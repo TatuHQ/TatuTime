@@ -47,6 +47,19 @@ struct Assets;
 
 const OPENAPI: &str = include_str!("../openapi.json");
 
+/// Lowercase hex encoding of `bytes` in one pre-sized allocation, instead of a
+/// `format!("{b:02x}")` + `String` per byte (#256) — the ETag/hash path can
+/// touch multi-MB PDFs.
+pub(crate) fn hex_lower(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for &b in bytes {
+        out.push(HEX[(b >> 4) as usize] as char);
+        out.push(HEX[(b & 0x0f) as usize] as char);
+    }
+    out
+}
+
 /// The mounting tier a route lives under, mirroring the `meta` / `public` /
 /// `protected` / `admin` sub-routers assembled in [`build_router`].
 ///

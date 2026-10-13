@@ -29,10 +29,13 @@ fn build_draft(
     include_expenses: bool,
     project_codes: &[crate::domain::ProjectCode],
 ) -> Result<Invoice, ApiError> {
+    // #256: one directory walk of the customer's projects, reused for both the
+    // unknown-code check and the selection filter (the staged wizard hit it
+    // twice).
+    let all_projects = app.store.list_projects(customer.id)?;
     if !project_codes.is_empty() {
-        let owned = app.store.list_projects(customer.id)?;
         for code in project_codes {
-            if !owned.iter().any(|p| &p.code == code) {
+            if !all_projects.iter().any(|p| &p.code == code) {
                 return Err(ApiError::validation(vec![FieldError::new(
                     "project_codes",
                     format!("unknown project {} for this customer", code.0),
@@ -40,15 +43,13 @@ fn build_draft(
             }
         }
     }
-    let projects: Vec<_> = {
-        let all = app.store.list_projects(customer.id)?;
-        if project_codes.is_empty() {
-            all
-        } else {
-            all.into_iter()
-                .filter(|p| project_codes.contains(&p.code))
-                .collect()
-        }
+    let projects: Vec<_> = if project_codes.is_empty() {
+        all_projects
+    } else {
+        all_projects
+            .into_iter()
+            .filter(|p| project_codes.contains(&p.code))
+            .collect()
     };
     let users = app.store.list_users()?;
     let entries = app.store.list_range(from, to)?;
@@ -285,7 +286,7 @@ pub async fn invoice_pdf(State(app): State<AppState>, Path(id): Path<Uuid>) -> A
     };
     use sha2::{Digest, Sha256};
     let sha = Sha256::digest(&bytes);
-    let etag = sha.iter().map(|b| format!("{b:02x}")).collect::<String>();
+    let etag = crate::hex_lower(&sha);
     tracing::debug!(invoice = %invoice.number, bytes = bytes.len(), "invoice pdf download");
     Ok((
         StatusCode::OK,
@@ -1501,9 +1502,12 @@ pub async fn update_invoice_draft(
         total_minor: totals.total_minor,
         tax_hundredths: edit.tax_hundredths,
         discount_hundredths: edit.discount_hundredths,
-        ..invoice.clone()
+        // #256: the loaded draft is not read again below — move it into the
+        // candidate instead of deep-cloning the whole document (the store then
+        // stamps identity in place rather than cloning again).
+        ..invoice
     };
-    let updated = app.store.replace_invoice_draft(id, &candidate)?;
+    let updated = app.store.replace_invoice_draft(id, candidate)?;
     Ok(Json(updated).into_response())
 }
 

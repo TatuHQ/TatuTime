@@ -215,14 +215,21 @@ impl CalendarSource for GraphCalendar {
 }
 
 fn urlencoded(s: &str) -> String {
-    // Percent-encode everything outside RFC 3986 unreserved chars.
-    let mut out = String::new();
+    // Percent-encode everything outside RFC 3986 unreserved chars. #256: one
+    // pre-sized buffer and a `push` per hex digit, not a `format!` + `String`
+    // allocation per encoded byte.
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+    let mut out = String::with_capacity(s.len() * 3);
     for b in s.bytes() {
         match b {
             b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
                 out.push(b as char);
             }
-            _ => out.push_str(&format!("%{b:02X}")),
+            _ => {
+                out.push('%');
+                out.push(HEX[(b >> 4) as usize] as char);
+                out.push(HEX[(b & 0x0f) as usize] as char);
+            }
         }
     }
     out

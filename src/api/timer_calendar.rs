@@ -100,7 +100,7 @@ pub async fn stop_timer(State(app): State<AppState>, actor: AuthUser) -> ApiResu
             crate::store::StoreError::NotFound => ApiError::not_found("timer"),
             other => other.into(),
         })?;
-    Ok(Json(entry_json(&entry)).into_response())
+    Ok(Json(&entry).into_response())
 }
 
 /// Discard the running timer without creating an entry.
