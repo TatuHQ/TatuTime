@@ -92,23 +92,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Single-instance guard (review B6): a second server against the same
     // volume would diverge on cached vault/revocation state and fire every
     // scheduler job twice. Hold an exclusive lock for the process lifetime.
-    let server_lock = {
-        use fs2::FileExt;
-        let f = std::fs::OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(false)
-            .open(root.join(".server.lock"))?;
-        match f.try_lock_exclusive() {
-            Ok(()) => f,
-            Err(_) => {
-                let msg = "another tucano-time instance is running against this data dir \
-                           (stale .server.lock?) — refusing to start a second scheduler";
-                tracing::error!(msg);
-                return Err(msg.into());
-            }
-        }
-    };
+    // The guard lives in the library (`acquire_server_lock`) so it is
+    // unit-testable (#262); the returned handle is held until shutdown.
+    let server_lock = tucano_time::acquire_server_lock(&root).map_err(|msg| {
+        tracing::error!("{msg}");
+        msg
+    })?;
 
     // Externalised configuration (#94): env > <data>/config.json > default.
     // A corrupt config file refuses to start rather than silently reverting

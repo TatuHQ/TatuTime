@@ -282,4 +282,47 @@ mod tests {
         assert_eq!(rows[0].hours_pct, Some(60.0));
         assert!(!rows[0].over);
     }
+
+    #[test]
+    fn burn_computes_amount_percentage_and_overspend() {
+        // #262 Tier 3: the money lane (`budget_amount_minor` / `amount_pct`) was
+        // never asserted — only the hours lane was.
+        let (cid, mut p) = proj(None);
+        p.budget_amount_minor = Some(10_000); // 100.00 in minor units
+        let customer = Customer {
+            id: cid,
+            name: "ACME".into(),
+            currency: Currency("EUR".into()),
+            default_rate_minor: 6000, // 60.00/h
+            active: true,
+            email: String::new(),
+            payment_terms: None,
+            invoice_notes: String::new(),
+            invoice_subject: String::new(),
+            address: None,
+            contacts: vec![],
+            tax_hundredths: 0,
+            discount_hundredths: 0,
+        };
+        let entries = vec![Entry {
+            id: uuid::Uuid::new_v4(),
+            date: NaiveDate::from_ymd_opt(2026, 10, 2).unwrap(),
+            customer_id: cid,
+            user_id: None,
+            project_code: ProjectCode::parse("P1").unwrap(),
+            task_code: None,
+            hours: Hours(600), // 6.00h * 60.00 = 360.00 (36_000 minor)
+            note: String::new(),
+            billable: true,
+            source: crate::domain::Source::Manual,
+            created_at: Utc.timestamp_opt(1, 0).unwrap(),
+            updated_at: Utc.timestamp_opt(1, 0).unwrap(),
+        }];
+        let rows = burn_report(&[(cid, p)], &entries, &[customer], &[]);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].budget_amount_minor, Some(10_000));
+        assert_eq!(rows[0].burn_amount_minor, 36_000);
+        assert_eq!(rows[0].amount_pct, Some(360.0));
+        assert!(rows[0].over, "an amount over budget must flag `over`");
+    }
 }

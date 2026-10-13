@@ -211,6 +211,30 @@ pub const API_ROUTES: &[(&str, &str, Tier)] = &[
     ("GET", "/api/calendar/oauth/callback", Tier::Admin),
 ];
 
+/// Single-instance guard (review B6): take an exclusive advisory lock on
+/// `<root>/.server.lock`. A second server against the same data dir would
+/// diverge on cached vault/revocation state and fire every scheduler job
+/// twice, so the caller holds the returned handle for the process lifetime —
+/// dropping it releases the lock. Extracted verbatim from `main` so the guard
+/// is unit-testable (#262; no behaviour change).
+pub fn acquire_server_lock(root: &std::path::Path) -> Result<std::fs::File, String> {
+    use fs2::FileExt;
+    let f = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(false)
+        .open(root.join(".server.lock"))
+        .map_err(|e| e.to_string())?;
+    match f.try_lock_exclusive() {
+        Ok(()) => Ok(f),
+        Err(_) => Err(
+            "another tucano-time instance is running against this data dir \
+             (stale .server.lock?) — refusing to start a second scheduler"
+                .to_owned(),
+        ),
+    }
+}
+
 pub fn build_router(state: AppState) -> Router {
     // Server meta and the GUI shell stay at the root; every JSON endpoint lives
     // under `/api` so the top-level paths are free for GUI page routes (e.g.
