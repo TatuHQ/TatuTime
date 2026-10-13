@@ -89,3 +89,76 @@ pub fn resolve_setting(
     cfg.get_optional_str(cfg_key, &appconfig::process_env)
         .or_else(|| resolve_secret(vault, vault_key, env))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::vault::SecretVault;
+
+    fn vault_with(root: &std::path::Path, key: &str, value: &str) -> SecretVault {
+        let vault = SecretVault::open(root, Some("0123456789abcdef0123456789abcdef"))
+            .unwrap()
+            .unwrap();
+        vault.put(key, value).unwrap();
+        vault
+    }
+
+    #[test]
+    fn resolve_secret_prefers_the_vault() {
+        // #262 Tier 3: the secret precedence chain (vault first, env fallback)
+        // had no direct test. The env name is deliberately one this process
+        // cannot have set, so an unset env is a deterministic `None`.
+        let dir = tempfile::tempdir().unwrap();
+        let vault = vault_with(dir.path(), "svc.token", "from-vault");
+        assert_eq!(
+            resolve_secret(Some(&vault), "svc.token", "TUCANO_262_UNSET_TOKEN"),
+            Some("from-vault".to_owned())
+        );
+        assert_eq!(
+            resolve_secret(None, "svc.token", "TUCANO_262_UNSET_TOKEN"),
+            None,
+            "no vault and no env is None, never an empty string"
+        );
+    }
+
+    #[test]
+    fn resolve_setting_prefers_config_then_vault() {
+        // #262 Tier 3: config.json outranks the vault fallback; with no config
+        // entry the vault supplies the value. `qbo_base_url` is an optional
+        // string with a Null default, so an unset env is a real `None`.
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = {
+            let mut c = crate::appconfig::AppConfig::load(dir.path()).unwrap();
+            let mut patch = serde_json::Map::new();
+            patch.insert(
+                "qbo_base_url".into(),
+                serde_json::json!("https://cfg.example"),
+            );
+            c.update(patch).unwrap();
+            c
+        };
+        let vault = vault_with(dir.path(), "qbo.base_url", "https://vault.example");
+        assert_eq!(
+            resolve_setting(
+                &cfg,
+                Some(&vault),
+                "qbo_base_url",
+                "qbo.base_url",
+                "TUCANO_QBO_BASE_URL"
+            ),
+            Some("https://cfg.example".to_owned()),
+            "config.json outranks the vault fallback"
+        );
+        let empty = crate::appconfig::AppConfig::empty();
+        assert_eq!(
+            resolve_setting(
+                &empty,
+                Some(&vault),
+                "qbo_base_url",
+                "qbo.base_url",
+                "TUCANO_QBO_BASE_URL"
+            ),
+            Some("https://vault.example".to_owned())
+        );
+    }
+}

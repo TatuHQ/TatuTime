@@ -2333,6 +2333,155 @@ mod tests {
         let totals = invoice_totals(u64::MAX, 10_000, 0);
         assert_eq!(totals.total_minor, u64::MAX);
     }
+
+    // ---- #262 Tier 3: direct validator coverage (previously HTTP-only) ----
+
+    #[test]
+    fn validate_project_input_defaults_and_bounds() {
+        // A blank name falls back to the (normalised) project code.
+        let ok = validate_project_input(&ProjectInput {
+            code: ProjectCode::parse("p-1").unwrap(),
+            name: "   ".into(),
+            currency: Currency("EUR".into()),
+            rate_minor: 6000,
+            active: true,
+            budget_hours: None,
+            budget_amount_minor: None,
+        })
+        .unwrap();
+        assert_eq!(ok.code, "P-1");
+        assert_eq!(ok.name, "P-1", "blank name falls back to the code");
+
+        // The #187 budget ceilings are enforced on both money and hours lanes.
+        let err = validate_project_input(&ProjectInput {
+            code: ProjectCode::parse("P1").unwrap(),
+            name: "P1".into(),
+            currency: Currency("EUR".into()),
+            rate_minor: 6000,
+            active: true,
+            budget_hours: Some(100_000_001),
+            budget_amount_minor: Some(100_000_001),
+        })
+        .unwrap_err();
+        let fields: Vec<&str> = err.iter().map(|f| f.field.as_str()).collect();
+        assert!(fields.contains(&"budget_hours"), "{fields:?}");
+        assert!(fields.contains(&"budget_amount_minor"), "{fields:?}");
+
+        // A name over the 120-char bound is a field error.
+        let err2 = validate_project_input(&ProjectInput {
+            code: ProjectCode::parse("P1").unwrap(),
+            name: "x".repeat(121),
+            currency: Currency("EUR".into()),
+            rate_minor: 6000,
+            active: true,
+            budget_hours: None,
+            budget_amount_minor: None,
+        })
+        .unwrap_err();
+        assert!(err2.iter().any(|f| f.field == "name"));
+    }
+
+    #[test]
+    fn validate_task_input_trims_and_bounds_name() {
+        let ok = validate_task_input(&TaskInput {
+            code: ProjectCode::parse("t-9").unwrap(),
+            name: "  Design  ".into(),
+            active: true,
+        })
+        .unwrap();
+        assert_eq!(ok.code, "T-9");
+        assert_eq!(ok.name, "Design", "name is trimmed");
+
+        // A blank name falls back to the code; a too-long one is rejected.
+        let blank = validate_task_input(&TaskInput {
+            code: ProjectCode::parse("t-9").unwrap(),
+            name: String::new(),
+            active: true,
+        })
+        .unwrap();
+        assert_eq!(blank.name, "T-9");
+        let err = validate_task_input(&TaskInput {
+            code: ProjectCode::parse("T-9").unwrap(),
+            name: "x".repeat(121),
+            active: true,
+        })
+        .unwrap_err();
+        assert!(err.iter().any(|f| f.field == "name"));
+    }
+
+    #[test]
+    fn validate_category_input_requires_a_name() {
+        let ok = validate_category_input(&CategoryInput {
+            name: "  Travel  ".into(),
+            default_billable: true,
+            active: true,
+        })
+        .unwrap();
+        assert_eq!(ok.name, "Travel", "name is trimmed");
+
+        for bad in ["   ", &"x".repeat(121)] {
+            let err = validate_category_input(&CategoryInput {
+                name: bad.to_string(),
+                default_billable: true,
+                active: true,
+            })
+            .unwrap_err();
+            assert!(err.iter().any(|f| f.field == "name"), "name {bad:?}");
+        }
+    }
+
+    #[test]
+    fn validate_expense_input_bounds_amount_date_note_and_receipt() {
+        let base = |amount: u64, date: &str, receipt: Option<String>| ExpenseInput {
+            date: date.into(),
+            customer_id: Uuid::nil(),
+            project_code: None,
+            category_id: None,
+            amount_minor: amount,
+            currency: Currency("EUR".into()),
+            billable: true,
+            note: String::new(),
+            receipt_name: None,
+            receipt_b64: receipt,
+        };
+
+        let ok = validate_expense_input(&base(1000, "2026-10-02", None)).unwrap();
+        assert_eq!(ok.amount_minor, 1000);
+
+        // Amount ceiling.
+        let err = validate_expense_input(&base(100_000_001, "2026-10-02", None)).unwrap_err();
+        assert!(err.iter().any(|f| f.field == "amount_minor"));
+        // Malformed date.
+        let err2 = validate_expense_input(&base(1000, "nope", None)).unwrap_err();
+        assert!(err2.iter().any(|f| f.field == "date"));
+        // Oversized receipt.
+        let err3 = validate_expense_input(&base(1000, "2026-10-02", Some("a".repeat(4_000_001))))
+            .unwrap_err();
+        assert!(err3.iter().any(|f| f.field == "receipt_b64"));
+        // Overlong note.
+        let mut long_note = base(1000, "2026-10-02", None);
+        long_note.note = "x".repeat(501);
+        let err4 = validate_expense_input(&long_note).unwrap_err();
+        assert!(err4.iter().any(|f| f.field == "note"));
+    }
+
+    #[test]
+    fn due_period_quarterly_boundary() {
+        let today = NaiveDate::from_ymd_opt(2026, 10, 7).unwrap();
+        // Never run -> a full 91-day quarter ending today.
+        assert_eq!(
+            due_period(Cadence::Quarterly, None, today),
+            Some((today - chrono::Duration::days(90), today))
+        );
+        // Ran 90 days ago -> not yet due; 91 days ago -> due, from the next day.
+        let last = today - chrono::Duration::days(90);
+        assert!(due_period(Cadence::Quarterly, Some(last), today).is_none());
+        let last91 = today - chrono::Duration::days(91);
+        assert_eq!(
+            due_period(Cadence::Quarterly, Some(last91), today),
+            Some((last91 + chrono::Duration::days(1), today))
+        );
+    }
 }
 
 #[cfg(test)]
