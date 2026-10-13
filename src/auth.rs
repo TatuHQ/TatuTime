@@ -229,9 +229,11 @@ pub fn resolve_session_secret(
         tracing::warn!("{} is too short; regenerating", key_path.display());
     }
     // Generate a fresh key and persist it on the data volume.
-    use rand::RngCore;
+    use rand::TryRng;
     let mut bytes = [0u8; 32];
-    rand::rngs::OsRng.fill_bytes(&mut bytes);
+    rand::rngs::SysRng
+        .try_fill_bytes(&mut bytes)
+        .expect("OS CSPRNG");
     let secret = bytes.iter().map(|b| format!("{b:02x}")).collect::<String>();
     match write_private_file(&key_path, secret.as_bytes()) {
         Ok(()) => (Some(secret), false),
@@ -292,8 +294,10 @@ pub fn make_session(
                 "TUCANO_SESSION_SECRET unset: sessions are ephemeral (restart logs everyone out)"
             );
             let mut key = [0u8; 32];
-            use rand::RngCore;
-            rand::rngs::OsRng.fill_bytes(&mut key);
+            use rand::TryRng;
+            rand::rngs::SysRng
+                .try_fill_bytes(&mut key)
+                .expect("OS CSPRNG");
             Ok(Session::new(key.to_vec(), 60 * 60 * 24, secure))
         }
     }
