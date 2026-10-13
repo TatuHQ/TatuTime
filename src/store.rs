@@ -538,8 +538,30 @@ impl Store {
         Ok(out)
     }
 
+    /// Whether any user document exists, without decoding the collection: a
+    /// `read_dir` + the same "is a document" filter as `dir_entries` (dot
+    /// files such as the email side index and `*.tmp` leftovers are not
+    /// documents). The public `GET /api/auth/status` probe no longer
+    /// deserialises every user to answer "is the dir empty" (#256).
     pub fn has_users(&self) -> Result<bool, StoreError> {
-        Ok(!self.list_users()?.is_empty())
+        let dir = self.doc_dir::<User>();
+        if !dir.exists() {
+            return Ok(false);
+        }
+        for entry in std::fs::read_dir(&dir)? {
+            let path = entry?.path();
+            let name = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or_default();
+            if !name.starts_with('.')
+                && !name.ends_with(".tmp")
+                && path.extension().and_then(|e| e.to_str()) == Some("json")
+            {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     pub fn get_user(&self, id: Uuid) -> Result<Option<User>, StoreError> {
@@ -579,9 +601,10 @@ impl Store {
     pub fn put_user_if_unchanged(&self, user: &User, expected: &User) -> Result<(), StoreError> {
         let _guard = self.write_lock()?;
         let current = self.get_user(user.id)?.ok_or(StoreError::NotFound)?;
-        if serde_json::to_value(&current).map_err(|error| StoreError::Io(error.to_string()))?
-            != serde_json::to_value(expected).map_err(|error| StoreError::Io(error.to_string()))?
-        {
+        // #256: `User` is `PartialEq`; compare the documents directly rather
+        // than round-tripping both through serde (which serialised two argon2
+        // hash strings) purely as an equality check.
+        if current != *expected {
             return Err(StoreError::Conflict(
                 "user changed; reload and try again".into(),
             ));
@@ -781,7 +804,7 @@ impl Store {
     pub fn replace_invoice_draft(
         &self,
         id: Uuid,
-        updated: &Invoice,
+        mut updated: Invoice,
     ) -> Result<Invoice, StoreError> {
         let _guard = self.write_lock()?;
         let path = self.doc_path::<Invoice>(&id.to_string());
@@ -793,15 +816,16 @@ impl Store {
                 "only a draft invoice can be edited".into(),
             ));
         }
-        let mut next = updated.clone();
-        next.id = existing.id;
-        next.number = existing.number;
-        next.created_at = existing.created_at;
-        next.status = InvoiceStatus::Draft;
-        next.issued_at = None;
-        write_json(&path, &next)?;
-        self.index_invoice_locked(&next)?;
-        Ok(next)
+        // #256: the caller hands the assembled candidate over by value, so the
+        // store stamps identity in place instead of cloning the whole draft.
+        updated.id = existing.id;
+        updated.number = existing.number;
+        updated.created_at = existing.created_at;
+        updated.status = InvoiceStatus::Draft;
+        updated.issued_at = None;
+        write_json(&path, &updated)?;
+        self.index_invoice_locked(&updated)?;
+        Ok(updated)
     }
 
     /// Atomically assign the next invoice number and persist under one writer
@@ -1945,7 +1969,7 @@ fn pdf_hint(number: &str, archived: &[u8], now: DateTime<Utc>) -> PdfHint {
     PdfHint {
         filename: format!("{}.pdf", crate::domain::safe_filename(number)),
         bytes: archived.len() as u64,
-        sha256: h.finalize().iter().map(|b| format!("{b:02x}")).collect(),
+        sha256: crate::hex_lower(&h.finalize()),
         archived_at: now,
     }
 }
@@ -1983,6 +2007,39 @@ mod tests {
         store.put_customer(&cust()).unwrap(); // 3rd file
         let err = store.list_customers().expect_err("3 > cap of 2");
         assert!(matches!(err, StoreError::TooManyItems), "{err:?}");
+    }
+
+    #[test]
+    fn has_users_ignores_side_indexes_and_tmp_files() {
+        // #256: the public status probe answers from the directory, so only a
+        // real user *document* may flip it.
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("data");
+        let store = Store::open(&root).unwrap();
+        // No users dir at all.
+        assert!(!store.has_users().unwrap());
+        // The email side index and a stranded `.tmp` write live in the users
+        // dir but are not documents.
+        let users_dir = root.join("users");
+        std::fs::create_dir_all(&users_dir).unwrap();
+        std::fs::write(users_dir.join(".idx.emails.json"), b"{}").unwrap();
+        std::fs::write(users_dir.join("abc.json.tmp"), b"{}").unwrap();
+        assert!(!store.has_users().unwrap());
+        // A real document flips it.
+        let user = User {
+            id: Uuid::new_v4(),
+            name: "A".into(),
+            email: "a@example.com".into(),
+            role: crate::auth::Role::Member,
+            active: true,
+            default_rate_minor: 0,
+            cost_rate_minor: 0,
+            password_hash: "x".into(),
+            created_at: chrono::Utc::now(),
+            session_version: 0,
+        };
+        store.put_user(&user).unwrap();
+        assert!(store.has_users().unwrap());
     }
 }
 

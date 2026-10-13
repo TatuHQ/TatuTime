@@ -3,6 +3,13 @@
 
 use super::*;
 
+/// Entry list body: serialised exactly once by `Json`, with no intermediate
+/// `serde_json::Value` per row (#256).
+#[derive(serde::Serialize)]
+struct EntryList<'a> {
+    entries: Vec<&'a Entry>,
+}
+
 /// Entry cross-references: the customer must exist and the project must
 /// belong to it. Violations are field errors (422), not 404s, because the
 /// payload names them.
@@ -116,12 +123,11 @@ pub async fn list_entries(
         }
     };
     // Private-per-user (#51): a member sees only their own entries.
-    let items: Vec<serde_json::Value> = entries
+    let items: Vec<&Entry> = entries
         .iter()
         .filter(|e| visible_to(&actor.0, e.user_id))
-        .map(entry_json)
         .collect();
-    Ok(Json(serde_json::json!({ "entries": items })).into_response())
+    Ok(Json(EntryList { entries: items }).into_response())
 }
 
 pub async fn create_entry(
@@ -147,7 +153,7 @@ pub async fn create_entry(
         updated_at: now,
     };
     app.store.put_entry(&entry)?;
-    Ok((StatusCode::CREATED, Json(entry_json(&entry))).into_response())
+    Ok((StatusCode::CREATED, Json(&entry)).into_response())
 }
 
 pub async fn get_entry(
@@ -160,7 +166,7 @@ pub async fn get_entry(
         .get_entry(id)?
         .filter(|e| visible_to(&actor.0, e.user_id))
         .ok_or_else(|| ApiError::not_found("entry"))?;
-    Ok(Json(entry_json(&entry)).into_response())
+    Ok(Json(&entry).into_response())
 }
 
 pub async fn update_entry(
@@ -198,7 +204,7 @@ pub async fn update_entry(
         .save_entry_guarded(Some(existing.date), &updated, || {
             ensure_unlocked(&app, id, "edit")
         })?;
-    Ok(Json(entry_json(&updated)).into_response())
+    Ok(Json(&updated).into_response())
 }
 
 pub async fn delete_entry(

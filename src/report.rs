@@ -108,9 +108,18 @@ pub fn summarise(
     billable_filter: Option<bool>,
 ) -> Summary {
     let customer_by_id: BTreeMap<Uuid, &Customer> = customers.iter().map(|c| (c.id, c)).collect();
+    // #256: index the per-entry lookups once (the Review D4 pattern already
+    // used by `domain::generate_invoice`), instead of an `iter().find` scan
+    // per entry per row.
+    let user_by_id: std::collections::HashMap<Uuid, &User> =
+        users.iter().map(|u| (u.id, u)).collect();
+    let project_by_key: std::collections::HashMap<(Uuid, &str), &crate::domain::Project> = projects
+        .iter()
+        .map(|(cid, p)| ((*cid, p.code.0.as_str()), p))
+        .collect();
     let user_name = |e: &Entry| -> String {
         e.user_id
-            .and_then(|uid| users.iter().find(|u| u.id == uid))
+            .and_then(|uid| user_by_id.get(&uid))
             .map(|u| u.name.clone())
             .unwrap_or_else(|| "(unattributed)".to_string())
     };
@@ -125,14 +134,13 @@ pub fn summarise(
         .map(|e| e.hours.0 as f64 / 100.0)
         .sum();
     let project_for = |e: &Entry| -> Option<&crate::domain::Project> {
-        projects
-            .iter()
-            .find(|(cid, p)| *cid == e.customer_id && p.code == e.project_code)
-            .map(|(_, p)| p)
+        project_by_key
+            .get(&(e.customer_id, e.project_code.0.as_str()))
+            .copied()
     };
     let user_rate = |e: &Entry| -> Option<u64> {
         e.user_id
-            .and_then(|uid| users.iter().find(|u| u.id == uid))
+            .and_then(|uid| user_by_id.get(&uid))
             .map(|u| u.default_rate_minor)
     };
 
@@ -241,16 +249,29 @@ pub fn summarise_profit(
     let projects = ctx.projects;
     let users = ctx.users;
     use crate::domain::InvoiceStatus;
+    // #256: build the per-entry indexes ONCE, outside the per-customer loop
+    // (`project_for` used to be rebuilt for every customer), and group entries
+    // by customer so the pass is O(records + entries), not O(customers ×
+    // entries).
+    let user_by_id: std::collections::HashMap<Uuid, &User> =
+        users.iter().map(|u| (u.id, u)).collect();
+    let project_by_key: std::collections::HashMap<(Uuid, &str), &crate::domain::Project> = projects
+        .iter()
+        .map(|(cid, p)| ((*cid, p.code.0.as_str()), p))
+        .collect();
+    let mut entries_by_customer: std::collections::HashMap<Uuid, Vec<&Entry>> =
+        std::collections::HashMap::new();
+    for en in entries {
+        entries_by_customer
+            .entry(en.customer_id)
+            .or_default()
+            .push(en);
+    }
     let mut rows: Vec<ProfitRow> = Vec::new();
     for c in customers {
-        let project_for = |e: &Entry| -> Option<&crate::domain::Project> {
-            projects
-                .iter()
-                .find(|(cid, p)| *cid == e.customer_id && p.code == e.project_code)
-                .map(|(_, p)| p)
-        };
         let entry_currency = |e: &Entry| -> String {
-            project_for(e)
+            project_by_key
+                .get(&(e.customer_id, e.project_code.0.as_str()))
                 .map(|p| p.currency.0.clone())
                 .unwrap_or_else(|| c.currency.0.clone())
         };
@@ -272,17 +293,18 @@ pub fn summarise_profit(
             let e = ledger.entry(x.currency.0.clone()).or_default();
             e.1 = e.1.saturating_add(x.amount_minor);
         }
-        for en in entries
-            .iter()
-            .filter(|e| e.customer_id == c.id && e.billable && e.date >= from && e.date <= to)
-        {
-            let rate = en
-                .user_id
-                .and_then(|uid| users.iter().find(|u| u.id == uid))
-                .map(|u| u.cost_rate_minor)
-                .unwrap_or(0);
-            let e = ledger.entry(entry_currency(en)).or_default();
-            e.1 = e.1.saturating_add(en.hours.amount_minor(rate));
+        if let Some(list) = entries_by_customer.get(&c.id) {
+            for &en in list {
+                if !(en.billable && en.date >= from && en.date <= to) {
+                    continue;
+                }
+                let rate = en
+                    .user_id
+                    .and_then(|uid| user_by_id.get(&uid).map(|u| u.cost_rate_minor))
+                    .unwrap_or(0);
+                let e = ledger.entry(entry_currency(en)).or_default();
+                e.1 = e.1.saturating_add(en.hours.amount_minor(rate));
+            }
         }
         for (currency, (revenue, cost)) in ledger {
             if revenue == 0 && cost == 0 {
@@ -480,15 +502,21 @@ pub fn export_csv(
     customer_filter: Option<Uuid>,
 ) -> String {
     let customer_by_id: BTreeMap<Uuid, &Customer> = customers.iter().map(|c| (c.id, c)).collect();
+    // #256: index the per-entry lookups once, as in `summarise`.
+    let user_by_id: std::collections::HashMap<Uuid, &User> =
+        users.iter().map(|u| (u.id, u)).collect();
+    let project_by_key: std::collections::HashMap<(Uuid, &str), &crate::domain::Project> = projects
+        .iter()
+        .map(|(cid, p)| ((*cid, p.code.0.as_str()), p))
+        .collect();
     let project_for = |e: &Entry| -> Option<&crate::domain::Project> {
-        projects
-            .iter()
-            .find(|(cid, p)| *cid == e.customer_id && p.code == e.project_code)
-            .map(|(_, p)| p)
+        project_by_key
+            .get(&(e.customer_id, e.project_code.0.as_str()))
+            .copied()
     };
     let user_rate = |e: &Entry| -> Option<u64> {
         e.user_id
-            .and_then(|uid| users.iter().find(|u| u.id == uid))
+            .and_then(|uid| user_by_id.get(&uid))
             .map(|u| u.default_rate_minor)
     };
 

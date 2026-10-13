@@ -392,10 +392,6 @@ pub(crate) fn get_customer(store: &Store, id: Uuid) -> Result<Customer, ApiError
         .ok_or_else(|| ApiError::not_found("customer"))
 }
 
-pub(crate) fn entry_json(e: &Entry) -> serde_json::Value {
-    serde_json::to_value(e).unwrap_or(serde_json::Value::Null)
-}
-
 /// Run blocking work on the blocking pool and join it, in one place (the
 /// `spawn_blocking` + `JoinError` boilerplate lived in four handlers). The
 /// closure maps its own domain error into the endpoint's `ApiError`; a
