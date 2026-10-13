@@ -2409,7 +2409,7 @@
         }
       },
       "Locked": {
-        "description": "A concurrent writer holds the store lock (#62); transient \u2014 retry. Sent with Retry-After.",
+        "description": "Transient lock condition; retry shortly. Sent with Retry-After. A concurrent writer holds the store lock (#62, code write_lock_busy) or an entry's lock state could not be verified and the write was refused fail-closed (#185, code lock_unavailable).",
         "headers": {
           "Retry-After": {
             "schema": {
@@ -2436,7 +2436,47 @@
         }
       },
       "Forbidden": {
-        "description": "Authenticated but not permitted (#51): admin operations require the administrator role, rejected with code forbidden. Mutating admin operations also return 403 (code csrf) when the X-CSRF-Protection: 1 header is missing (#46).",
+        "description": "Authenticated but the request is refused: an administrator role is required (#51, code forbidden), the X-CSRF-Protection: 1 header is missing on a mutating request (#46, code csrf), the first-run setup has already been completed (code initialised), or the account is deactivated (code inactive).",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "RateLimited": {
+        "description": "Too many failed attempts within the window (#47, code rate_limited); retry once the window elapses or a successful attempt resets the key.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "BadGateway": {
+        "description": "An upstream dependency failed (codes calendar_fetch, email_failed, oauth_exchange); local state is unchanged and the operation may be retried.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "VaultUnavailable": {
+        "description": "The secret vault is not enabled or not configured (#77, codes vault_disabled, no_vault); integration credentials and features are unavailable.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "InternalError": {
+        "description": "Server-side failure (code internal). The body stays generic and never carries paths, stack traces or raw filesystem errors.",
         "content": {
           "application/json": {
             "schema": {
@@ -2581,10 +2621,16 @@
             "$ref": "#/components/responses/BadRequest"
           },
           "401": {
-            "description": "Assertion failed verification or expired."
+            "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
-            "description": "Account deactivated."
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
           }
         }
       }
@@ -2650,10 +2696,13 @@
             }
           },
           "403": {
-            "description": "Already initialised."
+            "$ref": "#/components/responses/Forbidden"
           },
           "422": {
             "$ref": "#/components/responses/ValidationError"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
           }
         }
       }
@@ -2688,10 +2737,13 @@
             }
           },
           "401": {
-            "description": "Invalid credentials."
+            "$ref": "#/components/responses/Unauthorized"
           },
           "429": {
-            "description": "Too many failed attempts; try again later (#47)."
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
           }
         }
       }
@@ -2738,7 +2790,7 @@
             }
           },
           "401": {
-            "description": "Not authenticated."
+            "$ref": "#/components/responses/Unauthorized"
           }
         }
       }
@@ -3877,6 +3929,12 @@
           },
           "422": {
             "$ref": "#/components/responses/ValidationError"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/Locked"
           }
         }
       },
@@ -3903,6 +3961,12 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/Locked"
           }
         }
       }
@@ -4496,16 +4560,16 @@
             "$ref": "#/components/responses/BadRequest"
           },
           "401": {
-            "description": "Unknown or expired OAuth state."
+            "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
           },
           "502": {
-            "description": "Authorization code exchange failed."
+            "$ref": "#/components/responses/BadGateway"
           },
           "503": {
-            "description": "Secret vault not enabled."
+            "$ref": "#/components/responses/VaultUnavailable"
           }
         }
       }
@@ -4579,10 +4643,13 @@
             }
           },
           "404": {
-            "description": "No calendar feed configured."
+            "$ref": "#/components/responses/NotFound"
           },
           "502": {
-            "description": "Feed fetch failed."
+            "$ref": "#/components/responses/BadGateway"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
           }
         }
       }
@@ -4763,6 +4830,9 @@
           },
           "422": {
             "$ref": "#/components/responses/ValidationError"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
           }
         }
       }
@@ -4938,6 +5008,12 @@
           },
           "409": {
             "$ref": "#/components/responses/Conflict"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
           }
         }
       }
@@ -5177,7 +5253,7 @@
             "$ref": "#/components/responses/Conflict"
           },
           "500": {
-            "description": "The archive could not be read or written."
+            "$ref": "#/components/responses/InternalError"
           }
         }
       }
@@ -5251,7 +5327,7 @@
             "$ref": "#/components/responses/ValidationError"
           },
           "502": {
-            "description": "The email transport failed."
+            "$ref": "#/components/responses/BadGateway"
           }
         }
       }
@@ -5351,7 +5427,7 @@
             "$ref": "#/components/responses/ValidationError"
           },
           "502": {
-            "description": "The email transport failed."
+            "$ref": "#/components/responses/BadGateway"
           }
         }
       }
@@ -5428,6 +5504,9 @@
           },
           "409": {
             "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
           }
         },
         "description": "amount_minor absent = the full remaining balance (legacy behaviour). 0 is a 422, over-balance a 409 \u2014 both without persistence. Settling the last cent flips to paid; anything less parks at partly_paid with a ledger entry."
@@ -5527,6 +5606,9 @@
           },
           "409": {
             "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
           }
         }
       }
@@ -5578,13 +5660,13 @@
             "$ref": "#/components/responses/BadRequest"
           },
           "401": {
-            "description": "Webhook signature verification failed."
+            "$ref": "#/components/responses/Unauthorized"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "description": "Amount below invoice total, currency mismatch, or invoice not issued."
+            "$ref": "#/components/responses/Conflict"
           }
         }
       }
@@ -5661,6 +5743,9 @@
           },
           "409": {
             "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
           }
         }
       }
@@ -5894,6 +5979,9 @@
                 }
               }
             }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
           }
         }
       }
@@ -6142,6 +6230,9 @@
                 }
               }
             }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
           }
         }
       },
@@ -6249,6 +6340,9 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
           }
         }
       }
@@ -6476,7 +6570,7 @@
             "$ref": "#/components/responses/Forbidden"
           },
           "503": {
-            "description": "Vault not configured (no TUCANO_SECRET_KEY)."
+            "$ref": "#/components/responses/VaultUnavailable"
           }
         }
       }
@@ -6537,7 +6631,7 @@
             "$ref": "#/components/responses/ValidationError"
           },
           "503": {
-            "description": "Vault not configured."
+            "$ref": "#/components/responses/VaultUnavailable"
           }
         }
       },
@@ -6567,7 +6661,7 @@
             "$ref": "#/components/responses/NotFound"
           },
           "503": {
-            "description": "Vault not configured."
+            "$ref": "#/components/responses/VaultUnavailable"
           }
         }
       }
@@ -6647,6 +6741,15 @@
           },
           "409": {
             "$ref": "#/components/responses/Conflict"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Locked"
           }
         }
       }
@@ -6706,6 +6809,9 @@
           },
           "409": {
             "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
           }
         }
       }
@@ -6894,6 +7000,9 @@
           },
           "409": {
             "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
           }
         }
       }
@@ -7247,6 +7356,9 @@
           },
           "422": {
             "$ref": "#/components/responses/ValidationError"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
           }
         }
       }
@@ -7297,6 +7409,12 @@
           },
           "422": {
             "$ref": "#/components/responses/ValidationError"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
           }
         }
       }

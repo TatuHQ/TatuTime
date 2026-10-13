@@ -460,8 +460,8 @@ const ROUTE_ALLOWLIST: &[(&str, &str, &str)] = &[];
 
 /// Lock-guarded mutations and the response codes their handlers can actually
 /// produce (#18/#185, `InvoiceLock`/`SubmissionLock`) that the contract must
-/// declare. The broader 400/422/429 matrices are tracked by #251; this covers
-/// the lock lifecycle specifically.
+/// declare. The broader 400/422/429 matrices were completed in #251; this keeps
+/// the lock lifecycle pinned.
 const LOCK_LIFECYCLE_CODES: &[(&str, &str, &[&str])] = &[
     ("PUT", "/api/entries/{id}", &["409", "503"]),
     ("DELETE", "/api/entries/{id}", &["409", "503"]),
@@ -489,16 +489,9 @@ const PUBLIC_OPERATIONS: &[(&str, &str)] = &[
 /// fail if an entry is no longer a real gap, so this list only ever shrinks
 /// (#253).
 ///
-/// * `#251` — response-code matrices incomplete: lock 409/503 gaps.
-const ALLOWED_CONTRACT_GAPS: &[(&str, &str, &str, &str)] = &[
-    // #251: lock-lifecycle codes the handlers can emit but the contract omits.
-    ("PUT", "/api/entries/{id}", "409", "#251"),
-    ("PUT", "/api/entries/{id}", "503", "#251"),
-    ("DELETE", "/api/entries/{id}", "409", "#251"),
-    ("DELETE", "/api/entries/{id}", "503", "#251"),
-    ("DELETE", "/api/expenses/{id}", "409", "#251"),
-    ("POST", "/api/submissions", "503", "#251"),
-];
+/// Empty today: the #251 response-code gaps (lock 409/503) are closed and
+/// declared in `openapi.json`, so nothing remains to allow-list.
+const ALLOWED_CONTRACT_GAPS: &[(&str, &str, &str, &str)] = &[];
 
 #[tokio::test]
 async fn router_routes_match_openapi_bidirectionally() {
