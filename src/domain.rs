@@ -751,8 +751,13 @@ pub fn check_manual_line(
 }
 
 /// Validate + convert manual line input; errors carry `lines[i].field` names.
+///
+/// `today` is threaded in rather than read off the wall clock: the domain never
+/// calls `Utc::now()` itself (see `clock.rs`), so a manual-line draft stays
+/// deterministic under `FixedClock`.
 pub fn validate_manual_lines(
     lines: &[ManualLineInput],
+    today: NaiveDate,
     errors: &mut Vec<FieldError>,
 ) -> Vec<InvoiceLine> {
     if lines.len() > MANUAL_LINE_MAX {
@@ -762,7 +767,6 @@ pub fn validate_manual_lines(
         ));
         return Vec::new();
     }
-    let today = chrono::Utc::now().date_naive();
     lines
         .iter()
         .enumerate()
@@ -2101,6 +2105,7 @@ mod tests {
 
     #[test]
     fn manual_line_validation_guards() {
+        let today = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
         let mut errs = Vec::new();
         let ok = ManualLineInput {
             description: "Seat".into(),
@@ -2109,21 +2114,22 @@ mod tests {
             unit_price_minor: 2500,
             project_code: None,
         };
-        let lines = validate_manual_lines(std::slice::from_ref(&ok), &mut errs);
+        let lines = validate_manual_lines(std::slice::from_ref(&ok), today, &mut errs);
         assert!(errs.is_empty());
         assert_eq!(lines[0].amount_minor, 10_000);
         assert_eq!(lines[0].kind, LineKind::Fixed);
+        assert_eq!(lines[0].date, today);
         let bad = ManualLineInput {
             quantity_hundredths: 0,
             ..ok.clone()
         };
         let mut e2 = Vec::new();
-        validate_manual_lines(&[bad], &mut e2);
+        validate_manual_lines(&[bad], today, &mut e2);
         assert_eq!(e2.len(), 1);
         // > MANUAL_LINE_MAX lines short-circuits.
         let many = vec![ok; MANUAL_LINE_MAX + 1];
         let mut e3 = Vec::new();
-        assert!(validate_manual_lines(&many, &mut e3).is_empty());
+        assert!(validate_manual_lines(&many, today, &mut e3).is_empty());
         assert!(!e3.is_empty());
     }
 

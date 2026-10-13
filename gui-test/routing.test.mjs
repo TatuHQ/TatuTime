@@ -1,4 +1,4 @@
-// Page routing: every view has a stable URL path (see ROUTES in app.js and
+// Page routing: every view has a stable URL path (see TAB_ROUTES in app.js and
 // spa_page in src/lib.rs). Guards: (1) a deep link selects that view at boot,
 // (2) case and trailing slashes are canonicalised, (3) '/' and unknown paths
 // fall back to the default view, (4) member visibility wins over the URL,

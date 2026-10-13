@@ -1343,7 +1343,9 @@ pub async fn create_manual_invoice(
         "discount_hundredths",
         &mut errors,
     );
-    let lines = crate::domain::validate_manual_lines(&input.lines, &mut errors);
+    // Thread the clock's date in: the domain is clock-invariant (#261).
+    let today = app.clock.today();
+    let lines = crate::domain::validate_manual_lines(&input.lines, today, &mut errors);
     validate_line_projects(&app, &customer.id, &lines, &mut errors)?;
     if !errors.is_empty() {
         return Err(ApiError::validation(errors));
@@ -1351,7 +1353,6 @@ pub async fn create_manual_invoice(
     let subtotal = lines.iter().map(|l| l.amount_minor).sum();
     let totals =
         crate::domain::invoice_totals(subtotal, input.tax_hundredths, input.discount_hundredths);
-    let today = app.clock.today();
     let draft = Invoice {
         id: Uuid::new_v4(),
         number: String::new(),

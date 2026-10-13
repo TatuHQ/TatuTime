@@ -908,7 +908,10 @@ impl Store {
             .iter()
             .any(|e| e.category_id == Some(id))
         {
-            return Err(StoreError::AlreadyExists(
+            // A record still referenced by others is a *state conflict*, not an
+            // id collision, so `Conflict` is the honest variant at this seam.
+            // The full typed-error-family consolidation is deferred to #187.
+            return Err(StoreError::Conflict(
                 "category still used by expenses".into(),
             ));
         }
@@ -1162,12 +1165,12 @@ impl Store {
         // remove_dir_all below from deleting documents we failed to list.
         let projects = self.list_projects(id)?;
         if !projects.is_empty() {
-            return Err(StoreError::AlreadyExists(
+            return Err(StoreError::Conflict(
                 "customer still has projects; delete them first".into(),
             ));
         }
         if self.has_entries_for_customer(id)? {
-            return Err(StoreError::AlreadyExists(
+            return Err(StoreError::Conflict(
                 "customer still has time entries; delete or re-point them first".into(),
             ));
         }
@@ -1260,12 +1263,12 @@ impl Store {
             return Err(StoreError::NotFound);
         }
         if !self.list_tasks(customer_id, code)?.is_empty() {
-            return Err(StoreError::AlreadyExists(
+            return Err(StoreError::Conflict(
                 "project still has tasks; delete them first".into(),
             ));
         }
         if self.has_entries_for_project(customer_id, code)? {
-            return Err(StoreError::AlreadyExists(
+            return Err(StoreError::Conflict(
                 "project still has time entries; delete or re-point them first".into(),
             ));
         }
@@ -1331,7 +1334,7 @@ impl Store {
             return Err(StoreError::NotFound);
         }
         if self.has_entries_for_task(customer_id, project_code, code)? {
-            return Err(StoreError::AlreadyExists(
+            return Err(StoreError::Conflict(
                 "task still has time entries; delete or re-point them first".into(),
             ));
         }
@@ -1849,6 +1852,9 @@ impl Store {
     /// share one lock, closing the double-admin TOCTOU (review A12/B4).
     pub fn put_user_if_none(&self, user: &User) -> Result<(), StoreError> {
         let _guard = self.write_lock()?;
+        // The "no users yet" guard keeps `AlreadyExists` on purpose: `api::auth`
+        // matches it to raise the `initialised` code. Folding it into the
+        // typed-error cleanup is tracked by #187.
         if !self.list_users()?.is_empty() {
             return Err(StoreError::AlreadyExists("initialised".into()));
         }

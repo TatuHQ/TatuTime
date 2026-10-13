@@ -204,16 +204,25 @@ impl AppConfig {
         (d, Source::Default)
     }
 
-    /// Convenience typed accessors used by the boot/integration sites.
+    /// Convenience typed accessors used by the boot/integration sites and by
+    /// handlers on the request path. An unknown key never panics — one typo
+    /// would otherwise abort an axum connection instead of returning a
+    /// response — it is logged and degrades to the empty default (#261).
     pub fn get_int(&self, name: &str, env: &dyn Fn(&str) -> Option<String>) -> i64 {
-        let def = key_def(name).expect("whitelisted key");
+        let Some(def) = key_def(name) else {
+            tracing::error!(key = name, "unknown config key requested");
+            return 0;
+        };
         match self.resolve(def, env).0 {
             Value::Number(n) => n.as_i64().unwrap_or(0),
             _ => 0,
         }
     }
     pub fn get_str(&self, name: &str, env: &dyn Fn(&str) -> Option<String>) -> String {
-        let def = key_def(name).expect("whitelisted key");
+        let Some(def) = key_def(name) else {
+            tracing::error!(key = name, "unknown config key requested");
+            return String::new();
+        };
         match self.resolve(def, env).0 {
             Value::String(s) => s,
             _ => String::new(),
@@ -224,14 +233,20 @@ impl AppConfig {
         name: &str,
         env: &dyn Fn(&str) -> Option<String>,
     ) -> Option<String> {
-        let def = key_def(name).expect("whitelisted key");
+        let Some(def) = key_def(name) else {
+            tracing::error!(key = name, "unknown config key requested");
+            return None;
+        };
         match self.resolve(def, env).0 {
             Value::String(s) if !s.is_empty() => Some(s),
             _ => None,
         }
     }
     pub fn get_csv(&self, name: &str, env: &dyn Fn(&str) -> Option<String>) -> Vec<String> {
-        let def = key_def(name).expect("whitelisted key");
+        let Some(def) = key_def(name) else {
+            tracing::error!(key = name, "unknown config key requested");
+            return Vec::new();
+        };
         match self.resolve(def, env).0 {
             Value::String(s) => s
                 .split(',')
