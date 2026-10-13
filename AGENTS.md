@@ -51,18 +51,24 @@ The GUI is a presentation layer and nothing more — it never reads storage.
 - **Secret vault (#77):** admin-entered integration credentials are encrypted at
   rest with `TUCANO_SECRET_KEY` (32 bytes) and never returned to clients (masked
   hints only) or logged. Fail-closed: unset key ⇒ vault disabled.
-- **Locking (#18 seam):** entry edits/deletes consult `CombinedLocks`, which
-  composes `InvoiceLock` (entries on an *open* invoice — `status.is_open()` is
-  exactly `issued | partly_paid`, #8/#114 — so settling or writing off an
-  invoice **releases** its entries: deliberate lifecycle, not an oversight.
-  A closed invoice can never change (rates/hours are snapshotted at issue),
-  while the timesheet stays correctable; a partly-paid invoice is still
-  collectable and keeps its entries frozen) and `SubmissionLock` (entries in a
-  submitted/approved week, #16). Reads are never blocked. If the lock state
-  cannot be verified the write is refused fail-closed with 503
-  `lock_unavailable` (#185) — never allowed because the check was inconclusive.
-  Reimbursement claims (#24) lock their expenses via a direct scan in
-  `api::expenses`, not through this seam (see the #190 follow-up note).
+- **Locking (#18 seam):** entry edits/deletes and expense deletes consult
+  `CombinedLocks`, which composes `InvoiceLock` (entries **and** expenses on an
+  *open* invoice — `status.is_open()` is exactly `issued | partly_paid`,
+  #8/#114 — so settling or writing off an invoice **releases** its records:
+  deliberate lifecycle, not an oversight. A closed invoice can never change
+  (rates/hours are snapshotted at issue), while the timesheet stays
+  correctable; a partly-paid invoice is still collectable and keeps its records
+  frozen), `SubmissionLock` (entries in a submitted/approved week, #16) and
+  `ClaimLock` (expenses on a submitted/approved reimbursement claim, #24 — the
+  #190 follow-up, no longer a direct scan in `api::expenses`). Reads are never
+  blocked. If the lock state cannot be verified the write is refused fail-closed
+  with 503 `lock_unavailable` (#185) — never allowed because the check was
+  inconclusive. All three providers answer from one memoized
+  `store::LockSnapshot` keyed on the source collections' directory mtimes
+  (#255): a per-record check no longer re-reads every invoice/submission/claim
+  document, a changed directory stamp forces a single re-scan (so the set can
+  never go stale behind an atomic tmp+rename write), and a scan failure is
+  never cached.
 - Every payload is validated against the contract before any write
   (`deny_unknown_fields` + `domain::validate_*`); no partial persistence.
   Errors use the single JSON shape in `openapi.json`; responses never expose

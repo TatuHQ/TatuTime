@@ -466,7 +466,10 @@ const ROUTE_ALLOWLIST: &[(&str, &str, &str)] = &[];
 const LOCK_LIFECYCLE_CODES: &[(&str, &str, &[&str])] = &[
     ("PUT", "/api/entries/{id}", &["409", "503"]),
     ("DELETE", "/api/entries/{id}", &["409", "503"]),
-    ("DELETE", "/api/expenses/{id}", &["409"]),
+    // #255: the expense lock now flows through the CombinedLocks seam too
+    // (invoice + claim providers), so an unverifiable state is a 503 like the
+    // entry paths — this was a raw 500 before the #190 fold.
+    ("DELETE", "/api/expenses/{id}", &["409", "503"]),
     ("POST", "/api/submissions", &["503"]),
 ];
 
@@ -1687,6 +1690,39 @@ async fn unverifiable_lock_state_refuses_writes_but_never_reads() {
         "submit must fail closed"
     );
     let (s_get, _) = json_req(&app, "GET", &format!("/api/entries/{eid}"), None).await;
+    assert_eq!(s_get, StatusCode::OK, "reads are never blocked");
+}
+
+#[tokio::test]
+async fn unverifiable_claim_state_refuses_expense_delete_but_never_reads() {
+    // #255 (+ the #190 follow-up): the expense lock now flows through the same
+    // CombinedLocks seam the entries use, so a claim provider that cannot
+    // verify its state fails the delete CLOSED with 503 — before the fold this
+    // path surfaced a raw store error as a 500. Reads stay untouched.
+    let (app, d) = app().await;
+    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap().to_string();
+    let (_, x) = json_req(
+        &app,
+        "POST",
+        "/api/expenses",
+        Some(json!({"date":"2026-10-02","customer_id":cid,"amount_minor":5000,"currency":"EUR"})),
+    )
+    .await;
+    let xid = x["id"].as_str().unwrap().to_string();
+
+    // Corrupt the claims collection so the claim provider cannot verify state.
+    let claims_dir = d.path().join("data").join("claims");
+    std::fs::create_dir_all(&claims_dir).unwrap();
+    std::fs::write(claims_dir.join("corrupt.json"), b"{ not json").unwrap();
+
+    let (s_del, _) = json_req(&app, "DELETE", &format!("/api/expenses/{xid}"), None).await;
+    assert_eq!(
+        s_del,
+        StatusCode::SERVICE_UNAVAILABLE,
+        "expense delete must fail closed when the lock state is unverifiable"
+    );
+    let (s_get, _) = json_req(&app, "GET", &format!("/api/expenses/{xid}"), None).await;
     assert_eq!(s_get, StatusCode::OK, "reads are never blocked");
 }
 

@@ -11,7 +11,7 @@
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use chrono::{DateTime, NaiveDate, Utc};
@@ -84,6 +84,38 @@ impl From<std::io::Error> for StoreError {
     }
 }
 
+/// The frozen-reference snapshot the #18 lock seam answers from (#255).
+///
+/// One pass over the lock-source collections yields every locked entry id
+/// (open invoices #8/#114 and submitted/approved submissions #16) and every
+/// locked expense id (open invoices and submitted/approved reimbursement
+/// claims #24). The maps carry the human handle used in the 409 message
+/// (invoice number / submission week). The snapshot is memoized on a cheap
+/// directory-mtime stamp — see [`Store::lock_snapshot`].
+#[derive(Debug, Default, Clone)]
+pub struct LockSnapshot {
+    /// Entry id -> invoice number (frozen by an *open* invoice).
+    pub invoiced_entries: std::collections::HashMap<Uuid, String>,
+    /// Expense id -> invoice number (frozen by an *open* invoice).
+    pub invoiced_expenses: std::collections::HashMap<Uuid, String>,
+    /// Entry id -> week start `YYYY-MM-DD` (frozen by a submitted/approved week).
+    pub submitted_entries: std::collections::HashMap<Uuid, String>,
+    /// Expense id -> claim id (frozen by a submitted/approved claim).
+    pub claimed_expenses: std::collections::HashMap<Uuid, String>,
+}
+
+/// Cheap freshness token for the memoized lock snapshot (#255): the
+/// modification time of each lock-source collection directory. Every writer
+/// uses atomic tmp+rename (an architecture invariant), so any add, remove or
+/// replacement bumps its directory's mtime — a changed stamp forces a rebuild.
+/// A missing directory reads as `None`; its later creation changes the stamp.
+#[derive(Clone, PartialEq, Eq)]
+struct LockStamp {
+    invoices: Option<std::time::SystemTime>,
+    submissions: Option<std::time::SystemTime>,
+    claims: Option<std::time::SystemTime>,
+}
+
 pub struct Store {
     root: PathBuf,
     /// Intra-process serialiser: one thread mutates at a time.
@@ -92,6 +124,10 @@ pub struct Store {
     lock_timeout: Duration,
     /// Per-collection document cap (#50); env-overridable for tests.
     max_docs: usize,
+    /// Memoized #255 lock snapshot paired with the collection stamps it was
+    /// built from. Always the innermost lock (acquired briefly, never while
+    /// another store mutex is held), so it cannot deadlock the write guard.
+    lock_cache: Mutex<Option<(LockStamp, Arc<LockSnapshot>)>>,
 }
 
 /// Held for the duration of a mutating operation: the process-local mutex plus
@@ -237,6 +273,7 @@ impl Store {
             write_guard: Mutex::new(()),
             lock_timeout,
             max_docs,
+            lock_cache: Mutex::new(None),
         })
     }
 
@@ -906,6 +943,101 @@ impl Store {
         self.put_doc(claim)
     }
 
+    // ------------------------------------------------------- lock snapshot (#255)
+
+    /// The #18 lock snapshot: every frozen entry and expense id, memoized on
+    /// the source collections' directory stamps. In steady state (no writes
+    /// since the last call) this parses **zero** documents; any write that
+    /// changes a source collection bumps its directory mtime and forces exactly
+    /// one re-scan. A scan failure (unreadable or corrupt document) propagates
+    /// and is **never cached**, so callers stay fail-closed (#185).
+    ///
+    /// Correctness rests on the atomic tmp+rename write discipline: because a
+    /// rename into a directory bumps that directory's mtime, the memoized set
+    /// cannot go stale behind an out-of-band edit — a changed stamp always
+    /// rebuilds. This is the "recompute cheaply rather than risk staleness"
+    /// choice the fail-closed contract demands.
+    pub fn lock_snapshot(&self) -> Result<Arc<LockSnapshot>, StoreError> {
+        let stamp = LockStamp {
+            invoices: dir_mtime(&self.doc_dir::<Invoice>()),
+            submissions: dir_mtime(&self.doc_dir::<Submission>()),
+            claims: dir_mtime(&self.doc_dir::<ExpenseClaim>()),
+        };
+        {
+            let cache = self
+                .lock_cache
+                .lock()
+                .map_err(|_| StoreError::Io("lock cache poisoned".into()))?;
+            if let Some((cached, snapshot)) = cache.as_ref()
+                && *cached == stamp
+            {
+                return Ok(Arc::clone(snapshot));
+            }
+        }
+        // Rebuild outside the cache lock; a poisoned cache still fails closed
+        // on the *next* call rather than wedging here.
+        let snapshot = Arc::new(self.scan_lock_state()?);
+        if let Ok(mut cache) = self.lock_cache.lock() {
+            *cache = Some((stamp, Arc::clone(&snapshot)));
+        }
+        Ok(snapshot)
+    }
+
+    /// One full pass over invoices, submissions and claims (the parse cost the
+    /// snapshot caches). Any unreadable document aborts the scan so the caller
+    /// refuses the write fail-closed (#185).
+    fn scan_lock_state(&self) -> Result<LockSnapshot, StoreError> {
+        let mut snap = LockSnapshot::default();
+        for inv in self.list_invoices()? {
+            // Only *open* invoices freeze their records: settling (paid) or
+            // writing off releases them (#8/#114).
+            if !inv.status.is_open() {
+                continue;
+            }
+            for line in &inv.lines {
+                if let Some(entry) = line.entry_id {
+                    snap.invoiced_entries
+                        .entry(entry)
+                        .or_insert_with(|| inv.number.clone());
+                }
+                if let Some(expense) = line.expense_id {
+                    snap.invoiced_expenses
+                        .entry(expense)
+                        .or_insert_with(|| inv.number.clone());
+                }
+            }
+        }
+        for sub in self.list_submissions()? {
+            if !matches!(
+                sub.state,
+                crate::domain::SubmissionState::Submitted
+                    | crate::domain::SubmissionState::Approved
+            ) {
+                continue;
+            }
+            let week = sub.week_start.format("%Y-%m-%d").to_string();
+            for entry in &sub.entry_ids {
+                snap.submitted_entries
+                    .entry(*entry)
+                    .or_insert_with(|| week.clone());
+            }
+        }
+        for claim in self.list_claims()? {
+            if !matches!(
+                claim.state,
+                crate::domain::ClaimState::Submitted | crate::domain::ClaimState::Approved
+            ) {
+                continue;
+            }
+            for expense in &claim.expense_ids {
+                snap.claimed_expenses
+                    .entry(*expense)
+                    .or_insert_with(|| claim.id.to_string());
+            }
+        }
+        Ok(snap)
+    }
+
     // ---------------------------------------------------------------- timers --
 
     pub fn get_timer(&self, user_id: Uuid) -> Result<Option<Timer>, StoreError> {
@@ -1345,15 +1477,22 @@ impl Store {
             ));
         }
         let pdf_path = self.invoice_pdf_path(&id.to_string());
-        if !pdf_path.exists() {
+        let hint = if pdf_path.exists() {
+            // Archive already on file (e.g. a retry after the invoice write
+            // failed): the historical bytes stand, so hash what is stored.
+            let on_disk = std::fs::read(&pdf_path)?;
+            pdf_hint(&invoice.number, &on_disk, now)
+        } else {
             std::fs::create_dir_all(self.doc_dir::<Invoice>())?;
             write_bytes_atomic(&pdf_path, pdf)?;
-        }
-        let archived = std::fs::read(&pdf_path)?;
+            // #255: the file just written *is* `pdf`, so hash the in-memory
+            // bytes instead of re-reading up to 8 MB under the write lock.
+            pdf_hint(&invoice.number, pdf, now)
+        };
         invoice.status = InvoiceStatus::Issued;
         invoice.issued_at = Some(now);
         invoice.due_date = Some(due);
-        invoice.pdf = Some(pdf_hint(&invoice.number, &archived, now));
+        invoice.pdf = Some(hint);
         write_json(&self.doc_path::<Invoice>(&id.to_string()), &invoice)?;
         Ok(invoice)
     }
@@ -1698,13 +1837,28 @@ impl Store {
         std::fs::create_dir_all(self.root.join("invoices"))?;
         let seq_path = self.root.join("invoices").join(".seq.json");
         let stored: u64 = read_json(&seq_path)?.unwrap_or(0);
-        let n = stored.max(self.list_invoices()?.len() as u64) + 1;
+        // #255: the count-derived guard only exists to bootstrap a pre-ledger
+        // data dir (one written before B3 introduced `.seq.json`). Once the
+        // ledger exists it is authoritative — the earlier unconditional
+        // `list_invoices()` re-listed every invoice under the write lock on
+        // every creation, which the sequence file already made unnecessary.
+        let n = if seq_path.exists() {
+            stored + 1
+        } else {
+            stored.max(self.list_invoices()?.len() as u64) + 1
+        };
         write_json(&seq_path, &n)?;
         invoice.number = format!("INV-{n:04}");
         write_json(&self.doc_path::<Invoice>(&invoice.id.to_string()), &invoice)?;
         self.index_invoice_locked(&invoice)?;
         Ok(invoice)
     }
+}
+
+/// Directory modification time, or `None` when the directory is absent (a
+/// missing collection is empty; creating it later changes the stamp).
+fn dir_mtime(dir: &Path) -> Option<std::time::SystemTime> {
+    std::fs::metadata(dir).and_then(|m| m.modified()).ok()
 }
 
 fn prune_tmp_files(dir: &Path) {
