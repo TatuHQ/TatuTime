@@ -489,27 +489,8 @@ const PUBLIC_OPERATIONS: &[(&str, &str)] = &[
 /// fail if an entry is no longer a real gap, so this list only ever shrinks
 /// (#253).
 ///
-/// * `#250` — auth tiers misrepresented: SSO/webhook ops not marked public,
-///   admin GETs declaring no 403.
 /// * `#251` — response-code matrices incomplete: lock 409/503 gaps.
 const ALLOWED_CONTRACT_GAPS: &[(&str, &str, &str, &str)] = &[
-    // #250: pre-session operations not marked `security: []`.
-    ("GET", "/api/auth/sso/providers", "security[]", "#250"),
-    ("POST", "/api/auth/sso/assertion", "security[]", "#250"),
-    (
-        "POST",
-        "/api/payments/webhook/{provider}",
-        "security[]",
-        "#250",
-    ),
-    // #250: admin operations with no declared 403.
-    ("GET", "/api/reports/profitability", "403", "#250"),
-    ("GET", "/api/reports/budgets", "403", "#250"),
-    ("GET", "/api/invoices", "403", "#250"),
-    ("GET", "/api/invoices/{id}", "403", "#250"),
-    ("GET", "/api/invoices/summary", "403", "#250"),
-    ("GET", "/api/invoices/report", "403", "#250"),
-    ("GET", "/api/invoices/export.csv", "403", "#250"),
     // #251: lock-lifecycle codes the handlers can emit but the contract omits.
     ("PUT", "/api/entries/{id}", "409", "#251"),
     ("PUT", "/api/entries/{id}", "503", "#251"),

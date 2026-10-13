@@ -2424,6 +2424,26 @@
             }
           }
         }
+      },
+      "Unauthorized": {
+        "description": "No valid session cookie, or an invalid/expired one (#19). Guarded operations require authentication; the body is the shared Error shape with code unauthenticated.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Forbidden": {
+        "description": "Authenticated but not permitted (#51): admin operations require the administrator role, rejected with code forbidden. Mutating admin operations also return 403 (code csrf) when the X-CSRF-Protection: 1 header is missing (#46).",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
       }
     },
     "parameters": {
@@ -2482,6 +2502,7 @@
           "auth"
         ],
         "summary": "Configured SSO identity providers (#32), advertised pre-session",
+        "security": [],
         "responses": {
           "200": {
             "description": "Provider names.",
@@ -2544,6 +2565,7 @@
             }
           }
         },
+        "security": [],
         "responses": {
           "200": {
             "description": "Signed in; Set-Cookie session issued.",
@@ -2724,11 +2746,15 @@
     "/api/users": {
       "get": {
         "operationId": "listUsers",
+        "x-admin-only": true,
         "tags": [
           "users"
         ],
         "summary": "List users (admin only)",
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "All users.",
             "content": {
@@ -2752,12 +2778,13 @@
             }
           },
           "403": {
-            "description": "Admin role required."
+            "$ref": "#/components/responses/Forbidden"
           }
         }
       },
       "post": {
         "operationId": "createUser",
+        "x-admin-only": true,
         "tags": [
           "users"
         ],
@@ -2778,6 +2805,9 @@
           }
         ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "201": {
             "description": "Created.",
             "content": {
@@ -2789,7 +2819,7 @@
             }
           },
           "403": {
-            "description": "Admin role required. Also returned (code csrf) when the X-CSRF-Protection: 1 header is missing on a mutating request (#46)."
+            "$ref": "#/components/responses/Forbidden"
           },
           "409": {
             "$ref": "#/components/responses/Conflict"
@@ -2814,6 +2844,7 @@
       ],
       "put": {
         "operationId": "updateUser",
+        "x-admin-only": true,
         "tags": [
           "users"
         ],
@@ -2834,6 +2865,9 @@
           }
         ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "Updated user.",
             "content": {
@@ -2845,7 +2879,7 @@
             }
           },
           "403": {
-            "description": "Admin role required. Also returned (code csrf) when the X-CSRF-Protection: 1 header is missing on a mutating request (#46)."
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -2860,6 +2894,7 @@
       },
       "delete": {
         "operationId": "deleteUser",
+        "x-admin-only": true,
         "tags": [
           "users"
         ],
@@ -2870,11 +2905,14 @@
           }
         ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "204": {
             "description": "Deleted."
           },
           "403": {
-            "description": "Admin role required. Also returned (code csrf) when the X-CSRF-Protection: 1 header is missing on a mutating request (#46)."
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -2899,6 +2937,7 @@
       ],
       "put": {
         "operationId": "changeUserPassword",
+        "x-admin-only": true,
         "tags": [
           "users"
         ],
@@ -2919,11 +2958,14 @@
           }
         ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "204": {
             "description": "Password changed; current sessions were revoked."
           },
           "403": {
-            "description": "Admin role required. Also returned (code csrf) when the X-CSRF-Protection: 1 header is missing on a mutating request (#46)."
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -3020,6 +3062,9 @@
         ],
         "summary": "List customers, sorted by name",
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "All customers.",
             "content": {
@@ -3066,6 +3111,9 @@
           }
         ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "403": {
             "$ref": "#/components/responses/CsrfForbidden"
           },
@@ -3104,6 +3152,9 @@
         ],
         "summary": "Fetch one customer",
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "The customer.",
             "content": {
@@ -3141,6 +3192,9 @@
           }
         ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "403": {
             "$ref": "#/components/responses/CsrfForbidden"
           },
@@ -3174,6 +3228,9 @@
           }
         ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "403": {
             "$ref": "#/components/responses/CsrfForbidden"
           },
@@ -3208,6 +3265,9 @@
         ],
         "summary": "List a customer's projects, sorted by code",
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "Projects of this customer.",
             "content": {
@@ -3257,6 +3317,9 @@
           }
         ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "403": {
             "$ref": "#/components/responses/CsrfForbidden"
           },
@@ -3309,6 +3372,9 @@
         ],
         "summary": "Fetch one project",
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "The project.",
             "content": {
@@ -3346,6 +3412,9 @@
           }
         ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "403": {
             "$ref": "#/components/responses/CsrfForbidden"
           },
@@ -3379,6 +3448,9 @@
           }
         ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "403": {
             "$ref": "#/components/responses/CsrfForbidden"
           },
@@ -3421,6 +3493,9 @@
         ],
         "summary": "List a project's tasks",
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "Tasks of this project.",
             "content": {
@@ -3470,6 +3545,9 @@
           }
         ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "403": {
             "$ref": "#/components/responses/CsrfForbidden"
           },
@@ -3530,6 +3608,9 @@
         ],
         "summary": "Fetch one task",
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "The task.",
             "content": {
@@ -3567,6 +3648,9 @@
           }
         ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "403": {
             "$ref": "#/components/responses/CsrfForbidden"
           },
@@ -3600,6 +3684,9 @@
           }
         ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "403": {
             "$ref": "#/components/responses/CsrfForbidden"
           },
@@ -3635,6 +3722,9 @@
         "summary": "List entries for a day or an inclusive date range",
         "description": "Exactly one form: ?date=YYYY-MM-DD or ?from=...&to=... (span at most 400 days).",
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "Matching entries, ordered by date then creation.",
             "content": {
@@ -3685,6 +3775,9 @@
           }
         ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "403": {
             "$ref": "#/components/responses/CsrfForbidden"
           },
@@ -3723,6 +3816,9 @@
         ],
         "summary": "Fetch one entry",
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "The entry.",
             "content": {
@@ -3760,6 +3856,9 @@
           }
         ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "403": {
             "$ref": "#/components/responses/CsrfForbidden"
           },
@@ -3793,6 +3892,9 @@
           }
         ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "403": {
             "$ref": "#/components/responses/CsrfForbidden"
           },
@@ -3846,6 +3948,9 @@
         "summary": "Hours and amounts grouped by customer, project or ISO week",
         "description": "Amounts are computed with each entry's effective rate (project override, else customer default) at read time.",
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "Aggregated rows.",
             "content": {
@@ -3887,6 +3992,9 @@
         ],
         "summary": "One CSV row per entry: date, customer, code, hours, currency, hourly_rate, amount, note",
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "CSV document (formula-injection escaped).",
             "content": {
@@ -3906,11 +4014,18 @@
     "/api/reports/budgets": {
       "get": {
         "operationId": "budgetReport",
+        "x-admin-only": true,
         "tags": [
           "reports"
         ],
         "summary": "Budget burn vs budget for budgeted projects (#30)",
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "200": {
             "description": "Budget rows.",
             "content": {
@@ -4004,11 +4119,18 @@
       ],
       "get": {
         "operationId": "profitability",
+        "x-admin-only": true,
         "tags": [
           "reports"
         ],
         "summary": "Revenue vs cost (expenses + labour at cost rates) per customer and currency (#29, #186)",
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "200": {
             "description": "Profitability rows.",
             "content": {
@@ -4075,6 +4197,9 @@
         ],
         "summary": "Current running timer for the caller (with elapsed), or null (#14)",
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "Timer state.",
             "content": {
@@ -4187,6 +4312,9 @@
           }
         ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "403": {
             "$ref": "#/components/responses/CsrfForbidden"
           },
@@ -4213,6 +4341,9 @@
           }
         ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "403": {
             "$ref": "#/components/responses/CsrfForbidden"
           },
@@ -4235,6 +4366,9 @@
           }
         ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "403": {
             "$ref": "#/components/responses/CsrfForbidden"
           },
@@ -4257,6 +4391,7 @@
     "/api/calendar/oauth/start": {
       "get": {
         "operationId": "calendarOAuthStart",
+        "x-admin-only": true,
         "tags": [
           "calendar"
         ],
@@ -4277,6 +4412,9 @@
           }
         ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "Authorize URL.",
             "content": {
@@ -4300,7 +4438,7 @@
             "$ref": "#/components/responses/BadRequest"
           },
           "403": {
-            "description": "Admin role required."
+            "$ref": "#/components/responses/Forbidden"
           },
           "422": {
             "$ref": "#/components/responses/ValidationError"
@@ -4311,6 +4449,7 @@
     "/api/calendar/oauth/callback": {
       "get": {
         "operationId": "calendarOAuthCallback",
+        "x-admin-only": true,
         "tags": [
           "calendar"
         ],
@@ -4360,7 +4499,7 @@
             "description": "Unknown or expired OAuth state."
           },
           "403": {
-            "description": "Admin role required."
+            "$ref": "#/components/responses/Forbidden"
           },
           "502": {
             "description": "Authorization code exchange failed."
@@ -4387,6 +4526,9 @@
         ],
         "summary": "Calendar events overlapping the range, from the configured ICS feed (#15)",
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "Events.",
             "content": {
@@ -4453,6 +4595,9 @@
         ],
         "summary": "The caller's notifications, newest first, with unread count (#22)",
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "Notifications.",
             "content": {
@@ -4526,6 +4671,9 @@
           }
         ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "403": {
             "$ref": "#/components/responses/CsrfForbidden"
           },
@@ -4538,11 +4686,15 @@
     "/api/schedules": {
       "get": {
         "operationId": "listSchedules",
+        "x-admin-only": true,
         "tags": [
           "invoices"
         ],
         "summary": "List recurring invoice schedules (admin)",
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "Schedules.",
             "content": {
@@ -4566,12 +4718,13 @@
             }
           },
           "403": {
-            "description": "Admin role required."
+            "$ref": "#/components/responses/Forbidden"
           }
         }
       },
       "post": {
         "operationId": "createSchedule",
+        "x-admin-only": true,
         "tags": [
           "invoices"
         ],
@@ -4592,6 +4745,9 @@
           }
         ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "201": {
             "description": "Created.",
             "content": {
@@ -4603,7 +4759,7 @@
             }
           },
           "403": {
-            "description": "Admin role required. Also returned (code csrf) when the X-CSRF-Protection: 1 header is missing on a mutating request (#46)."
+            "$ref": "#/components/responses/Forbidden"
           },
           "422": {
             "$ref": "#/components/responses/ValidationError"
@@ -4625,6 +4781,7 @@
       ],
       "delete": {
         "operationId": "deleteSchedule",
+        "x-admin-only": true,
         "tags": [
           "invoices"
         ],
@@ -4635,11 +4792,14 @@
           }
         ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "204": {
             "description": "Deleted."
           },
           "403": {
-            "description": "Admin role required. Also returned (code csrf) when the X-CSRF-Protection: 1 header is missing on a mutating request (#46)."
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -4648,6 +4808,7 @@
       },
       "put": {
         "operationId": "updateSchedule",
+        "x-admin-only": true,
         "tags": [
           "schedules"
         ],
@@ -4669,6 +4830,9 @@
           }
         ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "Updated schedule.",
             "content": {
@@ -4680,7 +4844,7 @@
             }
           },
           "403": {
-            "description": "Admin role required. Also returned (code csrf) when the X-CSRF-Protection: 1 header is missing on a mutating request (#46)."
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -4694,11 +4858,18 @@
     "/api/invoices": {
       "get": {
         "operationId": "listInvoices",
+        "x-admin-only": true,
         "tags": [
           "invoices"
         ],
         "summary": "List invoices",
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "200": {
             "description": "All invoices.",
             "content": {
@@ -4725,6 +4896,7 @@
       },
       "post": {
         "operationId": "createInvoice",
+        "x-admin-only": true,
         "tags": [
           "invoices"
         ],
@@ -4745,6 +4917,9 @@
           }
         ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "403": {
             "$ref": "#/components/responses/CsrfForbidden"
           },
@@ -4781,11 +4956,18 @@
       ],
       "get": {
         "operationId": "getInvoice",
+        "x-admin-only": true,
         "tags": [
           "invoices"
         ],
         "summary": "Fetch one invoice",
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "200": {
             "description": "The invoice.",
             "content": {
@@ -4803,6 +4985,7 @@
       },
       "delete": {
         "operationId": "deleteInvoice",
+        "x-admin-only": true,
         "tags": [
           "invoices"
         ],
@@ -4813,6 +4996,9 @@
           }
         ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "403": {
             "$ref": "#/components/responses/CsrfForbidden"
           },
@@ -4829,6 +5015,7 @@
       },
       "put": {
         "operationId": "updateInvoiceDraft",
+        "x-admin-only": true,
         "tags": [
           "invoices"
         ],
@@ -4859,6 +5046,9 @@
           }
         },
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "Updated draft.",
             "content": {
@@ -4870,7 +5060,7 @@
             }
           },
           "403": {
-            "description": "Admin role required. Also returned (code csrf) when the X-CSRF-Protection: 1 header is missing on a mutating request (#46)."
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -4898,6 +5088,7 @@
       ],
       "post": {
         "operationId": "issueInvoice",
+        "x-admin-only": true,
         "tags": [
           "invoices"
         ],
@@ -4908,6 +5099,9 @@
           }
         ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "403": {
             "$ref": "#/components/responses/CsrfForbidden"
           },
@@ -4944,12 +5138,16 @@
       ],
       "get": {
         "operationId": "getInvoicePdf",
+        "x-admin-only": true,
         "tags": [
           "invoices"
         ],
         "summary": "Download the archived invoice PDF (#113); admin only",
         "description": "Returns the PDF archived at issue time, unmodified. A legacy issued invoice without an archive renders it from the snapshot-locked document on first read. Drafts are refused (409). Responses carry Content-Disposition and an ETag from the archive sha256.",
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "PDF document.",
             "headers": {
@@ -4970,7 +5168,7 @@
             }
           },
           "403": {
-            "description": "Admin role required."
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -4998,6 +5196,7 @@
       ],
       "post": {
         "operationId": "sendInvoiceEmail",
+        "x-admin-only": true,
         "tags": [
           "invoices"
         ],
@@ -5008,6 +5207,9 @@
           }
         ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "Sent.",
             "content": {
@@ -5037,7 +5239,7 @@
             }
           },
           "403": {
-            "description": "Admin role required. Also returned (code csrf) when the X-CSRF-Protection: 1 header is missing on a mutating request (#46)."
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -5068,6 +5270,7 @@
       ],
       "post": {
         "operationId": "sendInvoiceEmailCopy",
+        "x-admin-only": true,
         "tags": [
           "invoices"
         ],
@@ -5104,6 +5307,9 @@
           }
         ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "Sent.",
             "content": {
@@ -5133,7 +5339,7 @@
             }
           },
           "403": {
-            "description": "Admin role required. Also returned (code csrf) when the X-CSRF-Protection: 1 header is missing on a mutating request (#46)."
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -5164,6 +5370,7 @@
       ],
       "post": {
         "operationId": "payInvoice",
+        "x-admin-only": true,
         "tags": [
           "invoices"
         ],
@@ -5200,6 +5407,9 @@
           }
         ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "403": {
             "$ref": "#/components/responses/CsrfForbidden"
           },
@@ -5237,6 +5447,7 @@
       ],
       "post": {
         "operationId": "createCheckout",
+        "x-admin-only": true,
         "tags": [
           "invoices"
         ],
@@ -5270,6 +5481,9 @@
           }
         ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "201": {
             "description": "Checkout session.",
             "content": {
@@ -5306,7 +5520,7 @@
             "$ref": "#/components/responses/BadRequest"
           },
           "403": {
-            "description": "Admin role required. Also returned (code csrf) when the X-CSRF-Protection: 1 header is missing on a mutating request (#46)."
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -5348,6 +5562,7 @@
             }
           }
         },
+        "security": [],
         "responses": {
           "200": {
             "description": "Processed (paid / already_paid / ignored).",
@@ -5388,6 +5603,7 @@
       ],
       "post": {
         "operationId": "syncInvoice",
+        "x-admin-only": true,
         "tags": [
           "invoices"
         ],
@@ -5421,6 +5637,9 @@
           }
         ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "Sync record (status synced/failed; noop when already synced).",
             "content": {
@@ -5435,7 +5654,7 @@
             "$ref": "#/components/responses/BadRequest"
           },
           "403": {
-            "description": "Admin role required. Also returned (code csrf) when the X-CSRF-Protection: 1 header is missing on a mutating request (#46)."
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -5449,11 +5668,15 @@
     "/api/sync/accounting": {
       "get": {
         "operationId": "accountingSyncStatus",
+        "x-admin-only": true,
         "tags": [
           "invoices"
         ],
         "summary": "Visible accounting sync status: provider records + enabled providers (#33)",
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "Status.",
             "content": {
@@ -5532,7 +5755,7 @@
             }
           },
           "403": {
-            "description": "Admin role required."
+            "$ref": "#/components/responses/Forbidden"
           }
         }
       }
@@ -5540,11 +5763,18 @@
     "/api/invoices/summary": {
       "get": {
         "operationId": "invoiceSummary",
+        "x-admin-only": true,
         "tags": [
           "invoices"
         ],
         "summary": "Invoice status counts and outstanding totals for the dashboard",
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "200": {
             "description": "Summary.",
             "content": {
@@ -5569,11 +5799,18 @@
       ],
       "get": {
         "operationId": "invoiceReport",
+        "x-admin-only": true,
         "tags": [
           "invoices"
         ],
         "summary": "Revenue by customer and currency + status counts (#31, #186)",
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "200": {
             "description": "Report. Breaking change (#186): total_revenue_minor has been removed because summing minor units across currencies is invalid; use revenue_by_currency instead.",
             "content": {
@@ -5664,11 +5901,18 @@
     "/api/invoices/export.csv": {
       "get": {
         "operationId": "invoiceExportCsv",
+        "x-admin-only": true,
         "tags": [
           "invoices"
         ],
         "summary": "CSV export of all invoices (#31)",
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "200": {
             "description": "CSV.",
             "content": {
@@ -5690,6 +5934,9 @@
         ],
         "summary": "List expense categories",
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "All categories.",
             "content": {
@@ -5736,6 +5983,9 @@
           }
         ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "403": {
             "$ref": "#/components/responses/CsrfForbidden"
           },
@@ -5789,6 +6039,9 @@
           }
         ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "403": {
             "$ref": "#/components/responses/CsrfForbidden"
           },
@@ -5822,6 +6075,9 @@
           }
         ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "403": {
             "$ref": "#/components/responses/CsrfForbidden"
           },
@@ -5862,6 +6118,9 @@
           }
         ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "Matching expenses.",
             "content": {
@@ -5908,6 +6167,9 @@
           }
         ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "403": {
             "$ref": "#/components/responses/CsrfForbidden"
           },
@@ -5946,6 +6208,9 @@
         ],
         "summary": "Fetch one expense",
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "The expense.",
             "content": {
@@ -5973,6 +6238,9 @@
           }
         ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "403": {
             "$ref": "#/components/responses/CsrfForbidden"
           },
@@ -5988,11 +6256,15 @@
     "/api/audit": {
       "get": {
         "operationId": "auditLog",
+        "x-admin-only": true,
         "tags": [
           "users"
         ],
         "summary": "Recent security audit events (admin only, #52)",
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "Newest-first events.",
             "content": {
@@ -6016,7 +6288,7 @@
             }
           },
           "403": {
-            "description": "Admin role required."
+            "$ref": "#/components/responses/Forbidden"
           }
         }
       }
@@ -6024,11 +6296,15 @@
     "/api/admin/config": {
       "get": {
         "operationId": "adminConfig",
+        "x-admin-only": true,
         "tags": [
           "admin"
         ],
         "summary": "Effective externalised configuration: whitelist of non-secret knobs with value, source (env/file/default) and default (#94)",
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "Effective config.",
             "content": {
@@ -6091,12 +6367,13 @@
             }
           },
           "403": {
-            "description": "Admin role required."
+            "$ref": "#/components/responses/Forbidden"
           }
         }
       },
       "put": {
         "operationId": "updateAdminConfig",
+        "x-admin-only": true,
         "tags": [
           "admin"
         ],
@@ -6117,6 +6394,9 @@
           }
         ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "Persisted.",
             "content": {
@@ -6137,7 +6417,7 @@
             }
           },
           "403": {
-            "description": "Admin role required. Also returned (code csrf) when the X-CSRF-Protection: 1 header is missing on a mutating request (#46)."
+            "$ref": "#/components/responses/Forbidden"
           },
           "422": {
             "$ref": "#/components/responses/ValidationError"
@@ -6148,11 +6428,15 @@
     "/api/admin/secrets": {
       "get": {
         "operationId": "listSecrets",
+        "x-admin-only": true,
         "tags": [
           "users"
         ],
         "summary": "List configured integration secrets with masked hints (admin only, #77)",
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "Secrets (names + masked hints, never values).",
             "content": {
@@ -6189,7 +6473,7 @@
             }
           },
           "403": {
-            "description": "Admin role required."
+            "$ref": "#/components/responses/Forbidden"
           },
           "503": {
             "description": "Vault not configured (no TUCANO_SECRET_KEY)."
@@ -6210,6 +6494,7 @@
       ],
       "put": {
         "operationId": "setSecret",
+        "x-admin-only": true,
         "tags": [
           "users"
         ],
@@ -6239,11 +6524,14 @@
           }
         ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "204": {
             "description": "Stored."
           },
           "403": {
-            "description": "Admin role required. Also returned (code csrf) when the X-CSRF-Protection: 1 header is missing on a mutating request (#46)."
+            "$ref": "#/components/responses/Forbidden"
           },
           "422": {
             "$ref": "#/components/responses/ValidationError"
@@ -6255,6 +6543,7 @@
       },
       "delete": {
         "operationId": "deleteSecret",
+        "x-admin-only": true,
         "tags": [
           "users"
         ],
@@ -6265,11 +6554,14 @@
           }
         ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "204": {
             "description": "Deleted."
           },
           "403": {
-            "description": "Admin role required. Also returned (code csrf) when the X-CSRF-Protection: 1 header is missing on a mutating request (#46)."
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -6288,6 +6580,9 @@
         ],
         "summary": "List timesheet submissions",
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "All submissions.",
             "content": {
@@ -6334,6 +6629,9 @@
           }
         ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "403": {
             "$ref": "#/components/responses/CsrfForbidden"
           },
@@ -6387,6 +6685,9 @@
           }
         ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "403": {
             "$ref": "#/components/responses/CsrfForbidden"
           },
@@ -6417,6 +6718,9 @@
         ],
         "summary": "List reimbursement claims (own, or all for admin)",
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "Claims.",
             "content": {
@@ -6463,6 +6767,9 @@
           }
         ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "403": {
             "$ref": "#/components/responses/CsrfForbidden"
           },
@@ -6506,6 +6813,9 @@
           }
         ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "403": {
             "$ref": "#/components/responses/CsrfForbidden"
           },
@@ -6542,6 +6852,7 @@
       ],
       "post": {
         "operationId": "decideClaim",
+        "x-admin-only": true,
         "tags": [
           "expenses"
         ],
@@ -6562,6 +6873,9 @@
           }
         ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "Updated claim.",
             "content": {
@@ -6573,7 +6887,7 @@
             }
           },
           "403": {
-            "description": "Admin role required. Also returned (code csrf) when the X-CSRF-Protection: 1 header is missing on a mutating request (#46)."
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -6587,11 +6901,15 @@
     "/api/admin/invoice-template": {
       "get": {
         "operationId": "getInvoiceTemplate",
+        "x-admin-only": true,
         "tags": [
           "invoices"
         ],
         "summary": "Read the org invoice template plus the %variable% cheatsheet (#116)",
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "Template (defaults when unset) and variables.",
             "content": {
@@ -6632,12 +6950,13 @@
             }
           },
           "403": {
-            "description": "Admin role required."
+            "$ref": "#/components/responses/Forbidden"
           }
         }
       },
       "put": {
         "operationId": "putInvoiceTemplate",
+        "x-admin-only": true,
         "tags": [
           "invoices"
         ],
@@ -6659,6 +6978,9 @@
           }
         ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "Stored template.",
             "content": {
@@ -6670,7 +6992,7 @@
             }
           },
           "403": {
-            "description": "Admin role required. Also returned (code csrf) when the X-CSRF-Protection: 1 header is missing on a mutating request (#46)."
+            "$ref": "#/components/responses/Forbidden"
           },
           "422": {
             "$ref": "#/components/responses/ValidationError"
@@ -6692,12 +7014,16 @@
       ],
       "get": {
         "operationId": "getInvoiceDocument",
+        "x-admin-only": true,
         "tags": [
           "invoices"
         ],
         "summary": "Live {subject, html} preview of an invoice document (#116)",
         "description": "Resolved from the CURRENT template + customer (not a snapshot); the same content the PDF (#113) renders from. HTML is escaped markdown-subset output.",
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "Rendered document.",
             "content": {
@@ -6722,7 +7048,7 @@
             }
           },
           "403": {
-            "description": "Admin role required."
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -6744,6 +7070,7 @@
       ],
       "post": {
         "operationId": "writeOffInvoice",
+        "x-admin-only": true,
         "tags": [
           "invoices"
         ],
@@ -6776,6 +7103,9 @@
           }
         ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "Written-off invoice.",
             "content": {
@@ -6787,7 +7117,7 @@
             }
           },
           "403": {
-            "description": "Admin role required. Also returned (code csrf) when the X-CSRF-Protection: 1 header is missing on a mutating request (#46)."
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -6804,11 +7134,15 @@
     "/api/admin/org": {
       "get": {
         "operationId": "getOrg",
+        "x-admin-only": true,
         "tags": [
           "invoices"
         ],
         "summary": "Company identity (#138)",
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "Org profile (defaults when unset).",
             "content": {
@@ -6820,12 +7154,13 @@
             }
           },
           "403": {
-            "description": "Admin role required."
+            "$ref": "#/components/responses/Forbidden"
           }
         }
       },
       "put": {
         "operationId": "putOrg",
+        "x-admin-only": true,
         "tags": [
           "invoices"
         ],
@@ -6847,6 +7182,9 @@
           }
         ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "Stored profile.",
             "content": {
@@ -6858,7 +7196,7 @@
             }
           },
           "403": {
-            "description": "Admin role required. Also returned (code csrf) when the X-CSRF-Protection: 1 header is missing on a mutating request (#46)."
+            "$ref": "#/components/responses/Forbidden"
           },
           "422": {
             "$ref": "#/components/responses/ValidationError"
@@ -6869,6 +7207,7 @@
     "/api/invoices/manual": {
       "post": {
         "operationId": "createManualInvoice",
+        "x-admin-only": true,
         "tags": [
           "invoices"
         ],
@@ -6890,6 +7229,9 @@
           }
         ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "201": {
             "description": "Draft with number.",
             "content": {
@@ -6901,7 +7243,7 @@
             }
           },
           "403": {
-            "description": "Admin role required. Also returned (code csrf) when the X-CSRF-Protection: 1 header is missing on a mutating request (#46)."
+            "$ref": "#/components/responses/Forbidden"
           },
           "422": {
             "$ref": "#/components/responses/ValidationError"
@@ -6912,6 +7254,7 @@
     "/api/invoices/preview": {
       "post": {
         "operationId": "previewInvoice",
+        "x-admin-only": true,
         "tags": [
           "invoices"
         ],
@@ -6933,6 +7276,9 @@
           }
         ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "Unsaved draft preview.",
             "content": {
@@ -6944,7 +7290,7 @@
             }
           },
           "403": {
-            "description": "Admin role required. Also returned (code csrf) when the X-CSRF-Protection: 1 header is missing on a mutating request (#46)."
+            "$ref": "#/components/responses/Forbidden"
           },
           "409": {
             "$ref": "#/components/responses/Conflict"
@@ -6958,11 +7304,15 @@
     "/api/admin/item-types": {
       "get": {
         "operationId": "listItemTypes",
+        "x-admin-only": true,
         "tags": [
           "invoices"
         ],
         "summary": "Product/Service catalog incl. archived (#147)",
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "Catalog.",
             "content": {
@@ -6986,12 +7336,13 @@
             }
           },
           "403": {
-            "description": "Admin role required."
+            "$ref": "#/components/responses/Forbidden"
           }
         }
       },
       "post": {
         "operationId": "createItemType",
+        "x-admin-only": true,
         "tags": [
           "invoices"
         ],
@@ -7012,6 +7363,9 @@
           }
         ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "201": {
             "description": "Created.",
             "content": {
@@ -7023,7 +7377,7 @@
             }
           },
           "403": {
-            "description": "Admin role required. Also returned (code csrf) when the X-CSRF-Protection: 1 header is missing on a mutating request (#46)."
+            "$ref": "#/components/responses/Forbidden"
           },
           "422": {
             "$ref": "#/components/responses/ValidationError"
@@ -7045,6 +7399,7 @@
       ],
       "put": {
         "operationId": "updateItemType",
+        "x-admin-only": true,
         "tags": [
           "invoices"
         ],
@@ -7065,6 +7420,9 @@
           }
         ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "Updated.",
             "content": {
@@ -7076,7 +7434,7 @@
             }
           },
           "403": {
-            "description": "Admin role required. Also returned (code csrf) when the X-CSRF-Protection: 1 header is missing on a mutating request (#46)."
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -7088,6 +7446,7 @@
       },
       "delete": {
         "operationId": "deleteItemType",
+        "x-admin-only": true,
         "tags": [
           "invoices"
         ],
@@ -7098,11 +7457,14 @@
           }
         ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "204": {
             "description": "Deleted."
           },
           "403": {
-            "description": "Admin role required. Also returned (code csrf) when the X-CSRF-Protection: 1 header is missing on a mutating request (#46)."
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -7113,11 +7475,15 @@
     "/api/retainers": {
       "get": {
         "operationId": "listRetainers",
+        "x-admin-only": true,
         "tags": [
           "retainers"
         ],
         "summary": "Retainer list with balances (#144)",
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "Summaries.",
             "content": {
@@ -7177,12 +7543,13 @@
             }
           },
           "403": {
-            "description": "Admin role required."
+            "$ref": "#/components/responses/Forbidden"
           }
         }
       },
       "post": {
         "operationId": "createRetainer",
+        "x-admin-only": true,
         "tags": [
           "retainers"
         ],
@@ -7203,6 +7570,9 @@
           }
         ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "201": {
             "description": "Retainer with reconciled balance.",
             "content": {
@@ -7227,7 +7597,7 @@
             }
           },
           "403": {
-            "description": "Admin role required. Also returned (code csrf) when the X-CSRF-Protection: 1 header is missing on a mutating request (#46)."
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -7252,11 +7622,15 @@
       ],
       "get": {
         "operationId": "getRetainer",
+        "x-admin-only": true,
         "tags": [
           "retainers"
         ],
         "summary": "Retainer detail + full ledger (#144)",
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "Retainer with reconciled balance.",
             "content": {
@@ -7284,12 +7658,13 @@
             "$ref": "#/components/responses/NotFound"
           },
           "403": {
-            "description": "Admin role required."
+            "$ref": "#/components/responses/Forbidden"
           }
         }
       },
       "post": {
         "operationId": "closeRetainer",
+        "x-admin-only": true,
         "tags": [
           "retainers"
         ],
@@ -7300,6 +7675,9 @@
           }
         ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "Retainer with reconciled balance.",
             "content": {
@@ -7330,7 +7708,7 @@
             "$ref": "#/components/responses/Conflict"
           },
           "403": {
-            "description": "Admin role required. Also returned (code csrf) when the X-CSRF-Protection: 1 header is missing on a mutating request (#46)."
+            "$ref": "#/components/responses/Forbidden"
           }
         }
       }
@@ -7349,6 +7727,7 @@
       ],
       "post": {
         "operationId": "creditRetainer",
+        "x-admin-only": true,
         "tags": [
           "retainers"
         ],
@@ -7370,6 +7749,9 @@
           }
         ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "Retainer with reconciled balance.",
             "content": {
@@ -7394,7 +7776,7 @@
             }
           },
           "403": {
-            "description": "Admin role required. Also returned (code csrf) when the X-CSRF-Protection: 1 header is missing on a mutating request (#46)."
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -7422,6 +7804,7 @@
       ],
       "post": {
         "operationId": "drawRetainer",
+        "x-admin-only": true,
         "tags": [
           "retainers"
         ],
@@ -7443,6 +7826,9 @@
           }
         ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "Retainer with reconciled balance.",
             "content": {
@@ -7467,7 +7853,7 @@
             }
           },
           "403": {
-            "description": "Admin role required. Also returned (code csrf) when the X-CSRF-Protection: 1 header is missing on a mutating request (#46)."
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
