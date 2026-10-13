@@ -58,7 +58,12 @@ pub async fn create_user(
     }
     let email = normalise_email(&input.email)
         .ok_or_else(|| ApiError::validation(vec![FieldError::new("email", "invalid email")]))?;
-    if app.store.get_user_by_email(&email)?.is_some() {
+    let email_lookup = email.clone();
+    let existing = store_blocking("user email lookup", &app.store, move |s| {
+        s.get_user_by_email(&email_lookup)
+    })
+    .await?;
+    if existing.is_some() {
         return Err(ApiError::conflict("a user with that email exists"));
     }
     if !valid_password(&input.password) {
@@ -85,8 +90,9 @@ pub async fn create_user(
             cost_rate_minor: input.cost_rate_minor,
         },
         &app,
-    )?;
-    app.audit.record("user_created", &email, app.clock.now());
+    )
+    .await?;
+    record_audit(&app, "user_created", &email).await;
     Ok((StatusCode::CREATED, Json(PublicUser::from(&user))).into_response())
 }
 
@@ -182,9 +188,10 @@ pub async fn change_user_password(
     Path(id): Path<Uuid>,
     ValidJson(input): ValidJson<UserPasswordInput>,
 ) -> ApiResult {
-    let mut user = app
-        .store
-        .get_user(id)?
+    // #254: the read, the argon2id hash and the guarded write all run on the
+    // blocking pool; the byte-for-byte error mapping is unchanged.
+    let mut user = store_blocking("user load", &app.store, move |s| s.get_user(id))
+        .await?
         .ok_or_else(|| ApiError::not_found("user"))?;
     let expected = user.clone();
     if !valid_password(&input.password) {
@@ -193,12 +200,20 @@ pub async fn change_user_password(
             "must be at least 8 characters",
         )]));
     }
-    user.password_hash = crate::auth::hash_password(&input.password)
-        .map_err(|_| ApiError::internal("password hashing failed".into()))?;
+    let password = input.password.clone();
+    user.password_hash = blocking("password hashing", move || {
+        crate::auth::hash_password(&password)
+            .map_err(|_| ApiError::internal("password hashing failed".into()))
+    })
+    .await?;
     user.session_version += 1;
-    app.store.put_user_if_unchanged(&user, &expected)?;
-    app.audit
-        .record("user_password_changed", &user.email, app.clock.now());
+    let write = user.clone();
+    let expected_for_write = expected.clone();
+    store_blocking("user password write", &app.store, move |s| {
+        s.put_user_if_unchanged(&write, &expected_for_write)
+    })
+    .await?;
+    record_audit(&app, "user_password_changed", &user.email).await;
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 

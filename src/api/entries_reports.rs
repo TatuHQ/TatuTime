@@ -95,11 +95,19 @@ pub async fn list_entries(
     actor: AuthUser,
     Query(q): Query<EntryQuery>,
 ) -> ApiResult {
+    // #254: the range/day scans read the whole entry tree from disk; run them
+    // on the blocking pool so a large scan never stalls an async worker.
     let entries = match (&q.date, &q.from, &q.to) {
-        (Some(date), None, None) => app.store.list_by_date(parse_date(date)?)?,
+        (Some(date), None, None) => {
+            let date = parse_date(date)?;
+            store_blocking("entry day list", &app.store, move |s| s.list_by_date(date)).await?
+        }
         (None, Some(_), Some(_)) => {
             let (from, to) = parse_range(q.from.as_ref(), q.to.as_ref())?;
-            app.store.list_range(from, to)?
+            store_blocking("entry range list", &app.store, move |s| {
+                s.list_range(from, to)
+            })
+            .await?
         }
         _ => {
             return Err(ApiError::bad_request(
@@ -252,11 +260,15 @@ pub async fn summary(
             )));
         }
     };
-    let mut entries = app.store.list_range(from, to)?;
+    let mut entries = store_blocking("summary entries", &app.store, move |s| {
+        s.list_range(from, to)
+    })
+    .await?;
     // Private-per-user (#51): members report only on their own time.
     entries.retain(|e| visible_to(&actor.0, e.user_id));
-    let customers: Vec<Customer> = app.store.list_customers()?.into_iter().collect();
-    let (projects, users) = gather_hierarchy(&app, &customers)?;
+    let customers: Vec<Customer> =
+        store_blocking("summary customers", &app.store, |s| s.list_customers()).await?;
+    let (projects, users) = gather_hierarchy(&app, &customers).await?;
     let rows = report::summarise(
         &entries,
         &customers,
@@ -274,15 +286,21 @@ pub async fn summary(
 /// customer, so the per-project `list_tasks` fan-out was pure cost.
 type Hierarchy = (Vec<(Uuid, Project)>, Vec<User>);
 
-fn gather_hierarchy(app: &AppState, customers: &[Customer]) -> Result<Hierarchy, ApiError> {
-    let mut projects: Vec<(Uuid, Project)> = Vec::new();
-    for c in customers {
-        for p in app.store.list_projects(c.id)? {
-            projects.push((c.id, p));
+async fn gather_hierarchy(app: &AppState, customers: &[Customer]) -> Result<Hierarchy, ApiError> {
+    // #254: the per-customer project fan-out is a burst of small disk reads —
+    // one blocking-pool job instead of one read per customer on the worker.
+    let customers = customers.to_vec();
+    store_blocking("report hierarchy", &app.store, move |s| {
+        let mut projects: Vec<(Uuid, Project)> = Vec::new();
+        for c in &customers {
+            for p in s.list_projects(c.id)? {
+                projects.push((c.id, p));
+            }
         }
-    }
-    let users = app.store.list_users()?;
-    Ok((projects, users))
+        let users = s.list_users()?;
+        Ok((projects, users))
+    })
+    .await
 }
 
 /// `GET /reports/export.csv`: a range plus optional customer filter.
@@ -309,10 +327,13 @@ pub async fn export_csv(
         ),
         None => None,
     };
-    let mut entries = app.store.list_range(from, to)?;
+    let mut entries = store_blocking("export entries", &app.store, move |s| {
+        s.list_range(from, to)
+    })
+    .await?;
     entries.retain(|e| visible_to(&actor.0, e.user_id));
-    let customers = app.store.list_customers()?;
-    let (projects, users) = gather_hierarchy(&app, &customers)?;
+    let customers = store_blocking("export customers", &app.store, |s| s.list_customers()).await?;
+    let (projects, users) = gather_hierarchy(&app, &customers).await?;
     let csv = report::export_csv(&entries, &customers, &projects, &users, filter);
     Ok((
         [(axum::http::header::CONTENT_TYPE, "text/csv; charset=utf-8")],
@@ -325,11 +346,14 @@ pub async fn export_csv(
 /// cost (billable expenses + labour at each person's cost rate) (#29, #186).
 pub async fn profitability(State(app): State<AppState>, Query(q): Query<RangeQuery>) -> ApiResult {
     let (from, to) = q.dates()?;
-    let invoices = app.store.list_invoices()?;
-    let expenses = app.store.list_expenses()?;
-    let entries = app.store.list_range(from, to)?;
-    let customers = app.store.list_customers()?;
-    let (projects, users) = gather_hierarchy(&app, &customers)?;
+    let invoices = store_blocking("profit invoices", &app.store, |s| s.list_invoices()).await?;
+    let expenses = store_blocking("profit expenses", &app.store, |s| s.list_expenses()).await?;
+    let entries = store_blocking("profit entries", &app.store, move |s| {
+        s.list_range(from, to)
+    })
+    .await?;
+    let customers = store_blocking("profit customers", &app.store, |s| s.list_customers()).await?;
+    let (projects, users) = gather_hierarchy(&app, &customers).await?;
     let result = report::summarise_profit(
         &invoices,
         &expenses,
@@ -347,11 +371,11 @@ pub async fn profitability(State(app): State<AppState>, Query(q): Query<RangeQue
 
 /// Budget burn vs budget for budgeted projects (#30).
 pub async fn budget_report(State(app): State<AppState>) -> ApiResult {
-    let customers = app.store.list_customers()?;
+    let customers = store_blocking("budget customers", &app.store, |s| s.list_customers()).await?;
     // Reuse the shared hierarchy walk (review D3) and the lifetime entry scan:
     // budgets are lifetime totals, so a date-windowed query would undercount.
-    let (projects, users) = gather_hierarchy(&app, &customers)?;
-    let entries = app.store.list_all_entries()?;
+    let (projects, users) = gather_hierarchy(&app, &customers).await?;
+    let entries = store_blocking("budget entries", &app.store, |s| s.list_all_entries()).await?;
     let rows = crate::budgets::burn_report(&projects, &entries, &customers, &users);
     Ok(Json(serde_json::json!({ "rows": rows })).into_response())
 }

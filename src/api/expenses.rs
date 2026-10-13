@@ -62,7 +62,7 @@ pub async fn list_expenses(
     actor: AuthUser,
     Query(q): Query<ExpenseQuery>,
 ) -> ApiResult {
-    let mut expenses = app.store.list_expenses()?;
+    let mut expenses = store_blocking("expense list", &app.store, |s| s.list_expenses()).await?;
     if let Some(cid) = &q.customer_id {
         let cid = Uuid::parse_str(cid)
             .map_err(|_| ApiError::bad_request("'customer_id' must be a UUID"))?;

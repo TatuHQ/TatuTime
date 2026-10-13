@@ -40,7 +40,7 @@ pub async fn bootstrap(
             "too many attempts; try again later",
         ));
     }
-    if app.store.has_users()? {
+    if store_blocking("bootstrap check", &app.store, |s| s.has_users()).await? {
         return Err(ApiError::new(
             StatusCode::FORBIDDEN,
             "initialised",
@@ -63,9 +63,14 @@ pub async fn bootstrap(
         )]));
     }
     // Hash outside the lock; the check-then-insert is atomic in the store
-    // (review A12/B4: two racing bootstraps must not mint two admins).
-    let password_hash = auth::hash_password(&input.password)
-        .map_err(|_| ApiError::internal("password hashing failed".into()))?;
+    // (review A12/B4: two racing bootstraps must not mint two admins). The
+    // argon2id work runs on the blocking pool (#254).
+    let password = input.password.clone();
+    let password_hash = blocking("password hashing", move || {
+        auth::hash_password(&password)
+            .map_err(|_| ApiError::internal("password hashing failed".into()))
+    })
+    .await?;
     let user = User {
         id: Uuid::new_v4(),
         name: name.to_owned(),
@@ -78,7 +83,13 @@ pub async fn bootstrap(
         created_at: app.clock.now(),
         session_version: 1,
     };
-    match app.store.put_user_if_none(&user) {
+    let user_for_write = user.clone();
+    let store = app.store.clone();
+    let inserted = blocking("bootstrap user write", move || {
+        Ok(store.put_user_if_none(&user_for_write))
+    })
+    .await?;
+    match inserted {
         Ok(()) => {}
         Err(crate::store::StoreError::AlreadyExists(_)) => {
             return Err(ApiError::new(
@@ -90,7 +101,7 @@ pub async fn bootstrap(
         Err(other) => return Err(other.into()),
     }
     app.rate.reset("bootstrap");
-    app.audit.record("bootstrap", &email, app.clock.now());
+    record_audit(&app, "bootstrap", &email).await;
     let (headers, pubuser) = set_cookie(&app, &user);
     Ok((StatusCode::CREATED, headers, Json(pubuser)).into_response())
 }
@@ -108,15 +119,26 @@ pub async fn login(
             "too many failed attempts; try again later",
         ));
     }
-    let user = app.store.get_user_by_email(&email)?;
-    // #220: destructure instead of gating on is_some_and + unwrapping later;
-    // the login path stays panic-free if this ordering is ever edited.
-    let user = match user {
-        Some(u) if u.active && verify_password(&input.password, &u.password_hash) => u,
-        // Same response for unknown email and bad password (no user enumeration).
-        _ => {
+    // #254: the user lookup (disk read) and the argon2id verify (deliberately
+    // ~50–100 ms of CPU) run together on the blocking pool, so a login flood
+    // cannot pin an async worker. The user-enumeration-safe shape is unchanged.
+    let store = app.store.clone();
+    let email_lookup = email.clone();
+    let password = input.password.clone();
+    let candidate = blocking("login verify", move || {
+        let user = store.get_user_by_email(&email_lookup)?;
+        Ok(match user {
+            Some(u) if u.active && verify_password(&password, &u.password_hash) => Some(u),
+            // Same response for unknown email and bad password (no enumeration).
+            _ => None,
+        })
+    })
+    .await?;
+    let user = match candidate {
+        Some(u) => u,
+        None => {
             app.rate.record_failure(&key);
-            app.audit.record("login_failed", &email, app.clock.now());
+            record_audit(&app, "login_failed", &email).await;
             return Err(ApiError::new(
                 StatusCode::UNAUTHORIZED,
                 "invalid_credentials",
@@ -125,7 +147,7 @@ pub async fn login(
         }
     };
     app.rate.reset(&key);
-    app.audit.record("login_ok", &email, app.clock.now());
+    record_audit(&app, "login_ok", &email).await;
     let (headers, pubuser) = set_cookie(&app, &user);
     Ok((headers, Json(pubuser)).into_response())
 }
@@ -139,10 +161,18 @@ pub async fn logout(State(app): State<AppState>, req: axum::extract::Request) ->
         && let Some(token) = token_from_cookie_header(header)
         && let Some(claims) = app.session.verify(token, app.clock.now())
     {
-        app.revocations
-            .revoke(&claims.jti, claims.exp, app.clock.now());
-        app.audit
-            .record("logout", &claims.uid.to_string(), app.clock.now());
+        // #254: the revocation write (fs + mutex) and the audit append run on
+        // the blocking pool, off the async worker.
+        let revocations = app.revocations.clone();
+        let jti = claims.jti.clone();
+        let exp = claims.exp;
+        let now = app.clock.now();
+        blocking("session revoke", move || {
+            revocations.revoke(&jti, exp, now);
+            Ok(())
+        })
+        .await?;
+        record_audit(&app, "logout", &claims.uid.to_string()).await;
     }
     let mut headers = http::HeaderMap::new();
     let cookie = format!(
@@ -162,7 +192,7 @@ pub async fn logout(State(app): State<AppState>, req: axum::extract::Request) ->
 }
 
 pub async fn me(State(app): State<AppState>, req: axum::extract::Request) -> ApiResult {
-    let user = authenticate(&app, req.headers())?;
+    let user = authenticate(&app, req.headers()).await?;
     Ok(Json(PublicUser::from(&user)).into_response())
 }
 
@@ -223,7 +253,11 @@ pub async fn sso_assertion(
     })?;
     app.rate.reset(&rate_key);
 
-    let existing = app.store.get_user_by_email(&identity.email)?;
+    let lookup_email = identity.email.clone();
+    let existing = store_blocking("sso user lookup", &app.store, move |s| {
+        s.get_user_by_email(&lookup_email)
+    })
+    .await?;
     let user = match existing {
         Some(u) => {
             if !u.active {
@@ -240,7 +274,12 @@ pub async fn sso_assertion(
                 let mut updated = u.clone();
                 updated.role = role;
                 updated.session_version += 1;
-                app.store.put_user_if_unchanged(&updated, &u)?;
+                let write = updated.clone();
+                let expected = u.clone();
+                store_blocking("sso role refresh", &app.store, move |s| {
+                    s.put_user_if_unchanged(&write, &expected)
+                })
+                .await?;
                 updated
             } else {
                 u
@@ -269,14 +308,11 @@ pub async fn sso_assertion(
                     cost_rate_minor: 0,
                 },
                 &app,
-            )?
+            )
+            .await?
         }
     };
-    app.audit.record(
-        &format!("sso_login:{}", idp.name()),
-        &identity.email,
-        app.clock.now(),
-    );
+    record_audit(&app, &format!("sso_login:{}", idp.name()), &identity.email).await;
     let (headers, pubuser) = set_cookie(&app, &user);
     Ok((headers, Json(pubuser)).into_response())
 }
