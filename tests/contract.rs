@@ -338,25 +338,360 @@ async fn healthz_is_ok() {
     assert_eq!(body["status"], "ok");
 }
 
+// ------------------------- mechanical router↔openapi.json drift check (#253) --
+//
+// AGENTS.md makes `openapi.json` the source of truth and requires route changes
+// and contract changes to land in the same commit, but nothing verified it
+// mechanically. Two sources are cross-checked here:
+//
+//   * `API_ROUTES` (src/lib.rs) — the canonical `(method, path, tier)` registry
+//     the router is authored against;
+//   * the live router from `build_router`, whose mounted path set is read back
+//     from axum's `Debug` (axum exposes no route introspection).
+//
+// The tests diff the registry against the contract in both directions and probe
+// the live router so the registry can never over-claim a route — and so a route
+// added to or removed from `build_router` fails even when the registry and the
+// contract were not touched. The `Error.code` vocabulary is already compared to
+// `ApiError::codes()` by `contract_error_code_enum_matches_rust_vocabulary`
+// (#249).
+
+/// Replace axum `{param}` segments with a concrete value so a registry path can
+/// be dispatched. The value is irrelevant — a probe never reaches a handler.
+fn concretise(path: &str) -> String {
+    path.split('/')
+        .map(|seg| if seg.starts_with('{') { "probe" } else { seg })
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+/// Dispatch `TRACE` — a method no route registers — and return the status and
+/// the `Allow` header. Against a mounted path this yields 405 with the methods
+/// it serves; an unmounted path falls through to the JSON 404 fallback; a
+/// guarded path answers 401 before method routing when no session is supplied.
+async fn trace_probe(
+    router: &Router,
+    path: &str,
+    cookie: Option<&str>,
+) -> (StatusCode, Option<String>) {
+    let mut b = Request::builder()
+        .method("TRACE")
+        .uri(concretise(path))
+        .header("x-csrf-protection", "1");
+    if let Some(c) = cookie {
+        b = b.header(header::COOKIE, c);
+    }
+    let res = router
+        .clone()
+        .oneshot(b.body(Body::empty()).unwrap())
+        .await
+        .expect("oneshot");
+    let allow = res
+        .headers()
+        .get(header::ALLOW)
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_string);
+    (res.status(), allow)
+}
+
+/// The path set the mounted router actually serves, read back from axum's
+/// `Debug` of the route node (the only route introspection axum offers). The
+/// always-present fallback routes (`/`, `/{*…}`) and the dev-only SSE endpoint
+/// `/_dev/reload` (404 outside dev mode) are not JSON-API operations and are
+/// dropped. If axum changes its `Debug` shape this fails loudly rather than
+/// silently under-checking, which is the right failure mode for a test.
+fn router_paths(router: &Router) -> std::collections::BTreeSet<String> {
+    format!("{router:?}")
+        .split('"')
+        .skip(1)
+        .step_by(2)
+        .filter(|t| t.starts_with('/') && !t.contains("{*") && *t != "/" && *t != "/_dev/reload")
+        .map(str::to_string)
+        .collect()
+}
+
+/// The `(METHOD, path)` set the contract declares.
+fn contract_operations(contract: &Value) -> std::collections::BTreeSet<(String, String)> {
+    let mut ops = std::collections::BTreeSet::new();
+    for (path, item) in contract["paths"].as_object().expect("paths object") {
+        for method in item.as_object().expect("path item").keys() {
+            if matches!(method.as_str(), "get" | "post" | "put" | "delete" | "patch") {
+                ops.insert((method.to_ascii_uppercase(), path.clone()));
+            }
+        }
+    }
+    ops
+}
+
+/// Whether `METHOD path` declares the response `code`.
+fn declares_code(
+    paths: &serde_json::Map<String, Value>,
+    method: &str,
+    path: &str,
+    code: &str,
+) -> bool {
+    paths
+        .get(path)
+        .and_then(|item| item.get(method.to_ascii_lowercase()))
+        .and_then(|op| op.get("responses"))
+        .and_then(|r| r.get(code))
+        .is_some()
+}
+
+/// Whether `METHOD path` publishes an explicit empty `security: []` — i.e. the
+/// contract marks the operation reachable without a session cookie.
+fn declares_public_security(
+    paths: &serde_json::Map<String, Value>,
+    method: &str,
+    path: &str,
+) -> bool {
+    paths
+        .get(path)
+        .and_then(|item| item.get(method.to_ascii_lowercase()))
+        .and_then(|op| op.get("security"))
+        .and_then(|s| s.as_array())
+        .is_some_and(|s| s.is_empty())
+}
+
+/// Router mounts the contract lacks and vice versa, as `(METHOD, path, ticket)`.
+/// Empty today — the two `(method, path)` sets already agree — but present so
+/// future drift is allow-listed explicitly (with a ticket) rather than skipped.
+const ROUTE_ALLOWLIST: &[(&str, &str, &str)] = &[];
+
+/// Lock-guarded mutations and the response codes their handlers can actually
+/// produce (#18/#185, `InvoiceLock`/`SubmissionLock`) that the contract must
+/// declare. The broader 400/422/429 matrices are tracked by #251; this covers
+/// the lock lifecycle specifically.
+const LOCK_LIFECYCLE_CODES: &[(&str, &str, &[&str])] = &[
+    ("PUT", "/api/entries/{id}", &["409", "503"]),
+    ("DELETE", "/api/entries/{id}", &["409", "503"]),
+    ("DELETE", "/api/expenses/{id}", &["409"]),
+    ("POST", "/api/submissions", &["503"]),
+];
+
+/// Operations that run before a session exists and must publish `security: []`.
+const PUBLIC_OPERATIONS: &[(&str, &str)] = &[
+    ("GET", "/healthz"),
+    ("GET", "/openapi.json"),
+    ("GET", "/docs"),
+    ("POST", "/api/auth/bootstrap"),
+    ("POST", "/api/auth/login"),
+    ("POST", "/api/auth/logout"),
+    ("GET", "/api/auth/status"),
+    ("GET", "/api/auth/sso/providers"),
+    ("POST", "/api/auth/sso/assertion"),
+    ("POST", "/api/payments/webhook/{provider}"),
+];
+
+/// `(METHOD, path, kind, ticket)` gaps the contract is known to have, where
+/// `kind` is a declared response code (e.g. `403`) or the literal
+/// `security[]`. EVERY entry MUST name the ticket that will close it; the tests
+/// fail if an entry is no longer a real gap, so this list only ever shrinks
+/// (#253).
+///
+/// * `#250` — auth tiers misrepresented: SSO/webhook ops not marked public,
+///   admin GETs declaring no 403.
+/// * `#251` — response-code matrices incomplete: lock 409/503 gaps.
+const ALLOWED_CONTRACT_GAPS: &[(&str, &str, &str, &str)] = &[
+    // #250: pre-session operations not marked `security: []`.
+    ("GET", "/api/auth/sso/providers", "security[]", "#250"),
+    ("POST", "/api/auth/sso/assertion", "security[]", "#250"),
+    (
+        "POST",
+        "/api/payments/webhook/{provider}",
+        "security[]",
+        "#250",
+    ),
+    // #250: admin operations with no declared 403.
+    ("GET", "/api/reports/profitability", "403", "#250"),
+    ("GET", "/api/reports/budgets", "403", "#250"),
+    ("GET", "/api/invoices", "403", "#250"),
+    ("GET", "/api/invoices/{id}", "403", "#250"),
+    ("GET", "/api/invoices/summary", "403", "#250"),
+    ("GET", "/api/invoices/report", "403", "#250"),
+    ("GET", "/api/invoices/export.csv", "403", "#250"),
+    // #251: lock-lifecycle codes the handlers can emit but the contract omits.
+    ("PUT", "/api/entries/{id}", "409", "#251"),
+    ("PUT", "/api/entries/{id}", "503", "#251"),
+    ("DELETE", "/api/entries/{id}", "409", "#251"),
+    ("DELETE", "/api/entries/{id}", "503", "#251"),
+    ("DELETE", "/api/expenses/{id}", "409", "#251"),
+    ("POST", "/api/submissions", "503", "#251"),
+];
+
 #[tokio::test]
-async fn contract_paths_have_documented_responses() {
-    // Every operationId in the contract must be reachable. This is a light
-    // coverage check; the payload tests below check behaviour.
+async fn router_routes_match_openapi_bidirectionally() {
+    // #253 (a): the mounted router's (method, path) set must equal the contract
+    // in both directions, accounting for the `/api` nest and the root
+    // `/healthz|/openapi.json|/docs`.
+    let contract: Value =
+        serde_json::from_str(include_str!("../openapi.json")).expect("valid openapi.json");
+    let contract_ops = contract_operations(&contract);
+    let registry: std::collections::BTreeSet<(String, String)> = tucano_time::API_ROUTES
+        .iter()
+        .map(|(m, p, _)| ((*m).to_string(), (*p).to_string()))
+        .collect();
+    let allowed: std::collections::BTreeSet<(&str, &str)> =
+        ROUTE_ALLOWLIST.iter().map(|(m, p, _)| (*m, *p)).collect();
+
+    let mut drift = Vec::new();
+    for (method, path) in &registry {
+        if !contract_ops.contains(&(method.clone(), path.clone()))
+            && !allowed.contains(&(method.as_str(), path.as_str()))
+        {
+            drift.push(format!("router mounts {method} {path}; contract does not"));
+        }
+    }
+    for (method, path) in &contract_ops {
+        if !registry.contains(&(method.clone(), path.clone()))
+            && !allowed.contains(&(method.as_str(), path.as_str()))
+        {
+            drift.push(format!(
+                "contract declares {method} {path}; router does not"
+            ));
+        }
+    }
+    assert!(
+        drift.is_empty(),
+        "router/contract route drift:\n  {}",
+        drift.join("\n  ")
+    );
+
+    // #253 (a, live, paths): read the mounted path set straight off the router
+    // so a route added/removed in `build_router` fails even when neither the
+    // registry nor the contract changed.
+    let (client, _dir) = app().await;
+    let served = router_paths(&client.router);
+    let registered: std::collections::BTreeSet<String> = tucano_time::API_ROUTES
+        .iter()
+        .map(|(_, p, _)| (*p).to_string())
+        .collect();
+    assert_eq!(
+        served, registered,
+        "the mounted router's paths drifted from API_ROUTES — update src/lib.rs"
+    );
+
+    // #253 (a, live, methods + tier): probe each path once. `TRACE` is
+    // registered nowhere, so with an admin session a mounted path answers 405
+    // and advertises its methods in `Allow`; without a session a guarded path
+    // answers 401 while the open tier still answers 405.
+    let mut expected: std::collections::BTreeMap<
+        &str,
+        (tucano_time::Tier, std::collections::BTreeSet<&'static str>),
+    > = std::collections::BTreeMap::new();
+    for (method, path, tier) in tucano_time::API_ROUTES {
+        expected
+            .entry(*path)
+            .or_insert((*tier, std::collections::BTreeSet::new()))
+            .1
+            .insert(*method);
+    }
+    for (path, (tier, methods)) in &expected {
+        let (status, allow) = trace_probe(&client.router, path, Some(&client.cookie)).await;
+        assert_eq!(
+            status,
+            StatusCode::METHOD_NOT_ALLOWED,
+            "{path} is in API_ROUTES but the router did not mount it (probe {status})"
+        );
+        // GET implies HEAD, which `Allow` advertises; nothing else is implicit,
+        // so the advertised set (minus HEAD) must be exactly the registry's.
+        let advertised: std::collections::BTreeSet<String> = allow
+            .unwrap_or_default()
+            .split(',')
+            .map(|m| m.trim().to_string())
+            .filter(|m| !m.is_empty() && m != "HEAD")
+            .collect();
+        let want: std::collections::BTreeSet<String> =
+            methods.iter().map(|m| (*m).to_string()).collect();
+        assert_eq!(
+            advertised, want,
+            "{path}: the router serves {advertised:?} but API_ROUTES declares {want:?}"
+        );
+
+        let (anon, _) = trace_probe(&client.router, path, None).await;
+        match tier {
+            tucano_time::Tier::Open => assert_eq!(
+                anon,
+                StatusCode::METHOD_NOT_ALLOWED,
+                "{path} is open but an unauthenticated probe returned {anon}"
+            ),
+            tucano_time::Tier::Member | tucano_time::Tier::Admin => assert_eq!(
+                anon,
+                StatusCode::UNAUTHORIZED,
+                "{path} is guarded but an unauthenticated probe returned {anon}"
+            ),
+        }
+    }
+}
+
+#[test]
+fn contract_declares_producible_status_and_security() {
+    // #253 (b): every code a handler can actually produce must be declared, and
+    // the auth tiers the router enforces must be discoverable from the document.
+    // Admin ops must declare 403; lock-guarded mutations must declare their
+    // 409/503 lifecycle; pre-session ops must publish `security: []`. Known gaps
+    // are allow-listed per ticket and must be removed once closed.
     let contract: Value =
         serde_json::from_str(include_str!("../openapi.json")).expect("valid openapi.json");
     assert_eq!(contract["openapi"], "3.1.0");
     let paths = contract["paths"].as_object().expect("paths object");
-    for path in [
-        "/api/customers",
-        "/api/entries",
-        "/api/reports/summary",
-        "/api/reports/export.csv",
-        "/api/invoices",
-        "/api/auth/login",
-        "/api/users",
-    ] {
-        assert!(paths.contains_key(path), "contract missing {path}");
+
+    let mut gaps: std::collections::BTreeSet<(String, String, String)> =
+        std::collections::BTreeSet::new();
+    for (method, path, tier) in tucano_time::API_ROUTES {
+        if *tier == tucano_time::Tier::Admin && !declares_code(paths, method, path, "403") {
+            gaps.insert(((*method).to_string(), (*path).to_string(), "403".into()));
+        }
     }
+    for (method, path, codes) in LOCK_LIFECYCLE_CODES {
+        for code in *codes {
+            if !declares_code(paths, method, path, code) {
+                gaps.insert((
+                    (*method).to_string(),
+                    (*path).to_string(),
+                    (*code).to_string(),
+                ));
+            }
+        }
+    }
+    for (method, path) in PUBLIC_OPERATIONS {
+        if !declares_public_security(paths, method, path) {
+            gaps.insert((
+                (*method).to_string(),
+                (*path).to_string(),
+                "security[]".into(),
+            ));
+        }
+    }
+
+    let mut allowed = std::collections::BTreeSet::new();
+    for (m, p, k, _ticket) in ALLOWED_CONTRACT_GAPS {
+        allowed.insert(((*m).to_string(), (*p).to_string(), (*k).to_string()));
+    }
+
+    let unexpected: Vec<String> = gaps
+        .iter()
+        .filter(|gap| !allowed.contains(*gap))
+        .map(|(m, p, k)| format!("  {m} {p} must declare {k}"))
+        .collect();
+    assert!(
+        unexpected.is_empty(),
+        "contract omits producible status/security (fix the contract or allow-list it with a ticket):\n{}",
+        unexpected.join("\n")
+    );
+
+    // Shrinking-only allow-list: an entry whose gap is already closed is stale.
+    let mut stale = Vec::new();
+    for (m, p, k, ticket) in ALLOWED_CONTRACT_GAPS {
+        if !gaps.contains(&((*m).to_string(), (*p).to_string(), (*k).to_string())) {
+            stale.push(format!("{m} {p} {k} ({ticket})"));
+        }
+    }
+    assert!(
+        stale.is_empty(),
+        "stale allow-list entries — the gap is closed, remove them from ALLOWED_CONTRACT_GAPS: {}",
+        stale.join(", ")
+    );
 }
 
 #[test]
