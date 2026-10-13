@@ -54,20 +54,10 @@ fn build_draft(
     let entries = app.store.list_range(from, to)?;
     let expenses = app.store.list_expenses()?;
     let invoices = app.store.list_invoices()?;
-    let issued: Vec<&Invoice> = invoices
-        .iter()
-        .filter(|i| i.status != InvoiceStatus::Draft)
-        .collect();
-    let excluded_entries: Vec<Uuid> = issued
-        .iter()
-        .flat_map(|i| i.lines.iter())
-        .filter_map(|l| l.entry_id)
-        .collect();
-    let excluded_expenses: Vec<Uuid> = issued
-        .iter()
-        .flat_map(|i| i.lines.iter())
-        .filter_map(|l| l.expense_id)
-        .collect();
+    // #248: the ONE shared "already invoiced" predicate. Every non-draft
+    // invoice (issued, partly paid, paid, written off) contributes its lines as
+    // billed work, so no builder can re-bill a settled period.
+    let (excluded_entries, excluded_expenses) = crate::domain::already_invoiced(&invoices);
     let sources = crate::domain::InvoiceSources {
         projects: &projects,
         users: &users,

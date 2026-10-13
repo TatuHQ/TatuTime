@@ -1301,15 +1301,43 @@ pub struct ExpenseDraft {
     pub receipt_b64: Option<String>,
 }
 
+/// Entry and expense ids already committed to a **non-draft** invoice, in the
+/// `excluded_entries` / `excluded_expenses` shape [`generate_invoice`] consumes
+/// (#8). This is the single "already invoiced" predicate: the API draft/preview
+/// builder and the recurring scheduler both call it, so a line captured on an
+/// issued, settled (`partly_paid` / `paid`) or written-off document can never be
+/// billed twice (#248). Settling or writing off an invoice releases its entries
+/// from the edit lock (#114) but **not** from billing. Drafts are deliberately
+/// not excluded — their lines stay billable until the draft is issued.
+pub fn already_invoiced(invoices: &[Invoice]) -> (Vec<Uuid>, Vec<Uuid>) {
+    let billed: Vec<&Invoice> = invoices
+        .iter()
+        .filter(|i| i.status != InvoiceStatus::Draft)
+        .collect();
+    let entries = billed
+        .iter()
+        .flat_map(|i| i.lines.iter())
+        .filter_map(|l| l.entry_id)
+        .collect();
+    let expenses = billed
+        .iter()
+        .flat_map(|i| i.lines.iter())
+        .filter_map(|l| l.expense_id)
+        .collect();
+    (entries, expenses)
+}
+
 /// Read-only context for invoice generation, bundled to keep the signature small.
 pub struct InvoiceSources<'a> {
     pub projects: &'a [Project],
     pub users: &'a [User],
     pub entries: &'a [Entry],
     pub expenses: &'a [Expense],
-    /// Entry ids already on an issued invoice (excluded).
+    /// Entry ids already on a non-draft invoice (excluded); see
+    /// [`already_invoiced`].
     pub excluded_entries: &'a [Uuid],
-    /// Expense ids already on an issued invoice (excluded).
+    /// Expense ids already on a non-draft invoice (excluded); see
+    /// [`already_invoiced`].
     pub excluded_expenses: &'a [Uuid],
     pub include_expenses: bool,
     /// #134: when true the `projects` list is the billable SCOPE — entries
@@ -1321,8 +1349,8 @@ pub struct InvoiceSources<'a> {
 /// Build a draft invoice from the billable entries (and, if enabled, billable
 /// expenses) in `[from, to]` for one customer. Time-line rates are resolved per
 /// entry (person > project > customer) and snapshotted, so a later rate
-/// change never rewrites an issued invoice. Items already on an issued invoice
-/// (`excluded_*`) are skipped.
+/// change never rewrites an issued invoice. Items already on a non-draft
+/// invoice (`excluded_*`, e.g. from [`already_invoiced`]) are skipped.
 pub fn generate_invoice(
     number: String,
     customer: &Customer,
@@ -1375,7 +1403,7 @@ pub fn generate_invoice(
             continue;
         }
         if excluded_entry.contains(&e.id) {
-            continue; // already billed on an issued invoice
+            continue; // already billed on a non-draft invoice
         }
         let project = project_by_code.get(e.project_code.0.as_str()).copied();
         if *restrict_projects && project.is_none() {
@@ -2223,6 +2251,48 @@ mod tests {
         assert_eq!(s.outstanding.get("EUR").copied(), Some(16_000));
         // Both open invoices are past due; paid/written_off never overdue.
         assert_eq!(s.overdue, 2);
+    }
+
+    #[test]
+    fn already_invoiced_excludes_every_non_draft_status() {
+        let entry = Uuid::new_v4();
+        let expense = Uuid::new_v4();
+        let line = InvoiceLine {
+            kind: LineKind::Time,
+            date: NaiveDate::from_ymd_opt(2026, 1, 2).unwrap(),
+            entry_id: Some(entry),
+            expense_id: Some(expense),
+            project_code: Some(ProjectCode("P1".into())),
+            task_code: None,
+            hours: Some(Hours(100)),
+            rate_minor: Some(6000),
+            amount_minor: 6000,
+            note: String::new(),
+            quantity_hundredths: None,
+            unit_price_minor: None,
+            item_kind: None,
+        };
+        let with_line = |status: InvoiceStatus| {
+            let mut i = inv(status, 6000, None);
+            i.lines = vec![line.clone()];
+            i
+        };
+        // A draft's lines stay billable (#248): the predicate must NOT exclude
+        // them, or the recurring job could never bill a fresh period.
+        let (draft_entries, draft_expenses) = already_invoiced(&[with_line(InvoiceStatus::Draft)]);
+        assert!(draft_entries.is_empty() && draft_expenses.is_empty());
+        // Every settled or closed state is already billed: issued, partly
+        // paid, paid and written-off all keep their lines out of new drafts.
+        for status in [
+            InvoiceStatus::Issued,
+            InvoiceStatus::PartlyPaid,
+            InvoiceStatus::Paid,
+            InvoiceStatus::WrittenOff,
+        ] {
+            let (entries, expenses) = already_invoiced(&[with_line(status)]);
+            assert_eq!(entries, vec![entry], "entries for {status:?}");
+            assert_eq!(expenses, vec![expense], "expenses for {status:?}");
+        }
     }
 
     #[test]
