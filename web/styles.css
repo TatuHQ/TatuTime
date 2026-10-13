@@ -219,7 +219,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
    primary action below. Vanilla owns the frame, header divider and buttons. */
 .auth-overlay { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; background: color-mix(in srgb, var(--bg) 70%, var(--fg) 30%); padding: 1rem; }
 .auth-card { width: min(360px, 100%); margin: 0; }
-.auth-title { margin: 0 0 .25rem; font-size: 1.3rem; font-weight: 400; color: var(--brand); }
+.auth-title { margin: 0 0 .25rem; font-size: 1.3rem; font-weight: 400; color: var(--brand-deep); } /* #257: brand orange failed AA (3.65:1 light / 4.07:1 dark) at this size; --brand-deep is 9.4:1 / 8.6:1 */
 #auth-sub { margin: 0; }
 button.primary { width: 100%; }
 /* #145-alignment: the page-level "+" buttons share one size and sit at the
@@ -432,7 +432,7 @@ td.cell.locked .cell-input { opacity: .6; }
    unchanged, so the jsdom + wizard smoke checks drive the same elements. */
 #wizard-dialog { max-width: 30rem; padding: 0; border: 0; background: transparent; box-shadow: none; }
 #wizard-dialog .p-card { margin: 0; }
-#wizard-dialog h2 { margin: 0; font-size: 1.3rem !important; font-weight: 400; color: var(--brand); }
+#wizard-dialog h2 { margin: 0; font-size: 1.3rem !important; font-weight: 400; color: var(--brand-deep); } /* #257: see .auth-title — same AA fix */
 #wizard-dialog .wz-step { min-width: 0; }
 #wizard-dialog .wz-step p:first-child { margin-top: 0; }
 #wizard-dialog .field { margin: 0 0 .65rem; }
