@@ -690,6 +690,21 @@ async function refreshTimeCal() {
 
 // ---------------------------------------------------------------- tabs ---
 
+/// Resolves the sibling a roving-tabindex tablist should move to for a key,
+/// honouring the list's declared orientation (#258): a vertical tablist
+/// navigates with Up/Down, a horizontal one with Left/Right. Per the WAI-ARIA
+/// tabs pattern the default orientation is horizontal when `aria-orientation`
+/// is absent. Home/End always jump to the ends; returns `null` for any key
+/// that does not navigate this list.
+function nextTabIndex(key, index, count, orientation) {
+  const vertical = orientation === 'vertical';
+  if (key === (vertical ? 'ArrowDown' : 'ArrowRight')) return (index + 1) % count;
+  if (key === (vertical ? 'ArrowUp' : 'ArrowLeft')) return (index - 1 + count) % count;
+  if (key === 'Home') return 0;
+  if (key === 'End') return count - 1;
+  return null;
+}
+
 function initTabs() {
   const tabs = Array.from(document.querySelectorAll('#tabs [role="tab"]'));
   function activate(tab) {
@@ -715,13 +730,12 @@ function initTabs() {
   tabs.forEach((t) => {
     t.addEventListener('click', () => activate(t));
     t.addEventListener('keydown', (e) => {
-      const siblings = Array.from(t.closest('[role="tablist"]').querySelectorAll('[role="tab"]'));
+      const tablist = t.closest('[role="tablist"]');
+      const siblings = Array.from(tablist.querySelectorAll('[role="tab"]'));
       const i = siblings.indexOf(t);
-      let j = null;
-      if (e.key === 'ArrowRight') j = (i + 1) % siblings.length;
-      if (e.key === 'ArrowLeft') j = (i - 1 + siblings.length) % siblings.length;
-      if (e.key === 'Home') j = 0;
-      if (e.key === 'End') j = siblings.length - 1;
+      // #258: the sidebar is a *vertical* tablist (aria-orientation="vertical"),
+      // so navigate along its declared axis (Up/Down) — not Left/Right.
+      const j = nextTabIndex(e.key, i, siblings.length, tablist.getAttribute('aria-orientation'));
       if (j !== null) { e.preventDefault(); activate(siblings[j]); }
     });
   });
