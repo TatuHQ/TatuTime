@@ -255,9 +255,11 @@ impl AppState {
 /// A random per-process session key; sessions do not survive a restart. A
 /// hardening ticket covers requiring a configured secret in production.
 fn ephemeral_session() -> Session {
-    use rand::RngCore;
+    use rand::TryRng;
     let mut key = [0u8; 32];
-    rand::rngs::OsRng.fill_bytes(&mut key);
+    rand::rngs::SysRng
+        .try_fill_bytes(&mut key)
+        .expect("OS CSPRNG");
     Session::new(key.to_vec(), 60 * 60 * 24, false)
 }
 
