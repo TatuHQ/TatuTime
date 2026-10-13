@@ -3324,6 +3324,30 @@ async fn logout_revokes_the_session() {
 }
 
 #[tokio::test]
+async fn revocation_is_visible_immediately_across_instances() {
+    // #254 (review B6 freshness): authenticate must re-read `revoked.json` on
+    // every request — the read now runs on the blocking pool, but it must not
+    // become a stale per-request cache. A logout performed by a *separate*
+    // instance sharing the data dir has to take effect on the very next request.
+    let (a, dir) = app().await;
+    let (s1, _) = json_req(&a, "GET", "/api/auth/me", None).await;
+    assert_eq!(s1, StatusCode::OK, "session works before any revocation");
+
+    // Second instance (its own in-memory revocations) sharing the data dir.
+    let b = app_locked(dir.path(), Arc::new(tucano_time::lock::NoLocks)).await;
+    let (s2, _, _) = raw(&b.router, "POST", "/api/auth/logout", None, Some(&a.cookie)).await;
+    assert_eq!(s2, StatusCode::NO_CONTENT);
+
+    // Instance A sees the revocation next request, through the offloaded read.
+    let (s3, _) = json_req(&a, "GET", "/api/auth/me", None).await;
+    assert_eq!(
+        s3,
+        StatusCode::UNAUTHORIZED,
+        "a revocation written elsewhere must be honoured immediately"
+    );
+}
+
+#[tokio::test]
 async fn invoice_includes_billable_expenses_and_locks_them() {
     let (app, _d) = app().await;
     let c = new_customer(&app, "ACME", "EUR", 6000).await;

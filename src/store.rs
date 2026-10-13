@@ -244,6 +244,11 @@ impl Store {
     /// mutex (cheap, serialises threads) then the cross-process advisory flock
     /// on `.tucanotime.lock`, retried until the deadline. Returns
     /// `LockTimeout` (→ 503) if another process holds it too long.
+    ///
+    /// The retry loop parks the calling thread (`std::thread::sleep`), so this
+    /// must never be driven from a tokio worker: async callers reach every
+    /// mutating method through `api::store_blocking`, which runs the whole
+    /// operation — and thus any wait here — on the blocking pool (#254).
     fn write_lock(&self) -> Result<WriteGuard<'_>, StoreError> {
         let mutex = self
             .write_guard
