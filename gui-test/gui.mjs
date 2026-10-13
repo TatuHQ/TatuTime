@@ -359,6 +359,13 @@ check('copied row saved through the API', !!copied);
 await fetch(`${BASE}/api/entries/${copied.id}`, { method: 'DELETE', headers: { Cookie: SESSION_COOKIE } });
 
 // ---- create a brand-new customer through the customers form ----
+// jsdom 30.1.2 implements the spec "being rendered" focusability rule: an
+// element under a display:none ancestor is no longer focusable, like every
+// real browser. The other sections already navigate to their panel before
+// driving its forms; do the same here instead of relying on the old lenient
+// no-op-free focus into the hidden customers panel.
+window.document.getElementById('tab-customers').dispatchEvent(new window.Event('click', { bubbles: true }));
+await tick(250);
 const custForm = window.document.getElementById('customer-form');
 const customerDialog = window.document.getElementById('customer-dialog');
 check('customer form is in a closed popup initially',
@@ -856,12 +863,16 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
   const userStatusFilter = window.document.getElementById('user-filter-active');
   userStatusFilter.value = 'false';
   userStatusFilter.dispatchEvent(new window.Event('change', { bubbles: true }));
+  await tick(300); // the filter re-renders asynchronously; without this the
+  // check below read the pre-deactivation DOM and passed only by luck —
+  // it failed + crashed (userAction('Activate') undefined) on a loaded runner.
   check('inactive filter shows deactivated user', !!userAction('Activate'));
   userAction('Activate').click();
   await tick(300);
   check('reactivation removes user from inactive results', !window.document.getElementById('user-empty').hidden);
   userStatusFilter.value = '';
   userStatusFilter.dispatchEvent(new window.Event('change', { bubbles: true }));
+  await tick(250); // same race: the all-status re-render must land before Delete acts
   userAction('Delete').click();
   await tick(100);
   window.document.getElementById('dlg-ok').click();
