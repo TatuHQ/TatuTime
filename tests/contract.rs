@@ -4651,7 +4651,8 @@ async fn accounting_sync_failure_is_recorded_not_fatal() {
 async fn sso_jit_provisions_and_logs_in() {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(dir.path().join("data")).unwrap();
-    let idp = tucano_time::sso::SignedTokenIdp::new("okta-test", "stub-secret", vec![]);
+    let idp =
+        tucano_time::sso::SignedTokenIdp::new("okta-test", "stub-secret", vec!["acme.test".into()]);
     let registry = Arc::new(tucano_time::sso::SsoRegistry::new(vec![Arc::new(idp)]));
     let state = AppState::with_session(
         store,
@@ -4683,7 +4684,8 @@ async fn sso_jit_provisions_and_logs_in() {
         &vec![json!("okta-test")]
     );
 
-    let idp = tucano_time::sso::SignedTokenIdp::new("okta-test", "stub-secret", vec![]);
+    let idp =
+        tucano_time::sso::SignedTokenIdp::new("okta-test", "stub-secret", vec!["acme.test".into()]);
 
     // A valid signed assertion JIT-creates the user (member) and logs in.
     let claims = tucano_time::sso::TokenClaims {
@@ -4743,6 +4745,63 @@ async fn sso_jit_provisions_and_logs_in() {
     )
     .await;
     assert_eq!(sl, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn sso_empty_allowed_domains_denies_and_provisions_nothing() {
+    // #260: SSO with an empty allow-list must fail closed — the assertion is
+    // rejected and no account is JIT-provisioned (the old allow-all is gone).
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("data")).unwrap();
+    let idp = tucano_time::sso::SignedTokenIdp::new("okta-test", "stub-secret", vec![]);
+    let registry = Arc::new(tucano_time::sso::SsoRegistry::new(vec![Arc::new(idp)]));
+    let state = AppState::with_session(
+        store,
+        Arc::new(Session::new(
+            b"test-session-secret-0000000000000032".to_vec(),
+            3600,
+            false,
+        )),
+    )
+    .with_sso(registry);
+    let router = tucano_time::build_router(state);
+
+    let (sa, _, _) = raw(
+        &router,
+        "POST",
+        "/api/auth/bootstrap",
+        Some(json!({"name":"Admin","email":ADMIN_EMAIL,"password":ADMIN_PW})),
+        None,
+    )
+    .await;
+    assert_eq!(sa, StatusCode::CREATED);
+    let admin_cookie = login_cookie(&router, ADMIN_EMAIL, ADMIN_PW).await;
+
+    // A correctly-signed assertion but an empty allow-list: rejected, never
+    // provisioned.
+    let idp = tucano_time::sso::SignedTokenIdp::new("okta-test", "stub-secret", vec![]);
+    let claims = tucano_time::sso::TokenClaims {
+        sub: "u1".into(),
+        email: "Intruder@acme.test".into(),
+        name: "Intruder".into(),
+        groups: vec![],
+        exp: chrono::Utc::now().timestamp() + 300,
+    };
+    let token = idp.issue(&claims);
+    let (s1, body, _) = raw(
+        &router,
+        "POST",
+        "/api/auth/sso/assertion",
+        Some(json!({"provider":"okta-test","payload":token,"signature":""})),
+        None,
+    )
+    .await;
+    assert_eq!(s1, StatusCode::BAD_REQUEST, "{body}");
+
+    // Only the bootstrap admin exists: nothing was provisioned for the domain.
+    let (su, users, _) = raw(&router, "GET", "/api/users", None, Some(&admin_cookie)).await;
+    assert_eq!(su, StatusCode::OK, "{users}");
+    assert_eq!(users["users"].as_array().map(Vec::len), Some(1), "{users}");
 }
 
 #[tokio::test]
