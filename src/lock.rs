@@ -1,21 +1,31 @@
-//! Entry-lock port. A single seam answers "is this entry frozen, and why?".
-//! Invoices (#8) and timesheet submissions (#16) are lock providers here;
-//! the entry edit/delete handlers consult this one check so an entry cannot
-//! be changed through any route once locked. NOTE (#190): expense
-//! reimbursement claims (#24) enforce their lock with a direct scan in
-//! `api::expenses` rather than through this seam — folding them in as a
-//! third provider is a follow-up, the module no longer claims otherwise.
+//! Entry/expense-lock port. A single seam answers "is this record frozen, and
+//! why?". Invoices (#8), timesheet submissions (#16) and reimbursement claims
+//! (#24) are lock providers here; the entry edit/delete and expense delete
+//! handlers consult this one seam so a record cannot be changed through any
+//! route once locked. (#255 folded the claims scan — which used to live inline
+//! in `api::expenses` as the #190 follow-up — into a third provider.)
 //!
 //! `NoLocks` is the default: with no invoice/submission feature shipped yet,
 //! nothing is locked. Real providers implement `EntryLock` and are composed by
-//! `CombinedLocks` (first lock wins).
+//! `CombinedLocks` (first lock wins). The invoice, submission and claim
+//! providers all answer from one memoized `store::LockSnapshot` (#255), so a
+//! per-record check no longer re-reads every document.
 
 use uuid::Uuid;
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub enum LockReason {
-    Invoiced { id: String },
-    Submitted { id: String },
+    Invoiced {
+        id: String,
+    },
+    Submitted {
+        id: String,
+    },
+    /// An expense referenced by an *open* invoice (#8/#114) — the expense
+    /// counterpart of `Invoiced`.
+    ExpenseInvoiced,
+    /// An expense on a submitted/approved reimbursement claim (#24).
+    ExpenseClaimed,
 }
 
 impl LockReason {
@@ -27,11 +37,17 @@ impl LockReason {
             LockReason::Submitted { id } => {
                 format!("entry is in a submitted timesheet ({id}); reject/withdraw it first")
             }
+            LockReason::ExpenseInvoiced => {
+                "expense is on an open invoice; delete the invoice draft or void it first".into()
+            }
+            LockReason::ExpenseClaimed => {
+                "expense is on a submitted/approved claim; reject it first".into()
+            }
         }
     }
 }
 
-/// The backing collection could not be read, so the lock state of an entry
+/// The backing collection could not be read, so the lock state of a record
 /// cannot be verified (#185). Handlers must treat this as **fail closed**:
 /// refuse the write (503), never allow it because verification failed.
 #[derive(Debug)]
@@ -45,10 +61,21 @@ pub trait EntryLock: Send + Sync {
 
     /// Every locked entry id in **one** pass (#218). Callers that ask about
     /// many entries per request (submission creation) must not drive
-    /// `entry_lock` per id — the invoice/submission providers each re-read
-    /// their whole collection, making the loop O(entries x documents).
+    /// `entry_lock` per id — the providers answer from one snapshot (#255).
     /// Implementations must agree with `entry_lock` (covered by a unit test).
     fn locked_entries(&self) -> Result<std::collections::HashSet<Uuid>, LockUnavailable>;
+
+    /// The expense counterpart (#255): `Ok(Some(reason))` freezes an expense
+    /// delete the way `entry_lock` freezes an entry, `Ok(None)` is provably
+    /// unlocked and `Err` is unverifiable (fail closed). Defaults to "nothing
+    /// locked" so entry-only providers — and test doubles — need not implement
+    /// it.
+    fn expense_lock(&self, _expense_id: Uuid) -> Result<Option<LockReason>, LockUnavailable> {
+        Ok(None)
+    }
+    fn locked_expenses(&self) -> Result<std::collections::HashSet<Uuid>, LockUnavailable> {
+        Ok(std::collections::HashSet::new())
+    }
 }
 
 /// Default: nothing is locked.
@@ -64,7 +91,7 @@ impl EntryLock for NoLocks {
     }
 }
 
-/// Any provider that locks the entry wins; a provider that cannot verify
+/// Any provider that locks the record wins; a provider that cannot verify
 /// fails the whole check closed (#185).
 pub struct CombinedLocks {
     providers: Vec<Box<dyn EntryLock>>,
@@ -94,14 +121,39 @@ impl EntryLock for CombinedLocks {
         }
         Ok(all)
     }
+    fn expense_lock(&self, expense_id: Uuid) -> Result<Option<LockReason>, LockUnavailable> {
+        for provider in &self.providers {
+            if let Some(reason) = provider.expense_lock(expense_id)? {
+                return Ok(Some(reason));
+            }
+        }
+        Ok(None)
+    }
+    fn locked_expenses(&self) -> Result<std::collections::HashSet<Uuid>, LockUnavailable> {
+        let mut all = std::collections::HashSet::new();
+        for provider in &self.providers {
+            all.extend(provider.locked_expenses()?);
+        }
+        Ok(all)
+    }
+}
+
+/// Read the memoized #255 snapshot, mapping a store failure to the fail-closed
+/// `LockUnavailable` every provider shares (#185).
+fn snapshot(
+    store: &crate::store::Store,
+) -> Result<std::sync::Arc<crate::store::LockSnapshot>, LockUnavailable> {
+    store
+        .lock_snapshot()
+        .map_err(|e| LockUnavailable(e.to_string()))
 }
 
 /// Lock provider backed by *open* invoices (`InvoiceStatus::is_open()` =
-/// `issued | partly_paid`, #8/#114): an entry referenced by one is frozen.
-/// Settled (`paid`) and written-off invoices deliberately release their
-/// entries — the issued document can no longer change (rate snapshots), and
-/// the timesheet stays correctable (decision recorded in AGENTS.md /
-/// adr-001). Reads are unaffected; only edit/delete consult this.
+/// `issued | partly_paid`, #8/#114): an entry or expense referenced by one is
+/// frozen. Settled (`paid`) and written-off invoices deliberately release their
+/// records — the issued document can no longer change (rate snapshots), and the
+/// timesheet stays correctable (decision recorded in AGENTS.md / adr-001).
+/// Reads are unaffected; only edit/delete consult this.
 pub struct InvoiceLock {
     store: std::sync::Arc<crate::store::Store>,
 }
@@ -114,32 +166,32 @@ impl InvoiceLock {
 
 impl EntryLock for InvoiceLock {
     fn entry_lock(&self, entry_id: Uuid) -> Result<Option<LockReason>, LockUnavailable> {
-        let invoices = self
-            .store
-            .list_invoices()
-            .map_err(|e| LockUnavailable(e.to_string()))?;
-        Ok(invoices
-            .iter()
-            .find(|inv| {
-                // Open invoices freeze their entries; #114 adds the
-                // partly-paid state to the same lock family.
-                inv.status.is_open() && inv.lines.iter().any(|l| l.entry_id == Some(entry_id))
-            })
-            .map(|inv| LockReason::Invoiced {
-                id: inv.number.clone(),
-            }))
+        Ok(snapshot(&self.store)?
+            .invoiced_entries
+            .get(&entry_id)
+            .map(|number| LockReason::Invoiced { id: number.clone() }))
     }
 
     fn locked_entries(&self) -> Result<std::collections::HashSet<Uuid>, LockUnavailable> {
-        let invoices = self
-            .store
-            .list_invoices()
-            .map_err(|e| LockUnavailable(e.to_string()))?;
-        Ok(invoices
-            .iter()
-            .filter(|inv| inv.status.is_open())
-            .flat_map(|inv| inv.lines.iter())
-            .filter_map(|l| l.entry_id)
+        Ok(snapshot(&self.store)?
+            .invoiced_entries
+            .keys()
+            .copied()
+            .collect())
+    }
+
+    fn expense_lock(&self, expense_id: Uuid) -> Result<Option<LockReason>, LockUnavailable> {
+        Ok(snapshot(&self.store)?
+            .invoiced_expenses
+            .contains_key(&expense_id)
+            .then_some(LockReason::ExpenseInvoiced))
+    }
+
+    fn locked_expenses(&self) -> Result<std::collections::HashSet<Uuid>, LockUnavailable> {
+        Ok(snapshot(&self.store)?
+            .invoiced_expenses
+            .keys()
+            .copied()
             .collect())
     }
 }
@@ -158,47 +210,73 @@ impl SubmissionLock {
 
 impl EntryLock for SubmissionLock {
     fn entry_lock(&self, entry_id: Uuid) -> Result<Option<LockReason>, LockUnavailable> {
-        let submissions = self
-            .store
-            .list_submissions()
-            .map_err(|e| LockUnavailable(e.to_string()))?;
-        Ok(submissions
-            .iter()
-            .find(|s| {
-                (s.state == crate::domain::SubmissionState::Submitted
-                    || s.state == crate::domain::SubmissionState::Approved)
-                    && s.entry_ids.contains(&entry_id)
-            })
-            .map(|s| LockReason::Submitted {
-                id: s.week_start.format("%Y-%m-%d").to_string(),
-            }))
+        Ok(snapshot(&self.store)?
+            .submitted_entries
+            .get(&entry_id)
+            .map(|week| LockReason::Submitted { id: week.clone() }))
     }
 
     fn locked_entries(&self) -> Result<std::collections::HashSet<Uuid>, LockUnavailable> {
-        let submissions = self
-            .store
-            .list_submissions()
-            .map_err(|e| LockUnavailable(e.to_string()))?;
-        Ok(submissions
-            .iter()
-            .filter(|s| {
-                s.state == crate::domain::SubmissionState::Submitted
-                    || s.state == crate::domain::SubmissionState::Approved
-            })
-            .flat_map(|s| s.entry_ids.iter().copied())
+        Ok(snapshot(&self.store)?
+            .submitted_entries
+            .keys()
+            .copied()
+            .collect())
+    }
+}
+
+/// Lock provider backed by submitted/approved reimbursement claims (#24): an
+/// expense referenced by one is frozen until the claim is rejected (or the
+/// expense leaves it). #190/#255: this is the third provider behind the same
+/// seam the entry locks use, replacing the direct scan that used to live in
+/// `api::expenses`.
+pub struct ClaimLock {
+    store: std::sync::Arc<crate::store::Store>,
+}
+
+impl ClaimLock {
+    pub fn new(store: std::sync::Arc<crate::store::Store>) -> Self {
+        Self { store }
+    }
+}
+
+impl EntryLock for ClaimLock {
+    fn entry_lock(&self, _entry_id: Uuid) -> Result<Option<LockReason>, LockUnavailable> {
+        Ok(None)
+    }
+
+    fn locked_entries(&self) -> Result<std::collections::HashSet<Uuid>, LockUnavailable> {
+        Ok(std::collections::HashSet::new())
+    }
+
+    fn expense_lock(&self, expense_id: Uuid) -> Result<Option<LockReason>, LockUnavailable> {
+        Ok(snapshot(&self.store)?
+            .claimed_expenses
+            .contains_key(&expense_id)
+            .then_some(LockReason::ExpenseClaimed))
+    }
+
+    fn locked_expenses(&self) -> Result<std::collections::HashSet<Uuid>, LockUnavailable> {
+        Ok(snapshot(&self.store)?
+            .claimed_expenses
+            .keys()
+            .copied()
             .collect())
     }
 }
 
 #[cfg(test)]
 mod bulk_tests {
-    // #218: locked_entries() must agree with per-entry entry_lock() for the
-    // real providers — the submission path switched to the bulk call and the
-    // dashboard switched to the GUI mirror; drift here would be silent.
+    // #218/#255: locked_entries()/locked_expenses() must agree with the
+    // per-record entry_lock()/expense_lock() for the real providers — the
+    // submission path uses the bulk call and the invoice/claim providers now
+    // answer from the memoized snapshot, so drift here would be silent. The
+    // test also pins cache invalidation: a write that releases records after
+    // the snapshot was built must be reflected on the next call.
     use super::*;
     use crate::domain::{
-        Currency, Entry, Hours, Invoice, InvoiceLine, InvoiceStatus, LineKind, ProjectCode, Source,
-        Submission, SubmissionState,
+        ClaimState, Currency, Entry, ExpenseClaim, Hours, Invoice, InvoiceLine, InvoiceStatus,
+        LineKind, ProjectCode, Source, Submission, SubmissionState,
     };
     use chrono::{NaiveDate, TimeZone, Utc};
 
@@ -219,16 +297,21 @@ mod bulk_tests {
         }
     }
 
-    fn invoice_line(entry_id: Uuid) -> InvoiceLine {
+    /// A time line (when `entry_id` is set) or an expense line (otherwise).
+    fn invoice_line(entry_id: Option<Uuid>, expense_id: Option<Uuid>) -> InvoiceLine {
         InvoiceLine {
-            kind: LineKind::Time,
+            kind: if entry_id.is_some() {
+                LineKind::Time
+            } else {
+                LineKind::Expense
+            },
             date: NaiveDate::from_ymd_opt(2026, 10, 2).unwrap(),
-            entry_id: Some(entry_id),
-            expense_id: None,
+            entry_id,
+            expense_id,
             project_code: Some(ProjectCode("P1".into())),
             task_code: None,
-            hours: Some(Hours(100)),
-            rate_minor: Some(6000),
+            hours: entry_id.map(|_| Hours(100)),
+            rate_minor: entry_id.map(|_| 6000),
             amount_minor: 600,
             note: String::new(),
             quantity_hundredths: None,
@@ -237,7 +320,7 @@ mod bulk_tests {
         }
     }
 
-    fn invoice(number: &str, status: InvoiceStatus, entry_id: Uuid) -> Invoice {
+    fn invoice(number: &str, status: InvoiceStatus, lines: Vec<InvoiceLine>) -> Invoice {
         Invoice {
             id: Uuid::new_v4(),
             number: number.into(),
@@ -245,7 +328,7 @@ mod bulk_tests {
             currency: Currency("EUR".into()),
             period_from: NaiveDate::from_ymd_opt(2026, 10, 1).unwrap(),
             period_to: NaiveDate::from_ymd_opt(2026, 10, 7).unwrap(),
-            lines: vec![invoice_line(entry_id)],
+            lines,
             total_minor: 600,
             status,
             created_at: Utc.with_ymd_and_hms(2026, 10, 7, 0, 0, 0).unwrap(),
@@ -262,6 +345,22 @@ mod bulk_tests {
         }
     }
 
+    fn claim(state: ClaimState, expense_ids: Vec<Uuid>) -> ExpenseClaim {
+        ExpenseClaim {
+            id: Uuid::new_v4(),
+            user_id: Uuid::new_v4(),
+            title: "October".into(),
+            expense_ids,
+            total_minor: 600,
+            currency: Currency("EUR".into()),
+            state,
+            comment: String::new(),
+            created_at: Utc.with_ymd_and_hms(2026, 10, 7, 0, 0, 0).unwrap(),
+            submitted_at: None,
+            decided_at: None,
+        }
+    }
+
     #[test]
     fn bulk_locked_entries_match_per_entry_checks() {
         let dir = tempfile::tempdir().unwrap();
@@ -274,17 +373,31 @@ mod bulk_tests {
             Uuid::new_v4(),
             Uuid::new_v4(),
         );
+        let (x_issued, x_claim, x_free) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
         for entry in [e_issued, e_partly, e_paid] {
             store.put_entry(&entry_ref(entry)).unwrap();
         }
+        // An open invoice freezes both its entry and its expense line.
+        let inv_issued = invoice(
+            "INV-1",
+            InvoiceStatus::Issued,
+            vec![invoice_line(Some(e_issued), Some(x_issued))],
+        );
+        let inv_issued_id = inv_issued.id;
+        store.put_invoice(&inv_issued).unwrap();
         store
-            .put_invoice(&invoice("INV-1", InvoiceStatus::Issued, e_issued))
+            .put_invoice(&invoice(
+                "INV-2",
+                InvoiceStatus::PartlyPaid,
+                vec![invoice_line(Some(e_partly), None)],
+            ))
             .unwrap();
         store
-            .put_invoice(&invoice("INV-2", InvoiceStatus::PartlyPaid, e_partly))
-            .unwrap();
-        store
-            .put_invoice(&invoice("INV-3", InvoiceStatus::Paid, e_paid))
+            .put_invoice(&invoice(
+                "INV-3",
+                InvoiceStatus::Paid,
+                vec![invoice_line(Some(e_paid), None)],
+            ))
             .unwrap();
         store
             .put_submission(&Submission {
@@ -300,11 +413,20 @@ mod bulk_tests {
                 decided_at: None,
             })
             .unwrap();
+        // A *draft* claim does not lock; a submitted one does (#24).
+        store
+            .put_claim(&claim(ClaimState::Draft, vec![x_free]))
+            .unwrap();
+        store
+            .put_claim(&claim(ClaimState::Submitted, vec![x_claim]))
+            .unwrap();
 
         let combined = CombinedLocks::new(vec![
             Box::new(InvoiceLock::new(store.clone())),
             Box::new(SubmissionLock::new(store.clone())),
+            Box::new(ClaimLock::new(store.clone())),
         ]);
+
         let ids = [e_issued, e_partly, e_paid, e_sub, e_free];
         let bulk = combined.locked_entries().unwrap();
         for id in ids {
@@ -317,5 +439,37 @@ mod bulk_tests {
         }
         assert!(bulk.contains(&e_issued) && bulk.contains(&e_partly) && bulk.contains(&e_sub));
         assert!(!bulk.contains(&e_paid) && !bulk.contains(&e_free));
+
+        // Expense side, including the folded claim provider (#190 follow-up).
+        let x_ids = [x_issued, x_claim, x_free];
+        let bulk_x = combined.locked_expenses().unwrap();
+        for id in x_ids {
+            let per_expense = combined.expense_lock(id).unwrap().is_some();
+            assert_eq!(
+                bulk_x.contains(&id),
+                per_expense,
+                "bulk vs per-expense disagree for {id}"
+            );
+        }
+        assert!(bulk_x.contains(&x_issued) && bulk_x.contains(&x_claim));
+        assert!(!bulk_x.contains(&x_free), "a draft claim does not lock");
+
+        // #255 cache invalidation: the snapshot built above must not survive a
+        // write that releases its records. Deleting the open invoice drops both
+        // its entry and its expense on the very next call — the changed
+        // directory stamp forces one re-scan, never a stale answer.
+        store.delete_invoice(inv_issued_id).unwrap();
+        let bulk2 = combined.locked_entries().unwrap();
+        let bulk_x2 = combined.locked_expenses().unwrap();
+        assert!(
+            !bulk2.contains(&e_issued),
+            "a released entry must not stay cached"
+        );
+        assert!(
+            !bulk_x2.contains(&x_issued),
+            "a released expense must not stay cached"
+        );
+        assert!(bulk2.contains(&e_partly) && bulk2.contains(&e_sub));
+        assert!(bulk_x2.contains(&x_claim));
     }
 }

@@ -149,35 +149,22 @@ pub async fn delete_expense(
     if !owned {
         return Err(ApiError::not_found("expense"));
     }
-    // #218: the invoice/claim lock scans run INSIDE the delete transaction —
-    // previously an issue landing between scan and delete could strip a
-    // just-invoiced expense out from under the invoice. Also aligned with
-    // #114 semantics: the scan now uses is_open() (issued | partly_paid),
-    // matching InvoiceLock's rule for entries — the old '== Issued' check
-    // let a partly-paid invoice's expenses be deleted (round-2 finding,
-    // same class as #217). Message says "open invoice" accordingly.
+    // #218/#255: the invoice/claim lock check runs INSIDE the delete
+    // transaction through the same #18 seam the entry paths consult — this was
+    // the direct scan the #190 follow-up called out. Both providers answer from
+    // one memoized snapshot, so an *open* invoice (issued | partly_paid, #114)
+    // and a submitted/approved claim freeze the expense with the same 409, and
+    // an unverifiable lock state is refused fail-closed with 503 (#185),
+    // never allowed because the check was inconclusive.
     let verify = || -> Result<(), ApiError> {
-        let invoiced = app
-            .store
-            .list_invoices()?
-            .iter()
-            .filter(|i| i.status.is_open())
-            .any(|i| i.lines.iter().any(|l| l.expense_id == Some(id)));
-        if invoiced {
-            return Err(ApiError::conflict(
-                "expense is on an open invoice; delete the invoice draft or void it first",
-            ));
+        match app.locks.expense_lock(id) {
+            Ok(Some(reason)) => Err(ApiError::conflict(reason.message())),
+            Ok(None) => Ok(()),
+            Err(e) => {
+                tracing::warn!(error = ?e.0, expense = %id, "lock state unavailable; refusing expense delete");
+                Err(ApiError::lock_unavailable())
+            }
         }
-        let claimed = app.store.list_claims()?.iter().any(|c| {
-            (c.state == ClaimState::Submitted || c.state == ClaimState::Approved)
-                && c.expense_ids.contains(&id)
-        });
-        if claimed {
-            return Err(ApiError::conflict(
-                "expense is on a submitted/approved claim; reject it first",
-            ));
-        }
-        Ok(())
     };
     app.store.delete_expense_guarded(id, verify)?;
     Ok(StatusCode::NO_CONTENT.into_response())

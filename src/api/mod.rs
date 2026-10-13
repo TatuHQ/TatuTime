@@ -169,6 +169,9 @@ impl AppState {
         let locks = Arc::new(crate::lock::CombinedLocks::new(vec![
             Box::new(crate::lock::InvoiceLock::new(store.clone())),
             Box::new(crate::lock::SubmissionLock::new(store.clone())),
+            // #255/#190: reimbursement claims (#24) lock their expenses through
+            // the same seam instead of a direct scan in `api::expenses`.
+            Box::new(crate::lock::ClaimLock::new(store.clone())),
         ]));
         let audit = Arc::new(crate::audit::AuditLog::new(store.root()));
         let revocations = Arc::new(crate::revoke::Revocations::new(store.root()));
