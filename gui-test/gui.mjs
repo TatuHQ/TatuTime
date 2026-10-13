@@ -359,6 +359,13 @@ check('copied row saved through the API', !!copied);
 await fetch(`${BASE}/api/entries/${copied.id}`, { method: 'DELETE', headers: { Cookie: SESSION_COOKIE } });
 
 // ---- create a brand-new customer through the customers form ----
+// jsdom 30.1.2 implements the spec "being rendered" focusability rule: an
+// element under a display:none ancestor is no longer focusable, like every
+// real browser. The other sections already navigate to their panel before
+// driving its forms; do the same here instead of relying on the old lenient
+// no-op-free focus into the hidden customers panel.
+window.document.getElementById('tab-customers').dispatchEvent(new window.Event('click', { bubbles: true }));
+await tick(250);
 const custForm = window.document.getElementById('customer-form');
 const customerDialog = window.document.getElementById('customer-dialog');
 check('customer form is in a closed popup initially',
