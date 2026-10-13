@@ -245,9 +245,11 @@ impl OAuthFlows {
 
     /// Records a new state (random, single-use, 10-minute lifetime).
     pub fn start(&self, provider: &str, now: i64) -> String {
-        use rand::RngCore;
+        use rand::TryRng;
         let mut bytes = [0u8; 24];
-        rand::rngs::OsRng.fill_bytes(&mut bytes);
+        rand::rngs::SysRng
+            .try_fill_bytes(&mut bytes)
+            .expect("OS CSPRNG");
         let state = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes);
         let mut pending = self.pending.lock().unwrap();
         pending.retain(|_, (_, exp)| *exp > now); // opportunistic GC
