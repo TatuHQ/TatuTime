@@ -49,6 +49,18 @@
     },
     {
       "name": "meta"
+    },
+    {
+      "name": "calendar"
+    },
+    {
+      "name": "admin"
+    },
+    {
+      "name": "retainers"
+    },
+    {
+      "name": "schedules"
     }
   ],
   "components": {
@@ -431,8 +443,7 @@
               "null"
             ],
             "minimum": 1,
-            "maximum": 100000000,
-            "minimum": 1
+            "maximum": 100000000
           }
         },
         "additionalProperties": false
@@ -2030,6 +2041,118 @@
         },
         "additionalProperties": false
       },
+      "InvoiceLineInput": {
+        "type": "object",
+        "required": [
+          "kind",
+          "date"
+        ],
+        "description": "A draft line as submitted to PUT /api/invoices/{id} (#143/#187). Mirrors the stored InvoiceLine but is an INPUT shape: only kind and date are mandatory, the rest default. Manual lines (kind=fixed with an item kind) are re-priced server-side, so their amount_minor is always recomputed. Tracked lines (entry_id/expense_id) must be echoed back exactly as stored: any changed field is refused 422, which is how the #8 rate snapshot stays immutable.",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "time",
+              "expense",
+              "fixed"
+            ]
+          },
+          "date": {
+            "type": "string",
+            "format": "date"
+          },
+          "entry_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "expense_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "project_code": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ProjectCode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "task_code": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ProjectCode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "hours": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Hours"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rate_minor": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "amount_minor": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Not client-authoritative: recomputed server-side for manual lines and verified against the stored snapshot for tracked lines."
+          },
+          "note": {
+            "type": "string",
+            "default": "",
+            "description": "Optional for manual lines (the manual description); tracked lines carry the stored note verbatim."
+          },
+          "quantity_hundredths": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "maximum": 1000000,
+            "description": "Manual lines: hundredths of a unit (#143)."
+          },
+          "unit_price_minor": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 100000000,
+            "description": "Manual lines: snapshot unit price (#143)."
+          },
+          "item_kind": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/LineItemKind"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
       "InvoiceEditInput": {
         "type": "object",
         "required": [
@@ -2042,7 +2165,7 @@
             "minItems": 1,
             "maxItems": 100,
             "items": {
-              "$ref": "#/components/schemas/InvoiceLine"
+              "$ref": "#/components/schemas/InvoiceLineInput"
             }
           },
           "tax_hundredths": {
@@ -2186,6 +2309,47 @@
           "open",
           "closed"
         ]
+      },
+      "Timer": {
+        "type": "object",
+        "required": [
+          "user_id",
+          "customer_id",
+          "project_code",
+          "started_at"
+        ],
+        "description": "A running timer for one user (#14): server-side state, at most one active timer per user.",
+        "properties": {
+          "user_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "customer_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_code": {
+            "$ref": "#/components/schemas/ProjectCode"
+          },
+          "task_code": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ProjectCode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "note": {
+            "type": "string"
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "additionalProperties": false
       },
       "TxKind": {
         "type": "string",
@@ -2513,15 +2677,37 @@
       "FromParam": {
         "name": "from",
         "in": "query",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "date",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "description": "Inclusive start of a range. A range query needs both from and to: the range-only endpoints answer 400 when either is absent. At most 400 days."
+      },
+      "ToParam": {
+        "name": "to",
+        "in": "query",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "date",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "description": "Inclusive end of a range. A range query needs both from and to: the range-only endpoints answer 400 when either is absent."
+      },
+      "OptionalFromParam": {
+        "name": "from",
+        "in": "query",
         "required": false,
         "schema": {
           "type": "string",
           "format": "date",
           "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
         },
-        "description": "Inclusive start of a range. Requires to; at most 400 days."
+        "description": "Optional inclusive start of a range filter; pairs with to."
       },
-      "ToParam": {
+      "OptionalToParam": {
         "name": "to",
         "in": "query",
         "required": false,
@@ -2530,7 +2716,7 @@
           "format": "date",
           "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
         },
-        "description": "Inclusive end of a range."
+        "description": "Optional inclusive end of a range filter; pairs with from."
       }
     }
   },
@@ -3755,17 +3941,6 @@
       }
     },
     "/api/entries": {
-      "parameters": [
-        {
-          "$ref": "#/components/parameters/DateParam"
-        },
-        {
-          "$ref": "#/components/parameters/FromParam"
-        },
-        {
-          "$ref": "#/components/parameters/ToParam"
-        }
-      ],
       "get": {
         "operationId": "listEntries",
         "tags": [
@@ -3773,6 +3948,17 @@
         ],
         "summary": "List entries for a day or an inclusive date range",
         "description": "Exactly one form: ?date=YYYY-MM-DD or ?from=...&to=... (span at most 400 days).",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/DateParam"
+          },
+          {
+            "$ref": "#/components/parameters/OptionalFromParam"
+          },
+          {
+            "$ref": "#/components/parameters/OptionalToParam"
+          }
+        ],
         "responses": {
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -4265,52 +4451,22 @@
             "$ref": "#/components/responses/Unauthorized"
           },
           "200": {
-            "description": "Timer state.",
+            "description": "Timer state: the running timer with live elapsed, or null when no timer is running.",
             "content": {
               "application/json": {
                 "schema": {
-                  "nullable": true,
-                  "type": "object",
+                  "type": [
+                    "object",
+                    "null"
+                  ],
+                  "required": [
+                    "timer",
+                    "elapsed_seconds",
+                    "elapsed_hours"
+                  ],
                   "properties": {
                     "timer": {
-                      "type": "object",
-                      "required": [
-                        "user_id",
-                        "customer_id",
-                        "project_code",
-                        "started_at"
-                      ],
-                      "properties": {
-                        "user_id": {
-                          "type": "string",
-                          "format": "uuid"
-                        },
-                        "customer_id": {
-                          "type": "string",
-                          "format": "uuid"
-                        },
-                        "project_code": {
-                          "$ref": "#/components/schemas/ProjectCode"
-                        },
-                        "task_code": {
-                          "oneOf": [
-                            {
-                              "$ref": "#/components/schemas/ProjectCode"
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "note": {
-                          "type": "string"
-                        },
-                        "started_at": {
-                          "type": "string",
-                          "format": "date-time"
-                        }
-                      },
-                      "additionalProperties": false
+                      "$ref": "#/components/schemas/Timer"
                     },
                     "elapsed_seconds": {
                       "type": "integer"
@@ -4383,7 +4539,14 @@
             "$ref": "#/components/responses/CsrfForbidden"
           },
           "201": {
-            "description": "Started."
+            "description": "Started; the running timer is returned.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Timer"
+                }
+              }
+            }
           },
           "409": {
             "$ref": "#/components/responses/Conflict"
@@ -4522,18 +4685,20 @@
           {
             "name": "code",
             "in": "query",
-            "required": true,
+            "required": false,
             "schema": {
               "type": "string"
-            }
+            },
+            "description": "Authorization code from the provider. The handler defaults it to the empty string and answers 400 when it is empty."
           },
           {
             "name": "state",
             "in": "query",
-            "required": true,
+            "required": false,
             "schema": {
               "type": "string"
-            }
+            },
+            "description": "Opaque state minted by /api/calendar/oauth/start. The handler defaults it to the empty string; an unknown or expired state is 401 bad_state."
           }
         ],
         "responses": {
@@ -5098,15 +5263,6 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/CsrfProtection"
-          },
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
           }
         ],
         "summary": "Edit a draft invoice: replace lines and percentages (#143)",
@@ -5634,12 +5790,38 @@
           "invoices"
         ],
         "summary": "Provider webhook (public; authenticated by HMAC signature) \u2014 verifies amount/currency against the invoice and marks it paid (#34, review A11)",
+        "parameters": [
+          {
+            "name": "x-webhook-signature",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Provider signature (HMAC) over the raw body. Optional at the transport layer: the provider verifier fails the request 401 bad_signature when it is missing or does not match."
+          },
+          {
+            "name": "stripe-signature",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Stripe's signature header, accepted in place of x-webhook-signature."
+          }
+        ],
         "requestBody": {
           "required": true,
+          "description": "Raw provider payload, forwarded to the provider verifier unparsed (the signature covers the exact bytes), which is why the body is read as a string rather than deserialized here.",
           "content": {
             "application/json": {
               "schema": {
                 "type": "object"
+              }
+            },
+            "text/plain": {
+              "schema": {
+                "type": "string"
               }
             }
           }
@@ -5965,7 +6147,9 @@
                     },
                     "revenue_by_currency": {
                       "type": "object",
-                      "additionalProperties": { "type": "integer" },
+                      "additionalProperties": {
+                        "type": "integer"
+                      },
                       "description": "Non-draft revenue keyed by ISO-4217 code (#186: a flat total across currencies would sum unrelated minor units)."
                     },
                     "partly_paid": {
@@ -6199,10 +6383,10 @@
             }
           },
           {
-            "$ref": "#/components/parameters/FromParam"
+            "$ref": "#/components/parameters/OptionalFromParam"
           },
           {
-            "$ref": "#/components/parameters/ToParam"
+            "$ref": "#/components/parameters/OptionalToParam"
           }
         ],
         "responses": {

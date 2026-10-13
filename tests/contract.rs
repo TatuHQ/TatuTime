@@ -7,6 +7,7 @@ use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use http_body_util::BodyExt;
+use serde::Deserialize;
 use serde_json::{Value, json};
 use std::sync::Arc;
 use tower::ServiceExt;
@@ -725,6 +726,357 @@ fn contract_documents_csrf_on_mutating_operations() {
             );
         }
     }
+}
+
+// --------------------------- #252 contract document fidelity ----------------
+//
+// #252 replaced the document's `nullable` (3.0-only, silently ignored by 3.1
+// validators), corrected parameter requiredness/placement and the timer/webhook/
+// draft-line shapes, and declared every operation tag. These tests read the
+// checked-in document itself, so a regression in any of those fixes fails here.
+
+/// The `name`/`$ref` tail of every parameter declared on `METHOD path`, at
+/// operation and path-item level alike (the levels are merged on purpose: a
+/// parameter parked at path level applies to the operation too, which is exactly
+/// the leak #252 (5) fixed).
+fn declared_params(contract: &Value, method: &str, path: &str) -> Vec<String> {
+    let item = &contract["paths"][path];
+    let mut out = Vec::new();
+    for level in [item, &item[method.to_ascii_lowercase()]] {
+        for param in level["parameters"].as_array().into_iter().flatten() {
+            out.push(match param["$ref"].as_str() {
+                Some(reference) => reference
+                    .rsplit('/')
+                    .next()
+                    .unwrap_or(reference)
+                    .to_string(),
+                None => param["name"].as_str().unwrap_or_default().to_string(),
+            });
+        }
+    }
+    out
+}
+
+/// Whether `schema` is a JSON Schema union that admits `null` (#252 (7)):
+/// `{"type": [..., "null"]}` or `oneOf: [..., {"type": "null"}]`.
+fn admits_null(schema: &Value) -> bool {
+    let type_union = schema["type"]
+        .as_array()
+        .is_some_and(|types| types.iter().any(|t| t == "null"));
+    let one_of = schema["oneOf"]
+        .as_array()
+        .is_some_and(|arms| arms.iter().any(|arm| arm["type"] == "null"));
+    type_union || one_of
+}
+
+#[test]
+fn contract_openapi_has_no_nullable_keyword() {
+    // #252 (7): `nullable` is an OpenAPI 3.0 keyword. This document is 3.1, so a
+    // strict validator ignores it and `null` stops matching; the only valid
+    // spellings are a `"type": [..., "null"]` union or a `oneOf` with
+    // `{"type": "null"}`, which is what every nullable site here uses.
+    fn walk(node: &Value, path: &str, hits: &mut Vec<String>) {
+        match node {
+            Value::Object(map) => {
+                if map.contains_key("nullable") {
+                    hits.push(path.to_string());
+                }
+                for (key, value) in map {
+                    walk(value, &format!("{path}/{key}"), hits);
+                }
+            }
+            Value::Array(items) => {
+                for (index, value) in items.iter().enumerate() {
+                    walk(value, &format!("{path}/{index}"), hits);
+                }
+            }
+            _ => {}
+        }
+    }
+    let contract: Value =
+        serde_json::from_str(include_str!("../openapi.json")).expect("valid openapi.json");
+    let mut hits = Vec::new();
+    walk(&contract, "", &mut hits);
+    assert!(
+        hits.is_empty(),
+        "`nullable` is 3.0-only and ignored by 3.1 validators; replace it with a null union: {}",
+        hits.join(", ")
+    );
+}
+
+#[test]
+fn contract_declares_all_operation_tags() {
+    // #252 (9): Swagger UI renders a tag that is missing from the root `tags`
+    // list as an extra, unsorted group. Every tag an operation uses must be
+    // declared, and a declared-but-unused tag is dead weight — both drift.
+    let contract: Value =
+        serde_json::from_str(include_str!("../openapi.json")).expect("valid openapi.json");
+    let declared: std::collections::BTreeSet<String> = contract["tags"]
+        .as_array()
+        .expect("root tags array")
+        .iter()
+        .map(|tag| tag["name"].as_str().expect("tag name").to_string())
+        .collect();
+    let mut used: std::collections::BTreeMap<String, Vec<String>> =
+        std::collections::BTreeMap::new();
+    for (path, item) in contract["paths"].as_object().expect("paths object") {
+        for method in ["get", "post", "put", "delete", "patch"] {
+            let Some(op) = item.get(method) else { continue };
+            for tag in op["tags"].as_array().expect("operation tags") {
+                used.entry(tag.as_str().expect("tag name").to_string())
+                    .or_default()
+                    .push(format!("{} {path}", method.to_ascii_uppercase()));
+            }
+        }
+    }
+    let missing: Vec<String> = used
+        .iter()
+        .filter(|(tag, _)| !declared.contains(*tag))
+        .map(|(tag, ops)| format!("{tag} (used by {})", ops.join(", ")))
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "root `tags` does not declare: {}",
+        missing.join("; ")
+    );
+    let unused: Vec<&str> = declared
+        .iter()
+        .filter(|tag| !used.contains_key(*tag))
+        .map(String::as_str)
+        .collect();
+    assert!(
+        unused.is_empty(),
+        "root `tags` declares unused tags: {}",
+        unused.join(", ")
+    );
+}
+
+/// A walker that fails on a duplicate key inside the same JSON object (#252 (8)).
+/// `serde_json::Value` keeps the last duplicate silently, so the document needs
+/// its own strict pass: that is how `ProjectInput.budget_amount_minor` ended up
+/// carrying two `minimum` keys, one of which no validator could see.
+struct NoDuplicateKeys;
+
+impl<'de> serde::Deserialize<'de> for NoDuplicateKeys {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserializer.deserialize_any(NoDuplicateKeysVisitor)
+    }
+}
+
+struct NoDuplicateKeysVisitor;
+
+impl<'de> serde::de::Visitor<'de> for NoDuplicateKeysVisitor {
+    type Value = NoDuplicateKeys;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("any JSON value")
+    }
+
+    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+    where
+        A: serde::de::MapAccess<'de>,
+    {
+        let mut seen: Vec<String> = Vec::new();
+        while let Some(key) = map.next_key::<String>()? {
+            if seen.contains(&key) {
+                return Err(serde::de::Error::custom(format!(
+                    "duplicate JSON key `{key}`"
+                )));
+            }
+            seen.push(key);
+            map.next_value::<NoDuplicateKeys>()?;
+        }
+        Ok(NoDuplicateKeys)
+    }
+
+    fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+    where
+        A: serde::de::SeqAccess<'de>,
+    {
+        while seq.next_element::<NoDuplicateKeys>()?.is_some() {}
+        Ok(NoDuplicateKeys)
+    }
+
+    fn visit_some<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserializer.deserialize_any(NoDuplicateKeysVisitor)
+    }
+
+    fn visit_newtype_struct<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserializer.deserialize_any(NoDuplicateKeysVisitor)
+    }
+
+    fn visit_bool<E>(self, _value: bool) -> Result<Self::Value, E> {
+        Ok(NoDuplicateKeys)
+    }
+
+    fn visit_i64<E>(self, _value: i64) -> Result<Self::Value, E> {
+        Ok(NoDuplicateKeys)
+    }
+
+    fn visit_u64<E>(self, _value: u64) -> Result<Self::Value, E> {
+        Ok(NoDuplicateKeys)
+    }
+
+    fn visit_f64<E>(self, _value: f64) -> Result<Self::Value, E> {
+        Ok(NoDuplicateKeys)
+    }
+
+    fn visit_str<E>(self, _value: &str) -> Result<Self::Value, E> {
+        Ok(NoDuplicateKeys)
+    }
+
+    fn visit_string<E>(self, _value: String) -> Result<Self::Value, E> {
+        Ok(NoDuplicateKeys)
+    }
+
+    fn visit_none<E>(self) -> Result<Self::Value, E> {
+        Ok(NoDuplicateKeys)
+    }
+
+    fn visit_unit<E>(self) -> Result<Self::Value, E> {
+        Ok(NoDuplicateKeys)
+    }
+}
+
+#[test]
+fn contract_openapi_has_no_duplicate_keys() {
+    let text = include_str!("../openapi.json");
+    let mut deserializer = serde_json::Deserializer::from_str(text);
+    NoDuplicateKeys::deserialize(&mut deserializer)
+        .expect("openapi.json must not contain a duplicate key in one object");
+    deserializer
+        .end()
+        .expect("openapi.json must be a single JSON document");
+}
+
+#[test]
+fn contract_range_and_oauth_parameter_requiredness_matches_handlers() {
+    // #252 (1, 2, 5): the range-only handlers (`parse_range`) hard-fail 400 when
+    // from or to is absent, so their components are required; the flexible list
+    // endpoints keep the pair optional (and must not inherit it from path level,
+    // which is how POST /api/entries used to advertise three params it ignores);
+    // the OAuth callback reads code/state with serde defaults, so neither is
+    // required.
+    let contract: Value =
+        serde_json::from_str(include_str!("../openapi.json")).expect("valid openapi.json");
+    let params = &contract["components"]["parameters"];
+    for name in ["FromParam", "ToParam"] {
+        assert_eq!(
+            params[name]["required"],
+            json!(true),
+            "{name} is required: the range handlers answer 400 without it"
+        );
+    }
+    for name in ["OptionalFromParam", "OptionalToParam"] {
+        assert_eq!(
+            params[name]["required"],
+            json!(false),
+            "{name} is optional: the list endpoints filter only when the pair is given"
+        );
+    }
+    for path in [
+        "/api/reports/summary",
+        "/api/reports/export.csv",
+        "/api/reports/profitability",
+        "/api/calendar/events",
+        "/api/invoices/report",
+    ] {
+        let declared = declared_params(&contract, "GET", path);
+        assert!(
+            declared.iter().any(|p| p == "FromParam") && declared.iter().any(|p| p == "ToParam"),
+            "GET {path} needs the required range pair, found {declared:?}"
+        );
+    }
+    let entries = declared_params(&contract, "GET", "/api/entries");
+    assert!(
+        entries.iter().any(|p| p == "DateParam")
+            && entries.iter().any(|p| p == "OptionalFromParam")
+            && entries.iter().any(|p| p == "OptionalToParam"),
+        "GET /api/entries takes a day or an optional range, found {entries:?}"
+    );
+    let create = declared_params(&contract, "POST", "/api/entries");
+    assert_eq!(
+        create,
+        vec!["CsrfProtection"],
+        "POST /api/entries ignores the list filters and must not inherit them"
+    );
+    for name in ["code", "state"] {
+        let param = contract["paths"]["/api/calendar/oauth/callback"]["get"]["parameters"]
+            .as_array()
+            .expect("callback parameters")
+            .iter()
+            .find(|p| p["name"] == name)
+            .unwrap_or_else(|| panic!("{name} must be declared"));
+        assert_eq!(
+            param["required"],
+            json!(false),
+            "the handler defaults oauth callback {name}, so it is not required"
+        );
+    }
+}
+
+#[test]
+fn contract_declares_problem_operation_shapes() {
+    // #252 (3, 4, 6, 7): the timer start returns the running Timer; the webhook
+    // documents the signature headers it reads; PUT /api/invoices/{id} declares
+    // its path `id` once; the draft edit references the input line shape (only
+    // kind+date mandatory) rather than the stored one; and GET /api/timer can be
+    // null through a 3.1 union.
+    let contract: Value =
+        serde_json::from_str(include_str!("../openapi.json")).expect("valid openapi.json");
+    let started = &contract["paths"]["/api/timer"]["post"]["responses"]["201"];
+    assert_eq!(
+        started["content"]["application/json"]["schema"]["$ref"],
+        json!("#/components/schemas/Timer"),
+        "POST /api/timer 201 returns the serialized timer"
+    );
+    assert!(
+        contract["components"]["schemas"]["Timer"].is_object(),
+        "the finished timer start needs a Timer schema to reference"
+    );
+    let listed = &contract["paths"]["/api/timer"]["get"]["responses"]["200"]["content"]["application/json"]
+        ["schema"];
+    assert!(
+        admits_null(listed),
+        "GET /api/timer answers JSON null when no timer runs: {listed}"
+    );
+
+    let webhook = declared_params(&contract, "POST", "/api/payments/webhook/{provider}");
+    for header in ["x-webhook-signature", "stripe-signature"] {
+        assert!(
+            webhook.iter().any(|p| p == header),
+            "the webhook reads {header}; declared params: {webhook:?}"
+        );
+    }
+
+    let edit = declared_params(&contract, "PUT", "/api/invoices/{id}");
+    assert_eq!(
+        edit.iter().filter(|p| *p == "id").count(),
+        1,
+        "the path `id` must be declared once, not at both path and operation level: {edit:?}"
+    );
+
+    let lines =
+        &contract["components"]["schemas"]["InvoiceEditInput"]["properties"]["lines"]["items"];
+    assert_eq!(
+        lines["$ref"],
+        json!("#/components/schemas/InvoiceLineInput"),
+        "the edit body takes the input line shape, not the stored one"
+    );
+    assert_eq!(
+        contract["components"]["schemas"]["InvoiceLineInput"]["required"],
+        json!(["kind", "date"]),
+        "only kind and date are mandatory on a submitted line"
+    );
 }
 
 #[tokio::test]
