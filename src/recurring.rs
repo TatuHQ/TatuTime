@@ -87,20 +87,12 @@ impl RecurringJob {
                 let entries = self.store.list_range(from, to).map_err(|e| e.to_string())?;
                 let expenses = self.store.list_expenses().map_err(|e| e.to_string())?;
                 let all_invoices = self.store.list_invoices().map_err(|e| e.to_string())?;
-                let issued: Vec<&Invoice> = all_invoices
-                    .iter()
-                    .filter(|i| i.status == InvoiceStatus::Issued)
-                    .collect();
-                let excluded_entries: Vec<_> = issued
-                    .iter()
-                    .flat_map(|i| i.lines.iter())
-                    .filter_map(|l| l.entry_id)
-                    .collect();
-                let excluded_expenses: Vec<_> = issued
-                    .iter()
-                    .flat_map(|i| i.lines.iter())
-                    .filter_map(|l| l.expense_id)
-                    .collect();
+                // #248: the SAME "already invoiced" predicate as the API draft
+                // builder. Previously this site excluded only `Issued`, so a
+                // settled (`paid` / `partly_paid`) or written-off invoice's
+                // released entries were re-billed on the next run.
+                let (excluded_entries, excluded_expenses) =
+                    crate::domain::already_invoiced(&all_invoices);
                 let sources = crate::domain::InvoiceSources {
                     projects: &projects,
                     users: &users,
@@ -109,7 +101,6 @@ impl RecurringJob {
                     excluded_entries: &excluded_entries,
                     excluded_expenses: &excluded_expenses,
                     include_expenses: true,
-
                     restrict_projects: false,
                 };
                 match generate_invoice(String::new(), &customer, &sources, from, to, now) {

@@ -6229,6 +6229,123 @@ async fn invoice_preview_projects_and_paid_exclusion() {
     assert_eq!(s3, StatusCode::CONFLICT);
 }
 
+#[tokio::test]
+async fn recurring_never_rebills_settled_or_written_off_entries() {
+    // #248: the recurring scheduler must share the API's "already invoiced"
+    // predicate. A settled (`paid` / `partly_paid`) or written-off invoice's
+    // entries are released from the edit lock but must never be re-billed,
+    // while a draft's lines stay billable.
+    use tucano_time::recurring::RecurringJob;
+    use tucano_time::scheduler::Job;
+
+    // Run the daily recurring job once against the router's data dir. `now`
+    // fixes the weekly period to 2026-10-01..2026-10-07 (the seeded week).
+    let run_recurring = |dir: &std::path::Path| {
+        let store = Store::open(dir.join("data")).expect("store");
+        RecurringJob::new(Arc::new(store)).run("2026-10-07T12:00:00Z".parse().unwrap());
+    };
+    let invoice_count = |list: &Value| list["invoices"].as_array().unwrap().len();
+
+    // Every way of closing an invoice must keep its lines out of a new bill.
+    for (label, settle) in [
+        ("paid", 0u64),
+        ("partly_paid", 1000u64),
+        ("written_off", 0u64),
+    ] {
+        let (app, dir) = app().await;
+        let c = new_customer(&app, "ACME", "EUR", 6000).await;
+        let cid = c["id"].as_str().unwrap().to_string();
+        new_project(&app, &cid, "P1", json!({"rate_minor": 6000})).await;
+        json_req(
+            &app,
+            "POST",
+            "/api/entries",
+            Some(json!({"date":"2026-10-02","customer_id":cid.clone(),"project_code":"P1","hours":2})),
+        )
+        .await;
+        // Bill week 1, then close the invoice the named way.
+        let (_s, inv) = json_req(
+            &app,
+            "POST",
+            "/api/invoices",
+            Some(json!({"customer_id":cid.clone(),"from":"2026-10-01","to":"2026-10-07"})),
+        )
+        .await;
+        let iid = inv["id"].as_str().unwrap();
+        json_req(&app, "POST", &format!("/api/invoices/{iid}/issue"), None).await;
+        if label == "written_off" {
+            let (sw, wo) = json_req(
+                &app,
+                "POST",
+                &format!("/api/invoices/{iid}/write-off"),
+                Some(json!({"reason":"forgiven"})),
+            )
+            .await;
+            assert_eq!(sw, StatusCode::OK, "{label}: {wo}");
+        } else {
+            let pay = if label == "paid" {
+                json!({"reference":"x"})
+            } else {
+                json!({"reference":"x","amount_minor": settle})
+            };
+            let (sp, paid) =
+                json_req(&app, "POST", &format!("/api/invoices/{iid}/pay"), Some(pay)).await;
+            assert_eq!(sp, StatusCode::OK, "{label}: {paid}");
+        }
+        // A weekly time schedule whose next period covers the settled week.
+        let (ss, sched) = json_req(
+            &app,
+            "POST",
+            "/api/schedules",
+            Some(json!({"customer_id":cid.clone(),"cadence":"weekly","mode":"time","currency":"EUR"})),
+        )
+        .await;
+        assert_eq!(ss, StatusCode::CREATED, "{label}: {sched}");
+        run_recurring(dir.path());
+        let (_sl, list) = json_req(&app, "GET", "/api/invoices", None).await;
+        assert_eq!(
+            invoice_count(&list),
+            1,
+            "{label}: the recurring job must not re-bill a settled entry: {list}"
+        );
+    }
+
+    // (c) A DRAFT's lines stay billable: the same recurring run still bills.
+    let (app, dir) = app().await;
+    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap().to_string();
+    new_project(&app, &cid, "P1", json!({"rate_minor": 6000})).await;
+    json_req(
+        &app,
+        "POST",
+        "/api/entries",
+        Some(json!({"date":"2026-10-02","customer_id":cid.clone(),"project_code":"P1","hours":2})),
+    )
+    .await;
+    // Draft only, never issued: its lines are not excluded.
+    json_req(
+        &app,
+        "POST",
+        "/api/invoices",
+        Some(json!({"customer_id":cid.clone(),"from":"2026-10-01","to":"2026-10-07"})),
+    )
+    .await;
+    json_req(
+        &app,
+        "POST",
+        "/api/schedules",
+        Some(json!({"customer_id":cid.clone(),"cadence":"weekly","mode":"time","currency":"EUR"})),
+    )
+    .await;
+    run_recurring(dir.path());
+    let (_sl, list) = json_req(&app, "GET", "/api/invoices", None).await;
+    assert_eq!(
+        invoice_count(&list),
+        2,
+        "a draft's lines stay billable, so the recurring run adds an invoice: {list}"
+    );
+}
+
 // ------------------------------------------------------------------ #147 ---
 
 #[tokio::test]
