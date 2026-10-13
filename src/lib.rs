@@ -597,7 +597,8 @@ async fn docs() -> Response {
 /// The GUI's bookmarkable page routes (#TBD). Each maps to the same
 /// single-page shell; the client router reads `location.pathname` and selects
 /// the matching tab/segment/panel. Matched case-insensitively with any
-/// trailing slash ignored. Keep this in sync with `ROUTES` in `web/app.js`.
+/// trailing slash ignored. Keep this in sync with `TAB_ROUTES`/`KNOWN_ROUTES`
+/// in `web/app.js`.
 fn spa_page(path: &str) -> bool {
     let p = path.trim_end_matches('/').to_ascii_lowercase();
     matches!(

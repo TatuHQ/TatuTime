@@ -538,7 +538,6 @@ caption { padding-bottom: .35rem; }
 .customer-extra-details fieldset.field { margin-top: .5rem; }
 .panel-heading-row { display: flex; align-items: center; justify-content: flex-start; gap: 1rem; margin-bottom: .65rem; }
 .panel-heading-row h2 { margin: 0; }
-.category-settings-form { max-width: 34rem; }
 .chip { min-height: 2rem; }
 .chip-edit { border: 0; background: transparent; color: var(--brand-deep); padding: .1rem .25rem; font-size: .8rem; }
 .chip-edit:hover { text-decoration: underline; }

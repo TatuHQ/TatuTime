@@ -107,6 +107,15 @@ The GUI is a presentation layer and nothing more — it never reads storage.
   returns 404, not 403, to avoid leaking existence). Customers/projects/tasks/
   categories are shared org-wide reference data (any authenticated user).
 - **Invoices (#8):** generated from a period's billable, not-yet-invoiced entries; each line snapshots the resolved rate at generation, so a later rate change never rewrites an issued invoice. Issuing sets `status=issued`, which the `InvoiceLock` (a `lock::EntryLock` provider wired in `AppState`) uses to reject edits/deletes of referenced entries with 409. Draft invoices do not lock. Every builder (the API draft/preview pipeline and the recurring scheduler) resolves already-invoiced lines through one shared predicate, `domain::already_invoiced`, which excludes **every non-draft** invoice: settling (`paid`/`partly_paid`) or writing off an invoice releases its entries from the edit lock but never re-bills them (#248). Invoice number is sequential (`INV-0001`).
+- **HTTP status codes (C8):** a `POST` returns **201** when it mints a new,
+  client-addressable resource (`POST /api/customers`, `/api/entries`,
+  `/api/invoices`, `/api/invoices/{id}/checkout` → a new payment session, …).
+  It returns **200** when it is a *command or transition on an existing
+  resource* and hands back that resource's new state (`/invoices/{id}/issue`,
+  `/invoices/{id}/pay`, `/timer/stop` — which materialises the derived entry
+  but is a stop of the existing timer — and `/claims/{id}/submit`). The two
+  borderline cases are deliberate, not drift; the codes are pinned in
+  `openapi.json`.
 
 ### Commands
 

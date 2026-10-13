@@ -235,6 +235,14 @@ fn urlencoded(s: &str) -> String {
     out
 }
 
+/// Recover the inner guard from a poisoned `Mutex` rather than panicking: the
+/// values here (a pending-flow map and a token string) hold no invariant a
+/// mid-panic update could break, so recovery is always safe (project
+/// convention, cf. `revoke.rs`, `audit.rs`, `ratelimit.rs`; #261).
+fn lock<T>(m: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|p| p.into_inner())
+}
+
 // ------------------------------------------------------------- oauth dance --
 
 /// Pending consent flows keyed by CSRF `state` (provider + expiry). A restart
@@ -258,7 +266,7 @@ impl OAuthFlows {
             .try_fill_bytes(&mut bytes)
             .expect("OS CSPRNG");
         let state = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes);
-        let mut pending = self.pending.lock().unwrap();
+        let mut pending = lock(&self.pending);
         pending.retain(|_, (_, exp)| *exp > now); // opportunistic GC
         pending.insert(state.clone(), (provider.to_string(), now + 600));
         state
@@ -266,7 +274,7 @@ impl OAuthFlows {
 
     /// Consumes and validates a state; returns the provider it belongs to.
     pub fn take(&self, state: &str, now: i64) -> Option<String> {
-        let mut pending = self.pending.lock().unwrap();
+        let mut pending = lock(&self.pending);
         pending
             .remove(state)
             .filter(|(_, exp)| *exp > now)
@@ -444,7 +452,7 @@ impl BearerFetch {
     }
 
     fn current_token(&self) -> String {
-        self.access_token.lock().unwrap().clone()
+        lock(&self.access_token).clone()
     }
 
     fn do_get(&self, url: &str) -> Result<(u16, String), CalendarError> {
@@ -490,7 +498,7 @@ impl BearerFetch {
         match serde_json::from_str::<Value>(&text) {
             Ok(v) => {
                 if let Some(t) = v.get("access_token").and_then(Value::as_str) {
-                    *self.access_token.lock().unwrap() = t.to_string();
+                    *lock(&self.access_token) = t.to_string();
                     true
                 } else {
                     false
