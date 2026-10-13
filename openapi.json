@@ -7,7 +7,7 @@
       "name": "AGPL-3.0-or-later",
       "identifier": "AGPL-3.0-or-later"
     },
-    "description": "Timesheet system: daily/weekly time entries, customers and project codes with per-entity currencies and hourly rates. File-backed (no database); the API is the only writer below TUCANO_DATA_DIR. Access is private-per-user (#51): a member sees and edits only their own entries/expenses/submissions; an administrator sees all data and owns invoicing, approvals and user management (the /api/users and /api/invoices routes return 403 for members). Mutating endpoints may return 503 (Retry-After) under write contention (#62)."
+    "description": "Timesheet system: daily/weekly time entries, customers and project codes with per-entity currencies and hourly rates. File-backed (no database); the API is the only writer below TUCANO_DATA_DIR. Access is private-per-user (#51): a member sees and edits only their own entries/expenses/submissions; an administrator sees all data and owns invoicing, approvals and user management (the /api/users and /api/invoices routes return 403 for members). Mutating endpoints may return 503 (Retry-After) under write contention (#62). Mutating requests (POST/PUT/DELETE) must also carry the X-CSRF-Protection: 1 header (#46); without it the request is rejected 403 with code csrf. Exempt: POST /api/auth/login, /api/auth/bootstrap, /api/auth/sso/assertion and POST /api/payments/webhook/{provider}."
   },
   "servers": [
     {
@@ -82,9 +82,25 @@
                   "conflict",
                   "bad_request",
                   "internal",
-                  "invalid_json",
                   "write_lock_busy",
-                  "lock_unavailable"
+                  "lock_unavailable",
+                  "csrf",
+                  "unauthenticated",
+                  "forbidden",
+                  "rate_limited",
+                  "initialised",
+                  "invalid_credentials",
+                  "disabled",
+                  "inactive",
+                  "sso_invalid",
+                  "bad_signature",
+                  "bad_state",
+                  "no_vault",
+                  "vault_disabled",
+                  "calendar_not_configured",
+                  "calendar_fetch",
+                  "email_failed",
+                  "oauth_exchange"
                 ]
               },
               "message": {
@@ -2342,6 +2358,16 @@
       }
     },
     "responses": {
+      "CsrfForbidden": {
+        "description": "CSRF header missing or wrong on a mutating request (#46): send X-CSRF-Protection: 1.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
       "ValidationError": {
         "description": "Payload failed validation before any write or side effect.",
         "content": {
@@ -2401,6 +2427,18 @@
       }
     },
     "parameters": {
+      "CsrfProtection": {
+        "name": "X-CSRF-Protection",
+        "in": "header",
+        "required": true,
+        "description": "CSRF guard (#46): mutating requests (POST/PUT/DELETE) must send this header with the literal value 1, otherwise the request is rejected 403 csrf. Exempt endpoints (no header required): POST /api/auth/login, /api/auth/bootstrap, /api/auth/sso/assertion and POST /api/payments/webhook/{provider}.",
+        "schema": {
+          "type": "string",
+          "enum": [
+            "1"
+          ]
+        }
+      },
       "DateParam": {
         "name": "date",
         "in": "query",
@@ -2644,7 +2682,15 @@
         ],
         "summary": "Clear the session cookie",
         "security": [],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "403": {
+            "$ref": "#/components/responses/CsrfForbidden"
+          },
           "204": {
             "description": "Logged out."
           }
@@ -2726,6 +2772,11 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
           "201": {
             "description": "Created.",
@@ -2738,7 +2789,7 @@
             }
           },
           "403": {
-            "description": "Admin role required."
+            "description": "Admin role required. Also returned (code csrf) when the X-CSRF-Protection: 1 header is missing on a mutating request (#46)."
           },
           "409": {
             "$ref": "#/components/responses/Conflict"
@@ -2777,6 +2828,11 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Updated user.",
@@ -2789,7 +2845,7 @@
             }
           },
           "403": {
-            "description": "Admin role required."
+            "description": "Admin role required. Also returned (code csrf) when the X-CSRF-Protection: 1 header is missing on a mutating request (#46)."
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -2808,12 +2864,17 @@
           "users"
         ],
         "summary": "Delete a user (admin only)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
           "204": {
             "description": "Deleted."
           },
           "403": {
-            "description": "Admin role required."
+            "description": "Admin role required. Also returned (code csrf) when the X-CSRF-Protection: 1 header is missing on a mutating request (#46)."
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -2852,12 +2913,17 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
           "204": {
             "description": "Password changed; current sessions were revoked."
           },
           "403": {
-            "description": "Admin role required."
+            "description": "Admin role required. Also returned (code csrf) when the X-CSRF-Protection: 1 header is missing on a mutating request (#46)."
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -2994,7 +3060,15 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "403": {
+            "$ref": "#/components/responses/CsrfForbidden"
+          },
           "201": {
             "description": "Created; server assigns the id.",
             "content": {
@@ -3061,7 +3135,15 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "403": {
+            "$ref": "#/components/responses/CsrfForbidden"
+          },
           "200": {
             "description": "The updated customer.",
             "content": {
@@ -3086,7 +3168,15 @@
           "customers"
         ],
         "summary": "Delete a customer (must own no projects or entries)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "403": {
+            "$ref": "#/components/responses/CsrfForbidden"
+          },
           "204": {
             "description": "Deleted."
           },
@@ -3161,7 +3251,15 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "403": {
+            "$ref": "#/components/responses/CsrfForbidden"
+          },
           "201": {
             "description": "Created.",
             "content": {
@@ -3242,7 +3340,15 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "403": {
+            "$ref": "#/components/responses/CsrfForbidden"
+          },
           "200": {
             "description": "Updated.",
             "content": {
@@ -3267,7 +3373,15 @@
           "projects"
         ],
         "summary": "Delete a project (must have no entries)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "403": {
+            "$ref": "#/components/responses/CsrfForbidden"
+          },
           "204": {
             "description": "Deleted."
           },
@@ -3350,7 +3464,15 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "403": {
+            "$ref": "#/components/responses/CsrfForbidden"
+          },
           "201": {
             "description": "Created.",
             "content": {
@@ -3439,7 +3561,15 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "403": {
+            "$ref": "#/components/responses/CsrfForbidden"
+          },
           "200": {
             "description": "Updated.",
             "content": {
@@ -3464,7 +3594,15 @@
           "projects"
         ],
         "summary": "Delete a task (must have no entries)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "403": {
+            "$ref": "#/components/responses/CsrfForbidden"
+          },
           "204": {
             "description": "Deleted."
           },
@@ -3541,7 +3679,15 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "403": {
+            "$ref": "#/components/responses/CsrfForbidden"
+          },
           "201": {
             "description": "Created; server assigns id and timestamps.",
             "content": {
@@ -3608,7 +3754,15 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "403": {
+            "$ref": "#/components/responses/CsrfForbidden"
+          },
           "200": {
             "description": "Updated.",
             "content": {
@@ -3633,7 +3787,15 @@
           "entries"
         ],
         "summary": "Delete an entry",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "403": {
+            "$ref": "#/components/responses/CsrfForbidden"
+          },
           "204": {
             "description": "Deleted."
           },
@@ -4019,7 +4181,15 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "403": {
+            "$ref": "#/components/responses/CsrfForbidden"
+          },
           "201": {
             "description": "Started."
           },
@@ -4037,7 +4207,15 @@
           "entries"
         ],
         "summary": "Discard the running timer without logging",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "403": {
+            "$ref": "#/components/responses/CsrfForbidden"
+          },
           "204": {
             "description": "Discarded."
           }
@@ -4051,7 +4229,15 @@
           "entries"
         ],
         "summary": "Stop the timer and create a timer-sourced entry for the elapsed time",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "403": {
+            "$ref": "#/components/responses/CsrfForbidden"
+          },
           "200": {
             "description": "Created entry.",
             "content": {
@@ -4334,7 +4520,15 @@
           "entries"
         ],
         "summary": "Mark the caller's notifications read",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "403": {
+            "$ref": "#/components/responses/CsrfForbidden"
+          },
           "204": {
             "description": "Marked."
           }
@@ -4392,6 +4586,11 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
           "201": {
             "description": "Created.",
@@ -4404,7 +4603,7 @@
             }
           },
           "403": {
-            "description": "Admin role required."
+            "description": "Admin role required. Also returned (code csrf) when the X-CSRF-Protection: 1 header is missing on a mutating request (#46)."
           },
           "422": {
             "$ref": "#/components/responses/ValidationError"
@@ -4430,12 +4629,17 @@
           "invoices"
         ],
         "summary": "Delete a schedule (admin)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
           "204": {
             "description": "Deleted."
           },
           "403": {
-            "description": "Admin role required."
+            "description": "Admin role required. Also returned (code csrf) when the X-CSRF-Protection: 1 header is missing on a mutating request (#46)."
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -4459,6 +4663,11 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Updated schedule.",
@@ -4471,7 +4680,7 @@
             }
           },
           "403": {
-            "description": "Admin role required."
+            "description": "Admin role required. Also returned (code csrf) when the X-CSRF-Protection: 1 header is missing on a mutating request (#46)."
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -4530,7 +4739,15 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "403": {
+            "$ref": "#/components/responses/CsrfForbidden"
+          },
           "201": {
             "description": "Draft invoice.",
             "content": {
@@ -4590,7 +4807,15 @@
           "invoices"
         ],
         "summary": "Delete a draft invoice",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "403": {
+            "$ref": "#/components/responses/CsrfForbidden"
+          },
           "204": {
             "description": "Deleted."
           },
@@ -4608,6 +4833,9 @@
           "invoices"
         ],
         "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          },
           {
             "name": "id",
             "in": "path",
@@ -4642,7 +4870,7 @@
             }
           },
           "403": {
-            "description": "Admin role required."
+            "description": "Admin role required. Also returned (code csrf) when the X-CSRF-Protection: 1 header is missing on a mutating request (#46)."
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -4674,7 +4902,15 @@
           "invoices"
         ],
         "summary": "Issue a draft invoice (locks entries; archives the PDF, #113)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "403": {
+            "$ref": "#/components/responses/CsrfForbidden"
+          },
           "200": {
             "description": "Issued invoice.",
             "content": {
@@ -4766,6 +5002,11 @@
           "invoices"
         ],
         "summary": "Email an issued invoice to the customer's billing address (#35)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Sent.",
@@ -4796,7 +5037,7 @@
             }
           },
           "403": {
-            "description": "Admin role required."
+            "description": "Admin role required. Also returned (code csrf) when the X-CSRF-Protection: 1 header is missing on a mutating request (#46)."
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -4857,6 +5098,11 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Sent.",
@@ -4887,7 +5133,7 @@
             }
           },
           "403": {
-            "description": "Admin role required."
+            "description": "Admin role required. Also returned (code csrf) when the X-CSRF-Protection: 1 header is missing on a mutating request (#46)."
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -4948,7 +5194,15 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "403": {
+            "$ref": "#/components/responses/CsrfForbidden"
+          },
           "200": {
             "description": "Paid invoice.",
             "content": {
@@ -5010,6 +5264,11 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
           "201": {
             "description": "Checkout session.",
@@ -5047,7 +5306,7 @@
             "$ref": "#/components/responses/BadRequest"
           },
           "403": {
-            "description": "Admin role required."
+            "description": "Admin role required. Also returned (code csrf) when the X-CSRF-Protection: 1 header is missing on a mutating request (#46)."
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -5156,6 +5415,11 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Sync record (status synced/failed; noop when already synced).",
@@ -5171,7 +5435,7 @@
             "$ref": "#/components/responses/BadRequest"
           },
           "403": {
-            "description": "Admin role required."
+            "description": "Admin role required. Also returned (code csrf) when the X-CSRF-Protection: 1 header is missing on a mutating request (#46)."
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -5466,7 +5730,15 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "403": {
+            "$ref": "#/components/responses/CsrfForbidden"
+          },
           "201": {
             "description": "Created.",
             "content": {
@@ -5511,7 +5783,15 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "403": {
+            "$ref": "#/components/responses/CsrfForbidden"
+          },
           "200": {
             "description": "Updated.",
             "content": {
@@ -5536,7 +5816,15 @@
           "expenses"
         ],
         "summary": "Delete a category (must be unused)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "403": {
+            "$ref": "#/components/responses/CsrfForbidden"
+          },
           "204": {
             "description": "Deleted."
           },
@@ -5614,7 +5902,15 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "403": {
+            "$ref": "#/components/responses/CsrfForbidden"
+          },
           "201": {
             "description": "Created.",
             "content": {
@@ -5671,7 +5967,15 @@
           "expenses"
         ],
         "summary": "Delete an expense",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "403": {
+            "$ref": "#/components/responses/CsrfForbidden"
+          },
           "204": {
             "description": "Deleted."
           },
@@ -5807,6 +6111,11 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Persisted.",
@@ -5828,7 +6137,7 @@
             }
           },
           "403": {
-            "description": "Admin role required."
+            "description": "Admin role required. Also returned (code csrf) when the X-CSRF-Protection: 1 header is missing on a mutating request (#46)."
           },
           "422": {
             "$ref": "#/components/responses/ValidationError"
@@ -5924,12 +6233,17 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
           "204": {
             "description": "Stored."
           },
           "403": {
-            "description": "Admin role required."
+            "description": "Admin role required. Also returned (code csrf) when the X-CSRF-Protection: 1 header is missing on a mutating request (#46)."
           },
           "422": {
             "$ref": "#/components/responses/ValidationError"
@@ -5945,12 +6259,17 @@
           "users"
         ],
         "summary": "Delete a secret",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
           "204": {
             "description": "Deleted."
           },
           "403": {
-            "description": "Admin role required."
+            "description": "Admin role required. Also returned (code csrf) when the X-CSRF-Protection: 1 header is missing on a mutating request (#46)."
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -6009,7 +6328,15 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "403": {
+            "$ref": "#/components/responses/CsrfForbidden"
+          },
           "201": {
             "description": "Submitted.",
             "content": {
@@ -6054,7 +6381,15 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "403": {
+            "$ref": "#/components/responses/CsrfForbidden"
+          },
           "200": {
             "description": "Updated submission.",
             "content": {
@@ -6122,7 +6457,15 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "403": {
+            "$ref": "#/components/responses/CsrfForbidden"
+          },
           "201": {
             "description": "Draft claim.",
             "content": {
@@ -6157,7 +6500,15 @@
           "expenses"
         ],
         "summary": "Submit a draft claim (locks its expenses)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "403": {
+            "$ref": "#/components/responses/CsrfForbidden"
+          },
           "200": {
             "description": "Submitted claim.",
             "content": {
@@ -6205,6 +6556,11 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Updated claim.",
@@ -6217,7 +6573,7 @@
             }
           },
           "403": {
-            "description": "Admin role required."
+            "description": "Admin role required. Also returned (code csrf) when the X-CSRF-Protection: 1 header is missing on a mutating request (#46)."
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -6297,6 +6653,11 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Stored template.",
@@ -6309,7 +6670,7 @@
             }
           },
           "403": {
-            "description": "Admin role required."
+            "description": "Admin role required. Also returned (code csrf) when the X-CSRF-Protection: 1 header is missing on a mutating request (#46)."
           },
           "422": {
             "$ref": "#/components/responses/ValidationError"
@@ -6409,6 +6770,11 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Written-off invoice.",
@@ -6421,7 +6787,7 @@
             }
           },
           "403": {
-            "description": "Admin role required."
+            "description": "Admin role required. Also returned (code csrf) when the X-CSRF-Protection: 1 header is missing on a mutating request (#46)."
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -6475,6 +6841,11 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Stored profile.",
@@ -6487,7 +6858,7 @@
             }
           },
           "403": {
-            "description": "Admin role required."
+            "description": "Admin role required. Also returned (code csrf) when the X-CSRF-Protection: 1 header is missing on a mutating request (#46)."
           },
           "422": {
             "$ref": "#/components/responses/ValidationError"
@@ -6513,6 +6884,11 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
           "201": {
             "description": "Draft with number.",
@@ -6525,7 +6901,7 @@
             }
           },
           "403": {
-            "description": "Admin role required."
+            "description": "Admin role required. Also returned (code csrf) when the X-CSRF-Protection: 1 header is missing on a mutating request (#46)."
           },
           "422": {
             "$ref": "#/components/responses/ValidationError"
@@ -6551,6 +6927,11 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Unsaved draft preview.",
@@ -6563,7 +6944,7 @@
             }
           },
           "403": {
-            "description": "Admin role required."
+            "description": "Admin role required. Also returned (code csrf) when the X-CSRF-Protection: 1 header is missing on a mutating request (#46)."
           },
           "409": {
             "$ref": "#/components/responses/Conflict"
@@ -6625,6 +7006,11 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
           "201": {
             "description": "Created.",
@@ -6637,7 +7023,7 @@
             }
           },
           "403": {
-            "description": "Admin role required."
+            "description": "Admin role required. Also returned (code csrf) when the X-CSRF-Protection: 1 header is missing on a mutating request (#46)."
           },
           "422": {
             "$ref": "#/components/responses/ValidationError"
@@ -6673,6 +7059,11 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Updated.",
@@ -6685,7 +7076,7 @@
             }
           },
           "403": {
-            "description": "Admin role required."
+            "description": "Admin role required. Also returned (code csrf) when the X-CSRF-Protection: 1 header is missing on a mutating request (#46)."
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -6701,12 +7092,17 @@
           "invoices"
         ],
         "summary": "Delete a catalog item type (#147)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
           "204": {
             "description": "Deleted."
           },
           "403": {
-            "description": "Admin role required."
+            "description": "Admin role required. Also returned (code csrf) when the X-CSRF-Protection: 1 header is missing on a mutating request (#46)."
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -6801,6 +7197,11 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
           "201": {
             "description": "Retainer with reconciled balance.",
@@ -6826,7 +7227,7 @@
             }
           },
           "403": {
-            "description": "Admin role required."
+            "description": "Admin role required. Also returned (code csrf) when the X-CSRF-Protection: 1 header is missing on a mutating request (#46)."
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -6893,6 +7294,11 @@
           "retainers"
         ],
         "summary": "Close a retainer (final) (#144)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Retainer with reconciled balance.",
@@ -6924,7 +7330,7 @@
             "$ref": "#/components/responses/Conflict"
           },
           "403": {
-            "description": "Admin role required."
+            "description": "Admin role required. Also returned (code csrf) when the X-CSRF-Protection: 1 header is missing on a mutating request (#46)."
           }
         }
       }
@@ -6958,6 +7364,11 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Retainer with reconciled balance.",
@@ -6983,7 +7394,7 @@
             }
           },
           "403": {
-            "description": "Admin role required."
+            "description": "Admin role required. Also returned (code csrf) when the X-CSRF-Protection: 1 header is missing on a mutating request (#46)."
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -7026,6 +7437,11 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Retainer with reconciled balance.",
@@ -7051,7 +7467,7 @@
             }
           },
           "403": {
-            "description": "Admin role required."
+            "description": "Admin role required. Also returned (code csrf) when the X-CSRF-Protection: 1 header is missing on a mutating request (#46)."
           },
           "404": {
             "$ref": "#/components/responses/NotFound"

@@ -359,6 +359,65 @@ async fn contract_paths_have_documented_responses() {
     }
 }
 
+#[test]
+fn contract_error_code_enum_matches_rust_vocabulary() {
+    // #249: the Error.code enum in the contract must be exactly the Rust
+    // vocabulary (ApiError::codes()) — no stale codes, and none missing.
+    let contract: Value =
+        serde_json::from_str(include_str!("../openapi.json")).expect("valid openapi.json");
+    let enum_codes: Vec<String> = contract["components"]["schemas"]["Error"]["properties"]["error"]
+        ["properties"]["code"]["enum"]
+        .as_array()
+        .expect("Error.code enum")
+        .iter()
+        .map(|c| c.as_str().expect("string code").to_string())
+        .collect();
+    let rust_codes: Vec<String> = tucano_time::error::ApiError::codes()
+        .iter()
+        .map(|c| (*c).to_string())
+        .collect();
+    assert_eq!(
+        enum_codes, rust_codes,
+        "openapi.json Error.code enum drifted from ApiError::codes()"
+    );
+}
+
+#[test]
+fn contract_documents_csrf_on_mutating_operations() {
+    // #249: every mutating operation (except the documented pre-auth/signature
+    // exemptions) must document the X-CSRF-Protection header and a 403.
+    let contract: Value =
+        serde_json::from_str(include_str!("../openapi.json")).expect("valid openapi.json");
+    // Mirrors the `exempt` set in csrf_guard (src/lib.rs) plus the payment
+    // webhook prefix check.
+    let exempt = [
+        "/api/auth/login",
+        "/api/auth/bootstrap",
+        "/api/auth/sso/assertion",
+    ];
+    let paths = contract["paths"].as_object().expect("paths object");
+    for (path, item) in paths {
+        for method in ["post", "put", "delete", "patch"] {
+            let Some(op) = item.get(method) else { continue };
+            if exempt.contains(&path.as_str()) || path.starts_with("/api/payments/webhook/") {
+                continue;
+            }
+            let empty = Vec::new();
+            let params = op["parameters"].as_array().unwrap_or(&empty);
+            assert!(
+                params
+                    .iter()
+                    .any(|p| p["$ref"] == "#/components/parameters/CsrfProtection"),
+                "{method} {path} must document the CSRF header"
+            );
+            assert!(
+                op["responses"].get("403").is_some(),
+                "{method} {path} must document a 403 (csrf) response"
+            );
+        }
+    }
+}
+
 #[tokio::test]
 async fn unknown_field_rejected_before_persist() {
     let (app, d) = app().await;

@@ -78,6 +78,47 @@ impl ApiError {
     }
 }
 
+/// The complete, emittable `Error.code` vocabulary (#249): every string any
+/// code path can place in `error.code`. This is the single source of truth and
+/// is kept in lockstep with the `Error.code` enum in `openapi.json` by the
+/// `contract_error_code_vocabulary` test, which fails if the two drift apart.
+/// `invalid_json` is deliberately absent — a malformed body is surfaced as
+/// `validation_failed`/`bad_request`, never as `invalid_json` (#249).
+pub const CODE_VOCABULARY: &[&str] = &[
+    "validation_failed",
+    "not_found",
+    "conflict",
+    "bad_request",
+    "internal",
+    "write_lock_busy",
+    "lock_unavailable",
+    "csrf",
+    "unauthenticated",
+    "forbidden",
+    "rate_limited",
+    "initialised",
+    "invalid_credentials",
+    "disabled",
+    "inactive",
+    "sso_invalid",
+    "bad_signature",
+    "bad_state",
+    "no_vault",
+    "vault_disabled",
+    "calendar_not_configured",
+    "calendar_fetch",
+    "email_failed",
+    "oauth_exchange",
+];
+
+impl ApiError {
+    /// The machine-readable error-code vocabulary (#249), exactly as published
+    /// in the `Error.code` enum of `openapi.json`.
+    pub fn codes() -> &'static [&'static str] {
+        CODE_VOCABULARY
+    }
+}
+
 impl From<StoreError> for ApiError {
     fn from(e: StoreError) -> Self {
         match e {
@@ -123,3 +164,37 @@ impl IntoResponse for ApiError {
 
 // Rejected JSON payloads arrive through `ValidJson`; the shared 422 shape
 // above is produced there, so no axum-rejection glue lives in this module.
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn code_vocabulary_has_no_duplicates() {
+        let codes = ApiError::codes();
+        let mut sorted = codes.to_vec();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(sorted.len(), codes.len(), "CODE_VOCABULARY has duplicates");
+    }
+
+    #[test]
+    fn constructors_emit_documented_codes() {
+        // Every code a constructor can produce must be in the vocabulary, so
+        // the enum can never silently omit a real, emittable code (#249).
+        let emitted = [
+            ApiError::validation(Vec::new()).code,
+            ApiError::not_found("x").code,
+            ApiError::conflict("x").code,
+            ApiError::bad_request("x").code,
+            ApiError::lock_unavailable().code,
+            ApiError::internal("boom".into()).code,
+        ];
+        for code in emitted {
+            assert!(
+                ApiError::codes().contains(&code),
+                "constructor code {code:?} is missing from CODE_VOCABULARY"
+            );
+        }
+    }
+}
