@@ -9,9 +9,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { JSDOM } from 'jsdom';
+import { loadAppSource } from './load-app.mjs';
 
 const html = readFileSync(new URL('../web/index.html', import.meta.url), 'utf8');
-const app = readFileSync(new URL('../web/app.js', import.meta.url), 'utf8');
+const app = loadAppSource();
 
 // Wire the tab handlers without the network: every api call resolves, and
 // /auth/status has no `initialised`, so initAuth() returns falsy and startApp()

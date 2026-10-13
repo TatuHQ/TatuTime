@@ -833,7 +833,8 @@
     </div>
   </dialog>
 
-  <script src="/app.js"></script>
+  <!-- ES-module entry (#264): loads web/js via native imports, no build step. -->
+  <script type="module" src="/app.js"></script>
 
   <!-- #182: hierarchy dialogs live at body level so they can open
        from any of the three Setup sections (their panels hide otherwise). -->
