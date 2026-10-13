@@ -94,6 +94,12 @@ The GUI is a presentation layer and nothing more — it never reads storage.
   the `Secure` cookie flag is the independent `TUCANO_SECURE_COOKIES` axis
   (default on iff `TUCANO_ENV=production`; `=0` allows plain-HTTP LAN serving,
   review A5). `password_hash` is never serialised to clients.
+- **SSO (#32, #260):** identity providers (OIDC/signed-token, SAML stub) are
+  additive to local login and JIT-provision members from a verified assertion.
+  `allowed_domains` is a **fail-closed allow-list**: only listed domains are
+  trusted and an empty/unset list denies every domain — `registry_from_vault`
+  then registers no provider and logs a loud boot error (#260, mirroring vault
+  #77). Provider secrets stay in the vault/env, never in the repo or responses.
 - **RBAC / private-per-user (#51):** entries and expenses carry `user_id` (the
   author). A **member** sees/edits only their own records; an **admin** sees all
   and owns `/api/invoices` (admin tier) and submission approval. Enforce via
