@@ -284,12 +284,13 @@
          section once the Calendar segment is selected. -->
     <section id="panel-calendar" role="tabpanel" aria-labelledby="ts-cal" tabindex="0" hidden>
       <!-- #140: the month bar mirrors the Day and Week date bars — the same
-           card, a centred month label, the month total in the left slot and a
-           quiet "Return to this month" link on the right. The old secondary
-           "Today" button is gone; this link replaces it. -->
+           card, a centred month label, a "Total hours" readout in the left slot
+           and a quiet "Return to this month" link on the right. The old
+           secondary "Today" button is gone; this link replaces it. -->
       <div class="day-bar p-card">
         <div class="day-actions">
-          <span id="cal-total" class="p-form-help-text" role="status" aria-live="polite"></span>
+          <span class="cal-total-label">Total hours</span>
+          <span id="cal-total" class="cal-total-value" role="status" aria-live="polite"></span>
         </div>
         <nav class="day-nav" aria-label="Change month">
           <button type="button" id="cal-prev" aria-label="Previous month" title="Previous month"><i class="p-icon--chevron-left" aria-hidden="true"></i></button>
