@@ -9,6 +9,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { JSDOM } from 'jsdom';
 import { loadAppSource } from './load-app.mjs';
+import { waitFor } from './wait-for.mjs';
 
 const html = readFileSync(new URL('../web/index.html', import.meta.url), 'utf8');
 const app = loadAppSource();
@@ -32,9 +33,10 @@ async function bootAt(url) {
   dom.window.HTMLDialogElement.prototype.showModal = function showModal() { this.open = true; };
   dom.window.HTMLDialogElement.prototype.close = function close() { this.open = false; };
   dom.window.eval(`${app}\n${bootStub}`);
-  for (let i = 0; i < 200 && !dom.window.document.getElementById('version').textContent; i += 1) {
-    await new Promise((done) => setTimeout(done, 10));
-  }
+  // Wait for boot to complete (#265) instead of polling a fixed number of ticks.
+  await waitFor(() => dom.window.document.getElementById('version').textContent === 'TucanoTime', {
+    message: 'the app to finish booting at ' + url,
+  });
   assert.ok(dom.window.document.getElementById('version').textContent, 'boot completed');
   return dom;
 }

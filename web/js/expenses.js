@@ -3,7 +3,7 @@
 
 
 import { api } from './api.js';
-import { $, announce, askConfirm, clearFormError, el, fillSelect, formatMoney, showFormError } from './dom.js';
+import { $, announce, askConfirm, clearFormError, el, fillSelect, formatMoney, showFormError, statusChip } from './dom.js';
 import { customerName, state } from './state.js';
 import { invalidateLockCache, refreshDay } from './timesheet.js';
 
@@ -22,9 +22,9 @@ export async function refreshCategories() {
     ul.appendChild(
       el(
         'li',
-        { cls: `chip${cat.active ? '' : ' inactive'}` },
+        { cls: 'p-chip' },
         [
-          el('span', { text: cat.name }),
+          el('span', { cls: 'p-chip__value', text: cat.name }),
           el('button', {
             type: 'button',
             cls: 'chip-edit',
@@ -32,11 +32,12 @@ export async function refreshCategories() {
             attrs: { 'aria-label': `Edit category ${cat.name}` },
             on: { click: () => startCategoryEdit(cat) },
           }),
+          // #232 increment 3: the official chip dismiss affordance — icon-only
+          // (the Vanilla close glyph) with an accessible name.
           el('button', {
             type: 'button',
-            cls: 'chip-x',
-            text: '×',
-            attrs: { 'aria-label': `Delete category ${cat.name}` },
+            cls: 'p-chip__dismiss',
+            attrs: { 'aria-label': `Delete category ${cat.name}`, title: `Delete category ${cat.name}` },
             on: { click: () => removeCategory(cat) },
           }),
         ],
@@ -138,12 +139,12 @@ export async function refreshExpenses() {
     tbody.appendChild(
       el('tr', {}, [
         el('th', { attrs: { scope: 'row' }, text: x.date }),
-        el('td', { text: customerName(x.customer_id) }),
-        el('td', { text: x.project_code || '' }),
-        el('td', { text: c ? c.name : '' }),
-        el('td', { cls: 'num', text: `${x.currency} ${formatMoney(x.amount_minor)}` }),
-        el('td', { text: x.billable ? 'yes' : 'no' }),
-        el('td', { cls: 'actions-col' }, [
+        el('td', { attrs: { 'data-heading': 'Customer' }, text: customerName(x.customer_id) }),
+        el('td', { attrs: { 'data-heading': 'Project' }, text: x.project_code || '' }),
+        el('td', { attrs: { 'data-heading': 'Category' }, text: c ? c.name : '' }),
+        el('td', { cls: 'num', attrs: { 'data-heading': 'Amount' }, text: `${x.currency} ${formatMoney(x.amount_minor)}` }),
+        el('td', { attrs: { 'data-heading': 'Billable' }, text: x.billable ? 'yes' : 'no' }),
+        el('td', { cls: 'actions-col', attrs: { 'data-heading': 'Actions' } }, [
           el('button', {
             cls: 'danger',
             type: 'button',
@@ -225,7 +226,7 @@ export async function refreshSubmissions() {
         el('th', { attrs: { scope: 'row' }, text: `${s.week_start} → ${s.week_end}` }),
         el('td', { cls: 'num', text: String(s.entry_ids.length) }),
         el('td', {}, [
-          el('span', { cls: s.state === 'approved' ? 'badge on' : 'badge', text: s.state }),
+          statusChip(s.state, s.state === 'approved'),
         ]),
         el('td', { text: s.comment || '' }),
         el('td', { cls: 'actions-col' }, actions),

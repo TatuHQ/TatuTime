@@ -5,7 +5,7 @@
 import { API_BASE, api } from './api.js';
 import { iw } from './billing.js';
 import { refreshPanel, switchTab } from './boot.js';
-import { $, announce, askAlert, askConfirm, clearFormError, el, fillSelect, formatMoney, showFormError } from './dom.js';
+import { $, announce, askAlert, askConfirm, clearFormError, el, fillSelect, formatMoney, showFormError, statusChip } from './dom.js';
 import { ed } from './invoices.js';
 import { createSeqGuard } from './seq.js';
 import { customerName, fillCustomerSelect, fillProjectSelect, loadCustomers, loadProjects, state } from './state.js';
@@ -28,14 +28,11 @@ export async function refreshCustomerTable() {
           el('button', { type: 'button', cls: 'link', text: c.name,
             on: { click: () => openProjectsFor(c.id) } }),
         ]),
-        el('td', { cls: 'num', text: `${c.currency} ${formatMoney(c.default_rate_minor)}` }),
-        el('td', {}, [
-          el('span', {
-            cls: c.active ? 'badge on' : 'badge',
-            text: c.active ? 'Active' : 'Inactive',
-          }),
+        el('td', { cls: 'num', attrs: { 'data-heading': 'Default rate' }, text: `${c.currency} ${formatMoney(c.default_rate_minor)}` }),
+        el('td', { attrs: { 'data-heading': 'Status' } }, [
+          statusChip(c.active ? 'Active' : 'Inactive', c.active),
         ]),
-        el('td', { cls: 'actions-col' }, [
+        el('td', { cls: 'actions-col', attrs: { 'data-heading': 'Actions' } }, [
           el('button', {
             cls: 'link',
             type: 'button',
@@ -272,17 +269,14 @@ export async function refreshProjectTable() {
             attrs: { title: `Manage tasks for ${p.code}` },
             on: { click: () => openTasksFor(cid, p.code) } }),
         ]),
-        el('td', { text: customerName(cid) }),
-        el('td', { text: p.name }),
-        el('td', { text: p.currency || 'customer' }),
-        el('td', { cls: 'num', text: p.rate_minor != null ? formatMoney(p.rate_minor) : 'customer' }),
-        el('td', {}, [
-          el('span', {
-            cls: p.active ? 'badge on' : 'badge',
-            text: p.active ? 'Active' : 'Inactive',
-          }),
+        el('td', { attrs: { 'data-heading': 'Customer' }, text: customerName(cid) }),
+        el('td', { attrs: { 'data-heading': 'Name' }, text: p.name }),
+        el('td', { attrs: { 'data-heading': 'Currency' }, text: p.currency || 'customer' }),
+        el('td', { cls: 'num', attrs: { 'data-heading': 'Rate' }, text: p.rate_minor != null ? formatMoney(p.rate_minor) : 'customer' }),
+        el('td', { attrs: { 'data-heading': 'Status' } }, [
+          statusChip(p.active ? 'Active' : 'Inactive', p.active),
         ]),
-        el('td', { cls: 'actions-col' }, [
+        el('td', { cls: 'actions-col', attrs: { 'data-heading': 'Actions' } }, [
           el('button', {
             cls: 'link',
             type: 'button',
@@ -490,14 +484,11 @@ export async function refreshTaskTable() {
     tbody.appendChild(
       el('tr', {}, [
         el('th', { attrs: { scope: 'row' }, text: t.code }),
-        el('td', { text: t.name }),
-        el('td', {}, [
-          el('span', {
-            cls: t.active ? 'badge on' : 'badge',
-            text: t.active ? 'Active' : 'Inactive',
-          }),
+        el('td', { attrs: { 'data-heading': 'Name' }, text: t.name }),
+        el('td', { attrs: { 'data-heading': 'Status' } }, [
+          statusChip(t.active ? 'Active' : 'Inactive', t.active),
         ]),
-        el('td', { cls: 'actions-col' }, [
+        el('td', { cls: 'actions-col', attrs: { 'data-heading': 'Actions' } }, [
           el('button', {
             cls: 'link',
             type: 'button',

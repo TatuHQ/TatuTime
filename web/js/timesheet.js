@@ -4,7 +4,7 @@
 
 import { api } from './api.js';
 import { refreshCalendar } from './calendar.js';
-import { $, addDays, announce, askAlert, askConfirm, askPrompt, clearFormError, el, isoDate, mondayOf, rowAction, showFormError, ubuntuIcon } from './dom.js';
+import { $, addDays, announce, askAlert, askConfirm, askPrompt, clearFormError, el, isoDate, mondayOf, rowAction, showFormError, statusChip, ubuntuIcon } from './dom.js';
 import { isOpenInvoice } from './invoices.js';
 import { refreshNotifications } from './notifications.js';
 import { showTimesheet } from './route.js';
@@ -144,7 +144,7 @@ export async function refreshDay() {
         el(
           'td',
           { cls: 'entry-note', text: e.note || '', attrs: { title: e.note || '' } },
-          e.billable ? [] : [el('span', { cls: 'badge', text: ' non-billable' })],
+          e.billable ? [] : [statusChip('non-billable')],
         ),
         hoursCell,
         // Row actions use the shared link/danger pattern (the rest of the

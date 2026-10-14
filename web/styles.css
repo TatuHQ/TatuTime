@@ -98,17 +98,54 @@ body {
 }
 .brand { font-size: 1.5rem; font-weight: 550; color: var(--brand-deep); padding: .25rem .5rem; letter-spacing: 0; }
 .sidebar nav { flex: 1; display: flex; flex-direction: column; gap: .15rem; } /* #191: the utility separator + wizard button are nav siblings of the tablist now */
+/* ---- tablists: the official Vanilla p-tabs pattern (#232 increment 5) ----
+   Every app tablist (the sidebar rail, Day|Week|Calendar, the settings bar)
+   carries the official `p-tabs__list` / `p-tabs__item` / `p-tabs__link`
+   vocabulary. Vanilla's `.p-tabs` container is deliberately NOT used: it exists
+   to box the list *together with its panels* (`position: relative; overflow:
+   hidden`), and in this single-shell SPA the panels live in <main> — away from
+   their tablist — so the container would only clip the focus rings the app
+   guarantees. App-owned here is geometry and the rail's ink, nothing else. */
+/* Keep the app's own focus ring (the one the contrast audit reads) on the tab
+   links rather than Vanilla's in-box outline. */
+.p-tabs__link:focus-visible { outline: 3px solid var(--focus); outline-offset: 1px; }
+/* Vanilla spaces a tab's icon with `gap`; the global icon margin would double it. */
+.p-tabs__link [class*="p-icon--"] { margin-right: 0; }
+
+/* The sidebar rail is the app's *vertical* tablist (#258 navigates it with
+   Up/Down), so Vanilla's horizontal-strip box is unwound: no bottom rule, no
+   horizontal scrolling, no trailing item margin. */
 .tabs { display: flex; flex-direction: column; gap: .15rem; }
-.tabs [role="tab"] {
-  font: inherit; text-align: left; cursor: pointer; width: 100%;
-  padding: .55rem .7rem; border: none; border-left: 3px solid transparent;
-  background: transparent; color: var(--fg); border-radius: 0 var(--radius) var(--radius) 0;
+.sidebar #tabs.p-tabs__list { width: 100%; margin: 0; overflow: visible; white-space: normal; box-shadow: none; }
+.sidebar .p-tabs__item:last-child { margin-right: 0; }
+.sidebar .p-tabs__link {
+  width: 100%; height: auto; min-height: 2.75rem; margin: 0;
+  justify-content: flex-start; text-align: left; /* Vanilla centres a tab */
+  padding: .55rem .7rem;
+  /* the rail keeps the app ink (#333 / #f1e9ed) so it matches the wizard
+     entry and the colour-mode switch beside it, not Vanilla's #000/#fff strip
+     ink; the selected pair (--brand-deep on --accent-soft) is pinned in
+     gui-test/contrast.mjs */
+  color: var(--fg);
+  border-left: 3px solid transparent; border-radius: 0 var(--radius) var(--radius) 0;
 }
-.tabs [role="tab"]:hover { background: var(--row-alt); }
-.tabs [role="tab"][aria-selected="true"] {
+/* Vanilla's bottom highlight bar is a horizontal-strip affordance; the rail
+   keeps the same "selected" cue on its left edge instead. */
+.sidebar .p-tabs__link::before,
+.sidebar .p-tabs__link:focus:not(:focus-visible)::before { content: none; }
+.sidebar .p-tabs__link:hover { background: var(--row-alt); }
+.sidebar .p-tabs__link[aria-selected="true"] {
   background: var(--accent-soft); color: var(--brand-deep);
   border-left-color: var(--accent); font-weight: 700;
 }
+
+/* The two in-view strips keep their heading-slot geometry (the official list
+   hugs its tabs instead of filling the row) and #145's uniform segment widths,
+   and drop Vanilla's trailing item margin. */
+.ts-head .p-tabs__list, .settings-head .p-tabs__list { width: auto; margin: 0; }
+#ts-seg .p-tabs__item:last-child, .settings-tabs .p-tabs__item:last-child { margin-right: 0; }
+#ts-seg .p-tabs__link { min-width: 8.5ch; }
+.settings-tabs .p-tabs__link { min-width: 9rem; }
 .account { display: flex; align-items: center; justify-content: space-between; gap: .5rem; padding: .5rem; border-top: 1px solid var(--line); color: var(--muted); }
 .account .who { font-size: .85rem; overflow: hidden; text-overflow: ellipsis; }
 .more-tools-group { border-top: 1px solid var(--line); margin-top: .45rem; padding-top: .4rem; }
@@ -159,14 +196,8 @@ button.danger { background: none; border: none; color: var(--danger); padding: .
 .field.checkbox input, .theme-switch input { min-height: 0; width: 1rem; height: 1rem; }
 button [class*="p-icon--"] { flex: 0 0 1rem; vertical-align: -.15rem; margin-right: .5rem; }
 .day-nav button [class*="p-icon--"] { margin: 0; }
-.tabs [role="tab"] { min-height: 2.75rem; }
-.tabs [role="tab"] [class*="p-icon--"] { margin-right: .5rem; }
-.nav-label, .hint, .foot { font-size: .875rem; }
 button.p-button, button.p-button--positive { margin-bottom: 0; }
 button { margin-right: 0; margin-bottom: 0; }
-.card { box-shadow: none; }
-dialog { max-height: calc(100dvh - 3rem); overflow-y: auto; }
-dialog h2 { font-size: 1.5rem !important; font-weight: 400; }
 dialog input:not([type="checkbox"]), dialog select, dialog textarea { width: 100%; }
 button.note-flag { min-height: 1.75rem; min-width: 1.75rem; }
 button.note-flag [class*="p-icon--"] { margin-right: 0; }
@@ -174,7 +205,7 @@ button.note-flag [class*="p-icon--"] { margin-right: 0; }
 .lock [class*="p-icon--"] { vertical-align: -.15rem; }
 .bar > * { min-width: 0; }
 .table-scroll { max-width: 100%; }
-#expense-table, #config-table, #report-table { display: block; max-width: 100%; overflow-x: auto; }
+#config-table { display: block; max-width: 100%; overflow-x: auto; }
 button.link, button.danger { min-height: 2rem; }
 input[type="checkbox"], input[type="radio"] { min-height: 0; accent-color: var(--brand-deep); }
 @media (prefers-reduced-motion: reduce) {
@@ -192,13 +223,22 @@ tbody tr:nth-child(odd) { background: var(--row-alt); }
 tfoot th, tfoot td { font-weight: 700; border-top: 2px solid var(--line); border-bottom: none; }
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .actions-col { width: 9.5rem; }
-.badge { font-size: .78rem; padding: .12rem .5rem; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); text-transform: capitalize; }
-.badge.on { color: var(--brand-deep); border-color: var(--brand-deep); }
+/* #232 increment 3: status/rate pills are the official Vanilla chip
+   (`p-chip` + `p-chip__value`, built by `statusChip` in web/js/dom.js). The
+   bespoke `.badge` skin is retired — `p-status-label` is deprecated upstream
+   ("merged into the Chip component"), so `p-chip` is the official successor. */
 
 .table-scroll { overflow-x: auto; }
 #week-table td.cell { min-width: 5.5rem; }
 #week-table td.cell.has { background: var(--cell-active); font-weight: 600; }
 #week-table td.cell button { white-space: normal; background: none; border: none; color: var(--brand-deep); text-decoration: underline; font-weight: 600; padding: 0; }
+
+/* #232 increment 2 (reference tables): the customer/project/task/expense/report
+   registers are Vanilla p-card shells — the card owns the frame and the header
+   rule, so the #230 heading slot inside it drops its own bottom margin. The
+   dense registers use p-table--mobile-card for narrow screens (the renderers
+   supply the matching data-heading labels). */
+.p-card__header.customer-heading, .p-card__header.panel-heading-row, #report-form.bar { margin-bottom: 0; }
 
 .form-error { color: var(--danger); font-weight: 600; margin: .25rem 0; }
 .hint, .foot { color: var(--muted); font-size: .9rem; }
@@ -210,9 +250,10 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 [hidden] { display: none !important; }
 
 /* ---- chips ---- */
+/* #232 increment 3: editable category chips are official Vanilla `p-chip`s
+   (`p-chip__value` + `p-chip__dismiss`). Only the list layout and the
+   app-owned "Edit" affordance (Vanilla ships no in-chip edit) stay app-local. */
 .chips { list-style: none; display: flex; flex-wrap: wrap; gap: .4rem; padding: 0; margin: .25rem 0 1rem; }
-.chip { display: inline-flex; align-items: center; gap: .35rem; border: 1px solid var(--line); border-radius: 999px; padding: .2rem .65rem; background: var(--surface); }
-.chip-x { border: none; background: none; color: var(--danger); font-size: 1rem; line-height: 1; padding: 0 .1rem; cursor: pointer; }
 
 /* ---- auth ---- */
 /* First-admin sign-in is the twin of the first-run setup wizard (#229): a
@@ -238,10 +279,10 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .cal-events { list-style: none; padding: 0; margin: 0 0 1rem; }
 .cal-event { display: flex; align-items: center; justify-content: space-between; gap: .75rem; padding: .4rem .6rem; border: 1px solid var(--line); border-radius: var(--radius); margin-bottom: .35rem; background: var(--surface); }
 
+/* #232 increment 3: notifications are official `p-notification` markup (see
+   web/js/notifications.js); what remains here is the list/header layout only. */
 .notif-head { display: flex; align-items: center; justify-content: space-between; font-weight: 700; margin: .5rem 0 .25rem; }
 .notifs { list-style: none; padding: 0; margin: 0 0 1rem; }
-.notif { margin-bottom: .4rem; }
-.notif:last-child { margin-bottom: 0; }
 
 /* Day view redesign (#12) */
 .day-bar.p-card { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: .7rem 1rem; margin: 0 0 .75rem; padding: .65rem .8rem; }
@@ -273,7 +314,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 #day-table td.entry-note { padding: .65rem .75rem; color: var(--fg); font-size: .875rem;
   min-width: 0; max-width: 46ch; }
 .entry-note { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-#day-table td.entry-note span.badge { margin-left: .35rem; }
+#day-table td.entry-note .p-chip { margin-left: .35rem; }
 .entry-hours { font-variant-numeric: tabular-nums; font-weight: 600; }
 /* Aligned with the day table: same vertical rhythm as the row gaps
    (.45rem border-spacing) and the same content inset as .entry-main
@@ -311,40 +352,50 @@ td.cell.locked .cell-input { opacity: .6; }
   .app { flex-direction: column; }
   .sidebar { width: auto; flex: none; border-right: none; border-bottom: 1px solid var(--line); }
   .tabs { flex-direction: row; flex-wrap: wrap; }
-  .tabs [role="tab"] { width: auto; border-left: none; border-bottom: 3px solid transparent; border-radius: var(--radius); }
+  .sidebar .p-tabs__link { width: auto; border-left: none; border-bottom: 3px solid transparent; border-radius: var(--radius); }
   .more-tools-group { margin-top: .15rem; padding-top: .4rem; }
   #wizard-open { width: auto; border-left: none; border-bottom: 3px solid transparent; border-radius: var(--radius); }
-  .tabs [role="tab"][aria-selected="true"] { border-bottom-color: var(--accent); }
+  .sidebar .p-tabs__link[aria-selected="true"] { border-bottom-color: var(--accent); }
 }
 
-/* ------------------------------------------- inline dialog (#102) ------- */
-#app-dialog, #wizard-dialog, #entry-dialog, #expense-dialog, #expense-category-dialog, #customer-dialog, #project-dialog, #task-dialog, #user-dialog, #user-password-dialog {
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  padding: 1.1rem 1.2rem 1rem;
-  max-width: 26rem;
-  width: calc(100vw - 3rem);
-  background: var(--surface);
-  color: var(--text);
-  box-shadow: 0 10px 30px rgba(44, 0, 30, 0.35);
-}
-#app-dialog::backdrop, #wizard-dialog::backdrop, #entry-dialog::backdrop,
-#expense-dialog::backdrop, #expense-category-dialog::backdrop, #customer-dialog::backdrop,
-#project-dialog::backdrop, #task-dialog::backdrop { background: rgba(44, 0, 30, 0.55); } /* dark aubergine */
-#app-dialog h2, #wizard-dialog h2, #entry-dialog h2, #expense-dialog h2, #expense-category-dialog h2 { margin: 0 0 .4rem; font-size: 1.05rem; }
-#expense-dialog { max-width: 36rem; }
-#customer-dialog { max-width: 38rem; max-height: calc(100dvh - 3rem); overflow-y: auto; }
-#customer-dialog h2 { margin: 0 0 .75rem; font-size: 1.05rem; }
+/* --------------------- dialogs: official Vanilla p-modal pattern ------- */
+/* #232 increment 4: every popup is the official p-modal overlay — the native
+   <dialog> carries `p-modal` so it keeps the top layer, ::backdrop, inert
+   background and focus trap of #102 — with a `p-modal__dialog` box,
+   `p-modal__header`/`p-modal__title` and a `p-modal__footer`. Only the UA box
+   the native element adds (border + max sizes) is neutralised; the chrome,
+   colours and scrolling come from the vendored component classes. The overlay
+   paints its own dim, so the native ::backdrop is cleared. */
+dialog.p-modal { border: 0; max-width: none; max-height: none; }
+/* Closed-state guard (regression fix, #232 increment 4): that reset neutralises
+   the UA *box* but not the state that matters — the vendored `.p-modal
+   { display: flex }` is an AUTHOR declaration, and the cascade compares a
+   declaration's origin BEFORE its specificity, so it beats the UA stylesheet's
+   `dialog:not([open]) { display: none }` however specific that UA rule is. A
+   closed dialog therefore stayed rendered and every popup painted as a fixed
+   full-viewport overlay on load. Re-assert the non-rendered state at author
+   level: `dialog.p-modal:not([open])` (0,2,1) out-specifies `.p-modal` (0,1,0)
+   and comes later in the sheet, so it wins. Opening the dialog sets `[open]`
+   (`showModal()`), the guard stops matching, and the vendored overlay — top
+   layer, ::backdrop, inert background, focus trap — takes over unchanged.
+   Pinned by gui-test/dialog-display.test.mjs. */
+dialog.p-modal:not([open]) { display: none; }
+dialog.p-modal::backdrop { background: transparent; }
+/* Per-dialog widths stay app-owned (the pattern caps at 80rem — far too wide
+   for these focused forms). */
+#app-dialog .p-modal__dialog { max-width: 26rem; }
+#entry-dialog .p-modal__dialog { max-width: 28rem; }
+#expense-dialog .p-modal__dialog { max-width: 36rem; }
+#expense-category-dialog .p-modal__dialog { max-width: 28rem; }
+#customer-dialog .p-modal__dialog { max-width: 38rem; }
+#project-dialog .p-modal__dialog, #task-dialog .p-modal__dialog { max-width: 32rem; }
+#user-dialog .p-modal__dialog, #user-password-dialog .p-modal__dialog { max-width: 34rem; }
 #customer-dialog form { margin: 0; }
-#user-dialog, #user-password-dialog { max-width: 34rem; max-height: calc(100dvh - 3rem); overflow-y: auto; }
-#user-dialog::backdrop, #user-password-dialog::backdrop { background: rgba(44, 0, 30, .55); }
 #user-dialog form, #user-password-dialog form { margin: 0; }
 #user-dialog input:not([type="checkbox"]), #user-dialog select, #user-password-dialog input { width: 100%; }
 .user-filters { margin-top: 1rem; }
 .user-filters > div { min-width: 0; }
 #user-table { min-width: 40rem; }
-#project-dialog, #task-dialog { max-width: 32rem; max-height: calc(100dvh - 3rem); overflow-y: auto; }
-#project-dialog h2, #task-dialog h2 { margin: 0 0 .5rem; font-size: 1.05rem; }
 #project-dialog form, #task-dialog form { margin: 0; }
 .hierarchy-actions { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
 /* #182: hierarchy-section filter controls + scope label */
@@ -357,7 +408,6 @@ td.cell.locked .cell-input { opacity: .6; }
 .scope-hint { margin: 0 0 .65rem; }
 .scope-hint .scope-label { font-size: .85rem; }
 .customer-heading h2 { margin: 0; }
-#expense-category-dialog { max-width: 28rem; }
 #expense-dialog form, #expense-category-dialog form { margin: 0; }
 #expense-dialog .field, #expense-category-dialog .field { margin-bottom: .65rem; }
 #expense-dialog input, #expense-dialog select, #expense-dialog textarea,
@@ -366,7 +416,7 @@ td.cell.locked .cell-input { opacity: .6; }
 #dlg-input-wrap { display: block; margin: 0 0 .9rem; }
 #dlg-input-wrap[hidden] { display: none; }
 #dlg-input-wrap span { display: block; margin-bottom: .3rem; font-size: .85rem; }
-#dlg-input { width: 100%; padding: .45rem .5rem; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); }
+#dlg-input { width: 100%; padding: .45rem .5rem; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); }
 .dlg-actions { display: flex; justify-content: flex-end; gap: .5rem; }
 
 /* --------------------------------- timesheet section + Day|Week segment -- #107 */
@@ -378,7 +428,6 @@ td.cell.locked .cell-input { opacity: .6; }
 }
 .settings-head { display: flex; align-items: center; justify-content: flex-start; gap: 1rem; flex-wrap: wrap; margin-bottom: .9rem; }
 .settings-tabs { flex-wrap: wrap; }
-.settings-tabs [role="tab"] { min-width: 9rem; }
 .settings-panel { min-width: 0; }
 .settings-panel > h2:first-child { margin-top: .4rem; }
 .settings-panel > .card { max-width: 48rem; }
@@ -387,18 +436,10 @@ td.cell.locked .cell-input { opacity: .6; }
   border: 1px solid var(--line); border-radius: var(--radius);
   background: var(--surface); box-shadow: var(--shadow);
 }
-.seg [role="tab"] {
-  border: 0; background: transparent; color: var(--fg);
-  padding: .45rem 1rem; font: inherit; cursor: pointer;
-  /* #145-style uniform segments: equal minimum width + height so Day/Week/
-     Calendar (and Open/All) don't render at three different sizes. */
-  min-width: 8.5ch; min-height: 2.5rem; text-align: center;
-}
-.seg [role="tab"] + [role="tab"] { border-left: 1px solid var(--line); }
-.seg [role="tab"][aria-selected="true"] {
-  color: var(--brand-deep); font-weight: 700;
-  box-shadow: inset 0 -3px 0 var(--accent);
-}
+/* #232 increment 5: the only remaining `.seg` consumer is the invoice
+   Open|All filter — a role="group" of aria-pressed toggle buttons, not a
+   tablist — so the segmented-control skin stays while its retired
+   `[role="tab"]` descendants and their tab state are gone. */
 
 /* ------------------------------------------- day view refresh (#108) ---- */
 #day-table { border-collapse: separate; border-spacing: 0 .45rem; }
@@ -414,25 +455,23 @@ td.cell.locked .cell-input { opacity: .6; }
 .day-notifications { margin: .35rem 0 .65rem; }
 .day-notifications .notif-head { margin: 0 0 .4rem; }
 .day-notifications .notifs { display: grid; gap: .4rem; margin: 0; }
-.day-notifications .notif { margin: 0; }
+.day-notifications .p-notification { margin-bottom: 0; }
 .copy-bar select { padding: .45rem .6rem; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); color: var(--fg); font: inherit; cursor: pointer; }
 
 /* ------------------------------------------- week view refresh (#109) ---- */
-#week-table.grid thead th { white-space: nowrap; }
 #week-table.grid thead th .wk-clock { display: block; font-size: .8rem; opacity: .55; line-height: 1; }
 #week-table.grid thead th .wk-dow { display: block; font-weight: 700; }
 #week-table.grid thead th .wk-date { display: block; font-weight: 400; font-size: .8rem; opacity: .8; }
 #week-table .row-band { border-left: 3px solid var(--accent); }
-#week-table .row-total { white-space: nowrap; }
 .week-controls select { padding: .45rem .6rem; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); color: var(--fg); font: inherit; cursor: pointer; }
 
 /* First-run setup wizard (#111) and first-admin sign-in (#229) are twins:
    both are a Vanilla p-card with a ruled header, .65rem field rhythm and a
-   full-width primary action. The native dialog stays chromeless so the inner
-   p-card is the single frame, exactly as in the auth overlay. Ids are
-   unchanged, so the jsdom + wizard smoke checks drive the same elements. */
-#wizard-dialog { max-width: 30rem; padding: 0; border: 0; background: transparent; box-shadow: none; }
-#wizard-dialog .p-card { margin: 0; }
+   full-width primary action. #232 increment 4 makes the wizard <dialog> the
+   official `p-modal` overlay, so the inner p-card is the single frame exactly
+   as in the auth overlay. Ids are unchanged, so the jsdom + wizard smoke
+   checks drive the same elements. */
+#wizard-dialog .p-card { width: 100%; max-width: 30rem; margin: 0; max-height: calc(100dvh - 2rem); overflow-y: auto; }
 #wizard-dialog h2 { margin: 0; font-size: 1.3rem !important; font-weight: 400; color: var(--brand-deep); } /* #257: see .auth-title — same AA fix */
 #wizard-dialog .wz-step { min-width: 0; }
 #wizard-dialog .wz-step p:first-child { margin-top: 0; }
@@ -445,8 +484,8 @@ td.cell.locked .cell-input { opacity: .6; }
 #wizard-dialog .dlg-actions .secondary { flex: 1 1 0; }
 .tab-sep { height: 1px; background: var(--line); margin: .45rem .5rem .35rem; }
 /* The wizard entry sits among the tabs but is an action, not a tab (#111):
-   same chrome as .tabs [role="tab"], minus the selected state; #125 pins it
-   to the bottom of the rail behind a separator. */
+   same chrome as a rail tab (.p-tabs__link), minus the selected state; #125
+   pins it to the bottom of the rail behind a separator. */
 #wizard-open {
   font: inherit; text-align: left; cursor: pointer; width: 100%;
   padding: .55rem .7rem; border: none; border-left: 3px solid transparent;
@@ -467,7 +506,6 @@ td.cell.locked .cell-input { opacity: .6; }
 #invoice-table tbody tr[tabindex="0"]:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
 /* ---- focused Day-entry dialog (#145) ---- */
-#entry-dialog { max-width: 28rem; }
 #entry-dialog form.card { box-shadow: none; padding: 0; margin: 0; }
 #entry-dialog .field { margin: 0 0 .7rem; }
 /* ---- grouped MVP rail (#142) ---- */
@@ -519,7 +557,6 @@ fieldset.field > legend { font-weight: 600; font-size: .85rem; padding: 0 .3rem;
 .dlg-actions { gap: .6rem; }
 h3 { font-size: 1.02rem; margin: 1.1rem 0 .4rem; }
 caption { padding-bottom: .35rem; }
-.badge { display: inline-block; line-height: 1.4; vertical-align: middle; }
 .contact-row {
   display: grid; grid-template-columns: 1.2fr 1fr 1.4fr auto auto;
   gap: .4rem; align-items: center; margin-bottom: .35rem;
@@ -540,10 +577,8 @@ caption { padding-bottom: .35rem; }
 .customer-extra-details fieldset.field { margin-top: .5rem; }
 .panel-heading-row { display: flex; align-items: center; justify-content: flex-start; gap: 1rem; margin-bottom: .65rem; }
 .panel-heading-row h2 { margin: 0; }
-.chip { min-height: 2rem; }
 .chip-edit { border: 0; background: transparent; color: var(--brand-deep); padding: .1rem .25rem; font-size: .8rem; }
 .chip-edit:hover { text-decoration: underline; }
-.chip-x { margin-left: .1rem; }
 
 .invoice-workspace {
   display: grid;
@@ -575,11 +610,9 @@ caption { padding-bottom: .35rem; }
 .invoice-register-column #invoice-table .actions-col button { margin: .1rem; padding: .2rem .35rem; }
 #invoice-wizard h3 { margin-top: 0; }
 #iw-projects { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .2rem .75rem; }
-.inv-overview { align-items: start; }
 #inv-tiles { align-content: start; }
 .inv-tile { min-height: 5.25rem; }
 #inv-chart-wrap { min-height: 8rem; }
-#inv-chart { min-height: 4rem; }
 .invoice-trends { min-width: 0; }
 .invoice-trends > summary { border: 1px solid var(--line); background: var(--surface); }
 .advanced-billing { margin-top: 1rem; border: 1px solid var(--line); border-radius: var(--radius); padding: .35rem .55rem; background: var(--surface); }
@@ -589,7 +622,6 @@ caption { padding-bottom: .35rem; }
 .advanced-billing-section .card { max-width: none; }
 .advanced-billing-section table { display: block; overflow-x: auto; }
 .day-bar { display: grid; grid-template-columns: auto minmax(12rem, 1fr) auto; align-items: center; }
-.day-bar.p-card { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); }
 .day-actions { grid-column: 1; }
 .day-nav { justify-self: center; }
 #day-today { justify-self: end; }

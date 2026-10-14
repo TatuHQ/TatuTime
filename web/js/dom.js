@@ -1,9 +1,12 @@
 // dom.js — TucanoTime GUI module (ES-module split of web/app.js, #264).
 // Moved from the original monolithic app.js; behaviour is unchanged.
-
-
-import { iw } from './billing.js';
-import { ed } from './invoices.js';
+//
+// This is the graph's leaf module: it imports nothing, so the browser
+// evaluates it before every consumer and `$` is always initialised by the time
+// another module's top-level wiring runs. Importing a view module here (as the
+// split originally did for `iw`/`ed`, which this file never uses) puts dom.js
+// inside a cycle, makes it evaluate *last*, and the first consumer's `$('…')`
+// then throws "can't access lexical declaration '$' before initialization".
 
 export const $ = (id) => document.getElementById(id);
 
@@ -47,6 +50,10 @@ export function ubuntuIcon(name) {
 
 export function decorateUbuntuButton(button) {
   if (button.getAttribute('role') === 'tab') return;
+  // #232 increment 3: a chip's own controls (its dismiss button) carry the
+  // official Vanilla chip skin — the generic button decorator must not stack
+  // `p-button`/icons on top of them.
+  if (button.classList.contains('p-chip__dismiss')) return;
   // #191: `data-positive`/`data-icon` are the stable contract (a label or id
   // rename can no longer silently strip the icon/colour); the old submit,
   // class, id-allowlist and label-matching rules remain fallbacks.
@@ -61,10 +68,10 @@ export function decorateUbuntuButton(button) {
   const icon = button.dataset.icon
     ?? (text.startsWith('+') ? 'plus'
       : text === 'Edit' ? 'edit'
-      : text === 'Delete' ? 'delete'
-      : text.startsWith('Copy') ? 'copy'
-      : text === 'Start timer' ? 'play'
-      : text === 'Stop' ? 'stop' : null);
+        : text === 'Delete' ? 'delete'
+          : text.startsWith('Copy') ? 'copy'
+            : text === 'Start timer' ? 'play'
+              : text === 'Stop' ? 'stop' : null);
   if (icon) {
     if (!button.dataset.icon && text.startsWith('+')) {
       const label = [...button.childNodes].find((node) => node.nodeType === Node.TEXT_NODE && node.textContent.trim().startsWith('+'));
@@ -90,6 +97,19 @@ export function rowAction(cls, text, fn, title) {
   });
 }
 
+// #232 increment 3: the official status pill. Vanilla 4.59 deprecates
+// `p-status-label` — "the status label has been merged into the Chip component"
+// (canonical/vanilla-framework#5535) — so a status renders as `p-chip` +
+// `p-chip__value`. `is-inline` drops the chip's block margin so the pill sits on
+// a table cell / note baseline; the app's pre-existing binary emphasis (the old
+// `.badge.on` vs `.badge`) maps to `p-chip--positive` vs the neutral chip. The
+// label enters through `textContent` only.
+export function statusChip(text, emphasised = false) {
+  return el('span', { cls: `p-chip is-inline${emphasised ? ' p-chip--positive' : ''}` }, [
+    el('span', { cls: 'p-chip__value', text }),
+  ]);
+}
+
 export function fillSelect(select, options) {
   select.textContent = '';
   for (const o of options) {
@@ -106,6 +126,40 @@ export function fillSelect(select, options) {
 // harness drives the same buttons a real user sees. Resolution is wired to
 // the buttons directly (no `method="dialog"`), so behaviour does not depend
 // on the host implementing dialog form submission.
+//
+// #232 increment 4: every popup renders the official Vanilla `p-modal` overlay
+// (`p-modal` on the native <dialog>, a `p-modal__dialog` box inside it); only
+// the markup classes moved — the native element still owns the top layer,
+// ::backdrop, inert background and focus trap.
+
+// The native <dialog> returns focus to the control that opened it on close;
+// jsdom (and the getAttribute fallback path) does not, so make the contract
+// explicit for every dialog: wrap show/close to remember the opener and focus
+// it again on close. Idempotent, so wiring twice is harmless.
+export function initDialogFocusReturn() {
+  for (const dlg of document.querySelectorAll('dialog')) {
+    if (dlg.dataset.focusWired) continue;
+    dlg.dataset.focusWired = '1';
+    const show = dlg.showModal;
+    const close = dlg.close;
+    if (typeof show === 'function') {
+      dlg.showModal = function (...args) {
+        if (!(this.open === true || this.hasAttribute('open'))) this.__opener = document.activeElement;
+        return show.apply(this, args);
+      };
+    }
+    if (typeof close === 'function') {
+      dlg.close = function (...args) {
+        const wasOpen = this.open === true || this.hasAttribute('open');
+        const result = close.apply(this, args);
+        const opener = this.__opener;
+        this.__opener = null;
+        if (wasOpen && opener && opener.isConnected && typeof opener.focus === 'function') opener.focus();
+        return result;
+      };
+    }
+  }
+}
 
 export function dlgSettle(result) {
   const dlg = $('app-dialog');

@@ -3,7 +3,7 @@
 
 
 import { api } from './api.js';
-import { $, addDays, announce, askConfirm, askPrompt, clearFormError, el, formatMoney, isoDate, mondayOf, rowAction, showFormError } from './dom.js';
+import { $, addDays, announce, askConfirm, askPrompt, clearFormError, el, formatMoney, isoDate, mondayOf, rowAction, showFormError, statusChip } from './dom.js';
 import { ed, parseHundredths, refreshInvoices } from './invoices.js';
 import { customerName, state } from './state.js';
 
@@ -280,7 +280,7 @@ export async function refreshCatalog() {
         el('th', { attrs: { scope: 'row' }, text: it.name }),
         el('td', { text: it.kind }),
         el('td', { cls: 'num', text: `${it.currency} ${formatMoney(it.default_price_minor)}` }),
-        el('td', {}, [el('span', { cls: it.active ? 'badge on' : 'badge', text: it.active ? 'active' : 'archived' })]),
+        el('td', {}, [statusChip(it.active ? 'active' : 'archived', it.active)]),
         el('td', { cls: 'actions-col' }, actions),
       ]),
     );
@@ -355,7 +355,7 @@ export async function refreshRetainers() {
       el('tr', {}, [
         el('th', { attrs: { scope: 'row' }, text: `${customerName(r.customer_id)} / ${r.project_code}` }),
         el('td', { cls: 'num', text: `${r.currency} ${formatMoney(Math.max(r.balance_minor, 0))}` }),
-        el('td', {}, [el('span', { cls: r.status === 'open' ? 'badge on' : 'badge', text: r.status })]),
+        el('td', {}, [statusChip(r.status, r.status === 'open')]),
         el('td', { text: r.last_activity ? String(r.last_activity).slice(0, 10) : '\u2014' }),
         el('td', { cls: 'actions-col' }, actions),
       ]),
@@ -490,7 +490,7 @@ export async function refreshSchedules() {
         }),
         el('td', { text: scd.last_period_end || 'never' }),
         el('td', {}, [
-          el('span', { cls: active ? 'badge on' : 'badge', text: active ? 'active' : 'paused' }),
+          statusChip(active ? 'active' : 'paused', active),
         ]),
         el('td', { cls: 'actions-col' }, [
           action('link', active ? 'Pause' : 'Resume', () => toggleSchedule(scd),
