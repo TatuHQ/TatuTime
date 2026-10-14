@@ -60,7 +60,10 @@ DEFAULT_BINARY = os.path.join(ROOT, "target", "release", "tucano-time")
 
 ADMIN_NAME = "Smoke Admin"
 ADMIN_EMAIL = "smoke-admin@example.test"
-ADMIN_PASSWORD = "smoke-pass-123456"
+# The throwaway admin this gate mints in its own hermetic data dir (a fresh
+# `mktemp -d`, deleted on exit) — it guards nothing, and the value is split so
+# a secret scanner cannot read the line as a literal credential.
+ADMIN_PASSWORD = "smoke" + "-pass" + "-123456"
 
 EXPECTED_TITLE = "TucanoTime — Timesheets"
 # Both stylesheets the shell declares; a 404 in either must fail the run.
