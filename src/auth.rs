@@ -25,7 +25,7 @@ pub enum Role {
     Member,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct User {
     pub id: Uuid,
     pub name: String,
@@ -234,7 +234,7 @@ pub fn resolve_session_secret(
     rand::rngs::SysRng
         .try_fill_bytes(&mut bytes)
         .expect("OS CSPRNG");
-    let secret = bytes.iter().map(|b| format!("{b:02x}")).collect::<String>();
+    let secret = crate::hex_lower(&bytes);
     match write_private_file(&key_path, secret.as_bytes()) {
         Ok(()) => (Some(secret), false),
         Err(e) => {

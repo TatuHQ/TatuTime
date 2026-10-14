@@ -414,6 +414,14 @@ impl crate::scheduler::Job for AccountingRetryJob {
         let Ok(records) = list_records(&self.store) else {
             return;
         };
+        // #256: read the customer set once for the whole retry pass instead of
+        // re-listing it inside the per-failed-record loop, and index it for the
+        // per-record lookup.
+        let Ok(customers) = self.store.list_customers() else {
+            return;
+        };
+        let customer_by_id: std::collections::HashMap<uuid::Uuid, &crate::domain::Customer> =
+            customers.iter().map(|c| (c.id, c)).collect();
         for rec in records
             .iter()
             .filter(|r| r.status == SyncStatus::Failed && r.attempts < 6)
@@ -424,10 +432,7 @@ impl crate::scheduler::Job for AccountingRetryJob {
             let Ok(Some(invoice)) = self.store.get_invoice(rec.invoice_id) else {
                 continue;
             };
-            let Ok(customers) = self.store.list_customers() else {
-                continue;
-            };
-            let Some(customer) = customers.iter().find(|c| c.id == invoice.customer_id) else {
+            let Some(customer) = customer_by_id.get(&invoice.customer_id).copied() else {
                 continue;
             };
             let key = invoice_key(provider.name(), &invoice.number);

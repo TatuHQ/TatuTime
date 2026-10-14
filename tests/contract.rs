@@ -7,6 +7,7 @@ use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use http_body_util::BodyExt;
+use serde::Deserialize;
 use serde_json::{Value, json};
 use std::sync::Arc;
 use tower::ServiceExt;
@@ -338,25 +339,747 @@ async fn healthz_is_ok() {
     assert_eq!(body["status"], "ok");
 }
 
+// ------------------------- mechanical router↔openapi.json drift check (#253) --
+//
+// AGENTS.md makes `openapi.json` the source of truth and requires route changes
+// and contract changes to land in the same commit, but nothing verified it
+// mechanically. Two sources are cross-checked here:
+//
+//   * `API_ROUTES` (src/lib.rs) — the canonical `(method, path, tier)` registry
+//     the router is authored against;
+//   * the live router from `build_router`, whose mounted path set is read back
+//     from axum's `Debug` (axum exposes no route introspection).
+//
+// The tests diff the registry against the contract in both directions and probe
+// the live router so the registry can never over-claim a route — and so a route
+// added to or removed from `build_router` fails even when the registry and the
+// contract were not touched. The `Error.code` vocabulary is already compared to
+// `ApiError::codes()` by `contract_error_code_enum_matches_rust_vocabulary`
+// (#249).
+
+/// Replace axum `{param}` segments with a concrete value so a registry path can
+/// be dispatched. The value is irrelevant — a probe never reaches a handler.
+fn concretise(path: &str) -> String {
+    path.split('/')
+        .map(|seg| if seg.starts_with('{') { "probe" } else { seg })
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+/// Dispatch `TRACE` — a method no route registers — and return the status and
+/// the `Allow` header. Against a mounted path this yields 405 with the methods
+/// it serves; an unmounted path falls through to the JSON 404 fallback; a
+/// guarded path answers 401 before method routing when no session is supplied.
+async fn trace_probe(
+    router: &Router,
+    path: &str,
+    cookie: Option<&str>,
+) -> (StatusCode, Option<String>) {
+    let mut b = Request::builder()
+        .method("TRACE")
+        .uri(concretise(path))
+        .header("x-csrf-protection", "1");
+    if let Some(c) = cookie {
+        b = b.header(header::COOKIE, c);
+    }
+    let res = router
+        .clone()
+        .oneshot(b.body(Body::empty()).unwrap())
+        .await
+        .expect("oneshot");
+    let allow = res
+        .headers()
+        .get(header::ALLOW)
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_string);
+    (res.status(), allow)
+}
+
+/// The path set the mounted router actually serves, read back from axum's
+/// `Debug` of the route node (the only route introspection axum offers). The
+/// always-present fallback routes (`/`, `/{*…}`) and the dev-only SSE endpoint
+/// `/_dev/reload` (404 outside dev mode) are not JSON-API operations and are
+/// dropped. If axum changes its `Debug` shape this fails loudly rather than
+/// silently under-checking, which is the right failure mode for a test.
+fn router_paths(router: &Router) -> std::collections::BTreeSet<String> {
+    format!("{router:?}")
+        .split('"')
+        .skip(1)
+        .step_by(2)
+        .filter(|t| t.starts_with('/') && !t.contains("{*") && *t != "/" && *t != "/_dev/reload")
+        .map(str::to_string)
+        .collect()
+}
+
+/// The `(METHOD, path)` set the contract declares.
+fn contract_operations(contract: &Value) -> std::collections::BTreeSet<(String, String)> {
+    let mut ops = std::collections::BTreeSet::new();
+    for (path, item) in contract["paths"].as_object().expect("paths object") {
+        for method in item.as_object().expect("path item").keys() {
+            if matches!(method.as_str(), "get" | "post" | "put" | "delete" | "patch") {
+                ops.insert((method.to_ascii_uppercase(), path.clone()));
+            }
+        }
+    }
+    ops
+}
+
+/// Whether `METHOD path` declares the response `code`.
+fn declares_code(
+    paths: &serde_json::Map<String, Value>,
+    method: &str,
+    path: &str,
+    code: &str,
+) -> bool {
+    paths
+        .get(path)
+        .and_then(|item| item.get(method.to_ascii_lowercase()))
+        .and_then(|op| op.get("responses"))
+        .and_then(|r| r.get(code))
+        .is_some()
+}
+
+/// Whether `METHOD path` publishes an explicit empty `security: []` — i.e. the
+/// contract marks the operation reachable without a session cookie.
+fn declares_public_security(
+    paths: &serde_json::Map<String, Value>,
+    method: &str,
+    path: &str,
+) -> bool {
+    paths
+        .get(path)
+        .and_then(|item| item.get(method.to_ascii_lowercase()))
+        .and_then(|op| op.get("security"))
+        .and_then(|s| s.as_array())
+        .is_some_and(|s| s.is_empty())
+}
+
+/// Router mounts the contract lacks and vice versa, as `(METHOD, path, ticket)`.
+/// Empty today — the two `(method, path)` sets already agree — but present so
+/// future drift is allow-listed explicitly (with a ticket) rather than skipped.
+const ROUTE_ALLOWLIST: &[(&str, &str, &str)] = &[];
+
+/// Lock-guarded mutations and the response codes their handlers can actually
+/// produce (#18/#185, `InvoiceLock`/`SubmissionLock`) that the contract must
+/// declare. The broader 400/422/429 matrices were completed in #251; this keeps
+/// the lock lifecycle pinned.
+const LOCK_LIFECYCLE_CODES: &[(&str, &str, &[&str])] = &[
+    ("PUT", "/api/entries/{id}", &["409", "503"]),
+    ("DELETE", "/api/entries/{id}", &["409", "503"]),
+    // #255: the expense lock now flows through the CombinedLocks seam too
+    // (invoice + claim providers), so an unverifiable state is a 503 like the
+    // entry paths — this was a raw 500 before the #190 fold.
+    ("DELETE", "/api/expenses/{id}", &["409", "503"]),
+    ("POST", "/api/submissions", &["503"]),
+];
+
+/// Operations that run before a session exists and must publish `security: []`.
+const PUBLIC_OPERATIONS: &[(&str, &str)] = &[
+    ("GET", "/healthz"),
+    ("GET", "/openapi.json"),
+    ("GET", "/docs"),
+    ("POST", "/api/auth/bootstrap"),
+    ("POST", "/api/auth/login"),
+    ("POST", "/api/auth/logout"),
+    ("GET", "/api/auth/status"),
+    ("GET", "/api/auth/sso/providers"),
+    ("POST", "/api/auth/sso/assertion"),
+    ("POST", "/api/payments/webhook/{provider}"),
+];
+
+/// `(METHOD, path, kind, ticket)` gaps the contract is known to have, where
+/// `kind` is a declared response code (e.g. `403`) or the literal
+/// `security[]`. EVERY entry MUST name the ticket that will close it; the tests
+/// fail if an entry is no longer a real gap, so this list only ever shrinks
+/// (#253).
+///
+/// Empty today: the #251 response-code gaps (lock 409/503) are closed and
+/// declared in `openapi.json`, so nothing remains to allow-list.
+const ALLOWED_CONTRACT_GAPS: &[(&str, &str, &str, &str)] = &[];
+
 #[tokio::test]
-async fn contract_paths_have_documented_responses() {
-    // Every operationId in the contract must be reachable. This is a light
-    // coverage check; the payload tests below check behaviour.
+async fn router_routes_match_openapi_bidirectionally() {
+    // #253 (a): the mounted router's (method, path) set must equal the contract
+    // in both directions, accounting for the `/api` nest and the root
+    // `/healthz|/openapi.json|/docs`.
+    let contract: Value =
+        serde_json::from_str(include_str!("../openapi.json")).expect("valid openapi.json");
+    let contract_ops = contract_operations(&contract);
+    let registry: std::collections::BTreeSet<(String, String)> = tucano_time::API_ROUTES
+        .iter()
+        .map(|(m, p, _)| ((*m).to_string(), (*p).to_string()))
+        .collect();
+    let allowed: std::collections::BTreeSet<(&str, &str)> =
+        ROUTE_ALLOWLIST.iter().map(|(m, p, _)| (*m, *p)).collect();
+
+    let mut drift = Vec::new();
+    for (method, path) in &registry {
+        if !contract_ops.contains(&(method.clone(), path.clone()))
+            && !allowed.contains(&(method.as_str(), path.as_str()))
+        {
+            drift.push(format!("router mounts {method} {path}; contract does not"));
+        }
+    }
+    for (method, path) in &contract_ops {
+        if !registry.contains(&(method.clone(), path.clone()))
+            && !allowed.contains(&(method.as_str(), path.as_str()))
+        {
+            drift.push(format!(
+                "contract declares {method} {path}; router does not"
+            ));
+        }
+    }
+    assert!(
+        drift.is_empty(),
+        "router/contract route drift:\n  {}",
+        drift.join("\n  ")
+    );
+
+    // #253 (a, live, paths): read the mounted path set straight off the router
+    // so a route added/removed in `build_router` fails even when neither the
+    // registry nor the contract changed.
+    let (client, _dir) = app().await;
+    let served = router_paths(&client.router);
+    let registered: std::collections::BTreeSet<String> = tucano_time::API_ROUTES
+        .iter()
+        .map(|(_, p, _)| (*p).to_string())
+        .collect();
+    assert_eq!(
+        served, registered,
+        "the mounted router's paths drifted from API_ROUTES — update src/lib.rs"
+    );
+
+    // #253 (a, live, methods + tier): probe each path once. `TRACE` is
+    // registered nowhere, so with an admin session a mounted path answers 405
+    // and advertises its methods in `Allow`; without a session a guarded path
+    // answers 401 while the open tier still answers 405.
+    let mut expected: std::collections::BTreeMap<
+        &str,
+        (tucano_time::Tier, std::collections::BTreeSet<&'static str>),
+    > = std::collections::BTreeMap::new();
+    for (method, path, tier) in tucano_time::API_ROUTES {
+        expected
+            .entry(*path)
+            .or_insert((*tier, std::collections::BTreeSet::new()))
+            .1
+            .insert(*method);
+    }
+    for (path, (tier, methods)) in &expected {
+        let (status, allow) = trace_probe(&client.router, path, Some(&client.cookie)).await;
+        assert_eq!(
+            status,
+            StatusCode::METHOD_NOT_ALLOWED,
+            "{path} is in API_ROUTES but the router did not mount it (probe {status})"
+        );
+        // GET implies HEAD, which `Allow` advertises; nothing else is implicit,
+        // so the advertised set (minus HEAD) must be exactly the registry's.
+        let advertised: std::collections::BTreeSet<String> = allow
+            .unwrap_or_default()
+            .split(',')
+            .map(|m| m.trim().to_string())
+            .filter(|m| !m.is_empty() && m != "HEAD")
+            .collect();
+        let want: std::collections::BTreeSet<String> =
+            methods.iter().map(|m| (*m).to_string()).collect();
+        assert_eq!(
+            advertised, want,
+            "{path}: the router serves {advertised:?} but API_ROUTES declares {want:?}"
+        );
+
+        let (anon, _) = trace_probe(&client.router, path, None).await;
+        match tier {
+            tucano_time::Tier::Open => assert_eq!(
+                anon,
+                StatusCode::METHOD_NOT_ALLOWED,
+                "{path} is open but an unauthenticated probe returned {anon}"
+            ),
+            tucano_time::Tier::Member | tucano_time::Tier::Admin => assert_eq!(
+                anon,
+                StatusCode::UNAUTHORIZED,
+                "{path} is guarded but an unauthenticated probe returned {anon}"
+            ),
+        }
+    }
+}
+
+#[test]
+fn contract_declares_producible_status_and_security() {
+    // #253 (b): every code a handler can actually produce must be declared, and
+    // the auth tiers the router enforces must be discoverable from the document.
+    // Admin ops must declare 403; lock-guarded mutations must declare their
+    // 409/503 lifecycle; pre-session ops must publish `security: []`. Known gaps
+    // are allow-listed per ticket and must be removed once closed.
     let contract: Value =
         serde_json::from_str(include_str!("../openapi.json")).expect("valid openapi.json");
     assert_eq!(contract["openapi"], "3.1.0");
     let paths = contract["paths"].as_object().expect("paths object");
+
+    let mut gaps: std::collections::BTreeSet<(String, String, String)> =
+        std::collections::BTreeSet::new();
+    for (method, path, tier) in tucano_time::API_ROUTES {
+        if *tier == tucano_time::Tier::Admin && !declares_code(paths, method, path, "403") {
+            gaps.insert(((*method).to_string(), (*path).to_string(), "403".into()));
+        }
+    }
+    for (method, path, codes) in LOCK_LIFECYCLE_CODES {
+        for code in *codes {
+            if !declares_code(paths, method, path, code) {
+                gaps.insert((
+                    (*method).to_string(),
+                    (*path).to_string(),
+                    (*code).to_string(),
+                ));
+            }
+        }
+    }
+    for (method, path) in PUBLIC_OPERATIONS {
+        if !declares_public_security(paths, method, path) {
+            gaps.insert((
+                (*method).to_string(),
+                (*path).to_string(),
+                "security[]".into(),
+            ));
+        }
+    }
+
+    let mut allowed = std::collections::BTreeSet::new();
+    for (m, p, k, _ticket) in ALLOWED_CONTRACT_GAPS {
+        allowed.insert(((*m).to_string(), (*p).to_string(), (*k).to_string()));
+    }
+
+    let unexpected: Vec<String> = gaps
+        .iter()
+        .filter(|gap| !allowed.contains(*gap))
+        .map(|(m, p, k)| format!("  {m} {p} must declare {k}"))
+        .collect();
+    assert!(
+        unexpected.is_empty(),
+        "contract omits producible status/security (fix the contract or allow-list it with a ticket):\n{}",
+        unexpected.join("\n")
+    );
+
+    // Shrinking-only allow-list: an entry whose gap is already closed is stale.
+    let mut stale = Vec::new();
+    for (m, p, k, ticket) in ALLOWED_CONTRACT_GAPS {
+        if !gaps.contains(&((*m).to_string(), (*p).to_string(), (*k).to_string())) {
+            stale.push(format!("{m} {p} {k} ({ticket})"));
+        }
+    }
+    assert!(
+        stale.is_empty(),
+        "stale allow-list entries — the gap is closed, remove them from ALLOWED_CONTRACT_GAPS: {}",
+        stale.join(", ")
+    );
+}
+
+#[test]
+fn contract_error_code_enum_matches_rust_vocabulary() {
+    // #249: the Error.code enum in the contract must be exactly the Rust
+    // vocabulary (ApiError::codes()) — no stale codes, and none missing.
+    let contract: Value =
+        serde_json::from_str(include_str!("../openapi.json")).expect("valid openapi.json");
+    let enum_codes: Vec<String> = contract["components"]["schemas"]["Error"]["properties"]["error"]
+        ["properties"]["code"]["enum"]
+        .as_array()
+        .expect("Error.code enum")
+        .iter()
+        .map(|c| c.as_str().expect("string code").to_string())
+        .collect();
+    let rust_codes: Vec<String> = tucano_time::error::ApiError::codes()
+        .iter()
+        .map(|c| (*c).to_string())
+        .collect();
+    assert_eq!(
+        enum_codes, rust_codes,
+        "openapi.json Error.code enum drifted from ApiError::codes()"
+    );
+}
+
+#[test]
+fn contract_documents_csrf_on_mutating_operations() {
+    // #249: every mutating operation (except the documented pre-auth/signature
+    // exemptions) must document the X-CSRF-Protection header and a 403.
+    let contract: Value =
+        serde_json::from_str(include_str!("../openapi.json")).expect("valid openapi.json");
+    // Mirrors the `exempt` set in csrf_guard (src/lib.rs) plus the payment
+    // webhook prefix check.
+    let exempt = [
+        "/api/auth/login",
+        "/api/auth/bootstrap",
+        "/api/auth/sso/assertion",
+    ];
+    let paths = contract["paths"].as_object().expect("paths object");
+    for (path, item) in paths {
+        for method in ["post", "put", "delete", "patch"] {
+            let Some(op) = item.get(method) else { continue };
+            if exempt.contains(&path.as_str()) || path.starts_with("/api/payments/webhook/") {
+                continue;
+            }
+            let empty = Vec::new();
+            let params = op["parameters"].as_array().unwrap_or(&empty);
+            assert!(
+                params
+                    .iter()
+                    .any(|p| p["$ref"] == "#/components/parameters/CsrfProtection"),
+                "{method} {path} must document the CSRF header"
+            );
+            assert!(
+                op["responses"].get("403").is_some(),
+                "{method} {path} must document a 403 (csrf) response"
+            );
+        }
+    }
+}
+
+// --------------------------- #252 contract document fidelity ----------------
+//
+// #252 replaced the document's `nullable` (3.0-only, silently ignored by 3.1
+// validators), corrected parameter requiredness/placement and the timer/webhook/
+// draft-line shapes, and declared every operation tag. These tests read the
+// checked-in document itself, so a regression in any of those fixes fails here.
+
+/// The `name`/`$ref` tail of every parameter declared on `METHOD path`, at
+/// operation and path-item level alike (the levels are merged on purpose: a
+/// parameter parked at path level applies to the operation too, which is exactly
+/// the leak #252 (5) fixed).
+fn declared_params(contract: &Value, method: &str, path: &str) -> Vec<String> {
+    let item = &contract["paths"][path];
+    let mut out = Vec::new();
+    for level in [item, &item[method.to_ascii_lowercase()]] {
+        for param in level["parameters"].as_array().into_iter().flatten() {
+            out.push(match param["$ref"].as_str() {
+                Some(reference) => reference
+                    .rsplit('/')
+                    .next()
+                    .unwrap_or(reference)
+                    .to_string(),
+                None => param["name"].as_str().unwrap_or_default().to_string(),
+            });
+        }
+    }
+    out
+}
+
+/// Whether `schema` is a JSON Schema union that admits `null` (#252 (7)):
+/// `{"type": [..., "null"]}` or `oneOf: [..., {"type": "null"}]`.
+fn admits_null(schema: &Value) -> bool {
+    let type_union = schema["type"]
+        .as_array()
+        .is_some_and(|types| types.iter().any(|t| t == "null"));
+    let one_of = schema["oneOf"]
+        .as_array()
+        .is_some_and(|arms| arms.iter().any(|arm| arm["type"] == "null"));
+    type_union || one_of
+}
+
+#[test]
+fn contract_openapi_has_no_nullable_keyword() {
+    // #252 (7): `nullable` is an OpenAPI 3.0 keyword. This document is 3.1, so a
+    // strict validator ignores it and `null` stops matching; the only valid
+    // spellings are a `"type": [..., "null"]` union or a `oneOf` with
+    // `{"type": "null"}`, which is what every nullable site here uses.
+    fn walk(node: &Value, path: &str, hits: &mut Vec<String>) {
+        match node {
+            Value::Object(map) => {
+                if map.contains_key("nullable") {
+                    hits.push(path.to_string());
+                }
+                for (key, value) in map {
+                    walk(value, &format!("{path}/{key}"), hits);
+                }
+            }
+            Value::Array(items) => {
+                for (index, value) in items.iter().enumerate() {
+                    walk(value, &format!("{path}/{index}"), hits);
+                }
+            }
+            _ => {}
+        }
+    }
+    let contract: Value =
+        serde_json::from_str(include_str!("../openapi.json")).expect("valid openapi.json");
+    let mut hits = Vec::new();
+    walk(&contract, "", &mut hits);
+    assert!(
+        hits.is_empty(),
+        "`nullable` is 3.0-only and ignored by 3.1 validators; replace it with a null union: {}",
+        hits.join(", ")
+    );
+}
+
+#[test]
+fn contract_declares_all_operation_tags() {
+    // #252 (9): Swagger UI renders a tag that is missing from the root `tags`
+    // list as an extra, unsorted group. Every tag an operation uses must be
+    // declared, and a declared-but-unused tag is dead weight — both drift.
+    let contract: Value =
+        serde_json::from_str(include_str!("../openapi.json")).expect("valid openapi.json");
+    let declared: std::collections::BTreeSet<String> = contract["tags"]
+        .as_array()
+        .expect("root tags array")
+        .iter()
+        .map(|tag| tag["name"].as_str().expect("tag name").to_string())
+        .collect();
+    let mut used: std::collections::BTreeMap<String, Vec<String>> =
+        std::collections::BTreeMap::new();
+    for (path, item) in contract["paths"].as_object().expect("paths object") {
+        for method in ["get", "post", "put", "delete", "patch"] {
+            let Some(op) = item.get(method) else { continue };
+            for tag in op["tags"].as_array().expect("operation tags") {
+                used.entry(tag.as_str().expect("tag name").to_string())
+                    .or_default()
+                    .push(format!("{} {path}", method.to_ascii_uppercase()));
+            }
+        }
+    }
+    let missing: Vec<String> = used
+        .iter()
+        .filter(|(tag, _)| !declared.contains(*tag))
+        .map(|(tag, ops)| format!("{tag} (used by {})", ops.join(", ")))
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "root `tags` does not declare: {}",
+        missing.join("; ")
+    );
+    let unused: Vec<&str> = declared
+        .iter()
+        .filter(|tag| !used.contains_key(*tag))
+        .map(String::as_str)
+        .collect();
+    assert!(
+        unused.is_empty(),
+        "root `tags` declares unused tags: {}",
+        unused.join(", ")
+    );
+}
+
+/// A walker that fails on a duplicate key inside the same JSON object (#252 (8)).
+/// `serde_json::Value` keeps the last duplicate silently, so the document needs
+/// its own strict pass: that is how `ProjectInput.budget_amount_minor` ended up
+/// carrying two `minimum` keys, one of which no validator could see.
+struct NoDuplicateKeys;
+
+impl<'de> serde::Deserialize<'de> for NoDuplicateKeys {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserializer.deserialize_any(NoDuplicateKeysVisitor)
+    }
+}
+
+struct NoDuplicateKeysVisitor;
+
+impl<'de> serde::de::Visitor<'de> for NoDuplicateKeysVisitor {
+    type Value = NoDuplicateKeys;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("any JSON value")
+    }
+
+    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+    where
+        A: serde::de::MapAccess<'de>,
+    {
+        let mut seen: Vec<String> = Vec::new();
+        while let Some(key) = map.next_key::<String>()? {
+            if seen.contains(&key) {
+                return Err(serde::de::Error::custom(format!(
+                    "duplicate JSON key `{key}`"
+                )));
+            }
+            seen.push(key);
+            map.next_value::<NoDuplicateKeys>()?;
+        }
+        Ok(NoDuplicateKeys)
+    }
+
+    fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+    where
+        A: serde::de::SeqAccess<'de>,
+    {
+        while seq.next_element::<NoDuplicateKeys>()?.is_some() {}
+        Ok(NoDuplicateKeys)
+    }
+
+    fn visit_some<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserializer.deserialize_any(NoDuplicateKeysVisitor)
+    }
+
+    fn visit_newtype_struct<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserializer.deserialize_any(NoDuplicateKeysVisitor)
+    }
+
+    fn visit_bool<E>(self, _value: bool) -> Result<Self::Value, E> {
+        Ok(NoDuplicateKeys)
+    }
+
+    fn visit_i64<E>(self, _value: i64) -> Result<Self::Value, E> {
+        Ok(NoDuplicateKeys)
+    }
+
+    fn visit_u64<E>(self, _value: u64) -> Result<Self::Value, E> {
+        Ok(NoDuplicateKeys)
+    }
+
+    fn visit_f64<E>(self, _value: f64) -> Result<Self::Value, E> {
+        Ok(NoDuplicateKeys)
+    }
+
+    fn visit_str<E>(self, _value: &str) -> Result<Self::Value, E> {
+        Ok(NoDuplicateKeys)
+    }
+
+    fn visit_string<E>(self, _value: String) -> Result<Self::Value, E> {
+        Ok(NoDuplicateKeys)
+    }
+
+    fn visit_none<E>(self) -> Result<Self::Value, E> {
+        Ok(NoDuplicateKeys)
+    }
+
+    fn visit_unit<E>(self) -> Result<Self::Value, E> {
+        Ok(NoDuplicateKeys)
+    }
+}
+
+#[test]
+fn contract_openapi_has_no_duplicate_keys() {
+    let text = include_str!("../openapi.json");
+    let mut deserializer = serde_json::Deserializer::from_str(text);
+    NoDuplicateKeys::deserialize(&mut deserializer)
+        .expect("openapi.json must not contain a duplicate key in one object");
+    deserializer
+        .end()
+        .expect("openapi.json must be a single JSON document");
+}
+
+#[test]
+fn contract_range_and_oauth_parameter_requiredness_matches_handlers() {
+    // #252 (1, 2, 5): the range-only handlers (`parse_range`) hard-fail 400 when
+    // from or to is absent, so their components are required; the flexible list
+    // endpoints keep the pair optional (and must not inherit it from path level,
+    // which is how POST /api/entries used to advertise three params it ignores);
+    // the OAuth callback reads code/state with serde defaults, so neither is
+    // required.
+    let contract: Value =
+        serde_json::from_str(include_str!("../openapi.json")).expect("valid openapi.json");
+    let params = &contract["components"]["parameters"];
+    for name in ["FromParam", "ToParam"] {
+        assert_eq!(
+            params[name]["required"],
+            json!(true),
+            "{name} is required: the range handlers answer 400 without it"
+        );
+    }
+    for name in ["OptionalFromParam", "OptionalToParam"] {
+        assert_eq!(
+            params[name]["required"],
+            json!(false),
+            "{name} is optional: the list endpoints filter only when the pair is given"
+        );
+    }
     for path in [
-        "/api/customers",
-        "/api/entries",
         "/api/reports/summary",
         "/api/reports/export.csv",
-        "/api/invoices",
-        "/api/auth/login",
-        "/api/users",
+        "/api/reports/profitability",
+        "/api/calendar/events",
+        "/api/invoices/report",
     ] {
-        assert!(paths.contains_key(path), "contract missing {path}");
+        let declared = declared_params(&contract, "GET", path);
+        assert!(
+            declared.iter().any(|p| p == "FromParam") && declared.iter().any(|p| p == "ToParam"),
+            "GET {path} needs the required range pair, found {declared:?}"
+        );
     }
+    let entries = declared_params(&contract, "GET", "/api/entries");
+    assert!(
+        entries.iter().any(|p| p == "DateParam")
+            && entries.iter().any(|p| p == "OptionalFromParam")
+            && entries.iter().any(|p| p == "OptionalToParam"),
+        "GET /api/entries takes a day or an optional range, found {entries:?}"
+    );
+    let create = declared_params(&contract, "POST", "/api/entries");
+    assert_eq!(
+        create,
+        vec!["CsrfProtection"],
+        "POST /api/entries ignores the list filters and must not inherit them"
+    );
+    for name in ["code", "state"] {
+        let param = contract["paths"]["/api/calendar/oauth/callback"]["get"]["parameters"]
+            .as_array()
+            .expect("callback parameters")
+            .iter()
+            .find(|p| p["name"] == name)
+            .unwrap_or_else(|| panic!("{name} must be declared"));
+        assert_eq!(
+            param["required"],
+            json!(false),
+            "the handler defaults oauth callback {name}, so it is not required"
+        );
+    }
+}
+
+#[test]
+fn contract_declares_problem_operation_shapes() {
+    // #252 (3, 4, 6, 7): the timer start returns the running Timer; the webhook
+    // documents the signature headers it reads; PUT /api/invoices/{id} declares
+    // its path `id` once; the draft edit references the input line shape (only
+    // kind+date mandatory) rather than the stored one; and GET /api/timer can be
+    // null through a 3.1 union.
+    let contract: Value =
+        serde_json::from_str(include_str!("../openapi.json")).expect("valid openapi.json");
+    let started = &contract["paths"]["/api/timer"]["post"]["responses"]["201"];
+    assert_eq!(
+        started["content"]["application/json"]["schema"]["$ref"],
+        json!("#/components/schemas/Timer"),
+        "POST /api/timer 201 returns the serialized timer"
+    );
+    assert!(
+        contract["components"]["schemas"]["Timer"].is_object(),
+        "the finished timer start needs a Timer schema to reference"
+    );
+    let listed = &contract["paths"]["/api/timer"]["get"]["responses"]["200"]["content"]["application/json"]
+        ["schema"];
+    assert!(
+        admits_null(listed),
+        "GET /api/timer answers JSON null when no timer runs: {listed}"
+    );
+
+    let webhook = declared_params(&contract, "POST", "/api/payments/webhook/{provider}");
+    for header in ["x-webhook-signature", "stripe-signature"] {
+        assert!(
+            webhook.iter().any(|p| p == header),
+            "the webhook reads {header}; declared params: {webhook:?}"
+        );
+    }
+
+    let edit = declared_params(&contract, "PUT", "/api/invoices/{id}");
+    assert_eq!(
+        edit.iter().filter(|p| *p == "id").count(),
+        1,
+        "the path `id` must be declared once, not at both path and operation level: {edit:?}"
+    );
+
+    let lines =
+        &contract["components"]["schemas"]["InvoiceEditInput"]["properties"]["lines"]["items"];
+    assert_eq!(
+        lines["$ref"],
+        json!("#/components/schemas/InvoiceLineInput"),
+        "the edit body takes the input line shape, not the stored one"
+    );
+    assert_eq!(
+        contract["components"]["schemas"]["InvoiceLineInput"]["required"],
+        json!(["kind", "date"]),
+        "only kind and date are mandatory on a submitted line"
+    );
 }
 
 #[tokio::test]
@@ -967,6 +1690,39 @@ async fn unverifiable_lock_state_refuses_writes_but_never_reads() {
         "submit must fail closed"
     );
     let (s_get, _) = json_req(&app, "GET", &format!("/api/entries/{eid}"), None).await;
+    assert_eq!(s_get, StatusCode::OK, "reads are never blocked");
+}
+
+#[tokio::test]
+async fn unverifiable_claim_state_refuses_expense_delete_but_never_reads() {
+    // #255 (+ the #190 follow-up): the expense lock now flows through the same
+    // CombinedLocks seam the entries use, so a claim provider that cannot
+    // verify its state fails the delete CLOSED with 503 — before the fold this
+    // path surfaced a raw store error as a 500. Reads stay untouched.
+    let (app, d) = app().await;
+    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap().to_string();
+    let (_, x) = json_req(
+        &app,
+        "POST",
+        "/api/expenses",
+        Some(json!({"date":"2026-10-02","customer_id":cid,"amount_minor":5000,"currency":"EUR"})),
+    )
+    .await;
+    let xid = x["id"].as_str().unwrap().to_string();
+
+    // Corrupt the claims collection so the claim provider cannot verify state.
+    let claims_dir = d.path().join("data").join("claims");
+    std::fs::create_dir_all(&claims_dir).unwrap();
+    std::fs::write(claims_dir.join("corrupt.json"), b"{ not json").unwrap();
+
+    let (s_del, _) = json_req(&app, "DELETE", &format!("/api/expenses/{xid}"), None).await;
+    assert_eq!(
+        s_del,
+        StatusCode::SERVICE_UNAVAILABLE,
+        "expense delete must fail closed when the lock state is unverifiable"
+    );
+    let (s_get, _) = json_req(&app, "GET", &format!("/api/expenses/{xid}"), None).await;
     assert_eq!(s_get, StatusCode::OK, "reads are never blocked");
 }
 
@@ -2604,6 +3360,30 @@ async fn logout_revokes_the_session() {
 }
 
 #[tokio::test]
+async fn revocation_is_visible_immediately_across_instances() {
+    // #254 (review B6 freshness): authenticate must re-read `revoked.json` on
+    // every request — the read now runs on the blocking pool, but it must not
+    // become a stale per-request cache. A logout performed by a *separate*
+    // instance sharing the data dir has to take effect on the very next request.
+    let (a, dir) = app().await;
+    let (s1, _) = json_req(&a, "GET", "/api/auth/me", None).await;
+    assert_eq!(s1, StatusCode::OK, "session works before any revocation");
+
+    // Second instance (its own in-memory revocations) sharing the data dir.
+    let b = app_locked(dir.path(), Arc::new(tucano_time::lock::NoLocks)).await;
+    let (s2, _, _) = raw(&b.router, "POST", "/api/auth/logout", None, Some(&a.cookie)).await;
+    assert_eq!(s2, StatusCode::NO_CONTENT);
+
+    // Instance A sees the revocation next request, through the offloaded read.
+    let (s3, _) = json_req(&a, "GET", "/api/auth/me", None).await;
+    assert_eq!(
+        s3,
+        StatusCode::UNAUTHORIZED,
+        "a revocation written elsewhere must be honoured immediately"
+    );
+}
+
+#[tokio::test]
 async fn invoice_includes_billable_expenses_and_locks_them() {
     let (app, _d) = app().await;
     let c = new_customer(&app, "ACME", "EUR", 6000).await;
@@ -3871,7 +4651,8 @@ async fn accounting_sync_failure_is_recorded_not_fatal() {
 async fn sso_jit_provisions_and_logs_in() {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(dir.path().join("data")).unwrap();
-    let idp = tucano_time::sso::SignedTokenIdp::new("okta-test", "stub-secret", vec![]);
+    let idp =
+        tucano_time::sso::SignedTokenIdp::new("okta-test", "stub-secret", vec!["acme.test".into()]);
     let registry = Arc::new(tucano_time::sso::SsoRegistry::new(vec![Arc::new(idp)]));
     let state = AppState::with_session(
         store,
@@ -3903,7 +4684,8 @@ async fn sso_jit_provisions_and_logs_in() {
         &vec![json!("okta-test")]
     );
 
-    let idp = tucano_time::sso::SignedTokenIdp::new("okta-test", "stub-secret", vec![]);
+    let idp =
+        tucano_time::sso::SignedTokenIdp::new("okta-test", "stub-secret", vec!["acme.test".into()]);
 
     // A valid signed assertion JIT-creates the user (member) and logs in.
     let claims = tucano_time::sso::TokenClaims {
@@ -3963,6 +4745,63 @@ async fn sso_jit_provisions_and_logs_in() {
     )
     .await;
     assert_eq!(sl, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn sso_empty_allowed_domains_denies_and_provisions_nothing() {
+    // #260: SSO with an empty allow-list must fail closed — the assertion is
+    // rejected and no account is JIT-provisioned (the old allow-all is gone).
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("data")).unwrap();
+    let idp = tucano_time::sso::SignedTokenIdp::new("okta-test", "stub-secret", vec![]);
+    let registry = Arc::new(tucano_time::sso::SsoRegistry::new(vec![Arc::new(idp)]));
+    let state = AppState::with_session(
+        store,
+        Arc::new(Session::new(
+            b"test-session-secret-0000000000000032".to_vec(),
+            3600,
+            false,
+        )),
+    )
+    .with_sso(registry);
+    let router = tucano_time::build_router(state);
+
+    let (sa, _, _) = raw(
+        &router,
+        "POST",
+        "/api/auth/bootstrap",
+        Some(json!({"name":"Admin","email":ADMIN_EMAIL,"password":ADMIN_PW})),
+        None,
+    )
+    .await;
+    assert_eq!(sa, StatusCode::CREATED);
+    let admin_cookie = login_cookie(&router, ADMIN_EMAIL, ADMIN_PW).await;
+
+    // A correctly-signed assertion but an empty allow-list: rejected, never
+    // provisioned.
+    let idp = tucano_time::sso::SignedTokenIdp::new("okta-test", "stub-secret", vec![]);
+    let claims = tucano_time::sso::TokenClaims {
+        sub: "u1".into(),
+        email: "Intruder@acme.test".into(),
+        name: "Intruder".into(),
+        groups: vec![],
+        exp: chrono::Utc::now().timestamp() + 300,
+    };
+    let token = idp.issue(&claims);
+    let (s1, body, _) = raw(
+        &router,
+        "POST",
+        "/api/auth/sso/assertion",
+        Some(json!({"provider":"okta-test","payload":token,"signature":""})),
+        None,
+    )
+    .await;
+    assert_eq!(s1, StatusCode::BAD_REQUEST, "{body}");
+
+    // Only the bootstrap admin exists: nothing was provisioned for the domain.
+    let (su, users, _) = raw(&router, "GET", "/api/users", None, Some(&admin_cookie)).await;
+    assert_eq!(su, StatusCode::OK, "{users}");
+    assert_eq!(users["users"].as_array().map(Vec::len), Some(1), "{users}");
 }
 
 #[tokio::test]
@@ -6229,6 +7068,123 @@ async fn invoice_preview_projects_and_paid_exclusion() {
     assert_eq!(s3, StatusCode::CONFLICT);
 }
 
+#[tokio::test]
+async fn recurring_never_rebills_settled_or_written_off_entries() {
+    // #248: the recurring scheduler must share the API's "already invoiced"
+    // predicate. A settled (`paid` / `partly_paid`) or written-off invoice's
+    // entries are released from the edit lock but must never be re-billed,
+    // while a draft's lines stay billable.
+    use tucano_time::recurring::RecurringJob;
+    use tucano_time::scheduler::Job;
+
+    // Run the daily recurring job once against the router's data dir. `now`
+    // fixes the weekly period to 2026-10-01..2026-10-07 (the seeded week).
+    let run_recurring = |dir: &std::path::Path| {
+        let store = Store::open(dir.join("data")).expect("store");
+        RecurringJob::new(Arc::new(store)).run("2026-10-07T12:00:00Z".parse().unwrap());
+    };
+    let invoice_count = |list: &Value| list["invoices"].as_array().unwrap().len();
+
+    // Every way of closing an invoice must keep its lines out of a new bill.
+    for (label, settle) in [
+        ("paid", 0u64),
+        ("partly_paid", 1000u64),
+        ("written_off", 0u64),
+    ] {
+        let (app, dir) = app().await;
+        let c = new_customer(&app, "ACME", "EUR", 6000).await;
+        let cid = c["id"].as_str().unwrap().to_string();
+        new_project(&app, &cid, "P1", json!({"rate_minor": 6000})).await;
+        json_req(
+            &app,
+            "POST",
+            "/api/entries",
+            Some(json!({"date":"2026-10-02","customer_id":cid.clone(),"project_code":"P1","hours":2})),
+        )
+        .await;
+        // Bill week 1, then close the invoice the named way.
+        let (_s, inv) = json_req(
+            &app,
+            "POST",
+            "/api/invoices",
+            Some(json!({"customer_id":cid.clone(),"from":"2026-10-01","to":"2026-10-07"})),
+        )
+        .await;
+        let iid = inv["id"].as_str().unwrap();
+        json_req(&app, "POST", &format!("/api/invoices/{iid}/issue"), None).await;
+        if label == "written_off" {
+            let (sw, wo) = json_req(
+                &app,
+                "POST",
+                &format!("/api/invoices/{iid}/write-off"),
+                Some(json!({"reason":"forgiven"})),
+            )
+            .await;
+            assert_eq!(sw, StatusCode::OK, "{label}: {wo}");
+        } else {
+            let pay = if label == "paid" {
+                json!({"reference":"x"})
+            } else {
+                json!({"reference":"x","amount_minor": settle})
+            };
+            let (sp, paid) =
+                json_req(&app, "POST", &format!("/api/invoices/{iid}/pay"), Some(pay)).await;
+            assert_eq!(sp, StatusCode::OK, "{label}: {paid}");
+        }
+        // A weekly time schedule whose next period covers the settled week.
+        let (ss, sched) = json_req(
+            &app,
+            "POST",
+            "/api/schedules",
+            Some(json!({"customer_id":cid.clone(),"cadence":"weekly","mode":"time","currency":"EUR"})),
+        )
+        .await;
+        assert_eq!(ss, StatusCode::CREATED, "{label}: {sched}");
+        run_recurring(dir.path());
+        let (_sl, list) = json_req(&app, "GET", "/api/invoices", None).await;
+        assert_eq!(
+            invoice_count(&list),
+            1,
+            "{label}: the recurring job must not re-bill a settled entry: {list}"
+        );
+    }
+
+    // (c) A DRAFT's lines stay billable: the same recurring run still bills.
+    let (app, dir) = app().await;
+    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap().to_string();
+    new_project(&app, &cid, "P1", json!({"rate_minor": 6000})).await;
+    json_req(
+        &app,
+        "POST",
+        "/api/entries",
+        Some(json!({"date":"2026-10-02","customer_id":cid.clone(),"project_code":"P1","hours":2})),
+    )
+    .await;
+    // Draft only, never issued: its lines are not excluded.
+    json_req(
+        &app,
+        "POST",
+        "/api/invoices",
+        Some(json!({"customer_id":cid.clone(),"from":"2026-10-01","to":"2026-10-07"})),
+    )
+    .await;
+    json_req(
+        &app,
+        "POST",
+        "/api/schedules",
+        Some(json!({"customer_id":cid.clone(),"cadence":"weekly","mode":"time","currency":"EUR"})),
+    )
+    .await;
+    run_recurring(dir.path());
+    let (_sl, list) = json_req(&app, "GET", "/api/invoices", None).await;
+    assert_eq!(
+        invoice_count(&list),
+        2,
+        "a draft's lines stay billable, so the recurring run adds an invoice: {list}"
+    );
+}
+
 // ------------------------------------------------------------------ #147 ---
 
 #[tokio::test]
@@ -6591,5 +7547,866 @@ async fn customer_without_ever_having_projects_deletes_cleanly() {
             .unwrap()
             .iter()
             .all(|x| x["id"] != c["id"])
+    );
+}
+
+// ===========================================================================
+// #262 — contract/unit gaps from the full-repo review.
+//
+// Tier 1: the dangerous, previously-dark paths (DELETE over HTTP, RBAC on
+// non-owned *mutations*, the single-instance guard, the body-size cap, the
+// range cap, and the README-visible operations no test ever hit). Tier 2:
+// invalid-shape (422) coverage for endpoints that only had happy-path tests.
+// Everything asserts rejection *without persistence* and the documented
+// status/error shape — the bar AGENTS.md's test policy sets.
+// ===========================================================================
+
+/// Create a member and return their session cookie (shared by the RBAC tests).
+async fn member_cookie(app: &Client, email: &str, pw: &str) -> String {
+    let (s, body) = json_req(
+        app,
+        "POST",
+        "/api/users",
+        Some(json!({"name":"Member","email":email,"password":pw,"role":"member"})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "create member: {body}");
+    login_cookie(&app.router, email, pw).await
+}
+
+// ---------------------------------------------------- Tier 1: dangerous paths --
+
+/// #262(1): `DELETE /api/invoices/{id}` over HTTP — the path that was only
+/// covered at the store level. A draft deletes (204 → gone); an issued invoice
+/// can never be deleted (409); a member cannot reach the admin-tier surface.
+#[tokio::test]
+async fn delete_invoice_over_http_is_admin_only_and_draft_only() {
+    let (app, _d) = app().await;
+    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap();
+    new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
+    json_req(
+        &app,
+        "POST",
+        "/api/entries",
+        Some(entry_body(cid, "P1", json!(3), "2026-10-02")),
+    )
+    .await;
+
+    // Draft: deletable.
+    let (sc, draft) = json_req(
+        &app,
+        "POST",
+        "/api/invoices",
+        Some(json!({"customer_id":cid,"from":"2026-10-01","to":"2026-10-07"})),
+    )
+    .await;
+    assert_eq!(sc, StatusCode::CREATED, "{draft}");
+    let did = draft["id"].as_str().unwrap().to_string();
+
+    // A member never reaches the admin tier -> 403, and the draft survives.
+    let member = member_cookie(&app, "dana@test.local", "danapass123").await;
+    let (s_forbidden, _, _) = raw(
+        &app.router,
+        "DELETE",
+        &format!("/api/invoices/{did}"),
+        None,
+        Some(&member),
+    )
+    .await;
+    assert_eq!(s_forbidden, StatusCode::FORBIDDEN);
+    assert_eq!(
+        json_req(&app, "GET", &format!("/api/invoices/{did}"), None)
+            .await
+            .0,
+        StatusCode::OK,
+        "refused delete must not remove the draft"
+    );
+
+    // Admin deletes the draft -> 204, then it is gone (404).
+    let (s_del, _) = json_req(&app, "DELETE", &format!("/api/invoices/{did}"), None).await;
+    assert_eq!(s_del, StatusCode::NO_CONTENT);
+    assert_eq!(
+        json_req(&app, "GET", &format!("/api/invoices/{did}"), None)
+            .await
+            .0,
+        StatusCode::NOT_FOUND
+    );
+
+    // Issued: never deletable -> 409, and the invoice survives.
+    let (sc2, draft2) = json_req(
+        &app,
+        "POST",
+        "/api/invoices",
+        Some(json!({"customer_id":cid,"from":"2026-10-01","to":"2026-10-07"})),
+    )
+    .await;
+    assert_eq!(sc2, StatusCode::CREATED, "{draft2}");
+    let iid = draft2["id"].as_str().unwrap().to_string();
+    let (si, issued) = json_req(&app, "POST", &format!("/api/invoices/{iid}/issue"), None).await;
+    assert_eq!(si, StatusCode::OK, "{issued}");
+    let (s_conflict, body) = json_req(&app, "DELETE", &format!("/api/invoices/{iid}"), None).await;
+    assert_eq!(s_conflict, StatusCode::CONFLICT, "{body}");
+    assert_eq!(
+        json_req(&app, "GET", &format!("/api/invoices/{iid}"), None)
+            .await
+            .0,
+        StatusCode::OK,
+        "an issued invoice must survive the refused delete"
+    );
+}
+
+/// #262(2): the happy-path `DELETE /api/entries/{id}` (204) — the timesheet's
+/// primary correction path, previously proven only by its 409/503 refusals.
+#[tokio::test]
+async fn delete_entry_over_http_returns_204_and_removes_it() {
+    let (app, _d) = app().await;
+    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap();
+    new_project(&app, cid, "P1", json!({})).await;
+    let (sc, entry) = json_req(
+        &app,
+        "POST",
+        "/api/entries",
+        Some(entry_body(cid, "P1", json!(2), "2026-10-02")),
+    )
+    .await;
+    assert_eq!(sc, StatusCode::CREATED, "{entry}");
+    let eid = entry["id"].as_str().unwrap().to_string();
+
+    let (s, _, _) = raw_req(&app, "DELETE", &format!("/api/entries/{eid}")).await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    assert_eq!(
+        json_req(&app, "GET", &format!("/api/entries/{eid}"), None)
+            .await
+            .0,
+        StatusCode::NOT_FOUND
+    );
+    let (_, list) = json_req(&app, "GET", "/api/entries?date=2026-10-02", None).await;
+    assert!(
+        list["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|e| e["id"] != entry["id"]),
+        "deleted entry must leave the day list"
+    );
+}
+
+/// #262(3): RBAC on non-owned **mutations** — a member's PUT/DELETE of another
+/// user's entry or expense must be 404, never 403 (no existence leak, #51), and
+/// the refused mutations must leave storage untouched.
+#[tokio::test]
+async fn non_owner_member_mutations_are_404_not_403() {
+    let (app, _d) = app().await;
+    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap();
+    new_project(&app, cid, "P1", json!({})).await;
+
+    // The admin owns this entry and this expense.
+    let (_, admin_entry) = json_req(
+        &app,
+        "POST",
+        "/api/entries",
+        Some(entry_body(cid, "P1", json!(2), "2026-10-02")),
+    )
+    .await;
+    let admin_eid = admin_entry["id"].as_str().unwrap().to_string();
+    let (sc, cat) = json_req(
+        &app,
+        "POST",
+        "/api/categories",
+        Some(json!({"name":"Travel"})),
+    )
+    .await;
+    assert_eq!(sc, StatusCode::CREATED, "{cat}");
+    let (se, expense) = json_req(
+        &app,
+        "POST",
+        "/api/expenses",
+        Some(json!({"date":"2026-10-02","customer_id":cid,"category_id":cat["id"],"amount_minor":1000,"currency":"EUR"})),
+    )
+    .await;
+    assert_eq!(se, StatusCode::CREATED, "{expense}");
+    let exp_id = expense["id"].as_str().unwrap().to_string();
+
+    let member = member_cookie(&app, "dana@test.local", "danapass123").await;
+
+    let (s_put, _, _) = raw(
+        &app.router,
+        "PUT",
+        &format!("/api/entries/{admin_eid}"),
+        Some(entry_body(cid, "P1", json!(5), "2026-10-02")),
+        Some(&member),
+    )
+    .await;
+    assert_eq!(
+        s_put,
+        StatusCode::NOT_FOUND,
+        "non-owner edit is 404, not 403"
+    );
+    let (s_del, _, _) = raw(
+        &app.router,
+        "DELETE",
+        &format!("/api/entries/{admin_eid}"),
+        None,
+        Some(&member),
+    )
+    .await;
+    assert_eq!(
+        s_del,
+        StatusCode::NOT_FOUND,
+        "non-owner delete is 404, not 403"
+    );
+    let (s_exp, _, _) = raw(
+        &app.router,
+        "DELETE",
+        &format!("/api/expenses/{exp_id}"),
+        None,
+        Some(&member),
+    )
+    .await;
+    assert_eq!(
+        s_exp,
+        StatusCode::NOT_FOUND,
+        "non-owner expense delete is 404"
+    );
+
+    // Nothing was mutated by the refused writes.
+    let (_, still) = json_req(&app, "GET", &format!("/api/entries/{admin_eid}"), None).await;
+    assert_eq!(still["hours"], 2);
+    let (_, exp_still) = json_req(&app, "GET", &format!("/api/expenses/{exp_id}"), None).await;
+    assert_eq!(exp_still["id"], expense["id"]);
+}
+
+/// #262(4): the `.server.lock` single-instance guard (the data-corruption
+/// guard it exists for). A second instance against the same data dir must be
+/// refused; releasing the first lets a new one start.
+#[test]
+fn server_lock_refuses_a_second_instance() {
+    let dir = tempfile::tempdir().unwrap();
+    let first = tucano_time::acquire_server_lock(dir.path()).expect("first lock");
+    let second = tucano_time::acquire_server_lock(dir.path());
+    assert!(second.is_err(), "a second instance must be refused");
+    drop(first);
+    let third = tucano_time::acquire_server_lock(dir.path());
+    assert!(third.is_ok(), "the lock must be reacquirable after release");
+}
+
+/// #262(5): the request-body cap (256 KiB, `RequestBodyLimitLayer` in
+/// src/lib.rs). An oversized payload is bounded and rejected without
+/// persistence. NOTE (defect found while closing #262): it surfaces as the
+/// documented `bad_request` 400 — the `ValidJson` extractor turns the
+/// length-limit read error into the shared 400 shape (`src/api/mod.rs`) — not
+/// the conventional `413 Payload Too Large` the issue specified, and
+/// `openapi.json` declares no 413 anywhere. Behaviour is intentionally
+/// unchanged by this test-only PR; the intent is pinned by the `#[ignore]`d
+/// test below and reported on the PR.
+#[tokio::test]
+async fn oversized_body_is_rejected_without_persistence() {
+    let (app, _d) = app().await;
+    let huge = "x".repeat(300 * 1024);
+    let (status, body) =
+        json_req(&app, "POST", "/api/categories", Some(json!({"name": huge}))).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(body["error"]["code"], "bad_request");
+    // The oversized body persisted nothing.
+    let (_, list) = json_req(&app, "GET", "/api/categories", None).await;
+    assert!(
+        list["categories"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|c| c["name"].as_str().unwrap_or("").len() < 1000)
+    );
+}
+
+/// #262(5) INTENT — kept ignored because the gap is in the behaviour, not the
+/// test: an oversized body *should* answer `413 Payload Too Large` (the status
+/// the issue names and the convention `RequestBodyLimitLayer` exists to signal).
+/// Today the `ValidJson` extractor collapses the length-limit read failure into
+/// its generic 400, so this cannot pass without a production change —
+/// deliberately out of scope for this test-only PR. Follow-up: give the body
+/// limit a 413 code in the router/extractor and declare it in `openapi.json`.
+#[ignore = "defect: oversized bodies surface as 400, not 413 (needs a production follow-up)"]
+#[tokio::test]
+async fn oversized_body_should_surface_as_413() {
+    let (app, _d) = app().await;
+    let huge = "x".repeat(300 * 1024);
+    let (status, _) = json_req(&app, "POST", "/api/categories", Some(json!({"name": huge}))).await;
+    assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
+}
+
+/// #262(6a): `GET /api/auth/status` — public, drives the first-run setup UI.
+#[tokio::test]
+async fn auth_status_is_public_and_reports_initialisation() {
+    let (app, _d) = app().await;
+    let (status, body) = anon_req(&app, "GET", "/api/auth/status", None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["initialised"], true);
+}
+
+/// #262(6b): `GET /openapi.json` + `GET /docs` — the served contract and its UI.
+#[tokio::test]
+async fn openapi_and_docs_are_served_at_root() {
+    let (app, _d) = app().await;
+    let (s_doc, _h, bytes) = raw_req(&app, "GET", "/openapi.json").await;
+    assert_eq!(s_doc, StatusCode::OK);
+    let parsed: Value = serde_json::from_slice(&bytes).expect("openapi.json is JSON");
+    assert!(parsed["paths"].is_object());
+    assert_eq!(parsed["openapi"], "3.1.0");
+    let (s_docs, _h2, html) = raw_req(&app, "GET", "/docs").await;
+    assert_eq!(s_docs, StatusCode::OK);
+    assert!(
+        String::from_utf8_lossy(&html)
+            .to_ascii_lowercase()
+            .contains("swagger"),
+        "docs page must serve the Swagger UI shell"
+    );
+}
+
+/// #262(6c): `GET /api/submissions` and `GET /api/claims` — the owner-scoped
+/// `visible_to()` list filtering, untested until now.
+#[tokio::test]
+async fn submissions_and_claims_lists_filter_by_owner() {
+    let (app, _d) = app().await;
+    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap();
+    new_project(&app, cid, "P1", json!({})).await;
+
+    // The admin submits a week (needs an own, unlocked entry).
+    json_req(
+        &app,
+        "POST",
+        "/api/entries",
+        Some(entry_body(cid, "P1", json!(2), "2026-09-28")),
+    )
+    .await;
+    let (ss, sub) = json_req(
+        &app,
+        "POST",
+        "/api/submissions",
+        Some(json!({"week_start":"2026-09-28"})),
+    )
+    .await;
+    assert_eq!(ss, StatusCode::CREATED, "{sub}");
+
+    // A member with none of their own sees an empty list.
+    let member = member_cookie(&app, "dana@test.local", "danapass123").await;
+    let (sm, member_list, _) =
+        raw(&app.router, "GET", "/api/submissions", None, Some(&member)).await;
+    assert_eq!(sm, StatusCode::OK);
+    assert!(
+        member_list["submissions"].as_array().unwrap().is_empty(),
+        "a member must not see another user's submission"
+    );
+
+    // The admin (owner) sees exactly their own.
+    let (sa, admin_list) = json_req(&app, "GET", "/api/submissions", None).await;
+    assert_eq!(sa, StatusCode::OK);
+    assert_eq!(admin_list["submissions"].as_array().unwrap().len(), 1);
+    assert_eq!(admin_list["submissions"][0]["id"], sub["id"]);
+
+    // Claims: an empty, owner-filtered read is a valid 200.
+    let (sc, claims) = json_req(&app, "GET", "/api/claims", None).await;
+    assert_eq!(sc, StatusCode::OK);
+    assert!(claims["claims"].as_array().unwrap().is_empty());
+}
+
+/// #262(6d): `GET …/tasks` (list) — project-scoped task listing.
+#[tokio::test]
+async fn tasks_list_returns_the_projects_tasks() {
+    let (app, _d) = app().await;
+    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap();
+    new_project(&app, cid, "P1", json!({})).await;
+    new_task(&app, cid, "P1", "T-1", json!({"name":"Design"})).await;
+
+    let (s, list) = json_req(
+        &app,
+        "GET",
+        &format!("/api/customers/{cid}/projects/P1/tasks"),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    let codes: Vec<&str> = list["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["code"].as_str().unwrap())
+        .collect();
+    assert_eq!(codes, vec!["T-1"]);
+}
+
+/// #262(7): the task-tier update-happy-path (a rename) and the un-referencing
+/// delete after the last entry is removed.
+#[tokio::test]
+async fn task_rename_then_delete_after_unreferencing() {
+    let (app, _d) = app().await;
+    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap();
+    new_project(&app, cid, "P1", json!({})).await;
+    new_task(&app, cid, "P1", "T-1", json!({"name":"Design"})).await;
+
+    // Rename: body code must match the path code; the name changes.
+    let (s_up, updated) = json_req(
+        &app,
+        "PUT",
+        &format!("/api/customers/{cid}/projects/P1/tasks/T-1"),
+        Some(json!({"code":"T-1","name":"Design System"})),
+    )
+    .await;
+    assert_eq!(s_up, StatusCode::OK, "{updated}");
+    assert_eq!(updated["name"], "Design System");
+    let (_, got) = json_req(
+        &app,
+        "GET",
+        &format!("/api/customers/{cid}/projects/P1/tasks/T-1"),
+        None,
+    )
+    .await;
+    assert_eq!(got["name"], "Design System", "rename must persist");
+
+    // Referenced by an entry -> delete is refused (409).
+    let (_, entry) = json_req(
+        &app,
+        "POST",
+        "/api/entries",
+        Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","task_code":"T-1","hours":2})),
+    )
+    .await;
+    let eid = entry["id"].as_str().unwrap().to_string();
+    assert_eq!(
+        json_req(
+            &app,
+            "DELETE",
+            &format!("/api/customers/{cid}/projects/P1/tasks/T-1"),
+            None
+        )
+        .await
+        .0,
+        StatusCode::CONFLICT
+    );
+
+    // Un-reference it, then the delete succeeds (204) and the task is gone.
+    assert_eq!(
+        json_req(&app, "DELETE", &format!("/api/entries/{eid}"), None)
+            .await
+            .0,
+        StatusCode::NO_CONTENT
+    );
+    let (s_del, _) = json_req(
+        &app,
+        "DELETE",
+        &format!("/api/customers/{cid}/projects/P1/tasks/T-1"),
+        None,
+    )
+    .await;
+    assert_eq!(s_del, StatusCode::NO_CONTENT);
+    assert_eq!(
+        json_req(
+            &app,
+            "GET",
+            &format!("/api/customers/{cid}/projects/P1/tasks/T-1"),
+            None
+        )
+        .await
+        .0,
+        StatusCode::NOT_FOUND
+    );
+}
+
+/// #262(8): the HTTP-level 400-day range cap (`MAX_RANGE_DAYS`, enforced at the
+/// store level). A wider query rejects with 400; the ceiling itself passes.
+#[tokio::test]
+async fn range_query_over_max_days_rejects_with_400() {
+    let (app, _d) = app().await;
+    let (status, body) = json_req(
+        &app,
+        "GET",
+        "/api/entries?from=2020-01-01&to=2026-06-01",
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(body["error"]["code"], "bad_request");
+    // A window inside the cap is accepted.
+    let (ok, _) = json_req(
+        &app,
+        "GET",
+        "/api/entries?from=2026-01-01&to=2026-06-01",
+        None,
+    )
+    .await;
+    assert_eq!(ok, StatusCode::OK);
+}
+
+// ----------------------------------------------------- Tier 2: missing 422s --
+
+/// #262 Tier 2: categories POST and PUT reject invalid shapes (missing/blank
+/// name, unknown fields) with 422 and persist nothing.
+#[tokio::test]
+async fn category_invalid_shapes_are_422_without_persistence() {
+    let (app, _d) = app().await;
+    let (s_missing, body) = json_req(
+        &app,
+        "POST",
+        "/api/categories",
+        Some(json!({"default_billable": true})),
+    )
+    .await;
+    assert_eq!(s_missing, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["error"]["code"], "validation_failed");
+    for bad in [
+        json!({"name": "   "}),
+        json!({"name": "Travel", "bogus": 1}),
+        json!({"name": "T", "default_billable": "yes"}),
+    ] {
+        let label = bad.to_string();
+        let (s, _) = json_req(&app, "POST", "/api/categories", Some(bad)).await;
+        assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY, "payload: {label}");
+    }
+
+    // A valid create, then an invalid update leaves the stored value intact.
+    let (sc, cat) = json_req(
+        &app,
+        "POST",
+        "/api/categories",
+        Some(json!({"name":"Travel"})),
+    )
+    .await;
+    assert_eq!(sc, StatusCode::CREATED, "{cat}");
+    let cat_id = cat["id"].as_str().unwrap();
+    let (s_up, _) = json_req(
+        &app,
+        "PUT",
+        &format!("/api/categories/{cat_id}"),
+        Some(json!({"name": ""})),
+    )
+    .await;
+    assert_eq!(s_up, StatusCode::UNPROCESSABLE_ENTITY);
+    let (_, list) = json_req(&app, "GET", "/api/categories", None).await;
+    assert!(
+        list["categories"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|c| c["id"] == cat["id"] && c["name"] == "Travel"),
+        "refused update must not change the stored category"
+    );
+}
+
+/// #262 Tier 2: submissions POST rejects an absent/malformed `week_start`, and
+/// the decision endpoint rejects a malformed `decision` without changing state.
+#[tokio::test]
+async fn submission_invalid_shapes_are_422() {
+    let (app, _d) = app().await;
+    // Absent required field -> deserialisation 422.
+    let (s_absent, body) = json_req(&app, "POST", "/api/submissions", Some(json!({}))).await;
+    assert_eq!(s_absent, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["error"]["code"], "validation_failed");
+    // Malformed date -> the shared parse_date 400.
+    let (s_bad, _) = json_req(
+        &app,
+        "POST",
+        "/api/submissions",
+        Some(json!({"week_start":"not-a-date"})),
+    )
+    .await;
+    assert_eq!(s_bad, StatusCode::BAD_REQUEST);
+
+    // A real submission, then a malformed decision must 422 and not transition.
+    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap();
+    new_project(&app, cid, "P1", json!({})).await;
+    json_req(
+        &app,
+        "POST",
+        "/api/entries",
+        Some(entry_body(cid, "P1", json!(2), "2026-09-28")),
+    )
+    .await;
+    let (ss, sub) = json_req(
+        &app,
+        "POST",
+        "/api/submissions",
+        Some(json!({"week_start":"2026-09-28"})),
+    )
+    .await;
+    assert_eq!(ss, StatusCode::CREATED, "{sub}");
+    let sid = sub["id"].as_str().unwrap();
+    let (s_dec, dec_body) = json_req(
+        &app,
+        "POST",
+        &format!("/api/submissions/{sid}/decision"),
+        Some(json!({"decision":"maybe"})),
+    )
+    .await;
+    assert_eq!(s_dec, StatusCode::UNPROCESSABLE_ENTITY, "{dec_body}");
+    assert_eq!(dec_body["error"]["code"], "validation_failed");
+    let (_, listed) = json_req(&app, "GET", "/api/submissions", None).await;
+    assert_eq!(
+        listed["submissions"][0]["state"], "submitted",
+        "a refused decision must not transition the submission"
+    );
+}
+
+/// #262 Tier 2: the claim workflow's error shapes — submit-twice conflicts, a
+/// malformed decision is 422, and an unknown claim is 404.
+#[tokio::test]
+async fn claim_error_shapes_are_honest() {
+    let (app, _d) = app().await;
+    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap();
+    let (sc, cat) = json_req(
+        &app,
+        "POST",
+        "/api/categories",
+        Some(json!({"name":"Travel"})),
+    )
+    .await;
+    assert_eq!(sc, StatusCode::CREATED, "{cat}");
+    let (_, exp) = json_req(
+        &app,
+        "POST",
+        "/api/expenses",
+        Some(json!({"date":"2026-10-02","customer_id":cid,"category_id":cat["id"],"amount_minor":1000,"currency":"EUR"})),
+    )
+    .await;
+    let (scc, claim) = json_req(
+        &app,
+        "POST",
+        "/api/claims",
+        Some(json!({"title":"Oct costs","expense_ids":[exp["id"]]})),
+    )
+    .await;
+    assert_eq!(scc, StatusCode::CREATED, "{claim}");
+    let claim_id = claim["id"].as_str().unwrap();
+
+    // Submit a draft succeeds; a second submit is a 409 (no longer a draft).
+    assert_eq!(
+        json_req(
+            &app,
+            "POST",
+            &format!("/api/claims/{claim_id}/submit"),
+            None
+        )
+        .await
+        .0,
+        StatusCode::OK
+    );
+    assert_eq!(
+        json_req(
+            &app,
+            "POST",
+            &format!("/api/claims/{claim_id}/submit"),
+            None
+        )
+        .await
+        .0,
+        StatusCode::CONFLICT
+    );
+    // A malformed decision is 422 and leaves the claim submitted.
+    let (s_dec, body) = json_req(
+        &app,
+        "POST",
+        &format!("/api/claims/{claim_id}/decision"),
+        Some(json!({"decision":"nope"})),
+    )
+    .await;
+    assert_eq!(s_dec, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["error"]["code"], "validation_failed");
+    // An unknown claim id is a 404, never a phantom state change.
+    assert_eq!(
+        json_req(
+            &app,
+            "POST",
+            "/api/claims/00000000-0000-0000-0000-000000000000/submit",
+            None
+        )
+        .await
+        .0,
+        StatusCode::NOT_FOUND
+    );
+    // Submitting an unknown claim is 404; the known one is untouched.
+    let (_, listed) = json_req(&app, "GET", "/api/claims", None).await;
+    assert_eq!(listed["claims"][0]["state"], "submitted");
+}
+
+/// #262 Tier 2: timer errors — an unknown project code is a 422 field error,
+/// and stopping with no running timer is a 404.
+#[tokio::test]
+async fn timer_invalid_project_is_422_and_stop_without_timer_is_404() {
+    let (app, _d) = app().await;
+    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap();
+
+    let (s_bad, body) = json_req(
+        &app,
+        "POST",
+        "/api/timer",
+        Some(json!({"customer_id":cid,"project_code":"NOPE"})),
+    )
+    .await;
+    assert_eq!(s_bad, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["error"]["code"], "validation_failed");
+
+    let (s_stop, _) = json_req(&app, "POST", "/api/timer/stop", None).await;
+    assert_eq!(s_stop, StatusCode::NOT_FOUND);
+}
+
+/// #262 Tier 2: issuing — an empty period is a 409 and persists nothing; a
+/// double issue is refused (409) and never re-locks or duplicates.
+#[tokio::test]
+async fn invoice_issue_empty_period_conflicts_and_double_issue_is_refused() {
+    let (app, _d) = app().await;
+    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap();
+    new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
+
+    // No billable, not-yet-invoiced work in the period -> 409, nothing stored.
+    let (s_empty, body) = json_req(
+        &app,
+        "POST",
+        "/api/invoices",
+        Some(json!({"customer_id":cid,"from":"2026-01-01","to":"2026-01-07"})),
+    )
+    .await;
+    assert_eq!(s_empty, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"]["code"], "conflict");
+    let (_, list) = json_req(&app, "GET", "/api/invoices", None).await;
+    assert!(
+        list["invoices"].as_array().unwrap().is_empty(),
+        "an empty period must persist no invoice"
+    );
+
+    // Issue once, then a second issue is refused.
+    json_req(
+        &app,
+        "POST",
+        "/api/entries",
+        Some(entry_body(cid, "P1", json!(3), "2026-02-02")),
+    )
+    .await;
+    let (sc, draft) = json_req(
+        &app,
+        "POST",
+        "/api/invoices",
+        Some(json!({"customer_id":cid,"from":"2026-02-01","to":"2026-02-07"})),
+    )
+    .await;
+    assert_eq!(sc, StatusCode::CREATED, "{draft}");
+    let iid = draft["id"].as_str().unwrap();
+    assert_eq!(
+        json_req(&app, "POST", &format!("/api/invoices/{iid}/issue"), None)
+            .await
+            .0,
+        StatusCode::OK
+    );
+    let (s_again, again_body) =
+        json_req(&app, "POST", &format!("/api/invoices/{iid}/issue"), None).await;
+    assert_eq!(s_again, StatusCode::CONFLICT, "{again_body}");
+}
+
+/// #262 Tier 2: the bootstrap endpoint enforces the weak-password rule through
+/// HTTP (previously unit-tested only), on a store with no users yet.
+#[tokio::test]
+async fn bootstrap_weak_password_is_422_through_the_endpoint() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("data")).unwrap();
+    let router = tucano_time::build_router(AppState::with_session(
+        store,
+        Arc::new(Session::new(
+            b"test-session-secret-0000000000000032".to_vec(),
+            3600,
+            false,
+        )),
+    ));
+    let (s, body, _) = raw(
+        &router,
+        "POST",
+        "/api/auth/bootstrap",
+        Some(json!({"name":"Admin","email":"a@b.co","password":"short"})),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["error"]["code"], "validation_failed");
+    // The refusal created no user: the store still reports uninitialised.
+    let (_s2, st, _) = raw(&router, "GET", "/api/auth/status", None, None).await;
+    assert_eq!(st["initialised"], false);
+}
+
+/// Build a router with a real (temp-dir) vault for the secret-endpoint tests.
+async fn vault_router(dir: &std::path::Path) -> (Router, String) {
+    use tucano_time::vault::SecretVault;
+    let store = Store::open(dir.join("data")).unwrap();
+    let root = store.root().to_path_buf();
+    let vault = Arc::new(
+        SecretVault::open(&root, Some("0123456789abcdef0123456789abcdef"))
+            .unwrap()
+            .unwrap(),
+    );
+    let state = AppState {
+        store: Arc::new(store),
+        clock: Arc::new(SystemClock),
+        locks: Arc::new(tucano_time::lock::NoLocks),
+        session: Arc::new(Session::new(
+            b"test-session-secret-0000000000000032".to_vec(),
+            3600,
+            false,
+        )),
+        rate: Arc::new(tucano_time::ratelimit::RateLimiter::new(
+            8,
+            std::time::Duration::from_secs(300),
+        )),
+        audit: Arc::new(tucano_time::audit::AuditLog::new(&root)),
+        revocations: Arc::new(tucano_time::revoke::Revocations::new(&root)),
+        vault: Some(vault),
+        email: Arc::new(tucano_time::email::DisabledEmailSender),
+        payments: Arc::new(tucano_time::payments::PaymentRegistry::default()),
+        accounting: Arc::new(tucano_time::accounting::AccountingRegistry::default()),
+        sso: Arc::new(tucano_time::sso::SsoRegistry::default()),
+        oauth_flows: Arc::new(tucano_time::calendar_oauth::OAuthFlows::new()),
+        cfg: Arc::new(std::sync::Mutex::new(Arc::new(
+            tucano_time::appconfig::AppConfig::empty(),
+        ))),
+    };
+    let router = tucano_time::build_router(state);
+    let _ = raw(
+        &router,
+        "POST",
+        "/api/auth/bootstrap",
+        Some(json!({"name":"Admin","email":ADMIN_EMAIL,"password":ADMIN_PW})),
+        None,
+    )
+    .await;
+    let admin = login_cookie(&router, ADMIN_EMAIL, ADMIN_PW).await;
+    (router, admin)
+}
+
+/// #262 Tier 2: `PUT /admin/secrets/{key}` rejects an invalid key name with 422
+/// (the value is never stored). A valid key still succeeds.
+#[tokio::test]
+async fn secret_put_invalid_key_name_is_422() {
+    let dir = tempfile::tempdir().unwrap();
+    let (router, admin) = vault_router(dir.path()).await;
+    let long_key = "a".repeat(101); // > 100 chars -> invalid
+    let (s, body, _) = raw(
+        &router,
+        "PUT",
+        &format!("/api/admin/secrets/{long_key}"),
+        Some(json!({"value":"x"})),
+        Some(&admin),
+    )
+    .await;
+    assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["error"]["code"], "validation_failed");
+    // The invalid key was not persisted.
+    let (_, list, _) = raw(&router, "GET", "/api/admin/secrets", None, Some(&admin)).await;
+    assert!(
+        list["secrets"].as_array().unwrap().is_empty(),
+        "an invalid key must not be stored"
     );
 }

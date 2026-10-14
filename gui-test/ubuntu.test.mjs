@@ -4,6 +4,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { parse, walk, generate } from 'css-tree';
 import { JSDOM } from 'jsdom';
+import { loadAppSource } from './load-app.mjs';
 
 const vendor = new URL('../web/vendor/ubuntu/', import.meta.url);
 const css = readFileSync(new URL('components.css', vendor), 'utf8');
@@ -70,7 +71,7 @@ test('official positive buttons meet AA text contrast in both framework themes',
 
 test('server field errors associate controls with messages and clear safely', () => {
   const dom = new JSDOM(readFileSync(new URL('../web/index.html', import.meta.url), 'utf8'), { runScripts: 'outside-only' });
-  const script = readFileSync(new URL('../web/app.js', import.meta.url), 'utf8');
+  const script = loadAppSource();
   dom.window.eval(`${script}\nwindow.errorTest = { showFormError, clearFormError };`);
   const input = dom.window.document.getElementById('user-email');
   const error = dom.window.document.getElementById('user-error');

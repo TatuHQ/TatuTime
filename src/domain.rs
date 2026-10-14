@@ -751,8 +751,13 @@ pub fn check_manual_line(
 }
 
 /// Validate + convert manual line input; errors carry `lines[i].field` names.
+///
+/// `today` is threaded in rather than read off the wall clock: the domain never
+/// calls `Utc::now()` itself (see `clock.rs`), so a manual-line draft stays
+/// deterministic under `FixedClock`.
 pub fn validate_manual_lines(
     lines: &[ManualLineInput],
+    today: NaiveDate,
     errors: &mut Vec<FieldError>,
 ) -> Vec<InvoiceLine> {
     if lines.len() > MANUAL_LINE_MAX {
@@ -762,7 +767,6 @@ pub fn validate_manual_lines(
         ));
         return Vec::new();
     }
-    let today = chrono::Utc::now().date_naive();
     lines
         .iter()
         .enumerate()
@@ -1301,15 +1305,43 @@ pub struct ExpenseDraft {
     pub receipt_b64: Option<String>,
 }
 
+/// Entry and expense ids already committed to a **non-draft** invoice, in the
+/// `excluded_entries` / `excluded_expenses` shape [`generate_invoice`] consumes
+/// (#8). This is the single "already invoiced" predicate: the API draft/preview
+/// builder and the recurring scheduler both call it, so a line captured on an
+/// issued, settled (`partly_paid` / `paid`) or written-off document can never be
+/// billed twice (#248). Settling or writing off an invoice releases its entries
+/// from the edit lock (#114) but **not** from billing. Drafts are deliberately
+/// not excluded — their lines stay billable until the draft is issued.
+pub fn already_invoiced(invoices: &[Invoice]) -> (Vec<Uuid>, Vec<Uuid>) {
+    let billed: Vec<&Invoice> = invoices
+        .iter()
+        .filter(|i| i.status != InvoiceStatus::Draft)
+        .collect();
+    let entries = billed
+        .iter()
+        .flat_map(|i| i.lines.iter())
+        .filter_map(|l| l.entry_id)
+        .collect();
+    let expenses = billed
+        .iter()
+        .flat_map(|i| i.lines.iter())
+        .filter_map(|l| l.expense_id)
+        .collect();
+    (entries, expenses)
+}
+
 /// Read-only context for invoice generation, bundled to keep the signature small.
 pub struct InvoiceSources<'a> {
     pub projects: &'a [Project],
     pub users: &'a [User],
     pub entries: &'a [Entry],
     pub expenses: &'a [Expense],
-    /// Entry ids already on an issued invoice (excluded).
+    /// Entry ids already on a non-draft invoice (excluded); see
+    /// [`already_invoiced`].
     pub excluded_entries: &'a [Uuid],
-    /// Expense ids already on an issued invoice (excluded).
+    /// Expense ids already on a non-draft invoice (excluded); see
+    /// [`already_invoiced`].
     pub excluded_expenses: &'a [Uuid],
     pub include_expenses: bool,
     /// #134: when true the `projects` list is the billable SCOPE — entries
@@ -1321,8 +1353,8 @@ pub struct InvoiceSources<'a> {
 /// Build a draft invoice from the billable entries (and, if enabled, billable
 /// expenses) in `[from, to]` for one customer. Time-line rates are resolved per
 /// entry (person > project > customer) and snapshotted, so a later rate
-/// change never rewrites an issued invoice. Items already on an issued invoice
-/// (`excluded_*`) are skipped.
+/// change never rewrites an issued invoice. Items already on a non-draft
+/// invoice (`excluded_*`, e.g. from [`already_invoiced`]) are skipped.
 pub fn generate_invoice(
     number: String,
     customer: &Customer,
@@ -1375,7 +1407,7 @@ pub fn generate_invoice(
             continue;
         }
         if excluded_entry.contains(&e.id) {
-            continue; // already billed on an issued invoice
+            continue; // already billed on a non-draft invoice
         }
         let project = project_by_code.get(e.project_code.0.as_str()).copied();
         if *restrict_projects && project.is_none() {
@@ -2073,6 +2105,7 @@ mod tests {
 
     #[test]
     fn manual_line_validation_guards() {
+        let today = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
         let mut errs = Vec::new();
         let ok = ManualLineInput {
             description: "Seat".into(),
@@ -2081,21 +2114,22 @@ mod tests {
             unit_price_minor: 2500,
             project_code: None,
         };
-        let lines = validate_manual_lines(std::slice::from_ref(&ok), &mut errs);
+        let lines = validate_manual_lines(std::slice::from_ref(&ok), today, &mut errs);
         assert!(errs.is_empty());
         assert_eq!(lines[0].amount_minor, 10_000);
         assert_eq!(lines[0].kind, LineKind::Fixed);
+        assert_eq!(lines[0].date, today);
         let bad = ManualLineInput {
             quantity_hundredths: 0,
             ..ok.clone()
         };
         let mut e2 = Vec::new();
-        validate_manual_lines(&[bad], &mut e2);
+        validate_manual_lines(&[bad], today, &mut e2);
         assert_eq!(e2.len(), 1);
         // > MANUAL_LINE_MAX lines short-circuits.
         let many = vec![ok; MANUAL_LINE_MAX + 1];
         let mut e3 = Vec::new();
-        assert!(validate_manual_lines(&many, &mut e3).is_empty());
+        assert!(validate_manual_lines(&many, today, &mut e3).is_empty());
         assert!(!e3.is_empty());
     }
 
@@ -2226,6 +2260,48 @@ mod tests {
     }
 
     #[test]
+    fn already_invoiced_excludes_every_non_draft_status() {
+        let entry = Uuid::new_v4();
+        let expense = Uuid::new_v4();
+        let line = InvoiceLine {
+            kind: LineKind::Time,
+            date: NaiveDate::from_ymd_opt(2026, 1, 2).unwrap(),
+            entry_id: Some(entry),
+            expense_id: Some(expense),
+            project_code: Some(ProjectCode("P1".into())),
+            task_code: None,
+            hours: Some(Hours(100)),
+            rate_minor: Some(6000),
+            amount_minor: 6000,
+            note: String::new(),
+            quantity_hundredths: None,
+            unit_price_minor: None,
+            item_kind: None,
+        };
+        let with_line = |status: InvoiceStatus| {
+            let mut i = inv(status, 6000, None);
+            i.lines = vec![line.clone()];
+            i
+        };
+        // A draft's lines stay billable (#248): the predicate must NOT exclude
+        // them, or the recurring job could never bill a fresh period.
+        let (draft_entries, draft_expenses) = already_invoiced(&[with_line(InvoiceStatus::Draft)]);
+        assert!(draft_entries.is_empty() && draft_expenses.is_empty());
+        // Every settled or closed state is already billed: issued, partly
+        // paid, paid and written-off all keep their lines out of new drafts.
+        for status in [
+            InvoiceStatus::Issued,
+            InvoiceStatus::PartlyPaid,
+            InvoiceStatus::Paid,
+            InvoiceStatus::WrittenOff,
+        ] {
+            let (entries, expenses) = already_invoiced(&[with_line(status)]);
+            assert_eq!(entries, vec![entry], "entries for {status:?}");
+            assert_eq!(expenses, vec![expense], "expenses for {status:?}");
+        }
+    }
+
+    #[test]
     fn invoice_summary_counts_and_outstanding() {
         let today = NaiveDate::from_ymd_opt(2026, 2, 1).unwrap();
         let invoices = vec![
@@ -2262,6 +2338,155 @@ mod tests {
     fn invoice_totals_saturate_corrupt_tax_addition() {
         let totals = invoice_totals(u64::MAX, 10_000, 0);
         assert_eq!(totals.total_minor, u64::MAX);
+    }
+
+    // ---- #262 Tier 3: direct validator coverage (previously HTTP-only) ----
+
+    #[test]
+    fn validate_project_input_defaults_and_bounds() {
+        // A blank name falls back to the (normalised) project code.
+        let ok = validate_project_input(&ProjectInput {
+            code: ProjectCode::parse("p-1").unwrap(),
+            name: "   ".into(),
+            currency: Currency("EUR".into()),
+            rate_minor: 6000,
+            active: true,
+            budget_hours: None,
+            budget_amount_minor: None,
+        })
+        .unwrap();
+        assert_eq!(ok.code, "P-1");
+        assert_eq!(ok.name, "P-1", "blank name falls back to the code");
+
+        // The #187 budget ceilings are enforced on both money and hours lanes.
+        let err = validate_project_input(&ProjectInput {
+            code: ProjectCode::parse("P1").unwrap(),
+            name: "P1".into(),
+            currency: Currency("EUR".into()),
+            rate_minor: 6000,
+            active: true,
+            budget_hours: Some(100_000_001),
+            budget_amount_minor: Some(100_000_001),
+        })
+        .unwrap_err();
+        let fields: Vec<&str> = err.iter().map(|f| f.field.as_str()).collect();
+        assert!(fields.contains(&"budget_hours"), "{fields:?}");
+        assert!(fields.contains(&"budget_amount_minor"), "{fields:?}");
+
+        // A name over the 120-char bound is a field error.
+        let err2 = validate_project_input(&ProjectInput {
+            code: ProjectCode::parse("P1").unwrap(),
+            name: "x".repeat(121),
+            currency: Currency("EUR".into()),
+            rate_minor: 6000,
+            active: true,
+            budget_hours: None,
+            budget_amount_minor: None,
+        })
+        .unwrap_err();
+        assert!(err2.iter().any(|f| f.field == "name"));
+    }
+
+    #[test]
+    fn validate_task_input_trims_and_bounds_name() {
+        let ok = validate_task_input(&TaskInput {
+            code: ProjectCode::parse("t-9").unwrap(),
+            name: "  Design  ".into(),
+            active: true,
+        })
+        .unwrap();
+        assert_eq!(ok.code, "T-9");
+        assert_eq!(ok.name, "Design", "name is trimmed");
+
+        // A blank name falls back to the code; a too-long one is rejected.
+        let blank = validate_task_input(&TaskInput {
+            code: ProjectCode::parse("t-9").unwrap(),
+            name: String::new(),
+            active: true,
+        })
+        .unwrap();
+        assert_eq!(blank.name, "T-9");
+        let err = validate_task_input(&TaskInput {
+            code: ProjectCode::parse("T-9").unwrap(),
+            name: "x".repeat(121),
+            active: true,
+        })
+        .unwrap_err();
+        assert!(err.iter().any(|f| f.field == "name"));
+    }
+
+    #[test]
+    fn validate_category_input_requires_a_name() {
+        let ok = validate_category_input(&CategoryInput {
+            name: "  Travel  ".into(),
+            default_billable: true,
+            active: true,
+        })
+        .unwrap();
+        assert_eq!(ok.name, "Travel", "name is trimmed");
+
+        for bad in ["   ", &"x".repeat(121)] {
+            let err = validate_category_input(&CategoryInput {
+                name: bad.to_string(),
+                default_billable: true,
+                active: true,
+            })
+            .unwrap_err();
+            assert!(err.iter().any(|f| f.field == "name"), "name {bad:?}");
+        }
+    }
+
+    #[test]
+    fn validate_expense_input_bounds_amount_date_note_and_receipt() {
+        let base = |amount: u64, date: &str, receipt: Option<String>| ExpenseInput {
+            date: date.into(),
+            customer_id: Uuid::nil(),
+            project_code: None,
+            category_id: None,
+            amount_minor: amount,
+            currency: Currency("EUR".into()),
+            billable: true,
+            note: String::new(),
+            receipt_name: None,
+            receipt_b64: receipt,
+        };
+
+        let ok = validate_expense_input(&base(1000, "2026-10-02", None)).unwrap();
+        assert_eq!(ok.amount_minor, 1000);
+
+        // Amount ceiling.
+        let err = validate_expense_input(&base(100_000_001, "2026-10-02", None)).unwrap_err();
+        assert!(err.iter().any(|f| f.field == "amount_minor"));
+        // Malformed date.
+        let err2 = validate_expense_input(&base(1000, "nope", None)).unwrap_err();
+        assert!(err2.iter().any(|f| f.field == "date"));
+        // Oversized receipt.
+        let err3 = validate_expense_input(&base(1000, "2026-10-02", Some("a".repeat(4_000_001))))
+            .unwrap_err();
+        assert!(err3.iter().any(|f| f.field == "receipt_b64"));
+        // Overlong note.
+        let mut long_note = base(1000, "2026-10-02", None);
+        long_note.note = "x".repeat(501);
+        let err4 = validate_expense_input(&long_note).unwrap_err();
+        assert!(err4.iter().any(|f| f.field == "note"));
+    }
+
+    #[test]
+    fn due_period_quarterly_boundary() {
+        let today = NaiveDate::from_ymd_opt(2026, 10, 7).unwrap();
+        // Never run -> a full 91-day quarter ending today.
+        assert_eq!(
+            due_period(Cadence::Quarterly, None, today),
+            Some((today - chrono::Duration::days(90), today))
+        );
+        // Ran 90 days ago -> not yet due; 91 days ago -> due, from the next day.
+        let last = today - chrono::Duration::days(90);
+        assert!(due_period(Cadence::Quarterly, Some(last), today).is_none());
+        let last91 = today - chrono::Duration::days(91);
+        assert_eq!(
+            due_period(Cadence::Quarterly, Some(last91), today),
+            Some((last91 + chrono::Duration::days(1), today))
+        );
     }
 }
 

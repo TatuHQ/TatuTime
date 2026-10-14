@@ -1,4 +1,4 @@
-// Page routing: every view has a stable URL path (see ROUTES in app.js and
+// Page routing: every view has a stable URL path (see TAB_ROUTES in app.js and
 // spa_page in src/lib.rs). Guards: (1) a deep link selects that view at boot,
 // (2) case and trailing slashes are canonicalised, (3) '/' and unknown paths
 // fall back to the default view, (4) member visibility wins over the URL,
@@ -8,9 +8,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { JSDOM } from 'jsdom';
+import { loadAppSource } from './load-app.mjs';
 
 const html = readFileSync(new URL('../web/index.html', import.meta.url), 'utf8');
-const app = readFileSync(new URL('../web/app.js', import.meta.url), 'utf8');
+const app = loadAppSource();
 
 // Member boot stub (same shape as boot.test.mjs): admin-tier panels are hidden,
 // every data route answers with empty collections.

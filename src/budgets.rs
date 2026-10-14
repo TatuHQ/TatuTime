@@ -42,6 +42,16 @@ pub fn burn_report(
         customers.iter().map(|c| (c.id, c)).collect();
     let user_by_id: std::collections::HashMap<uuid::Uuid, &User> =
         users.iter().map(|u| (u.id, u)).collect();
+    // #256: the per-project scan of the whole entry set made this O(projects ×
+    // entries); group the billable entries by (customer, project) once.
+    let mut entries_by_project: std::collections::HashMap<(uuid::Uuid, &str), Vec<&Entry>> =
+        std::collections::HashMap::new();
+    for e in entries.iter().filter(|e| e.billable) {
+        entries_by_project
+            .entry((e.customer_id, e.project_code.0.as_str()))
+            .or_default()
+            .push(e);
+    }
     let mut rows = Vec::new();
     for (cid, p) in projects {
         if p.budget_hours.is_none() && p.budget_amount_minor.is_none() {
@@ -50,17 +60,16 @@ pub fn burn_report(
         let customer = customer_by_id.get(cid).copied();
         let mut burn_h = 0u64;
         let mut burn_amt = 0u64;
-        for e in entries
-            .iter()
-            .filter(|e| &e.customer_id == cid && e.project_code == p.code && e.billable)
-        {
-            burn_h += u64::from(e.hours.0);
-            if let Some(cust) = customer {
-                let urate = e
-                    .user_id
-                    .and_then(|uid| user_by_id.get(&uid).map(|u| u.default_rate_minor));
-                let (_, rate) = effective_rates(cust, Some(p), urate);
-                burn_amt += e.hours.amount_minor(rate);
+        if let Some(list) = entries_by_project.get(&(*cid, p.code.0.as_str())) {
+            for &e in list {
+                burn_h += u64::from(e.hours.0);
+                if let Some(cust) = customer {
+                    let urate = e
+                        .user_id
+                        .and_then(|uid| user_by_id.get(&uid).map(|u| u.default_rate_minor));
+                    let (_, rate) = effective_rates(cust, Some(p), urate);
+                    burn_amt += e.hours.amount_minor(rate);
+                }
             }
         }
         let burn_hours = burn_h as f64 / 100.0;
@@ -281,5 +290,48 @@ mod tests {
         assert_eq!(rows[0].burn_hours, 6.0);
         assert_eq!(rows[0].hours_pct, Some(60.0));
         assert!(!rows[0].over);
+    }
+
+    #[test]
+    fn burn_computes_amount_percentage_and_overspend() {
+        // #262 Tier 3: the money lane (`budget_amount_minor` / `amount_pct`) was
+        // never asserted — only the hours lane was.
+        let (cid, mut p) = proj(None);
+        p.budget_amount_minor = Some(10_000); // 100.00 in minor units
+        let customer = Customer {
+            id: cid,
+            name: "ACME".into(),
+            currency: Currency("EUR".into()),
+            default_rate_minor: 6000, // 60.00/h
+            active: true,
+            email: String::new(),
+            payment_terms: None,
+            invoice_notes: String::new(),
+            invoice_subject: String::new(),
+            address: None,
+            contacts: vec![],
+            tax_hundredths: 0,
+            discount_hundredths: 0,
+        };
+        let entries = vec![Entry {
+            id: uuid::Uuid::new_v4(),
+            date: NaiveDate::from_ymd_opt(2026, 10, 2).unwrap(),
+            customer_id: cid,
+            user_id: None,
+            project_code: ProjectCode::parse("P1").unwrap(),
+            task_code: None,
+            hours: Hours(600), // 6.00h * 60.00 = 360.00 (36_000 minor)
+            note: String::new(),
+            billable: true,
+            source: crate::domain::Source::Manual,
+            created_at: Utc.timestamp_opt(1, 0).unwrap(),
+            updated_at: Utc.timestamp_opt(1, 0).unwrap(),
+        }];
+        let rows = burn_report(&[(cid, p)], &entries, &[customer], &[]);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].budget_amount_minor, Some(10_000));
+        assert_eq!(rows[0].burn_amount_minor, 36_000);
+        assert_eq!(rows[0].amount_pct, Some(360.0));
+        assert!(rows[0].over, "an amount over budget must flag `over`");
     }
 }
