@@ -68,12 +68,25 @@ component backlog.
   and `cssSha256` is still
   `c6b404f72a9fb86c5a1425af9f26b27870edf2e9da74c640dbb149390d936e05`.
 
-**Umbrella status.** With increment 6 the six planned PRs are all merged, but
-#232 stays **open** (*Part of*): the page map above is still ⬜ — every row
+- **Remaining registers (#232 phase 2a)** — the still-bespoke registers moved onto
+  the same pattern: the user (`/settings/users`), approval (`/approvals`),
+  credential (`/settings/security`), catalog (`/settings/catalog`) and the
+  advanced-billing recurring/retainer (`/invoices`) registers are `p-card` shells
+  using `p-table--mobile-card` with renderer-supplied `data-heading` labels, while
+  the runtime-config and template-variable summaries keep a plain official table
+  inside their card. The three bespoke register rules the conversion replaced
+  (`#config-table`, `#user-table`, `.advanced-billing-section table`) are deleted,
+  so `styles.css` drops from 701 lines / 389 rules to 698 / 386. The `#report-table`
+  shell had already landed in increment 2. The component family is unchanged, so
+  `npm run build:ubuntu` is a **no-op** and `cssSha256` stays
+  `c6b404f72a9fb86c5a1425af9f26b27870edf2e9da74c640dbb149390d936e05`.
+
+**Umbrella status.** With increment 6 and phase 2a the planned PRs are all merged,
+but #232 stays **open** (*Part of*): the page map above is still ⬜ — every row
 needs its own PR and the manual light/dark + keyboard/AT review of ground rules
-4–5, including the Invoices `p-table--sortable` register and the user/submission
-registers — and the `decorateUbuntuButton` label-matching fallback is still to
-retire. Those are what a later ticket needs before it can `Closes #232`.
+4–5, including the Invoices `p-table--sortable` register — and the
+`decorateUbuntuButton` label-matching fallback is still to retire. Those are what
+a later ticket needs before it can `Closes #232`.
 
 ## Ground rules
 
@@ -117,6 +130,17 @@ retire. Those are what a later ticket needs before it can `Closes #232`.
 Cross-navigation (row "Projects" buttons, wizard finish, calendar → day) is
 expected to keep working through the tabs' click handlers; a follow-up ticket
 may turn those into real links once every page is migrated.
+
+**#232 phase 2a progress (registers only).** The register of each view below is
+now on the official pattern, but every row stays ⬜ because a page is not
+"migrated" until its forms/dialogs and the per-page light/dark + keyboard/AT
+review land too: the user (`/settings/users`), approval (`/approvals`), credential
+(`/settings/security`), catalog (`/settings/catalog`) and the advanced-billing
+recurring/retainer (`/invoices`) registers are `p-card` + `p-table--mobile-card`
+shells, and the runtime-config (`/settings/security`) and template-variable
+(`/settings/invoices`) summaries are plain official tables in a `p-card`. The
+Day/Week/Calendar grids, the invoice line editor and the Invoices
+`p-table--sortable` register (row 7) are deliberately untouched.
 
 ## Order and per-page scope
 

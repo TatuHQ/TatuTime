@@ -205,7 +205,6 @@ button.note-flag [class*="p-icon--"] { margin-right: 0; }
 .lock [class*="p-icon--"] { vertical-align: -.15rem; }
 .bar > * { min-width: 0; }
 .table-scroll { max-width: 100%; }
-#config-table { display: block; max-width: 100%; overflow-x: auto; }
 button.link, button.danger { min-height: 2rem; }
 input[type="checkbox"], input[type="radio"] { min-height: 0; accent-color: var(--brand-deep); }
 @media (prefers-reduced-motion: reduce) {
@@ -233,12 +232,12 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 #week-table td.cell.has { background: var(--cell-active); font-weight: 600; }
 #week-table td.cell button { white-space: normal; background: none; border: none; color: var(--brand-deep); text-decoration: underline; font-weight: 600; padding: 0; }
 
-/* #232 increment 2 (reference tables): the customer/project/task/expense/report
-   registers are Vanilla p-card shells — the card owns the frame and the header
-   rule, so the #230 heading slot inside it drops its own bottom margin. The
-   dense registers use p-table--mobile-card for narrow screens (the renderers
-   supply the matching data-heading labels). */
-.p-card__header.customer-heading, .p-card__header.panel-heading-row, #report-form.bar { margin-bottom: 0; }
+/* #232 increment 2 + phase 2a (registers): the customer/project/task/expense/
+   report and user/submission/secret/config/item/template-vars/rec/ret registers
+   are Vanilla p-card shells — the card owns the frame and header rule, so the
+   heading slot (and submit/report bars) drops its bottom margin; dense registers
+   use p-table--mobile-card (data-heading) and summaries keep a plain table. */
+.p-card__header.customer-heading, .p-card__header.panel-heading-row, #report-form.bar, #submission-form.bar { margin-bottom: 0; }
 
 .form-error { color: var(--danger); font-weight: 600; margin: .25rem 0; }
 .hint, .foot { color: var(--muted); font-size: .9rem; }
@@ -395,7 +394,6 @@ dialog.p-modal::backdrop { background: transparent; }
 #user-dialog input:not([type="checkbox"]), #user-dialog select, #user-password-dialog input { width: 100%; }
 .user-filters { margin-top: 1rem; }
 .user-filters > div { min-width: 0; }
-#user-table { min-width: 40rem; }
 #project-dialog form, #task-dialog form { margin: 0; }
 .hierarchy-actions { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
 /* #182: hierarchy-section filter controls + scope label */
@@ -620,7 +618,6 @@ caption { padding-bottom: .35rem; }
 .advanced-billing-section { min-width: 0; }
 .advanced-billing-section h2:first-child { margin-top: .25rem; }
 .advanced-billing-section .card { max-width: none; }
-.advanced-billing-section table { display: block; overflow-x: auto; }
 .day-bar { display: grid; grid-template-columns: auto minmax(12rem, 1fr) auto; align-items: center; }
 .day-actions { grid-column: 1; }
 .day-nav { justify-self: center; }
