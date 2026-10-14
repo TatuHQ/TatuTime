@@ -41,3 +41,14 @@ $increase-font-size-on-larger-screens: false;
 @include vf-p-notification;
 @include vf-p-modal;
 @include vf-p-tabs;
+
+// #232 increment 1 (auth + form controls): official form-control rhythm and
+// link patterns. `vf-b-forms` supplies the official label/input/select/textarea
+// rhythm the auth window, setup wizard and entry/user/customer forms adopt;
+// `vf-p-forms` + `vf-p-form-validation` + `vf-p-form-help-text` supply the
+// class-scoped form patterns; `vf-p-links` supplies `p-link--soft`.
+@include vf-b-forms;
+@include vf-p-forms;
+@include vf-p-form-validation;
+@include vf-p-form-help-text;
+@include vf-p-links;

@@ -15,6 +15,11 @@ component backlog.
 - **Page routing** — the JSON API moved under `/api`; every view now has a
   stable, case-insensitive URL (`spa_page` in `src/lib.rs`, `TAB_ROUTES` in
   `web/app.js`). This is what makes per-page review-and-sign-off practical.
+- **Auth + form controls (#232 increment 1)** — the vendor bundle now carries the
+  official form family (`vf-b-forms`/`vf-p-links`); the hand-rolled control
+  styles are retired and the auth/wizard/entry/user/customer forms use the
+  explicit `p-button--positive`/`p-button` classes. Tables, chips, dialogs and
+  tablists follow in their own #232 increments.
 
 ## Ground rules
 

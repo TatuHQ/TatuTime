@@ -119,7 +119,7 @@ export async function loadSsoProviders() {
       box.appendChild(
         el('button', {
           type: 'button',
-          cls: 'secondary',
+          cls: 'p-button',
           text: `Sign in with ${name}`,
           on: {
             click: () => {
