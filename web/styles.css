@@ -231,8 +231,8 @@ input[type="checkbox"], input[type="radio"] { min-height: 0; accent-color: var(-
    it: the 2a registers were already full-width `p-card`s. */
 .buttons { display: flex; gap: .6rem; }
 
-/* ---- tables ---- */
-table { border-collapse: collapse; width: 100%; margin-top: .5rem; }
+/* ---- tables ---- (#232 phase 2f: the vendored base `table` rule owns `border-collapse` + `width`) */
+table { margin-top: .5rem; }
 caption { text-align: left; color: var(--muted); }
 th, td { text-align: left; padding: .5rem .65rem; border-bottom: 1px solid var(--line); vertical-align: top; }
 thead th { border-bottom: 2px solid var(--line); }
@@ -346,8 +346,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 #day-table tfoot th { text-align: left; }
 #day-table tfoot td { font-variant-numeric: tabular-nums; font-weight: 700; }
 
-/* Week grid (#13) */
-#week-table.grid { border-collapse: collapse; width: 100%; }
+/* Week grid (#13). #232 phase 2f: the `#week-table.grid` border-collapse/width pair duplicated the base `table` rule — deleted (#day-table's `separate` still overrides). */
 #week-table.grid th, #week-table.grid td { border: 1px solid var(--line); padding: 0; text-align: left; }
 #week-table.grid thead th { padding: .35rem .5rem; font-size: .85rem; white-space: nowrap; }
 #week-table.grid thead th.today { color: var(--brand-deep); border-bottom: 3px solid var(--accent); }
