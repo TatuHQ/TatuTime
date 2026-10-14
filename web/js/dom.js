@@ -1,9 +1,12 @@
 // dom.js — TucanoTime GUI module (ES-module split of web/app.js, #264).
 // Moved from the original monolithic app.js; behaviour is unchanged.
-
-
-import { iw } from './billing.js';
-import { ed } from './invoices.js';
+//
+// This is the graph's leaf module: it imports nothing, so the browser
+// evaluates it before every consumer and `$` is always initialised by the time
+// another module's top-level wiring runs. Importing a view module here (as the
+// split originally did for `iw`/`ed`, which this file never uses) puts dom.js
+// inside a cycle, makes it evaluate *last*, and the first consumer's `$('…')`
+// then throws "can't access lexical declaration '$' before initialization".
 
 export const $ = (id) => document.getElementById(id);
 
@@ -65,10 +68,10 @@ export function decorateUbuntuButton(button) {
   const icon = button.dataset.icon
     ?? (text.startsWith('+') ? 'plus'
       : text === 'Edit' ? 'edit'
-      : text === 'Delete' ? 'delete'
-      : text.startsWith('Copy') ? 'copy'
-      : text === 'Start timer' ? 'play'
-      : text === 'Stop' ? 'stop' : null);
+        : text === 'Delete' ? 'delete'
+          : text.startsWith('Copy') ? 'copy'
+            : text === 'Start timer' ? 'play'
+              : text === 'Stop' ? 'stop' : null);
   if (icon) {
     if (!button.dataset.icon && text.startsWith('+')) {
       const label = [...button.childNodes].find((node) => node.nodeType === Node.TEXT_NODE && node.textContent.trim().startsWith('+'));
