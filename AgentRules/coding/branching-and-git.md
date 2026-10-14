@@ -6,8 +6,9 @@ title: Branching & git
 
 # Branching and Git
 
-Branch roles and merge targets follow Gitflow. Where a repository has no `develop` branch,
-substitute its default branch for `develop` throughout.
+Branch roles and merge targets follow Gitflow, and every repository keeps a `develop`
+branch. Repoint a repository that lacks one before its next change, and do not commit to
+`main` directly in the meantime.
 
 | Branch | Created from | Merged into |
 | --- | --- | --- |
