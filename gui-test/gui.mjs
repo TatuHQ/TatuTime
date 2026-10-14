@@ -560,8 +560,12 @@ check('cancel leaves the note unchanged (#126)',
   /Note unchanged/i.test(window.document.getElementById('live-region').textContent));
 window.document.getElementById('ts-week').dispatchEvent(new window.Event('click', { bubbles: true }));
 
-check('Week add-row controls are removed',
-  ['week-add-row', 'week-add-project', 'week-add-task', 'week-add-confirm', 'week-add-cancel']
+// #172 follow-up: "+ Add row" is back as a BUTTON that opens the
+// customer/project/task dialog — the old inline pickers stay deleted.
+check('Week + Add row is a dialog button with no inline pickers (#172 follow-up)',
+  window.document.getElementById('week-add-row')?.tagName === 'BUTTON'
+  && window.document.getElementById('week-row-dialog')?.classList.contains('p-modal')
+  && ['week-add-project', 'week-add-task', 'week-add-confirm', 'week-add-cancel']
     .every((id) => !window.document.getElementById(id)));
 check('copy previous week is a button rather than a dropdown',
   window.document.getElementById('week-copy-previous').tagName === 'BUTTON'

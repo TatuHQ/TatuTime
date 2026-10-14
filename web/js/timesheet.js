@@ -9,7 +9,7 @@ import { isOpenInvoice } from './invoices.js';
 import { refreshNotifications } from './notifications.js';
 import { showTimesheet } from './route.js';
 import { createSeqGuard } from './seq.js';
-import { customerName, fillProjectSelect, fillTaskSelect, state } from './state.js';
+import { customerName, fillCustomerSelect, fillProjectSelect, fillTaskSelect, state } from './state.js';
 
 const daySeq = createSeqGuard();
 
@@ -704,6 +704,86 @@ export function addWeekRow(customerId, projectCode, taskCode, week) {
   }
   weekState.extraRows.push({ customer_id: customerId, project_code: projectCode, task_code: taskCode || '', week });
   return true;
+}
+
+// ------------------------------------------------- week: add a project row ---
+//
+// #172 follow-up: the Week grid's "+ Add row" picks a customer/project/task and
+// appends an EMPTY row — hours go in that row's day cells, so a whole week is
+// entered at once instead of day by day. Mirrors the Day entry dialog's modal +
+// focus-return contract (#145), but carries no hours/date fields.
+
+export let weekRowOpener = null; // focus return target when the dialog closes
+
+export function showWeekRowForm(show) {
+  const dlg = $('week-row-dialog');
+  if (show) {
+    if (!(dlg.open === true || dlg.hasAttribute('open'))) weekRowOpener = document.activeElement;
+    if (typeof dlg.showModal === 'function') dlg.showModal();
+    else dlg.setAttribute('open', '');
+    return;
+  }
+  if (dlg.open === true || dlg.hasAttribute('open')) {
+    if (typeof dlg.close === 'function') dlg.close();
+    else dlg.removeAttribute('open');
+  }
+  if (weekRowOpener && document.contains(weekRowOpener) && typeof weekRowOpener.focus === 'function') {
+    weekRowOpener.focus();
+  }
+  weekRowOpener = null;
+}
+
+export function resetWeekRowForm() {
+  $('week-row-customer').value = '';
+  fillProjectSelect($('week-row-project'), '', null); // "Choose a customer first…"
+  fillTaskSelect($('week-row-task'), '', null, null); // "Choose a project first…"
+  clearFormError($('week-row-error'));
+}
+
+export function openWeekRowForm() {
+  resetWeekRowForm();
+  fillCustomerSelect($('week-row-customer'), '', true);
+  const start = $('week-date').value || mondayOf(isoDate(new Date()));
+  $('week-row-week').textContent =
+    `New row for the week of ${weekShort(start)} – ${weekShort(addDays(start, 6))}`;
+  showWeekRowForm(true);
+  $('week-row-customer').focus();
+}
+
+// Focus the new row's first day cell once the grid has re-rendered, so the user
+// can type straight into Monday. Cells render Mon–Sun in document order.
+function focusWeekRowCell(customerId, projectCode, taskCode) {
+  const input = [...document.querySelectorAll('#week-table input.cell-input')].find(
+    (i) =>
+      i.dataset.customer === customerId &&
+      i.dataset.project === projectCode &&
+      (i.dataset.task || '') === (taskCode || ''),
+  );
+  if (input) input.focus();
+}
+
+export async function saveWeekRow(evt) {
+  evt.preventDefault();
+  clearFormError($('week-row-error'));
+  const customerId = $('week-row-customer').value;
+  const projectCode = $('week-row-project').value;
+  const taskCode = $('week-row-task').value || '';
+  if (!customerId) {
+    showFormError($('week-row-error'), { message: 'Select a customer.' });
+    return;
+  }
+  if (!projectCode) {
+    showFormError($('week-row-error'), { message: 'Select a project code.' });
+    return;
+  }
+  if (!addWeekRow(customerId, projectCode, taskCode, $('week-date').value)) {
+    showFormError($('week-row-error'), { message: 'That project row is already in this week.' });
+    return;
+  }
+  showWeekRowForm(false);
+  announce(`Added ${projectCode}${taskCode ? ' / ' + taskCode : ''} — enter hours in its cells.`);
+  await refreshWeek();
+  focusWeekRowCell(customerId, projectCode, taskCode);
 }
 
 // Copy the source week's PROJECT LINES into the displayed week — never the

@@ -232,13 +232,49 @@
           <button type="button" id="week-today" class="link">Return to this week</button>
         </div>
       </div>
-      <p class="p-form-help-text">Type hours into a cell and press Enter or click away to save. Clearing a cell deletes that entry.</p>
+      <p class="p-form-help-text">Add row starts a project line for this week; type hours into its cells and press Enter or click away to save. Clearing a cell deletes that entry.</p>
       <div class="table-scroll">
         <table id="week-table" class="grid"></table>
       </div>
       <div class="week-controls p-card p-card--muted">
+        <button type="button" id="week-add-row" class="secondary" data-icon="plus">Add row</button>
         <button type="button" id="week-copy-previous" class="secondary" data-icon="copy">Copy from previous week</button>
       </div>
+
+      <!-- #172 follow-up: adding a project ROW to the week grid. The dialog
+           picks only customer/project/task — no hours: the row's day cells take
+           the whole week\u2019s time, which is the point of the Week view. Kept
+           separate from the Day entry dialog (#145), which still captures one
+           day\u2019s hours. -->
+      <dialog id="week-row-dialog" class="p-modal" aria-modal="true" aria-labelledby="week-row-title">
+      <div class="p-modal__dialog">
+      <header class="p-modal__header">
+        <h2 class="p-modal__title" id="week-row-title">Add a project row</h2>
+      </header>
+      <p class="p-form-help-text" id="week-row-week"></p>
+      <form id="week-row-form">
+        <div class="p-form__group">
+          <label class="p-form__label" for="week-row-customer">Customer</label>
+          <select class="p-form__control" id="week-row-customer" name="customer_id" required></select>
+        </div>
+        <div class="p-form__group">
+          <label class="p-form__label" for="week-row-project">Project code</label>
+          <select class="p-form__control" id="week-row-project" name="project_code" required></select>
+        </div>
+        <div class="p-form__group">
+          <label class="p-form__label" for="week-row-task">Task (optional)</label>
+          <select class="p-form__control" id="week-row-task" name="task_code"></select>
+        </div>
+        <div class="p-form-validation is-error">
+          <p class="p-form-validation__message" id="week-row-error" role="alert" hidden></p>
+        </div>
+        <footer class="buttons p-modal__footer">
+          <button data-positive="1" type="submit" id="week-row-save" class="p-button--positive">Add row</button>
+          <button type="button" class="p-button" id="week-row-cancel">Cancel</button>
+        </footer>
+      </form>
+      </div>
+      </dialog>
     </section>
 
     <!-- CALENDAR VIEW (#140): month overview of LOGGED time; distinct from

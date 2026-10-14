@@ -420,6 +420,7 @@ dialog.p-modal::backdrop { background: transparent; }
    for these focused forms). */
 #app-dialog .p-modal__dialog { max-width: 26rem; }
 #entry-dialog .p-modal__dialog { max-width: 28rem; }
+#week-row-dialog .p-modal__dialog { max-width: 26rem; }
 #expense-dialog .p-modal__dialog { max-width: 36rem; }
 #expense-category-dialog .p-modal__dialog { max-width: 28rem; }
 #customer-dialog .p-modal__dialog { max-width: 38rem; }
