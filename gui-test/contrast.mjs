@@ -61,6 +61,15 @@ const PAIRS = [
   ['nav field text on field bg', '--fg', '--field-bg', 4.5],
   ['focus ring vs surface (UI)', '--focus', '--surface', 3.0],
   ['accent vs surface (UI)', '--accent', '--surface', 3.0],
+  // #232 increment 5: the sidebar rail's tab states — the active/inactive pair
+  // is the classic contrast gap a tab migration can open, so both states are
+  // pinned rather than trusted: the inactive tab is app ink (--fg) on the rail
+  // (--sidebar-bg), its hover tint is --row-alt, and the selected tab is
+  // --brand-deep on the --accent-soft fill (8.4:1 light / 6.1:1 dark). The two
+  // in-view strips take Vanilla's own tokens (checked in a11y.test.mjs).
+  ['nav tab ink on the rail', '--fg', '--sidebar-bg', 4.5],
+  ['nav tab ink on rail hover', '--fg', '--row-alt', 4.5],
+  ['selected nav tab ink on its tint', '--brand-deep', '--accent-soft', 4.5],
 ];
 
 let failures = 0;

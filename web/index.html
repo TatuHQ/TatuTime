@@ -44,27 +44,34 @@
     <aside class="sidebar">
       <div class="brand">TucanoTime</div>
       <nav aria-label="Sections">
-        <div id="tabs" class="tabs" role="tablist" aria-label="Application sections" aria-orientation="vertical">
+        <!-- #232 increment 5: the rail is the official p-tabs__list markup
+             (every tab wrapped in p-tabs__item, the button carrying
+             p-tabs__link) and keeps its vertical axis + Up/Down roving
+             focus (#258). Vanilla's `.p-tabs` container is deliberately
+             not used: it boxes the list *with its panels*, and here the
+             panels live in <main>, while its `overflow: hidden` would
+             clip the focus rings. -->
+        <div id="tabs" class="tabs p-tabs__list" role="tablist" aria-label="Application sections" aria-orientation="vertical">
             <div class="nav-group" role="presentation">
               <span class="nav-label">Track time</span>
-              <button role="tab" id="tab-timesheet" aria-controls="panel-timesheet" aria-selected="true"><i class="p-icon--history" aria-hidden="true"></i>Timesheets</button>
+              <div class="p-tabs__item"><button class="p-tabs__link" role="tab" id="tab-timesheet" aria-controls="panel-timesheet" aria-selected="true"><i class="p-icon--history" aria-hidden="true"></i>Timesheets</button></div>
             </div>
             <div class="nav-group" role="presentation">
               <span class="nav-label">Setup</span>
-              <button role="tab" id="tab-customers" aria-controls="panel-customers" aria-selected="false" tabindex="-1"><i class="p-icon--user" aria-hidden="true"></i>Customers</button>
-              <button role="tab" id="tab-projects" aria-controls="panel-projects" aria-selected="false" tabindex="-1"><i class="p-icon--menu" aria-hidden="true"></i>Projects</button>
-              <button role="tab" id="tab-tasks" aria-controls="panel-tasks" aria-selected="false" tabindex="-1"><i class="p-icon--copy" aria-hidden="true"></i>Tasks</button>
+              <div class="p-tabs__item"><button class="p-tabs__link" role="tab" id="tab-customers" aria-controls="panel-customers" aria-selected="false" tabindex="-1"><i class="p-icon--user" aria-hidden="true"></i>Customers</button></div>
+              <div class="p-tabs__item"><button class="p-tabs__link" role="tab" id="tab-projects" aria-controls="panel-projects" aria-selected="false" tabindex="-1"><i class="p-icon--menu" aria-hidden="true"></i>Projects</button></div>
+              <div class="p-tabs__item"><button class="p-tabs__link" role="tab" id="tab-tasks" aria-controls="panel-tasks" aria-selected="false" tabindex="-1"><i class="p-icon--copy" aria-hidden="true"></i>Tasks</button></div>
             </div>
             <div class="nav-group" role="presentation">
               <span class="nav-label">Billing</span>
-              <button role="tab" id="tab-invoices" aria-controls="panel-invoices" aria-selected="false" tabindex="-1"><i class="p-icon--copy" aria-hidden="true"></i>Invoices</button>
+              <div class="p-tabs__item"><button class="p-tabs__link" role="tab" id="tab-invoices" aria-controls="panel-invoices" aria-selected="false" tabindex="-1"><i class="p-icon--copy" aria-hidden="true"></i>Invoices</button></div>
             </div>
             <div class="nav-group more-tools-group" role="presentation">
               <span class="nav-label">More tools</span>
-              <button role="tab" id="tab-expenses" aria-controls="panel-expenses" aria-selected="false" tabindex="-1"><i class="p-icon--copy" aria-hidden="true"></i>Expenses</button>
-              <button role="tab" id="tab-submissions" aria-controls="panel-submissions" aria-selected="false" tabindex="-1"><i class="p-icon--success" aria-hidden="true"></i>Approvals</button>
-              <button role="tab" id="tab-reports" aria-controls="panel-reports" aria-selected="false" tabindex="-1"><i class="p-icon--history" aria-hidden="true"></i>Reports</button>
-              <button role="tab" id="tab-settings" aria-controls="panel-settings" aria-selected="false" tabindex="-1"><i class="p-icon--settings" aria-hidden="true"></i>Settings <span class="beta" title="Integration credentials — providers not yet wired">Beta</span></button>
+              <div class="p-tabs__item"><button class="p-tabs__link" role="tab" id="tab-expenses" aria-controls="panel-expenses" aria-selected="false" tabindex="-1"><i class="p-icon--copy" aria-hidden="true"></i>Expenses</button></div>
+              <div class="p-tabs__item"><button class="p-tabs__link" role="tab" id="tab-submissions" aria-controls="panel-submissions" aria-selected="false" tabindex="-1"><i class="p-icon--success" aria-hidden="true"></i>Approvals</button></div>
+              <div class="p-tabs__item"><button class="p-tabs__link" role="tab" id="tab-reports" aria-controls="panel-reports" aria-selected="false" tabindex="-1"><i class="p-icon--history" aria-hidden="true"></i>Reports</button></div>
+              <div class="p-tabs__item"><button class="p-tabs__link" role="tab" id="tab-settings" aria-controls="panel-settings" aria-selected="false" tabindex="-1"><i class="p-icon--settings" aria-hidden="true"></i>Settings <span class="beta" title="Integration credentials — providers not yet wired">Beta</span></button></div>
             </div>
         </div>
         <!-- Utility action — #191: moved OUT of the tablist (its permitted
@@ -100,10 +107,13 @@
            one H1 per page, H2s for real sections). -->
       <div class="ts-head">
         <button type="button" id="day-add" class="primary" data-icon="plus">Track time</button>
-        <div class="seg" role="tablist" aria-label="Timesheet view" id="ts-seg">
-          <button type="button" role="tab" id="ts-day" aria-controls="panel-day" aria-selected="true">Day</button>
-          <button type="button" role="tab" id="ts-week" aria-controls="panel-week" aria-selected="false" tabindex="-1">Week</button>
-          <button type="button" role="tab" id="ts-cal" aria-controls="panel-calendar" aria-selected="false" tabindex="-1">Calendar</button>
+        <!-- #232 increment 5: Day | Week | Calendar is the official
+             p-tabs__list (the id/sibling order stay put — gui.mjs pins
+             #day-add's next sibling). -->
+        <div class="p-tabs__list" role="tablist" aria-label="Timesheet view" id="ts-seg">
+          <div class="p-tabs__item"><button type="button" class="p-tabs__link" role="tab" id="ts-day" aria-controls="panel-day" aria-selected="true">Day</button></div>
+          <div class="p-tabs__item"><button type="button" class="p-tabs__link" role="tab" id="ts-week" aria-controls="panel-week" aria-selected="false" tabindex="-1">Week</button></div>
+          <div class="p-tabs__item"><button type="button" class="p-tabs__link" role="tab" id="ts-cal" aria-controls="panel-calendar" aria-selected="false" tabindex="-1">Calendar</button></div>
         </div>
       </div>
 
@@ -595,12 +605,14 @@
     <!-- SETTINGS (admin) -->
     <section id="panel-settings" role="tabpanel" aria-labelledby="tab-settings" tabindex="0" hidden>
       <div class="settings-head">
-        <div id="settings-tabs" class="seg settings-tabs" role="tablist" aria-label="Settings categories">
-          <button type="button" role="tab" id="settings-tab-security" aria-controls="settings-panel-security" aria-selected="true">Security &amp; runtime</button>
-          <button type="button" role="tab" id="settings-tab-users" aria-controls="settings-panel-users" aria-selected="false" tabindex="-1">Users</button>
-          <button type="button" role="tab" id="settings-tab-invoice" aria-controls="settings-panel-invoice" aria-selected="false" tabindex="-1">Invoice documents</button>
-          <button type="button" role="tab" id="settings-tab-catalog" aria-controls="settings-panel-catalog" aria-selected="false" tabindex="-1">Products &amp; services</button>
-          <button type="button" role="tab" id="settings-tab-expenses" aria-controls="settings-panel-expenses" aria-selected="false" tabindex="-1">Expense categories</button>
+        <!-- #232 increment 5: the settings tab bar is the official
+             p-tabs__list. -->
+        <div id="settings-tabs" class="settings-tabs p-tabs__list" role="tablist" aria-label="Settings categories">
+          <div class="p-tabs__item"><button type="button" class="p-tabs__link" role="tab" id="settings-tab-security" aria-controls="settings-panel-security" aria-selected="true">Security &amp; runtime</button></div>
+          <div class="p-tabs__item"><button type="button" class="p-tabs__link" role="tab" id="settings-tab-users" aria-controls="settings-panel-users" aria-selected="false" tabindex="-1">Users</button></div>
+          <div class="p-tabs__item"><button type="button" class="p-tabs__link" role="tab" id="settings-tab-invoice" aria-controls="settings-panel-invoice" aria-selected="false" tabindex="-1">Invoice documents</button></div>
+          <div class="p-tabs__item"><button type="button" class="p-tabs__link" role="tab" id="settings-tab-catalog" aria-controls="settings-panel-catalog" aria-selected="false" tabindex="-1">Products &amp; services</button></div>
+          <div class="p-tabs__item"><button type="button" class="p-tabs__link" role="tab" id="settings-tab-expenses" aria-controls="settings-panel-expenses" aria-selected="false" tabindex="-1">Expense categories</button></div>
         </div>
       </div>
 
