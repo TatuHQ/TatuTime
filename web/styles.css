@@ -378,6 +378,9 @@ td.cell.locked .cell-input { opacity: .6; }
 .row-total { font-weight: 700; padding: .4rem .6rem; white-space: nowrap; }
 #week-table tfoot th, #week-table tfoot td { padding: .45rem .6rem; font-weight: 700; border-top: 2px solid var(--line); font-variant-numeric: tabular-nums; }
 .week-controls { display: flex; gap: .5rem; align-items: center; margin-top: .75rem; flex-wrap: wrap; }
+/* #12 parity: the copy-from-previous-week toolbar sits in the same muted card
+   as the Day view's copy bar. */
+.week-controls.p-card { margin-top: .75rem; padding: .65rem .75rem; }
 
 /* ---- narrow: sidebar collapses to a top bar ---- */
 @media (max-width: 720px) {
@@ -495,9 +498,15 @@ dialog.p-modal::backdrop { background: transparent; }
 .copy-bar select { padding: .45rem .6rem; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); color: var(--fg); font: inherit; cursor: pointer; }
 
 /* ------------------------------------------- week view refresh (#109) ---- */
-#week-table.grid thead th .wk-clock { display: block; font-size: .8rem; opacity: .55; line-height: 1; }
-#week-table.grid thead th .wk-dow { display: block; font-weight: 700; }
-#week-table.grid thead th .wk-date { display: block; font-weight: 400; font-size: .8rem; opacity: .8; }
+/* #12/#108 parity: each day column header is the same 2×2 box as the Day
+   view's week strip — the date top-left, the per-day status icon top-right
+   (success when the day has an entry, history when it is empty) and the
+   weekday name bottom-left. Scoped to the day columns (`[data-date]`) so the
+   Project and Week header cells keep their plain flow. */
+#week-table.grid thead th[data-date] { display: grid; grid-template-columns: 1fr auto; grid-template-rows: auto auto; align-items: start; gap: 0 .3rem; }
+#week-table.grid thead th .wk-date { grid-column: 1; grid-row: 1; font-weight: 400; font-size: .8rem; opacity: .8; }
+#week-table.grid thead th .wk-clock { grid-column: 2; grid-row: 1; justify-self: end; align-self: start; color: var(--muted); line-height: 1; }
+#week-table.grid thead th .wk-dow { grid-column: 1; grid-row: 2; font-weight: 700; }
 #week-table .row-band { border-left: 3px solid var(--accent); }
 .week-controls select { padding: .45rem .6rem; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); color: var(--fg); font: inherit; cursor: pointer; }
 
@@ -574,10 +583,20 @@ dialog.p-modal::backdrop { background: transparent; }
   cursor: pointer; text-align: left; }
 .cal-day.cal-plain { cursor: default; }
 .cal-cell.has:hover { background: var(--row-alt); }
+/* #108 parity: the date number top-left and the per-day status icon top-right
+   inside the cell (success when the day has an entry, history when it is empty). */
+.cal-head { display: flex; align-items: flex-start; justify-content: space-between;
+  gap: .3rem; width: 100%; min-width: 0; }
+.cal-status { color: var(--muted); line-height: 1; }
+.cal-status [class*="p-icon--"] { width: .8rem; height: .8rem; }
 .cal-num { font-weight: 700; }
 .cal-hours { font-size: .78rem; color: var(--brand-deep); font-variant-numeric: tabular-nums; }
+/* One line per project: the code chip and its total time alongside. */
+.cal-entry { display: flex; align-items: baseline; gap: .3rem; max-width: 100%; min-width: 0; }
+.cal-time { flex: 0 0 auto; color: var(--muted); font-size: .72rem; font-variant-numeric: tabular-nums; }
 .cal-chip { font-size: .68rem; background: var(--accent-soft); color: var(--brand-deep);
   border-radius: .6rem; padding: 0 .4rem; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.cal-chip.cal-more { background: none; border: 1px dashed var(--line); color: var(--muted); }
 .cal-cell:focus-within { outline: 2px solid var(--accent); outline-offset: -2px; }
 @media (prefers-color-scheme: dark) {
   .cal-chip { color: var(--brand-deep); }

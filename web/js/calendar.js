@@ -3,7 +3,7 @@
 
 
 import { api } from './api.js';
-import { $, announce, el, isoDate } from './dom.js';
+import { $, announce, el, isoDate, ubuntuIcon } from './dom.js';
 import { activateSeg } from './route.js';
 import { createSeqGuard } from './seq.js';
 import { MONTH_NAMES, fmtHM, refreshDay, showEntryForm } from './timesheet.js';
@@ -61,14 +61,40 @@ export async function refreshTimeCal() {
   for (let d = 1; d <= last; d += 1) {
     const date = `${month}-${String(d).padStart(2, '0')}`;
     const dayEntries = byDate.get(date) || [];
-    const kids = [el('span', { cls: 'cal-num', text: String(d) })];
+    const daySum = dayEntries.reduce((a, e) => a + e.hundredths, 0);
+    // Top row mirrors the Day view's day box (#12/#108): the date number
+    // top-left and a per-day status icon top-right — success when the day has
+    // an entry, history when it is empty.
+    const kids = [
+      el('span', { cls: 'cal-head' }, [
+        el('span', { cls: 'cal-num', text: String(d) }),
+        el('span', { cls: 'cal-status', attrs: { 'aria-hidden': 'true' } }, [
+          ubuntuIcon(dayEntries.length ? 'success' : 'history'),
+        ]),
+      ]),
+    ];
     if (dayEntries.length) {
-      const sum = dayEntries.reduce((a, e) => a + e.hundredths, 0);
-      kids.push(el('span', { cls: 'cal-hours', text: fmtHM(sum) }));
-      const names = dayEntries.map((e) => e.project_code);
-      const uniq = [...new Set(names)];
-      for (const code of uniq.slice(0, 3)) kids.push(el('span', { cls: 'cal-chip', text: code }));
-      if (uniq.length > 3) kids.push(el('span', { cls: 'cal-chip', text: `+${uniq.length - 3}` }));
+      kids.push(el('span', { cls: 'cal-hours', text: fmtHM(daySum) }));
+      // One line per project ("CODE  H:MM") instead of bare chips, so several
+      // projects stay readable inside the grid. The first three fit; the rest
+      // collapse into a "+N more" affordance — clicking the day still hands
+      // the whole day over to the Day view.
+      const byProject = new Map();
+      for (const e of dayEntries) {
+        byProject.set(e.project_code, (byProject.get(e.project_code) || 0) + e.hundredths);
+      }
+      const projects = [...byProject.entries()];
+      for (const [code, hundredths] of projects.slice(0, 3)) {
+        kids.push(
+          el('span', { cls: 'cal-entry' }, [
+            el('span', { cls: 'cal-chip', text: code }),
+            el('span', { cls: 'cal-time', text: fmtHM(hundredths) }),
+          ]),
+        );
+      }
+      if (projects.length > 3) {
+        kids.push(el('span', { cls: 'cal-chip cal-more', text: `+${projects.length - 3} more` }));
+      }
     }
     const cell = el(
       'td',
@@ -87,9 +113,9 @@ export async function refreshTimeCal() {
                 },
               },
               attrs: {
-                'aria-label': `${d} ${monthName(month)}: ${fmtHM(
-                  dayEntries.reduce((a, e) => a + e.hundredths, 0),
-                )} across ${dayEntries.length} entr${dayEntries.length === 1 ? 'y' : 'ies'} — open Day view`,
+                'aria-label': `${d} ${monthName(month)}: ${fmtHM(daySum)} across ${
+                  dayEntries.length
+                } entr${dayEntries.length === 1 ? 'y' : 'ies'} — open Day view`,
               },
             }, kids)
           : el('div', { cls: 'cal-day cal-plain' }, kids),

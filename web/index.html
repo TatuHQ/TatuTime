@@ -222,7 +222,7 @@
     <!-- WEEK -->
     <section id="panel-week" role="tabpanel" aria-labelledby="ts-week" tabindex="0" hidden>
       <input type="date" id="week-date" hidden>
-      <div class="day-bar">
+      <div class="day-bar p-card">
         <nav class="day-nav" aria-label="Change week">
           <button type="button" id="week-prev" aria-label="Previous week" title="Previous week"><i class="p-icon--chevron-left" aria-hidden="true"></i></button>
           <span id="week-label" class="day-label"></span>
@@ -236,7 +236,7 @@
       <div class="table-scroll">
         <table id="week-table" class="grid"></table>
       </div>
-      <div class="week-controls">
+      <div class="week-controls p-card p-card--muted">
         <button type="button" id="week-copy-previous" class="secondary" data-icon="copy">Copy from previous week</button>
       </div>
     </section>
@@ -247,7 +247,7 @@
          #tabs aria-controls, so a sibling here would remain visible on every
          section once the Calendar segment is selected. -->
     <section id="panel-calendar" role="tabpanel" aria-labelledby="ts-cal" tabindex="0" hidden>
-      <div class="cal-nav">
+      <div class="cal-nav p-card">
         <button type="button" id="cal-prev" aria-label="Previous month" title="Previous month"><i class="p-icon--chevron-left" aria-hidden="true"></i></button>
         <h2 id="cal-label">Calendar</h2>
         <button type="button" id="cal-next" aria-label="Next month" title="Next month"><i class="p-icon--chevron-right" aria-hidden="true"></i></button>
@@ -259,7 +259,7 @@
         <thead><tr><th scope="col">Mon</th><th scope="col">Tue</th><th scope="col">Wed</th><th scope="col">Thu</th><th scope="col">Fri</th><th scope="col">Sat</th><th scope="col">Sun</th></tr></thead>
         <tbody></tbody>
       </table>
-      <p class="p-form-help-text">Click a day with entries to open it in the Day view. This calendar shows your logged time; the Calendar events section below lists imported calendar items (#36).</p>
+      <p class="p-form-help-text">Click a day with entries to open it in the Day view.</p>
     </section>
 
     </section><!-- /panel-timesheet -->

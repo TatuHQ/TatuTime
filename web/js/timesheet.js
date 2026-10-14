@@ -424,12 +424,14 @@ export async function refreshWeek() {
   for (let i = 0; i < 7; i += 1) days.push(addDays(start, i));
   weekState.days = days;
   const end = days[6];
-  const thisWeek = start === mondayOf(isoDate(new Date()));
   const today = isoDate(new Date());
-  $('week-label').textContent = `${thisWeek ? 'This week ' : ''}${weekShort(start)} – ${weekShort(end)} ${end.slice(0, 4)}`;
+  $('week-label').textContent = `${weekShort(start)} – ${weekShort(end)} ${end.slice(0, 4)}`;
 
   const data = await api.get(`/entries?from=${start}&to=${end}`);
   const entries = data.entries || [];
+  // Days in the displayed week that carry at least one entry — drives the
+  // per-column status icon (mirrors the Day view's week strip).
+  const entryDates = new Set(entries.map((e) => e.date));
   const locked = await weekLockIds();
   if (seq !== weekState.seq) return; // a newer render superseded this one
 
@@ -460,6 +462,10 @@ export async function refreshWeek() {
     el('th', { attrs: { scope: 'col' }, text: 'Project' }),
     ...days.map((d) => {
       const [yy, mm, dd] = d.split('-').map(Number);
+      // Mirror the Day view's day box (#12/#108): the date sits top-left and
+      // the per-day status icon — success when the day has an entry, history
+      // when it is empty — sits top-right inside the header cell.
+      const hasEntry = entryDates.has(d);
       return el(
         'th',
         {
@@ -468,9 +474,11 @@ export async function refreshWeek() {
           data: { date: d },
         },
         [
-          el('span', { cls: 'wk-clock', attrs: { 'aria-hidden': 'true' } }, [ubuntuIcon('history')]),
-          el('span', { cls: 'wk-dow', text: new Date(d).toUTCString().slice(0, 3) }),
           el('span', { cls: 'wk-date', text: `${dd} ${MONTH_NAMES[mm - 1]}` }),
+          el('span', { cls: 'wk-dow', text: new Date(d).toUTCString().slice(0, 3) }),
+          el('span', { cls: 'wk-clock', attrs: { 'aria-hidden': 'true' } }, [
+            ubuntuIcon(hasEntry ? 'success' : 'history'),
+          ]),
         ],
       );
     }),
