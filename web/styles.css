@@ -196,10 +196,8 @@ button.danger { background: none; border: none; color: var(--danger); padding: .
 .field.checkbox input, .theme-switch input { min-height: 0; width: 1rem; height: 1rem; }
 button [class*="p-icon--"] { flex: 0 0 1rem; vertical-align: -.15rem; margin-right: .5rem; }
 .day-nav button [class*="p-icon--"] { margin: 0; }
-.nav-label, .hint, .foot { font-size: .875rem; }
 button.p-button, button.p-button--positive { margin-bottom: 0; }
 button { margin-right: 0; margin-bottom: 0; }
-.card { box-shadow: none; }
 dialog input:not([type="checkbox"]), dialog select, dialog textarea { width: 100%; }
 button.note-flag { min-height: 1.75rem; min-width: 1.75rem; }
 button.note-flag [class*="p-icon--"] { margin-right: 0; }
@@ -405,7 +403,7 @@ dialog.p-modal::backdrop { background: transparent; }
 #dlg-input-wrap { display: block; margin: 0 0 .9rem; }
 #dlg-input-wrap[hidden] { display: none; }
 #dlg-input-wrap span { display: block; margin-bottom: .3rem; font-size: .85rem; }
-#dlg-input { width: 100%; padding: .45rem .5rem; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); }
+#dlg-input { width: 100%; padding: .45rem .5rem; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); }
 .dlg-actions { display: flex; justify-content: flex-end; gap: .5rem; }
 
 /* --------------------------------- timesheet section + Day|Week segment -- #107 */
@@ -448,12 +446,10 @@ dialog.p-modal::backdrop { background: transparent; }
 .copy-bar select { padding: .45rem .6rem; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); color: var(--fg); font: inherit; cursor: pointer; }
 
 /* ------------------------------------------- week view refresh (#109) ---- */
-#week-table.grid thead th { white-space: nowrap; }
 #week-table.grid thead th .wk-clock { display: block; font-size: .8rem; opacity: .55; line-height: 1; }
 #week-table.grid thead th .wk-dow { display: block; font-weight: 700; }
 #week-table.grid thead th .wk-date { display: block; font-weight: 400; font-size: .8rem; opacity: .8; }
 #week-table .row-band { border-left: 3px solid var(--accent); }
-#week-table .row-total { white-space: nowrap; }
 .week-controls select { padding: .45rem .6rem; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); color: var(--fg); font: inherit; cursor: pointer; }
 
 /* First-run setup wizard (#111) and first-admin sign-in (#229) are twins:
@@ -497,7 +493,6 @@ dialog.p-modal::backdrop { background: transparent; }
 #invoice-table tbody tr[tabindex="0"]:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
 /* ---- focused Day-entry dialog (#145) ---- */
-#entry-dialog .p-modal__dialog { max-width: 28rem; }
 #entry-dialog form.card { box-shadow: none; padding: 0; margin: 0; }
 #entry-dialog .field { margin: 0 0 .7rem; }
 /* ---- grouped MVP rail (#142) ---- */
@@ -602,11 +597,9 @@ caption { padding-bottom: .35rem; }
 .invoice-register-column #invoice-table .actions-col button { margin: .1rem; padding: .2rem .35rem; }
 #invoice-wizard h3 { margin-top: 0; }
 #iw-projects { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .2rem .75rem; }
-.inv-overview { align-items: start; }
 #inv-tiles { align-content: start; }
 .inv-tile { min-height: 5.25rem; }
 #inv-chart-wrap { min-height: 8rem; }
-#inv-chart { min-height: 4rem; }
 .invoice-trends { min-width: 0; }
 .invoice-trends > summary { border: 1px solid var(--line); background: var(--surface); }
 .advanced-billing { margin-top: 1rem; border: 1px solid var(--line); border-radius: var(--radius); padding: .35rem .55rem; background: var(--surface); }
@@ -616,7 +609,6 @@ caption { padding-bottom: .35rem; }
 .advanced-billing-section .card { max-width: none; }
 .advanced-billing-section table { display: block; overflow-x: auto; }
 .day-bar { display: grid; grid-template-columns: auto minmax(12rem, 1fr) auto; align-items: center; }
-.day-bar.p-card { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); }
 .day-actions { grid-column: 1; }
 .day-nav { justify-self: center; }
 #day-today { justify-self: end; }
