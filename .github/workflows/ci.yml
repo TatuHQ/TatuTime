@@ -45,6 +45,31 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
+      # Toolchain fetch retry (run 38605399352): rust-toolchain.toml pins
+      # channel = "1.98.0" with the rustfmt/clippy components, so the first
+      # `cargo` invocation in the checkout makes rustup fetch that channel
+      # from static.rust-lang.org. A transient connect timeout there
+      # (os error 110) turned a green PR red. Warm the pinned toolchain once
+      # through a bounded retry so a flaky fetch is absorbed; a genuinely
+      # unavailable toolchain still fails the job -- every attempt errors and
+      # the step exits non-zero.
+      - name: Ensure pinned Rust toolchain (retry transient fetch failures)
+        run: |
+          retry() {
+            local attempt=1 max=5 delay=5
+            until "$@"; do
+              if [ "$attempt" -ge "$max" ]; then
+                echo "::error title=Transient toolchain fetch failed::$* failed after $max attempts" >&2
+                return 1
+              fi
+              echo "attempt $attempt/$max for '$*' failed; retrying in ${delay}s" >&2
+              sleep "$delay"
+              attempt=$((attempt + 1))
+              delay=$((delay * 2))
+            done
+          }
+          retry rustup toolchain install 1.98.0 --profile minimal --component rustfmt --component clippy
+
       - name: Format
         run: cargo fmt --all -- --check
 
@@ -236,10 +261,32 @@ jobs:
       # Versions are pinned (#263 item 4) so the gate is reproducible: an
       # unpinned `cargo install` silently picks up whatever is newest at run
       # time and can flip a green build red (or vice versa) between runs.
+      #
+      # Toolchain fetch retry (run 38605399352): rust-toolchain.toml pins
+      # channel = "1.98.0" with the rustfmt/clippy components, so the first
+      # `cargo` invocation below makes rustup fetch that channel from
+      # static.rust-lang.org. A transient connect timeout there (os error 110)
+      # turned a green PR red. Warm the pinned toolchain through a bounded
+      # retry so a flaky fetch is absorbed; a genuinely unavailable toolchain
+      # still fails the job -- every attempt errors and the step exits non-zero.
       - name: Install git (advisory-db clone) and cargo-deny
         run: |
           apt-get update -qq
           apt-get install -y --no-install-recommends git
+          retry() {
+            local attempt=1 max=5 delay=5
+            until "$@"; do
+              if [ "$attempt" -ge "$max" ]; then
+                echo "::error title=Transient toolchain fetch failed::$* failed after $max attempts" >&2
+                return 1
+              fi
+              echo "attempt $attempt/$max for '$*' failed; retrying in ${delay}s" >&2
+              sleep "$delay"
+              attempt=$((attempt + 1))
+              delay=$((delay * 2))
+            done
+          }
+          retry rustup toolchain install 1.98.0 --profile minimal --component rustfmt --component clippy
           cargo install --locked cargo-deny --version 0.20.2
 
       - name: cargo deny check
