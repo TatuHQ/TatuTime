@@ -21,7 +21,7 @@ ${prelude}
 window.bootTest = {
   dashRenderOverview, refreshInvoices, refreshCustomerPickers,
   writeOffInvoice, navigateDay, weekLockIds, state,
-  refreshTimeCal, calState,
+  refreshWeek, refreshTimeCal, calState,
   peekLockCache: () => weekLockCache,
   liveText: () => document.getElementById('live-region').textContent,
   api,
@@ -243,5 +243,57 @@ test('rapid calendar navigation renders the newest month response (#188)', async
   assert.equal(document.getElementById('cal-label').textContent, 'Jul 2026');
   assert.match(document.getElementById('cal-total').textContent, /5:00 logged/);
   assert.equal(document.querySelector('#cal-grid .cal-chip')?.textContent, 'NEW');
+  dom.window.close();
+});
+
+test('calendar day cells show a per-day status icon and project + time rows (#140)', async () => {
+  const { dom, context, document } = makeDom();
+  context.calState.month = '2026-06';
+  context.api.get = () => Promise.resolve({ entries: [
+    { id: 'a', date: '2026-06-03', hours: 1.5, project_code: 'ALPHA' },
+    { id: 'b', date: '2026-06-03', hours: 2, project_code: 'BETA' },
+    { id: 'c', date: '2026-06-03', hours: 0.5, project_code: 'GAMMA' },
+    { id: 'd', date: '2026-06-03', hours: 0.25, project_code: 'DELTA' },
+  ] });
+  await context.refreshTimeCal();
+  const has = document.querySelector('#cal-grid td.cal-cell.has');
+  assert.ok(has, 'a day with entries renders as an active cell');
+  assert.ok(has.querySelector('.cal-status .p-icon--success'),
+    'a logged day shows the success status icon');
+  const rows = [...has.querySelectorAll('.cal-entry')];
+  assert.equal(rows.length, 3, 'only the first three projects are listed');
+  assert.equal(rows[0].querySelector('.cal-chip').textContent, 'ALPHA');
+  assert.equal(rows[0].querySelector('.cal-time').textContent, '1:30',
+    'each project row carries its total time alongside the code');
+  assert.equal(has.querySelector('.cal-chip.cal-more').textContent, '+1 more',
+    'the remainder collapses into a generic more affordance');
+  const plain = document.querySelector('#cal-grid td.cal-cell:not(.has) .cal-plain');
+  assert.ok(plain.querySelector('.cal-status .p-icon--history'),
+    'an empty day shows the history status icon');
+  dom.window.close();
+});
+
+test('week column headers mirror the day box and drop the "This week" prefix (#12)', async () => {
+  const { dom, context, document } = makeDom();
+  context.api.get = async (path) => {
+    if (path.startsWith('/submissions')) return { submissions: [] };
+    if (path.startsWith('/invoices')) return { invoices: [] };
+    if (path.startsWith('/entries')) return { entries: [
+      { id: 'e1', date: '2026-06-03', hours: 2, customer_id: 'c1', project_code: 'ALPHA' },
+    ] };
+    return {};
+  };
+  document.getElementById('week-date').value = '2026-06-01'; // a Monday
+  await context.refreshWeek();
+  const hdr = (date) => document.querySelector(`#week-table thead th[data-date="${date}"]`);
+  const wed = hdr('2026-06-03');
+  assert.ok(wed.querySelector('.wk-clock .p-icon--success'),
+    'a logged day column shows the success status icon');
+  assert.ok(hdr('2026-06-01').querySelector('.wk-clock .p-icon--history'),
+    'an empty day column shows the history status icon');
+  assert.equal(wed.querySelector('.wk-date').textContent, '3 Jun',
+    'the date leads the header cell like the Day view');
+  assert.equal(document.getElementById('week-label').textContent, '01 Jun \u2013 07 Jun 2026',
+    'the week label no longer prefixes "This week"');
   dom.window.close();
 });
