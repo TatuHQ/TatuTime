@@ -560,8 +560,12 @@ check('cancel leaves the note unchanged (#126)',
   /Note unchanged/i.test(window.document.getElementById('live-region').textContent));
 window.document.getElementById('ts-week').dispatchEvent(new window.Event('click', { bubbles: true }));
 
-check('Week add-row controls are removed',
-  ['week-add-row', 'week-add-project', 'week-add-task', 'week-add-confirm', 'week-add-cancel']
+// #172 follow-up: "+ Add row" is back as a BUTTON that opens the
+// customer/project/task dialog — the old inline pickers stay deleted.
+check('Week + Add row is a dialog button with no inline pickers (#172 follow-up)',
+  window.document.getElementById('week-add-row')?.tagName === 'BUTTON'
+  && window.document.getElementById('week-row-dialog')?.classList.contains('p-modal')
+  && ['week-add-project', 'week-add-task', 'week-add-confirm', 'week-add-cancel']
     .every((id) => !window.document.getElementById(id)));
 check('copy previous week is a button rather than a dropdown',
   window.document.getElementById('week-copy-previous').tagName === 'BUTTON'
@@ -903,8 +907,9 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
   });
   const xmas = [...calPanel.querySelectorAll('td.cal-cell.has button')]
     .find((b) => (b.getAttribute('aria-label') || '').includes('25 Dec 2026'));
-  check('day cell shows hours + project chip (#140)',
-    !!xmas && xmas.textContent.includes('3:30') && xmas.textContent.includes('P-9'));
+  check('day cell shows the day total, not the entries (#140)',
+    !!xmas && xmas.querySelector('.cal-hours')?.textContent.trim() === '3:30'
+    && xmas.querySelectorAll('.cal-chip, .cal-entry').length === 0);
   check('month total announced live (#140)',
     /Dec 2026: .+ logged/.test(window.document.getElementById('cal-total').textContent));
   if (xmas) {
@@ -923,11 +928,15 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
   check('entry-less days render plain (#140)', empty > 20);
   const curMonth = new Date().toISOString().slice(0, 7);
   const curMonthName = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][Number(curMonth.slice(5,7)) - 1];
-  window.document.getElementById('cal-today').dispatchEvent(new window.Event('click', { bubbles: true }));
+  check('the month bar mirrors the Day/Week bar and the Today button is gone (#140)',
+    window.document.getElementById('cal-month').parentElement.className.includes('day-end')
+    && window.document.getElementById('cal-label').parentElement.className.includes('day-nav')
+    && !window.document.getElementById('cal-today'));
+  window.document.getElementById('cal-month').dispatchEvent(new window.Event('click', { bubbles: true }));
   await waitFor(() => byId('cal-label').textContent.includes(curMonthName), {
-    message: `Today to jump back to the current month (${curMonthName})`,
+    message: `Return to this month to jump back to the current month (${curMonthName})`,
   });
-  check('Today jumps to the current month (#140)',
+  check('Return to this month jumps to the current month (#140)',
     window.document.getElementById('cal-label').textContent.includes(curMonthName));
   // #231: with the Calendar segment active, leave Timesheets via the sidebar rail.
   // The panel sat *outside* panel-timesheet once, so nothing hid it and the month

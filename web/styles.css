@@ -199,7 +199,7 @@ button.danger { background: none; border: none; color: var(--danger); padding: .
 .p-form__group { margin-bottom: .65rem; }
 /* Vanilla's `.p-form-help-text` pulls up (margin-top: -.5rem) to hug the input
    above it; the app also uses the class for panel/dialog copy that follows a
-   heading or a card edge (and a flex item in `.cal-nav`), so it keeps the
+   heading or a card edge (and a flex item in the calendar bar), so it keeps the
    natural block rhythm. Vanilla still owns the class's size/colour. Flagged
    for maintainer visual sign-off. */
 .p-form-help-text { margin: revert; }
@@ -378,6 +378,9 @@ td.cell.locked .cell-input { opacity: .6; }
 .row-total { font-weight: 700; padding: .4rem .6rem; white-space: nowrap; }
 #week-table tfoot th, #week-table tfoot td { padding: .45rem .6rem; font-weight: 700; border-top: 2px solid var(--line); font-variant-numeric: tabular-nums; }
 .week-controls { display: flex; gap: .5rem; align-items: center; margin-top: .75rem; flex-wrap: wrap; }
+/* #12 parity: the copy-from-previous-week toolbar sits in the same muted card
+   as the Day view's copy bar. */
+.week-controls.p-card { margin-top: .75rem; padding: .65rem .75rem; }
 
 /* ---- narrow: sidebar collapses to a top bar ---- */
 @media (max-width: 720px) {
@@ -417,6 +420,7 @@ dialog.p-modal::backdrop { background: transparent; }
    for these focused forms). */
 #app-dialog .p-modal__dialog { max-width: 26rem; }
 #entry-dialog .p-modal__dialog { max-width: 28rem; }
+#week-row-dialog .p-modal__dialog { max-width: 26rem; }
 #expense-dialog .p-modal__dialog { max-width: 36rem; }
 #expense-category-dialog .p-modal__dialog { max-width: 28rem; }
 #customer-dialog .p-modal__dialog { max-width: 38rem; }
@@ -495,9 +499,20 @@ dialog.p-modal::backdrop { background: transparent; }
 .copy-bar select { padding: .45rem .6rem; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); color: var(--fg); font: inherit; cursor: pointer; }
 
 /* ------------------------------------------- week view refresh (#109) ---- */
-#week-table.grid thead th .wk-clock { display: block; font-size: .8rem; opacity: .55; line-height: 1; }
-#week-table.grid thead th .wk-dow { display: block; font-weight: 700; }
-#week-table.grid thead th .wk-date { display: block; font-weight: 400; font-size: .8rem; opacity: .8; }
+/* #12/#108 parity: each day column header is the same 2×2 box as the Day
+   view's week strip — the date top-left, the per-day status icon top-right
+   (success when the day has an entry, history when it is empty) and the
+   weekday name bottom-left.
+   The grid MUST live on the inner `.wk-head` span, never on the `th` itself: a
+   `display` other than `table-cell` on a `th` drops its cell role, the browser
+   wraps it in an anonymous cell, and every day header collapses into a single
+   column — the titles stop lining up with their day columns. jsdom computes no
+   layout, so this was invisible there; measured in Firefox and pinned by
+   css-tokens.test.mjs and browser-smoke.py. */
+#week-table.grid thead th .wk-head { display: grid; grid-template-columns: 1fr auto; grid-template-rows: auto auto; align-items: start; gap: 0 .3rem; }
+#week-table.grid thead th .wk-date { grid-column: 1; grid-row: 1; font-weight: 400; font-size: .8rem; opacity: .8; }
+#week-table.grid thead th .wk-clock { grid-column: 2; grid-row: 1; justify-self: end; align-self: start; color: var(--muted); line-height: 1; }
+#week-table.grid thead th .wk-dow { grid-column: 1; grid-row: 2; font-weight: 700; }
 #week-table .row-band { border-left: 3px solid var(--accent); }
 .week-controls select { padding: .45rem .6rem; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); color: var(--fg); font: inherit; cursor: pointer; }
 
@@ -554,15 +569,9 @@ dialog.p-modal::backdrop { background: transparent; }
   .nav-label { width: 100%; padding-left: 0; }
 }
 /* ---- calendar timesheet view (#140) ---- */
-.cal-nav { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; margin-bottom: .5rem; }
-.cal-nav h2 { margin: 0; font-size: 1.1rem; min-width: 12ch; text-align: center; }
-/* #145-consistency: month arrows match the day/week chevrons (same square
-   icon button, real p-icon instead of HTML arrow entities). */
-#cal-prev, #cal-next {
-  display: inline-grid; place-items: center; width: 2.5rem; height: 2.5rem;
-  padding: 0; font-size: 1rem; line-height: 1;
-}
-#cal-prev [class*="p-icon--"], #cal-next [class*="p-icon--"] { margin: 0; }
+/* The month bar IS the Day/Week `.day-bar` (card, centred label, quiet trailing
+   action), so the month arrows need no rules of their own: they are ordinary
+   `.day-nav button`s once the markup mirrors the day and week bars. */
 #cal-grid { width: 100%; table-layout: fixed; border-collapse: collapse; }
 #cal-grid th { font-size: .75rem; color: var(--muted); padding: .3rem 0; text-align: left; }
 #cal-grid td.cal-cell { border: 1px solid var(--line); vertical-align: top; height: 5.2rem;
@@ -574,14 +583,18 @@ dialog.p-modal::backdrop { background: transparent; }
   cursor: pointer; text-align: left; }
 .cal-day.cal-plain { cursor: default; }
 .cal-cell.has:hover { background: var(--row-alt); }
+/* #108 parity: the date number top-left and the per-day status icon top-right
+   inside the cell (success when the day has an entry, history when it is empty). */
+.cal-head { display: flex; align-items: flex-start; justify-content: space-between;
+  gap: .3rem; width: 100%; min-width: 0; }
+.cal-status { color: var(--muted); line-height: 1; }
+.cal-status [class*="p-icon--"] { width: .8rem; height: .8rem; }
 .cal-num { font-weight: 700; }
-.cal-hours { font-size: .78rem; color: var(--brand-deep); font-variant-numeric: tabular-nums; }
-.cal-chip { font-size: .68rem; background: var(--accent-soft); color: var(--brand-deep);
-  border-radius: .6rem; padding: 0 .4rem; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+/* The day total is the whole content of a logged cell (#140) — no per-entry
+   list — so it reads at a glance. */
+.cal-hours { font-size: .85rem; font-weight: 600; color: var(--brand-deep);
+  font-variant-numeric: tabular-nums; }
 .cal-cell:focus-within { outline: 2px solid var(--accent); outline-offset: -2px; }
-@media (prefers-color-scheme: dark) {
-  .cal-chip { color: var(--brand-deep); }
-}
 
 /* ---- shared alignment pass (#131): reusable rhythm, no component changes ---- */
 /* #232 phase 2b: these fieldsets are `p-form__group`s now; the frame stays

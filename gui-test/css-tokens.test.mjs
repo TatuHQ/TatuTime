@@ -273,6 +273,32 @@ test('the week-strip day box keeps row-gap 0 so an icon-less box gains no empty 
   );
 });
 
+// #12/#108 follow-up (found in Firefox, invisible to jsdom): a `display` other
+// than `table-cell` on a `<th>` drops its table-cell role. The browser then
+// wraps it in an anonymous table cell and the whole header row collapses into a
+// single column, so the day titles no longer line up with their day columns.
+// The 2x2 header grid must therefore live on an inner element (`.wk-head`), and
+// no rule may hand a `#week-table` `<th>` a different `display`.
+test('no week-table rule replaces the table-cell display of a <th> (#12)', () => {
+  const subjectIsTh = (part) => {
+    const last = part.split(/[\s>+~]+/).filter(Boolean).pop() || '';
+    return /^th(\b|\[|:|#|\.)/.test(last);
+  };
+  const offenders = [];
+  for (const rule of shippedRules) {
+    const display = declared(rule.body, 'display');
+    if (display === null || /^table-cell$/i.test(display.trim())) continue;
+    for (const part of rule.selector.split(',').map((s) => s.trim())) {
+      if (part.includes('#week-table') && subjectIsTh(part)) offenders.push(`${part} { display: ${display.trim()} }`);
+    }
+  }
+  assert.deepEqual(
+    offenders,
+    [],
+    `a <th> in #week-table is styled with a non-table-cell display, which makes the browser wrap it in an anonymous cell and collapse the header row: ${offenders.join('; ')}`,
+  );
+});
+
 test('the week-strip day box declares an explicit two-column, two-row grid (#12)', () => {
   const body = baseBody('.ws-day.p-card');
   // Count top-level tracks only: a space inside `minmax(0, 1fr)` is not a split.
@@ -290,4 +316,15 @@ test('the week-strip day box declares an explicit two-column, two-row grid (#12)
     2,
     `.ws-day.p-card must declare a 2-track grid-template-rows, got \`${declared(body, 'grid-template-rows')}\``,
   );
+});
+
+test('the week day-column header grid is declared on the inner .wk-head span (#12)', () => {
+  const body = baseBody('#week-table.grid thead th .wk-head');
+  assert.match(
+    (declared(body, 'display') || '').trim(),
+    /^grid$/i,
+    'the 2x2 header grid belongs on .wk-head, not on the <th>',
+  );
+  assert.equal(baseBody('#week-table.grid thead th .wk-date').includes('grid-row'), true,
+    'the date/clock/weekday placement rules still target the .wk-head children');
 });
