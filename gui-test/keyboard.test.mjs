@@ -26,7 +26,8 @@ api.get = async () => ({});
 api.post = async () => ({});
 initTabs();         // vertical sidebar tablist (#tabs)
 initSettingsTabs(); // horizontal tablist (#settings-tabs)
-window.kb = { nextTabIndex };`;
+initSegTabs();      // horizontal Day|Week|Calendar strip (#ts-seg)
+window.kb = { nextTabIndex, TAB_ROUTES, DEFAULT_ROUTE, KNOWN_ROUTES };`;
     dom.window.eval(`${app}\n${stub}`);
     return { dom, kb: dom.window.kb, document: dom.window.document };
 }
@@ -113,6 +114,102 @@ test('nextTabIndex maps the arrow axis to the declared orientation (#258)', () =
     // Home/End are orientation-independent.
     assert.equal(kb.nextTabIndex('Home', 2, 3, 'vertical'), 0);
     assert.equal(kb.nextTabIndex('End', 0, 3, 'horizontal'), 2);
+    dom.window.close();
+});
+
+// ------------------------------------------------ tablists (#232 increment 5) --
+//
+// The three app tablists moved onto the official p-tabs vocabulary. These guard
+// the two things that could silently break in the move — the ARIA tab pattern
+// (roles, roving tabindex, aria-controls -> tabpanel) and the #258 key contract
+// — plus the route table, whose keys *are* the sidebar/settings tab ids.
+
+test('every migrated tablist keeps the ARIA tab pattern and roving tabindex (#232 inc 5)', () => {
+    const { dom, document } = setup();
+    const lists = [...document.querySelectorAll('[role="tablist"]')];
+    assert.ok(lists.length >= 3, `expected the app tablists, got ${lists.length}`);
+    for (const list of lists) {
+        assert.ok(list.classList.contains('p-tabs__list'), `${list.id} is a p-tabs__list`);
+        const tabs = [...list.querySelectorAll('[role="tab"]')];
+        assert.ok(tabs.length > 1, `${list.id} holds its tabs`);
+        for (const tab of tabs) {
+            assert.ok(tab.classList.contains('p-tabs__link'), `${tab.id} carries p-tabs__link`);
+            assert.ok(tab.closest('.p-tabs__item'), `${tab.id} is wrapped in a p-tabs__item`);
+            const panel = document.getElementById(tab.getAttribute('aria-controls'));
+            assert.ok(panel && panel.getAttribute('role') === 'tabpanel', `${tab.id} controls a tabpanel`);
+            assert.equal(panel.getAttribute('aria-labelledby'), tab.id, `${tab.id} names its own panel`);
+        }
+        // Roving tabindex survives the move: only the selected tab is a tab stop.
+        assert.deepEqual(
+            tabs.filter((tab) => tab.tabIndex === 0).map((tab) => tab.id),
+            tabs.filter((tab) => tab.getAttribute('aria-selected') === 'true').map((tab) => tab.id),
+            `${list.id} keeps exactly the selected tab in the tab order`,
+        );
+    }
+    dom.window.close();
+});
+
+test('the migrated rail keeps the #258 vertical key contract (#232 inc 5)', () => {
+    const { dom, document } = setup();
+    document.getElementById('tab-timesheet').focus();
+    // Left/Right stay inert on the vertical rail — they belong to horizontal lists.
+    press(dom, 'ArrowRight');
+    assert.equal(activeId(document), 'tab-timesheet', 'ArrowRight does not move the vertical rail');
+    press(dom, 'ArrowDown');
+    assert.equal(activeId(document), 'tab-customers', 'ArrowDown still moves the rail');
+    assert.equal(document.getElementById('tab-customers').tabIndex, 0, 'focus follows the roving tabindex');
+    assert.equal(document.getElementById('tab-timesheet').tabIndex, -1, 'the vacated tab leaves the tab order');
+    assert.equal(document.getElementById('tab-customers').getAttribute('aria-selected'), 'true',
+        'moving focus still activates the section');
+    press(dom, 'End');
+    assert.equal(activeId(document), 'tab-settings', 'End still jumps to the last section');
+    dom.window.close();
+});
+
+test('the migrated Day|Week|Calendar strip keeps its horizontal key contract (#232 inc 5)', () => {
+    const { dom, document } = setup();
+    const strip = document.getElementById('ts-seg');
+    assert.equal(strip.hasAttribute('aria-orientation'), false,
+        'horizontal is the ARIA default — the strip needs no aria-orientation');
+    document.getElementById('ts-day').focus();
+    press(dom, 'ArrowRight');
+    assert.equal(activeId(document), 'ts-week', 'ArrowRight → next segment');
+    assert.equal(document.getElementById('ts-week').getAttribute('aria-selected'), 'true');
+    assert.equal(document.getElementById('panel-week').hidden, false, 'the segment panel is revealed');
+    assert.equal(document.getElementById('panel-day').hidden, true, 'the previous panel is hidden');
+    press(dom, 'Home');
+    assert.equal(activeId(document), 'ts-day', 'Home → first segment');
+    press(dom, 'End');
+    assert.equal(activeId(document), 'ts-cal', 'End → last segment');
+    press(dom, 'ArrowDown');
+    assert.equal(activeId(document), 'ts-cal', 'ArrowDown is inert on the horizontal strip');
+    // Enter/Space activate a real <button>: the click path (which the browser
+    // synthesises for both keys) must switch the view exactly as before.
+    document.getElementById('ts-day').dispatchEvent(new dom.window.Event('click', { bubbles: true }));
+    assert.equal(document.getElementById('ts-day').getAttribute('aria-selected'), 'true');
+    assert.equal(document.getElementById('panel-day').hidden, false);
+    assert.equal(document.getElementById('panel-calendar').hidden, true);
+    dom.window.close();
+});
+
+test('the route table still names the tab ids the migrated markup carries (#232 inc 5)', () => {
+    const { dom, kb } = setup();
+    const document = dom.window.document;
+    assert.equal(kb.DEFAULT_ROUTE, '/timesheets/day', 'the default route is unchanged');
+    for (const [tab, routes] of Object.entries(kb.TAB_ROUTES)) {
+        assert.ok(document.getElementById(tab), `${tab} still exists in the shell`);
+        if (typeof routes !== 'string') {
+            for (const sub of Object.keys(routes)) {
+                assert.ok(document.getElementById(sub), `${sub} still exists in the shell`);
+            }
+        }
+    }
+    assert.equal(
+        [...document.querySelectorAll('#settings-tabs [role="tab"]')].length,
+        Object.keys(kb.TAB_ROUTES['tab-settings']).length,
+        'the settings bar has one tab per route',
+    );
+    assert.ok(kb.KNOWN_ROUTES.size >= 10, 'the known-route set is intact');
     dom.window.close();
 });
 

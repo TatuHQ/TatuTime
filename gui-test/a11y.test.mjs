@@ -187,3 +187,66 @@ function parseColour(value) {
   }
   assert.fail(`unparsed colour: ${value}`);
 }
+
+
+// ----------------------------------------------- tablists (#232 increment 5) --
+//
+// The app tablists are now the official p-tabs pattern: `p-tabs__list` on the
+// role="tablist" element, every tab wrapped in `p-tabs__item` with the button
+// carrying `p-tabs__link`. These pin the vocabulary, the full ARIA tab wiring
+// and the active/inactive contrast the migration had to keep.
+
+test('every tablist adopts the official p-tabs vocabulary with the full ARIA tab wiring (#232 inc 5)', () => {
+  const document = new JSDOM(html).window.document;
+  const tablists = [...document.querySelectorAll('[role="tablist"]')];
+  assert.ok(tablists.length >= 3, `expected the three app tablists, got ${tablists.length}`);
+  for (const list of tablists) {
+    const name = list.id || list.getAttribute('aria-label');
+    assert.ok(list.classList.contains('p-tabs__list'), `${name} is the official p-tabs__list`);
+    const tabs = [...list.querySelectorAll('[role="tab"]')];
+    assert.ok(tabs.length > 1, `${name} holds its tabs`);
+    for (const tab of tabs) {
+      assert.ok(tab.classList.contains('p-tabs__link'), `${tab.id} carries p-tabs__link`);
+      assert.ok(tab.parentElement.classList.contains('p-tabs__item'), `${tab.id} sits in a p-tabs__item`);
+      assert.ok(['true', 'false'].includes(tab.getAttribute('aria-selected')), `${tab.id} declares aria-selected`);
+      const panel = document.getElementById(tab.getAttribute('aria-controls'));
+      assert.ok(panel, `${tab.id} points at a panel`);
+      assert.equal(panel.getAttribute('role'), 'tabpanel', `${tab.id} controls a tabpanel`);
+      assert.equal(panel.getAttribute('aria-labelledby'), tab.id, `${tab.id} gives its panel its name`);
+    }
+    const tabStops = tabs.filter((tab) => tab.tabIndex === 0);
+    assert.equal(tabStops.length, 1, `${name} keeps a roving tabindex (one tab stop)`);
+    assert.equal(tabStops[0].getAttribute('aria-selected'), 'true', `${name}'s tab stop is the selected tab`);
+  }
+});
+
+test('the bespoke tab skins are retired in favour of the p-tabs adapter (#232 inc 5)', () => {
+  assert.match(stylesCss, /\.sidebar \.p-tabs__link\[aria-selected="true"\]/, 'the rail adapter is present');
+  assert.ok(!/\.tabs \[role="tab"\]/.test(stylesCss), 'the bespoke .tabs [role="tab"] skin is gone');
+  assert.ok(!/\.seg \[role="tab"\]/.test(stylesCss), 'the bespoke .seg [role="tab"] segment skin is gone');
+  // `.seg` survives for the invoice Open|All toggle group, which is a
+  // role="group" of aria-pressed buttons — not a tablist.
+  assert.match(stylesCss, /\.seg \{\n\s+display: inline-flex/, 'the .seg shell stays for the toggle group');
+});
+
+test('the selected tab is signalled by the text colour, not a faint tint, in both themes (#232 inc 5)', () => {
+  // The classic tab contrast gap is an active state carried by a low-contrast
+  // tint. Vanilla paints the selected indicator bar with --vf-color-text-default
+  // — the same token as the tab's own ink — so the active tab is never lighter
+  // than the inactive one; assert that pairing *and* its AA ratio per theme.
+  assert.match(vendorCss, /\[aria-selected=true\]::before\{[^}]*background-color:var\(--vf-color-text-default\)/,
+    'the selected bar is painted in the tab text colour');
+  const themes = [];
+  walk(parse(vendorCss), { visit: 'Rule', enter(node) {
+    const values = {};
+    node.block.children.forEach((declaration) => {
+      if (declaration.type === 'Declaration') values[declaration.property] = generate(declaration.value);
+    });
+    if (values['--vf-color-text-default'] && values['--vf-color-background-default']) themes.push(values);
+  } });
+  assert.ok(themes.length >= 2, 'light + dark token sets');
+  for (const theme of themes) {
+    const ratio = contrast(theme['--vf-color-text-default'], theme['--vf-color-background-default']);
+    assert.ok(ratio >= 4.5, `tab ink on the tab background: ${ratio.toFixed(2)} < 4.5`);
+  }
+});

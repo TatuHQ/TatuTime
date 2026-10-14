@@ -44,6 +44,18 @@ component backlog.
   on close. The component family shipped in stage 1, so the vendor bundle is
   unchanged and `cssSha256` is still
   `c6b404f72a9fb86c5a1425af9f26b27870edf2e9da74c640dbb149390d936e05`.
+- **Tablists (#232 increment 5)** — the sidebar rail, the Timesheets
+  `Day|Week|Calendar` bar and the Settings bar are the official `p-tabs__list` /
+  `p-tabs__item` / `p-tabs__link` pattern (ARIA tab roles, roving `tabindex`,
+  `aria-controls`/`tabpanel` wiring and the #258 Up/Down vs Left/Right key
+  contract all unchanged); the bespoke `.tabs [role="tab"]` and
+  `.seg [role="tab"]` skins are retired. Vanilla's `.p-tabs` container is not
+  used — it boxes list+panels and its `overflow: hidden` would clip focus rings,
+  while here the panels live in `<main>`. The component family shipped in stage 1,
+  so the vendor bundle is unchanged and `cssSha256` is still
+  `c6b404f72a9fb86c5a1425af9f26b27870edf2e9da74c640dbb149390d936e05`. Mapping
+  correction: the Invoices Open|All control named below is a `role="group"` of
+  `aria-pressed` toggle buttons, not a tablist — it keeps the app segmented skin.
 
 ## Ground rules
 
@@ -99,17 +111,20 @@ patterns). Each page lists what "migrated" means — nothing layout-level.
    `p-badge`, copy-forward bar to the shared card adapter. Deliver: the
    `p-table` adapter used by every later register.
 2. **Timesheets — Week.** Grid keeps its app-owned geometry (explicitly out of
-   scope per `ubuntu-design.md`); migrate the surrounding controls
-   (segmented Day|Week|Calendar to `p-tabs`, week totals footer affordances).
+   scope per `ubuntu-design.md`); the surrounding controls remain
+   (the Day|Week|Calendar strip is already the official `p-tabs__list` since
+   increment 5; week totals footer affordances still to do).
 3. **Timesheets — Calendar.** Month navigation cluster + legend onto shared
    button/card adapters; grid cells stay app-owned.
 4. **Customers.** Register onto the Day `p-table` adapter; create/edit popup
    onto the `p-modal` skin; contact rows onto form rhythm.
 5. **Projects.** Same adapters; scope-label + filter row onto `p-field`.
 6. **Tasks.** Same; hierarchy filters onto the shared filter-field pattern.
-7. **Invoices.** Biggest page: Open/All segment to `p-tabs`, register gains
-   `p-table--sortable`, preview panel + tracked-work wizard dialogs onto the
-   modal/card adapters, payment dialogs included.
+7. **Invoices.** Biggest page: register gains `p-table--sortable`, preview panel
+   + tracked-work wizard dialogs onto the modal/card adapters, payment dialogs
+   included. The Open|All control is **not** a tablist (it is a `role="group"` of
+   `aria-pressed` toggle buttons), so it keeps the app's segmented `.seg` /
+   `.seg-btn` skin rather than moving onto `p-tabs`.
 8. **Expenses.** Register + quick-add category popup reuse earlier adapters.
 9. **Approvals.** Submission table + decision dialogs reuse earlier adapters.
 10. **Reports.** Query bar onto `p-field`, result table onto `p-table`,

@@ -100,6 +100,32 @@ backlog was corrected — and no new component family was needed, so
 `npm run build:ubuntu` is a **no-op** and the `manifest.json` `cssSha256` is
 unchanged.
 
+**Increment 5 (tablists)** puts every app tablist on the official `p-tabs`
+vocabulary — `p-tabs__list` on the `role="tablist"` element, each tab wrapped in
+a `p-tabs__item` and the button carrying `p-tabs__link` — across the sidebar rail,
+the Timesheets `Day|Week|Calendar` bar and the Settings bar. The ARIA tab pattern
+and the #258 roving-tabindex contract are unchanged: `role="tab"`,
+`aria-selected`, exactly one tab in the tab order, `aria-controls` → panel
+`role="tabpanel"` + `aria-labelledby`, and activation still drives the same view
+switch and route change (the vertical rail navigates Up/Down, the horizontal bars
+Left/Right, both Home/End). Vanilla's `.p-tabs` container is deliberately **not**
+used: it exists to box the list *together with its panels* and carries
+`overflow: hidden`, so in this single-shell SPA — where the panels live in
+`<main>` — it would buy nothing and clip the focus rings. The bespoke
+`.tabs [role="tab"]` rail skin, the `.seg [role="tab"]` segment skin and the
+duplicated icon margin are retired; the rail keeps the app ink (`--fg`, selected
+`--brand-deep` on `--accent-soft`, both pinned in `gui-test/contrast.mjs`) so it
+matches the wizard entry beside it, while the two strips take Vanilla's own
+colours and bottom highlight bar (whose selected indicator is painted in the tab
+text colour — so the active tab can never be *lower* contrast than the inactive
+one, the classic tab gap). What stays app-owned is geometry only: the rail's
+vertical axis, the strips' heading-slot width, and the #145 uniform segment
+widths. Recorded correction to earlier backlog prose: the plan listed the
+Invoices Open|All control as a tablist to move onto `p-tabs`, but it is a
+`role="group"` of `aria-pressed` toggle buttons, so it keeps the `.seg` /
+`.seg-btn` segmented-control skin. `vf-p-tabs` shipped in stage 1, so
+`npm run build:ubuntu` is a **no-op** and `cssSha256` is unchanged.
+
 The rules the plan holds to: no global reset (the editable timesheet grid is
 app-owned and must keep its dense cell geometry), the rejected GOV.UK direction
 (#175) stays rejected, and automated contrast coverage is never presented as
@@ -135,9 +161,11 @@ moved under `/api` and every view gained a stable path (`spa_page` in
    `p-modal__dialog`/`__header`/`__title`/`__footer` internals, keeping the
    native `<dialog>` element (#102 security behaviour unchanged) and its p-card
    twin frame for the wizard.
-4. **Stage 3** — sidebar tabs and segment controls onto `p-tabs`; retire the
-   label-matching fallback in `decorateUbuntuButton` once every creation site
-   passes `data-icon`/`data-positive` (attribute support shipped with #191).
+4. **Stage 3** — ✅ sidebar tabs and segment controls onto the official
+   `p-tabs` vocabulary (#232 inc 5; the `.p-tabs` container is intentionally not
+   used — see the increment note above). Still open: retire the label-matching
+   fallback in `decorateUbuntuButton` once every creation site passes
+   `data-icon`/`data-positive` (attribute support shipped with #191).
 
 ## Applied Changes
 
