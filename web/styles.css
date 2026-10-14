@@ -344,10 +344,14 @@ td.num, th.num, .ws-total.num { text-align: right; font-variant-numeric: tabular
 .entry-hours { font-variant-numeric: tabular-nums; font-weight: 600; }
 /* Aligned with the day table: same vertical rhythm as the row gaps
    (.45rem border-spacing) and the same content inset as .entry-main
-   (.75rem), so the box and its button sit on the grid, not beside it. */
-.copy-bar.p-card { margin-top: .45rem; padding: .65rem .75rem; display: flex; flex-direction: column; gap: .55rem; align-items: stretch; }
-.copy-bar .secondary { align-self: flex-start; }
-.copy-rows { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: .35rem; width: 100%; }
+   (.75rem), so the box and its button sit on the grid, not beside it.
+   Copy-forward bar (#12, restyled #108): the toolbar centres its button
+   vertically against the copied rows it fills instead of pinning it to
+   the top of the card, and lets the rows wrap back under the button when
+   they no longer fit beside it (narrow screens keep the old layout). */
+.copy-bar.p-card { margin-top: .45rem; padding: .65rem .75rem; display: flex; flex-wrap: wrap; align-items: center; gap: .55rem .75rem; }
+.copy-bar .secondary { align-self: center; flex: 0 0 auto; }
+.copy-rows { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: .35rem; flex: 1 1 24rem; min-width: 0; }
 .copy-row { display: flex; align-items: center; gap: .6rem; padding: .45rem .6rem; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
 .copy-label { font-weight: 600; min-width: 22ch; }
 .copy-hours { width: 6.5rem; min-width: 0; }
