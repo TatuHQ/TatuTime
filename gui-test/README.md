@@ -54,6 +54,32 @@ contains no fixed-duration wait, and
 `gui-test/node_modules` is gitignored, so run the gates in the pinned `node:22-slim`
 image (`npm ci` first) or a local Node 22 with the dependencies installed.
 
+The suites read the app from `../web/…`, so a container run must mount **both**
+trees: `gui-test` as the working directory and `web` next to it. This is exactly
+what CI does (`.github/workflows/ci.yml`, `gui-test` job):
+
+```sh
+docker run --rm --network host \
+  -v "$PWD/gui-test:/gui" -v "$PWD/web:/web:ro" \
+  -e TT_GUI_BASE="http://localhost:$TT_PORT" \
+  -w /gui node:22-slim \
+  bash -c "npm ci --no-audit --no-fund && node contrast.mjs && npm run test:jsdom --silent && node gui.mjs"
+```
+
+Mounting only `gui-test` (e.g. `-v "$PWD/gui-test:/w" -w /w`) leaves `../web/…`
+unresolvable, so the suites fail on missing files instead of on the app.
+
+**Blind spot to know about.** [`load-app.mjs`](./load-app.mjs) concatenates the
+module sources in file order into one scope, so the jsdom suites resolve no
+module URL, enforce no MIME type and never evaluate in the browser's module
+order. A specifier that resolves to the wrong URL (the #264 regression) or a
+module cycle is therefore invisible here. Those classes are covered instead by
+the served-graph crawl in
+`tests/contract.rs::gui_module_graph_is_served_with_js_mime` (each specifier
+resolved against the URL of the module that declares it: 200 + JS MIME per hop)
+and by [`module-order.test.mjs`](./module-order.test.mjs), which evaluates the
+real graph in the browser's depth-first post-order.
+
 ## Visual evidence (screenshots) — #140/#142/#133/#141
 
 The suite itself never compares pixels (deliberately OS-fragile); when a
