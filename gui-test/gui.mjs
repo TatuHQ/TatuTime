@@ -1395,7 +1395,7 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
   window.document.getElementById('inv-tab-all').dispatchEvent(new window.Event('click', { bubbles: true }));
   await waitFor(() => countRows() > 1, { message: 'the All tab to list the invoices to sort' });
   // sort by total desc then asc
-  const totalBtn = window.document.querySelector('.sort-th[data-col="total"]');
+  const totalBtn = window.document.querySelector('.p-table__sort-button[data-col="total"]');
   const sortedTotals = () => [...window.document.querySelectorAll('#invoice-table tbody tr')].map((r) => r.children[3].textContent);
   totalBtn.dispatchEvent(new window.Event('click', { bubbles: true }));
   await waitFor(() => totalBtn.closest('th').getAttribute('aria-sort') === 'ascending', {
@@ -1408,8 +1408,22 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
     message: 'sorting by total again to re-render the rows in the opposite order',
   });
   const desc = sortedTotals();
+  const headerSorts = () => [...window.document.querySelectorAll('#invoice-table thead th')].map((th) => th.getAttribute('aria-sort'));
   check('sorting by total toggles direction (#135)', asc.length > 1 && JSON.stringify(asc) !== JSON.stringify(desc)
-    && totalBtn.closest('th').getAttribute('aria-sort') === 'descending');
+    && totalBtn.closest('th').getAttribute('aria-sort') === 'descending'
+    && headerSorts().filter((a) => a === 'ascending' || a === 'descending').length === 1
+    && headerSorts().filter((a) => a === 'none').length === 5);
+  // #232 phase 2d: sorting another column moves aria-sort off the previous one
+  const custBtn = window.document.querySelector('.p-table__sort-button[data-col="customer"]');
+  custBtn.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await waitFor(() => custBtn.closest('th').getAttribute('aria-sort') === 'ascending'
+    && totalBtn.closest('th').getAttribute('aria-sort') === 'none', {
+    message: 'sorting by customer to move aria-sort off the total column',
+  });
+  check('sorting another column moves and resets aria-sort (#232 phase 2d)',
+    custBtn.closest('th').getAttribute('aria-sort') === 'ascending'
+    && totalBtn.closest('th').getAttribute('aria-sort') === 'none'
+    && headerSorts().filter((a) => a === 'ascending' || a === 'descending').length === 1);
   // column toggle
   const colCb = window.document.querySelector('.inv-col[value="customer"]');
   colCb.checked = false;

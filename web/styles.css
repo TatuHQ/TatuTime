@@ -702,8 +702,10 @@ caption { padding-bottom: .35rem; }
 .cols-pop summary { cursor: pointer; padding: .35rem .6rem; border: 1px solid var(--line); border-radius: var(--radius); list-style: none; }
 .cols-pop[open] { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: .4rem .6rem; }
 .cols-pop label { display: flex; gap: .4rem; align-items: center; font-weight: 400; }
-.sort-th { border: none; background: none; font: inherit; font-weight: 700; color: inherit; cursor: pointer; padding: 0; }
-.sort-th:hover { color: var(--brand-deep); }
+/* #232 phase 2d: the bespoke `.sort-th` skin is retired — the Invoices
+   register uses Vanilla 4.59's real sortable pattern (aria-sort on the <th>
+   plus `.p-table__sort-button`), which owns the cursor, hover ink and the
+   chevron indicator. */
 @media (max-width: 900px) {
   .inv-overview { grid-template-columns: 1fr; }
 }

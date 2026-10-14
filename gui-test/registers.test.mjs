@@ -28,8 +28,9 @@ const SUMMARY_REGISTERS = {
     'template-vars': ['Variable', 'Example'],
     'report-table': ['Group', 'Currency', 'Hours', 'Amount', 'Entries'],
 };
-// Deliberately app-owned: the timesheet grids, the editable line editor and the
-// Invoices register (which a dedicated `p-table--sortable` increment owns).
+// Deliberately app-owned: the timesheet grids and the editable line editor.
+// The Invoices register is phase 2d — the real aria-sort + .p-table__sort-button
+// pattern (there is no `p-table--sortable` class in Vanilla 4.59).
 const LEFT_ALONE = ['day-table', 'week-table', 'cal-grid', 'invoice-table', 'ed-lines'];
 
 function headers(table) {

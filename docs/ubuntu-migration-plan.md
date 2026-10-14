@@ -126,7 +126,7 @@ component backlog.
 **Umbrella status.** With increment 6 and phases 2a–2c the planned PRs are
 all merged, but #232 stays **open** (*Part of*): the page map above is still ⬜ —
 every row needs the manual light/dark + keyboard/AT review of ground rules 4–5,
-including the Invoices `p-table--sortable` register — and the now-redundant
+including the Invoices sortable register — and the now-redundant
 `decorateUbuntuButton` fallbacks are still to delete (phase 2e). Those are what a
 later ticket needs before it can `Closes #232`.
 
@@ -181,8 +181,10 @@ review land too: the user (`/settings/users`), approval (`/approvals`), credenti
 recurring/retainer (`/invoices`) registers are `p-card` + `p-table--mobile-card`
 shells, and the runtime-config (`/settings/security`) and template-variable
 (`/settings/invoices`) summaries are plain official tables in a `p-card`. The
-Day/Week/Calendar grids, the invoice line editor and the Invoices
-`p-table--sortable` register (row 7) are deliberately untouched.
+Day/Week/Calendar grids and the invoice line editor are deliberately untouched;
+the Invoices sortable register (row 7) is now **phase 2d** — the real `aria-sort`
++ `.p-table__sort-button` pattern (there is no `.p-table--sortable` class in
+Vanilla 4.59).
 
 **#232 phase 2b progress (forms).** Every page's stacked form rows, hints and
 error messages are on the official vocabulary now (see the phase-2b bullet
@@ -195,9 +197,26 @@ skin, the `.theme-switch` fieldset and the `.cols-pop` column picker.
 the official `p-card` (see the phase-2c bullet above), so the last card skin left
 the sheet; but the rows stay ⬜ for the same reason as 2a/2b — the per-page
 light/dark + keyboard/AT review has not happened yet — and the Invoices sortable
-register (phase 2d) is still to come. Deliberately still app-owned: the
+register has since landed in phase 2d (below). Deliberately still app-owned: the
 horizontal filter/tool bars (`.bar`, `.filter-field`), the `#dlg-input` prompt
 skin, the `.theme-switch` fieldset and the `.cols-pop` column picker.
+
+**#232 phase 2d progress (the sortable register).** The Invoices register is on
+Vanilla 4.59's real sortable pattern — `aria-sort` on the `<th>` plus a
+`.p-table__sort-button` — because there is **no `.p-table--sortable` class** in
+4.59 (the pattern is the `vf-p-table-sortable` mixin; the earlier plan prose that
+named a `.p-table--sortable` class was wrong and is corrected here). The sortable
+columns, their order, the ascending/descending toggle, the default (`Number`
+ascending) and the `data-col` keys are unchanged: the active column carries
+`ascending`/`descending`, every other sortable column is `none`, and the static
+markup now reflects that (the bespoke `.sort-th` skin left every heading
+un-annotated until the first click — a screen-reader gap this closes). The row
+content, status pill, empty state and the totals/summary behaviour are untouched.
+The bespoke `.sort-th` rules are deleted; `styles.css` moves from 724 lines / 379
+rules to 726 / 377 (373 comment-stripped). Row 7 still needs the
+per-page light/dark + keyboard/AT review. Guards: `gui-test/sortable.test.mjs`
+(static contract + `dashFilter` semantics), the `gui.mjs` live sort assertions
+and the real-browser gate's new sortable audit.
 
 ## Order and per-page scope
 
@@ -219,7 +238,9 @@ patterns). Each page lists what "migrated" means — nothing layout-level.
    onto the `p-modal` skin; contact rows onto form rhythm.
 5. **Projects.** Same adapters; scope-label + filter row onto `p-field`.
 6. **Tasks.** Same; hierarchy filters onto the shared filter-field pattern.
-7. **Invoices.** Biggest page: register gains `p-table--sortable`, preview panel
+7. **Invoices.** Biggest page: register onto the real sortable pattern
+   (`aria-sort` + `.p-table__sort-button`; there is **no** `p-table--sortable`
+   class in Vanilla 4.59) — landed in phase 2d — preview panel
    + tracked-work wizard dialogs onto the modal/card adapters, payment dialogs
    included. The Open|All control is **not** a tablist (it is a `role="group"` of
    `aria-pressed` toggle buttons), so it keeps the app's segmented `.seg` /
