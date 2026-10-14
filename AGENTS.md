@@ -26,6 +26,19 @@ rate. A single Rust binary serves the REST API, the browser GUI and the API docs
 data is file-based JSON (no database), mirroring the TucanoTest suite philosophy.
 The GUI is a presentation layer and nothing more — it never reads storage.
 
+### Branching
+
+This repository is **`main`-only**: there is no `develop` branch and none is
+expected. Every change — feature, fix, chore or dependency bump — is proposed as
+a pull request branched from `main` and merged back into `main`, and Dependabot
+targets `main` too. The shared rules in
+[`AgentRules/coding/branching-and-git.md`](AgentRules/coding/branching-and-git.md)
+describe a Gitflow flow with a `develop` branch; for this repository, read them
+as requiring the default branch only and substitute `main` for `develop`
+throughout. That divergence is deliberate and repository-specific — `AgentRules/`
+is auto-synced from TucanoAgentRules and must not be edited here, so reconciling
+the upstream wording is an upstream change, not a local one.
+
 ### Architecture invariants
 
 - Money is **minor units** (`u64` cents) and hours are **hundredths** (`u32`);
