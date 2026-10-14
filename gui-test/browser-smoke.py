@@ -1032,6 +1032,114 @@ class Gate:
         )
         self.drain_console("form migration (#232 phase 2b/2c)")
 
+    # ------------------------------------------- sortable register (#232 2d) --
+    def invoice_sort_audit(self):
+        """#232 phase 2d: the Invoices register is Vanilla 4.59's real sortable
+        pattern — `aria-sort` on the `<th>` plus `.p-table__sort-button` (there is
+        NO `.p-table--sortable` class). Seed two drafts with different totals
+        through the API, then drive the register in a real browser: the active
+        column carries `aria-sort` and only that column, clicking a header sorts
+        by it, and clicking again flips the direction so the rows reverse."""
+        csrf = {"x-csrf-protection": "1"}
+        status, _, raw = self.http("GET", "/api/customers", cookie=self.cookie)
+        cid = json.loads(raw)["customers"][0]["id"]
+        status, _, raw = self.http("GET", f"/api/customers/{cid}/projects", cookie=self.cookie)
+        code = json.loads(raw)["projects"][0]["code"]
+        for day, hours in (("2026-01-10", 1), ("2026-02-10", 3)):
+            status, _, raw = self.http(
+                "POST", "/api/entries",
+                {"date": day, "customer_id": cid, "project_code": code, "hours": hours},
+                cookie=self.cookie, extra_headers=csrf,
+            )
+            if status != 201:
+                raise RuntimeError(f"seeding a sortable entry failed: HTTP {status} {raw[:200]!r}")
+        for frm, to in (("2026-01-01", "2026-01-31"), ("2026-02-01", "2026-02-28")):
+            status, _, raw = self.http(
+                "POST", "/api/invoices",
+                {"customer_id": cid, "from": frm, "to": to},
+                cookie=self.cookie, extra_headers=csrf,
+            )
+            if status != 201:
+                raise RuntimeError(f"seeding a sortable invoice failed: HTTP {status} {raw[:200]!r}")
+
+        self.navigate("/invoices")
+        self.wait_script(
+            "document.readyState === 'complete'"
+            " && document.getElementById('version').textContent === 'TucanoTime'",
+            "the app to boot at /invoices",
+        )
+        # The register opens on the Open tab, which hides drafts.
+        self.marionette.script("document.getElementById('inv-tab-all').click(); return true;")
+        self.wait_script(
+            "(function () { return document.querySelectorAll('#invoice-table tbody tr').length >= 2; })()",
+            "the All tab to list the two seeded drafts",
+        )
+
+        def snapshot():
+            return json.loads(self.marionette.script(
+                "var ths = Array.prototype.slice.call(document.querySelectorAll('#invoice-table thead th'));"
+                "return JSON.stringify({"
+                " sorts: ths.map(function (th) { return th.getAttribute('aria-sort'); }),"
+                " cls: ths.map(function (th) { var b = th.querySelector('button');"
+                "   return b ? b.classList.contains('p-table__sort-button') : null; }),"
+                " cols: ths.map(function (th) { var b = th.querySelector('button'); return b ? b.getAttribute('data-col') : null; }),"
+                " totals: Array.prototype.map.call(document.querySelectorAll('#invoice-table tbody tr'),"
+                "   function (r) { return r.children[3].textContent; })"
+                "});"
+            ))
+
+        def amount(text):
+            return float(re.sub(r"[^0-9.]", "", text))
+
+        first = snapshot()
+        self.check(
+            "the invoice register is Vanilla's real sortable pattern (#232 phase 2d)",
+            first["sorts"] == ["ascending", "none", "none", "none", "none", "none", None]
+            and first["cols"] == ["number", "customer", "period", "total", "balance", "status", None]
+            and first["cls"][:6] == [True, True, True, True, True, True]
+            and first["cls"][6] is None,
+            f"register={first}",
+            info=f"aria-sort={first['sorts']}",
+        )
+        self.check(
+            "the sortable register renders the seeded rows (#232 phase 2d)",
+            len(first["totals"]) == 2 and len({amount(t) for t in first["totals"]}) == 2,
+            f"totals={first['totals']}",
+        )
+
+        btn = "document.querySelector('.p-table__sort-button[data-col=\"total\"]')"
+        vals_js = ("var vals = Array.prototype.map.call(document.querySelectorAll"
+                   "('#invoice-table tbody tr'), function (r) {"
+                   " return parseFloat(r.children[3].textContent.replace(/[^0-9.]/g, '')); });")
+        asc_wait = ("(function () { var th = " + btn + ".closest('th');"
+                    " if (th.getAttribute('aria-sort') !== 'ascending') return false;"
+                    " " + vals_js +
+                    " return vals.length >= 2 && vals[0] <= vals[vals.length - 1]; })()")
+        desc_wait = ("(function () { var th = " + btn + ".closest('th');"
+                     " if (th.getAttribute('aria-sort') !== 'descending') return false;"
+                     " " + vals_js +
+                     " return vals.length >= 2 && vals[0] > vals[vals.length - 1]; })()")
+
+        self.marionette.script(btn + ".click(); return true;")
+        self.wait_script(asc_wait, "the Total header to sort the rows ascending")
+        asc = snapshot()
+        self.marionette.script(btn + ".click(); return true;")
+        self.wait_script(desc_wait, "the Total header to flip the rows to descending")
+        desc = snapshot()
+        asc_amounts = [amount(t) for t in asc["totals"]]
+        desc_amounts = [amount(t) for t in desc["totals"]]
+        self.check(
+            "clicking a header sorts and toggles direction in a real browser (#232 phase 2d)",
+            asc_amounts == sorted(asc_amounts)
+            and desc_amounts == sorted(asc_amounts, reverse=True)
+            and asc_amounts != desc_amounts
+            and asc["sorts"] == ["none", "none", "none", "ascending", "none", "none", None]
+            and desc["sorts"] == ["none", "none", "none", "descending", "none", "none", None],
+            f"asc={asc['totals']} desc={desc['totals']}",
+            info=f"{asc_amounts} -> {desc_amounts}",
+        )
+        self.drain_console("sortable register (#232 phase 2d)")
+
     # ------------------------------------------------------------ lifecycle --
     def cleanup(self):
         for proc in (self.firefox_proc, self.server):
@@ -1109,6 +1217,7 @@ class Gate:
         self.drain_console("sign-in")
         self.walk_views()
         self.forms_audit()
+        self.invoice_sort_audit()
         if self.web_dir:
             self.dev_live_reload()
 

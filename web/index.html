@@ -465,9 +465,13 @@
           </details>
         </div>
       </div>
+      <!-- #232 phase 2d: the sortable register uses Vanilla 4.59's real
+           pattern — aria-sort on the <th> plus a .p-table__sort-button.
+           There is NO `.p-table--sortable` class in 4.59 (the mixin is
+           vf-p-table-sortable); the earlier plan prose was wrong. -->
       <div class="invoice-table-scroll"><table id="invoice-table">
         <caption class="sr-only">Invoices</caption>
-        <thead><tr><th scope="col"><button type="button" class="sort-th" data-col="number">Number</button></th><th scope="col"><button type="button" class="sort-th" data-col="customer">Customer</button></th><th scope="col"><button type="button" class="sort-th" data-col="period">Period</button></th><th scope="col" class="num"><button type="button" class="sort-th" data-col="total">Total</button></th><th scope="col" class="num"><button type="button" class="sort-th" data-col="balance">Balance</button></th><th scope="col"><button type="button" class="sort-th" data-col="status">Status</button></th><th scope="col" class="actions-col">Actions</th></tr></thead>
+        <thead><tr><th scope="col" aria-sort="ascending"><button type="button" class="p-table__sort-button" data-col="number">Number</button></th><th scope="col" aria-sort="none"><button type="button" class="p-table__sort-button" data-col="customer">Customer</button></th><th scope="col" aria-sort="none"><button type="button" class="p-table__sort-button" data-col="period">Period</button></th><th scope="col" class="num" aria-sort="none"><button type="button" class="p-table__sort-button" data-col="total">Total</button></th><th scope="col" class="num" aria-sort="none"><button type="button" class="p-table__sort-button" data-col="balance">Balance</button></th><th scope="col" aria-sort="none"><button type="button" class="p-table__sort-button" data-col="status">Status</button></th><th scope="col" class="actions-col">Actions</th></tr></thead>
         <tbody></tbody>
       </table></div>
       <p id="invoice-empty" hidden>No invoices yet.</p>

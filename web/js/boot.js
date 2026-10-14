@@ -143,12 +143,18 @@ export function wireInvoiceDashboard() {
   for (const cb of document.querySelectorAll('.inv-col')) {
     cb.addEventListener('change', dashApplyColumns);
   }
-  for (const btn of document.querySelectorAll('.sort-th')) {
+  for (const btn of document.querySelectorAll('.p-table__sort-button')) {
     btn.addEventListener('click', () => {
       const col = btn.getAttribute('data-col');
       if (dash.sortKey === col) dash.sortDir = -dash.sortDir;
       else { dash.sortKey = col; dash.sortDir = 1; }
-      for (const b2 of document.querySelectorAll('.sort-th')) b2.closest('th').removeAttribute('aria-sort');
+      // #232 phase 2d: Vanilla's real p-table__sort-button pattern reflects
+      // the sort with aria-sort on the <th> — the active column carries
+      // ascending/descending and every other sortable column is marked
+      // `none` (the ARIA "sortable but not currently sorted" state).
+      for (const b2 of document.querySelectorAll('.p-table__sort-button')) {
+        b2.closest('th').setAttribute('aria-sort', 'none');
+      }
       btn.closest('th').setAttribute('aria-sort', dash.sortDir === 1 ? 'ascending' : 'descending');
       refreshInvoices().catch?.(() => {});
     });

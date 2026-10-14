@@ -154,9 +154,11 @@ key/value + reference shape is not a mobile-card list). The `#user-table`
 `.advanced-billing-section table` `display:block`/`overflow-x` rule the conversion
 replaced are deleted (`styles.css` 701/389 → 698/386), and a new
 `gui-test/registers.test.mjs` guard pins the classes, the p-card ancestry, the
-frozen column order and the rendered row counts. The Day/Week/Calendar grids, the
-invoice line editor and the Invoices `p-table--sortable` register are deliberately
-left to their own increments. The component set is unchanged, so
+frozen column order and the rendered row counts. The Day/Week/Calendar grids and the
+invoice line editor are deliberately left to their own increments — the Invoices
+sortable register landed in **phase 2d** (the real `aria-sort` +
+`.p-table__sort-button` pattern; there is no `.p-table--sortable` class). The
+component set is unchanged, so
 `npm run build:ubuntu` is a **no-op** and `cssSha256` is unchanged.
 
 **#232 phase 2b (forms).** The last bespoke form vocabulary is gone: every
@@ -204,13 +206,33 @@ painted 100% wide; the width rule is now scoped to
 715 lines / 383 rules → 724 / 379 (375 comment-stripped); the component set is
 unchanged, so `npm run build:ubuntu` is a **no-op** and `cssSha256` is unchanged.
 
+**#232 phase 2d (the sortable register).** The Invoices register is on Vanilla
+4.59's real sortable pattern — `aria-sort` on the `<th>` plus a
+`.p-table__sort-button`. There is **no `.p-table--sortable` class** in 4.59: the
+pattern ships as the `vf-p-table-sortable` mixin, so the plan/design prose that
+named such a class was wrong and is corrected with this increment (a naming
+correction of the same kind as the `p-modal__body` one noted under increment 4).
+The sortable columns, their order, the ascending/descending toggle, the default
+(`Number` ascending) and the `data-col` keys are unchanged; the active column
+carries `ascending`/`descending`, every other sortable column is `none`, and the
+static markup now reflects the default (previously the bespoke `.sort-th` left
+the headings un-annotated until the first click — a screen-reader gap this
+closes). The row content, status pill, empty state and the totals/summary
+behaviour are untouched. The bespoke `.sort-th` rules are deleted; `styles.css`
+724 lines / 379 rules → 726 / 377 (373 comment-stripped). The
+`.invoice-table-scroll` wrapper is kept: the register is `table-layout: fixed`
+with a `38rem` min-width under 720px, so it still needs the horizontal-overflow
+container. Guards: `gui-test/sortable.test.mjs` (static contract + `dashFilter`
+semantics), the `gui.mjs` live sort assertions and the real-browser gate's
+sortable audit.
+
 **Umbrella #232 status.** Increments 1–6 and the phase-2a/2b/2c sweeps are all
 landed and green, so the component-substitution
 scope and the shared form vocabulary are complete; the umbrella stays **open**
 (*Part of #232*) only for the page-by-page rollout tracked in
 [`ubuntu-migration-plan.md`](ubuntu-migration-plan.md) — rows 1–15 are still ⬜
 (the per-page manual light/dark + assistive-technology sign-off in ground rules
-4–5, and the Invoices `p-table--sortable` register in its own increment) — and
+4–5, the Invoices sortable register having landed in phase 2d) — and
 for deleting the now-redundant `decorateUbuntuButton` fallbacks (phase 2e).
 `npm run build:ubuntu` is a **no-op** and `cssSha256` is unchanged.
 
@@ -241,7 +263,8 @@ moved under `/api` and every view gained a stable path (`spa_page` in
    and the submission/user/credential/catalog/recurring/retainer registers
    (phase 2a) are `p-card` shells — the dense registers use `p-table--mobile-card`,
    the config/template-vars summaries a plain official table. Still open: the
-   Invoices register gains `p-table--sortable` in its own page increment.
+   Invoices register's sortable pattern (aria-sort + .p-table__sort-button; there
+   is no `p-table--sortable` class) landed in #232 phase 2d.
 2. **Stage 2b** — cards/chips/badges: ✅ cards (#229, #232 inc 2); chips/badges
    (#232 inc 3) — `.card`/`.chip`/`.badge` are now `p-card`/`p-chip` adapters. The
    old backlog named `p-badge`, but the shipped `p-badge` is a **numeric counter**
