@@ -238,7 +238,7 @@ th, td { text-align: left; padding: .5rem .65rem; border-bottom: 1px solid var(-
 thead th { border-bottom: 2px solid var(--line); }
 tbody tr:nth-child(odd) { background: var(--row-alt); }
 tfoot th, tfoot td { font-weight: 700; border-top: 2px solid var(--line); border-bottom: none; }
-td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+td.num, th.num, .ws-total.num { text-align: right; font-variant-numeric: tabular-nums; }
 .actions-col { width: 9.5rem; }
 /* #232 increment 3: status/rate pills are the official Vanilla chip
    (`p-chip` + `p-chip__value`, built by `statusChip` in web/js/dom.js). The
@@ -311,20 +311,28 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .day-end { grid-column: 3; justify-self: end; display: flex; align-items: center; gap: .75rem; }
 .day-nav button { display: inline-grid; place-items: center; border: 1px solid var(--line); background: var(--surface); border-radius: var(--radius); width: 2.5rem; height: 2.5rem; padding: 0; font-size: 1rem; line-height: 1; cursor: pointer; }
 .day-nav button:hover { border-color: var(--accent); background: var(--accent-soft); color: var(--brand-deep); }
-.day-label { font-weight: 700; font-size: 1.1rem; min-width: 14ch; }
+/* Pin the date box to the widest label the format renders (a 9-letter
+   weekday, ", DD" and a 3-letter month) so the day arrows stay equally
+   spaced around a centred date — 17ch. */
+.day-label { font-weight: 700; font-size: 1.1rem; min-width: 17ch; }
 /* Week strip — .ws-day uses Vanilla p-card as its shell; all rules here are
    layout overrides (inner grid, margin/padding reset, accent border-bottom)
-   and interactive states that Vanilla cards do not provide. */
+   and interactive states that Vanilla cards do not provide. The day box is
+   an explicit 2×2 grid: .ws-date top-left, .ws-clock top-right (still in
+   flow, justify-self: end / align-self: start), .ws-name bottom-left and
+   .ws-total bottom-right; row-gap is 0 so an icon-less box gains no empty
+   line, and .ws-total's `num` is activated by the `td.num, th.num,
+   .ws-total.num` utility above. */
 .week-strip { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: .5rem; margin-bottom: 1rem; }
-.ws-day.p-card { display: grid; grid-template-columns: 1fr auto; grid-template-rows: auto auto; align-content: center; gap: .1rem .4rem; min-width: 0; min-height: 4.5rem; margin: 0; padding: .55rem .65rem; border-bottom: 3px solid transparent; cursor: pointer; text-align: left; transition: border-color .12s, background-color .12s, box-shadow .12s; }
+.ws-day.p-card { display: grid; grid-template-columns: 1fr auto; grid-template-rows: auto auto; align-content: center; gap: 0 .4rem; min-width: 0; min-height: 4.5rem; margin: 0; padding: .55rem .65rem; border-bottom: 3px solid transparent; cursor: pointer; text-align: left; transition: border-color .12s, background-color .12s, box-shadow .12s; }
 .ws-day:hover { border-color: var(--accent); background: var(--accent-soft); }
 .ws-day:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .ws-day.selected { border-bottom-color: var(--accent); background: var(--accent-soft); }
-.ws-name { grid-column: 1; color: var(--muted); font-size: .8rem; font-weight: 500; line-height: 1.2; }
-.ws-date { grid-column: 2; grid-row: 1 / span 2; align-self: center; color: var(--muted); font-size: 1.1rem; font-variant-numeric: tabular-nums; }
+.ws-name { grid-column: 1; grid-row: 2; color: var(--muted); font-size: .8rem; font-weight: 500; line-height: 1.2; }
+.ws-date { grid-column: 1; grid-row: 1; color: var(--muted); font-size: 1.1rem; font-variant-numeric: tabular-nums; }
 .ws-day.selected .ws-name, .ws-day.selected .ws-date { color: var(--brand-deep); font-weight: 700; }
-.ws-total { grid-column: 1; font-variant-numeric: tabular-nums; font-weight: 600; line-height: 1.25; }
-.ws-clock { position: static; grid-column: 2; grid-row: 2; justify-self: end; align-self: end; color: var(--muted); line-height: 1; }
+.ws-total { grid-column: 2; grid-row: 2; justify-self: end; font-weight: 600; line-height: 1.25; }
+.ws-clock { position: static; grid-column: 2; grid-row: 1; justify-self: end; align-self: start; color: var(--muted); line-height: 1; }
 .ws-week { grid-column: 1 / -1; justify-self: end; padding: .15rem 0 0; color: var(--muted); font-size: .9rem; font-weight: 600; font-variant-numeric: tabular-nums; }
 .entry-main { padding: .65rem .75rem; }
 .entry-project { font-weight: 600; }
