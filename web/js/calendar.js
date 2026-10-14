@@ -62,7 +62,9 @@ export async function refreshTimeCal() {
     const date = `${month}-${String(d).padStart(2, '0')}`;
     const dayEntries = byDate.get(date) || [];
     const daySum = dayEntries.reduce((a, e) => a + e.hundredths, 0);
-    // Top row mirrors the Day view's day box (#12/#108): the date number
+    // The cell carries the DAY TOTAL only — never a per-entry list (#140), so a
+    // busy day stays legible at a glance and the detail stays in the Day view.
+    // The top row mirrors the Day view's day box (#12/#108): the date number
     // top-left and a per-day status icon top-right — success when the day has
     // an entry, history when it is empty.
     const kids = [
@@ -75,26 +77,6 @@ export async function refreshTimeCal() {
     ];
     if (dayEntries.length) {
       kids.push(el('span', { cls: 'cal-hours', text: fmtHM(daySum) }));
-      // One line per project ("CODE  H:MM") instead of bare chips, so several
-      // projects stay readable inside the grid. The first three fit; the rest
-      // collapse into a "+N more" affordance — clicking the day still hands
-      // the whole day over to the Day view.
-      const byProject = new Map();
-      for (const e of dayEntries) {
-        byProject.set(e.project_code, (byProject.get(e.project_code) || 0) + e.hundredths);
-      }
-      const projects = [...byProject.entries()];
-      for (const [code, hundredths] of projects.slice(0, 3)) {
-        kids.push(
-          el('span', { cls: 'cal-entry' }, [
-            el('span', { cls: 'cal-chip', text: code }),
-            el('span', { cls: 'cal-time', text: fmtHM(hundredths) }),
-          ]),
-        );
-      }
-      if (projects.length > 3) {
-        kids.push(el('span', { cls: 'cal-chip cal-more', text: `+${projects.length - 3} more` }));
-      }
     }
     const cell = el(
       'td',

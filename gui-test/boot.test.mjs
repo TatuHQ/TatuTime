@@ -248,11 +248,11 @@ test('rapid calendar navigation renders the newest month response (#188)', async
   await yieldToEventLoop();
   assert.equal(document.getElementById('cal-label').textContent, 'Jul 2026');
   assert.match(document.getElementById('cal-total').textContent, /5:00 logged/);
-  assert.equal(document.querySelector('#cal-grid .cal-chip')?.textContent, 'NEW');
+  assert.equal(document.querySelector('#cal-grid .cal-hours')?.textContent, '5:00');
   dom.window.close();
 });
 
-test('calendar day cells show a per-day status icon and project + time rows (#140)', async () => {
+test('calendar day cells show a per-day status icon and the day total only (#140)', async () => {
   const { dom, context, document } = makeDom();
   context.calState.month = '2026-06';
   context.api.get = () => Promise.resolve({
@@ -268,16 +268,14 @@ test('calendar day cells show a per-day status icon and project + time rows (#14
   assert.ok(has, 'a day with entries renders as an active cell');
   assert.ok(has.querySelector('.cal-status .p-icon--success'),
     'a logged day shows the success status icon');
-  const rows = [...has.querySelectorAll('.cal-entry')];
-  assert.equal(rows.length, 3, 'only the first three projects are listed');
-  assert.equal(rows[0].querySelector('.cal-chip').textContent, 'ALPHA');
-  assert.equal(rows[0].querySelector('.cal-time').textContent, '1:30',
-    'each project row carries its total time alongside the code');
-  assert.equal(has.querySelector('.cal-chip.cal-more').textContent, '+1 more',
-    'the remainder collapses into a generic more affordance');
+  assert.equal(has.querySelector('.cal-hours').textContent, '4:15',
+    'the cell shows the day total, never a per-entry list');
+  assert.equal(has.querySelectorAll('.cal-entry, .cal-chip').length, 0,
+    'no per-project rows or chips are rendered');
   const plain = document.querySelector('#cal-grid td.cal-cell:not(.has) .cal-plain');
   assert.ok(plain.querySelector('.cal-status .p-icon--history'),
     'an empty day shows the history status icon');
+  assert.equal(plain.querySelector('.cal-hours'), null, 'an empty day shows no total');
   dom.window.close();
 });
 

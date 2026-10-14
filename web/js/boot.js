@@ -97,7 +97,7 @@ export function wireDayAndCalendar() {
     calState.month = shiftMonth(calState.month || $('day-date').value.slice(0, 7), 1);
     refreshTimeCal().catch?.(() => {});
   });
-  $('cal-today').addEventListener('click', () => {
+  $('cal-month').addEventListener('click', () => {
     calState.month = isoDate(new Date()).slice(0, 7);
     refreshTimeCal().catch?.(() => {});
   });

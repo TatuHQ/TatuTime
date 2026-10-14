@@ -283,12 +283,22 @@
          #tabs aria-controls, so a sibling here would remain visible on every
          section once the Calendar segment is selected. -->
     <section id="panel-calendar" role="tabpanel" aria-labelledby="ts-cal" tabindex="0" hidden>
-      <div class="cal-nav p-card">
-        <button type="button" id="cal-prev" aria-label="Previous month" title="Previous month"><i class="p-icon--chevron-left" aria-hidden="true"></i></button>
-        <h2 id="cal-label">Calendar</h2>
-        <button type="button" id="cal-next" aria-label="Next month" title="Next month"><i class="p-icon--chevron-right" aria-hidden="true"></i></button>
-        <button type="button" id="cal-today" class="secondary">Today</button>
-        <span id="cal-total" class="p-form-help-text" role="status" aria-live="polite"></span>
+      <!-- #140: the month bar mirrors the Day and Week date bars — the same
+           card, a centred month label, the month total in the left slot and a
+           quiet "Return to this month" link on the right. The old secondary
+           "Today" button is gone; this link replaces it. -->
+      <div class="day-bar p-card">
+        <div class="day-actions">
+          <span id="cal-total" class="p-form-help-text" role="status" aria-live="polite"></span>
+        </div>
+        <nav class="day-nav" aria-label="Change month">
+          <button type="button" id="cal-prev" aria-label="Previous month" title="Previous month"><i class="p-icon--chevron-left" aria-hidden="true"></i></button>
+          <span id="cal-label" class="day-label"></span>
+          <button type="button" id="cal-next" aria-label="Next month" title="Next month"><i class="p-icon--chevron-right" aria-hidden="true"></i></button>
+        </nav>
+        <div class="day-end">
+          <button type="button" id="cal-month" class="link">Return to this month</button>
+        </div>
       </div>
       <table id="cal-grid">
         <caption class="sr-only">Logged hours by day</caption>
