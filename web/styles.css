@@ -222,7 +222,13 @@ input[type="checkbox"], input[type="radio"] { min-height: 0; accent-color: var(-
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
 }
-.card { border: 1px solid var(--line); border-radius: var(--radius); padding: 1.1rem; margin: .75rem 0; max-width: 560px; background: var(--surface); box-shadow: var(--shadow); }
+/* #232 phase 2c: the bespoke `.card` skin is retired — every former `.card`
+   element is now the official Vanilla `p-card` (the invoice wizard/editor/
+   preview regions, the retainer ledger, the template preview and every
+   settings/advanced-billing form), which owns the frame, padding, rhythm and
+   border. The bespoke max-width caps that only trimmed that skin
+   (`.settings-panel > .card`, `.advanced-billing-section .card`) retire with
+   it: the 2a registers were already full-width `p-card`s. */
 .buttons { display: flex; gap: .6rem; }
 
 /* ---- tables ---- */
@@ -422,8 +428,13 @@ dialog.p-modal::backdrop { background: transparent; }
 #expense-dialog form, #expense-category-dialog form { margin: 0; }
 /* #232 phase 2b: a byte-identical duplicate of the retired
    `.field { margin-bottom: .65rem }`; the `.p-form__group` rhythm covers it. */
-#expense-dialog input, #expense-dialog select, #expense-dialog textarea,
-#expense-category-dialog input { width: 100%; }
+/* #232 phase 2c: `#expense-dialog input` (1,0,1) out-specified the tick-box
+   sizing `.p-form__group input[type="checkbox"]` (0,2,1) by id count, so the
+   #expense-billable checkbox painted 100% wide. Scope the width rule away
+   from checkbox/radio (mirroring `dialog input:not([type="checkbox"])`). */
+#expense-dialog input:not([type="checkbox"]):not([type="radio"]),
+#expense-dialog select, #expense-dialog textarea,
+#expense-category-dialog input:not([type="checkbox"]):not([type="radio"]) { width: 100%; }
 #dlg-message { margin: 0 0 .8rem; white-space: pre-line; }
 #dlg-input-wrap { display: block; margin: 0 0 .9rem; }
 #dlg-input-wrap[hidden] { display: none; }
@@ -442,7 +453,6 @@ dialog.p-modal::backdrop { background: transparent; }
 .settings-tabs { flex-wrap: wrap; }
 .settings-panel { min-width: 0; }
 .settings-panel > h2:first-child { margin-top: .4rem; }
-.settings-panel > .card { max-width: 48rem; }
 .seg {
   display: inline-flex; overflow: hidden;
   border: 1px solid var(--line); border-radius: var(--radius);
@@ -518,9 +528,9 @@ dialog.p-modal::backdrop { background: transparent; }
 #invoice-table tbody tr { cursor: default; }
 #invoice-table tbody tr[tabindex="0"]:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
-/* ---- focused Day-entry dialog (#145) ---- */
-#entry-dialog form.card { box-shadow: none; padding: 0; margin: 0; }
-/* #232 phase 2b: the .7rem Day-entry row rhythm folds into the unified .65rem one. */
+/* #232 phase 2b/2c: the .7rem Day-entry row rhythm folds into the unified
+   .65rem one; the entry form dropped the retired `.card` class outright —
+   the `p-modal__dialog` is the frame, so no reset is needed. */
 /* ---- grouped MVP rail (#142) ---- */
 .nav-group { display: flex; flex-direction: column; gap: .15rem; margin-bottom: .45rem; }
 .nav-label { font-size: .75rem; letter-spacing: 0; text-transform: uppercase;
@@ -634,7 +644,6 @@ caption { padding-bottom: .35rem; }
 .advanced-billing-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; align-items: start; }
 .advanced-billing-section { min-width: 0; }
 .advanced-billing-section h2:first-child { margin-top: .25rem; }
-.advanced-billing-section .card { max-width: none; }
 .day-bar { display: grid; grid-template-columns: auto minmax(12rem, 1fr) auto; align-items: center; }
 .day-actions { grid-column: 1; }
 .day-nav { justify-self: center; }

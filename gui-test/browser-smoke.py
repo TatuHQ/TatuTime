@@ -994,7 +994,43 @@ class Gate:
             f"{error}",
             info=f"message={error['text']!r} colour={error['color']}",
         )
-        self.drain_console("form migration (#232 phase 2b)")
+
+        # #232 phase 2c: the retired `#expense-dialog input { width: 100% }` used
+        # to out-specify the tick-box sizing by id count, so #expense-billable
+        # painted 100% wide. Prove in a real browser that it now computes to the
+        # 1rem box and stays far narrower than its form row (the static guard is
+        # gui-test/input-width.test.mjs).
+        self.navigate("/expenses")
+        self.wait_script(
+            "document.readyState === 'complete'"
+            " && document.getElementById('version').textContent === 'TucanoTime'",
+            "the app to boot at /expenses",
+        )
+        self.marionette.script("document.getElementById('expense-new').click(); return true;")
+        self.wait_script(
+            "(function () { var d = document.getElementById('expense-dialog');"
+            " return !!(d && (d.open === true || d.hasAttribute('open'))); })()",
+            "the expense dialog to open",
+        )
+        tick = json.loads(self.marionette.script(
+            "var t = document.getElementById('expense-billable');"
+            "var group = t ? t.closest('.p-form__group') : null;"
+            "return JSON.stringify({"
+            " width: t ? getComputedStyle(t).width : null,"
+            " height: t ? getComputedStyle(t).height : null,"
+            " box: t ? t.getBoundingClientRect().width : null,"
+            " row: group ? group.getBoundingClientRect().width : null"
+            "});"
+        ))
+        self.check(
+            "the #expense-billable tick box keeps its 1rem size, not 100% (#232 phase 2c)",
+            abs(px(tick["width"]) - 16.0) < 0.6
+            and abs(px(tick["height"]) - 16.0) < 0.6
+            and tick["row"] and tick["box"] < tick["row"] * 0.5,
+            f"computed={tick}",
+            info=f"tick={tick['width']}x{tick['height']} in a {tick['row']}px row",
+        )
+        self.drain_console("form migration (#232 phase 2b/2c)")
 
     # ------------------------------------------------------------ lifecycle --
     def cleanup(self):

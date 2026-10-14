@@ -183,8 +183,29 @@ is 698 lines / 386 rules → 715 / 383; the component set is unchanged, so
 attribute coverage) and the real-browser gate's new form audit (80 → 86 embedded
 / 86 → 92 dev checks).
 
-**Umbrella #232 status.** Increments 1–6, the phase-2a register sweep and the
-phase-2b form sweep are all landed and green, so the component-substitution
+**#232 phase 2c (cards).** The bespoke `.card` skin is retired: all 15 former
+`.card` sites are the official `p-card`, and the heading-slot panels (invoice
+wizard, line editor, document preview, retainer ledger, template preview) put
+their title in a `p-card__header` exactly as the phase-2a registers do. The Day
+entry form **drops** the class rather than gaining `p-card` — it is the body of a
+`p-modal__dialog`, which already supplies the frame, so a nested card would
+double the border. The four bespoke rules the conversion replaced (`.card`,
+`.settings-panel > .card`, `#entry-dialog form.card`,
+`.advanced-billing-section .card`) are deleted. `p-card__footer` was **not** used
+because Vanilla 4.59 ships no such class (only `__header`/`__inner`/`__content`/
+`__image`/`__thumbnail`) — a naming correction in the same spirit as the
+`p-table--sortable` one. The increment resolves the pre-existing
+`#expense-dialog input { width: 100% }` defect the phase-2b note left open: it
+out-specified the 1rem tick-box rule (0,2,1) by id count, so `#expense-billable`
+painted 100% wide; the width rule is now scoped to
+`input:not([type="checkbox"]):not([type="radio"])` (matching the existing
+`dialog input:not([type="checkbox"])` pattern) and pinned by a new
+`gui-test/input-width.test.mjs` static guard plus the browser gate. `styles.css`
+715 lines / 383 rules → 724 / 379 (375 comment-stripped); the component set is
+unchanged, so `npm run build:ubuntu` is a **no-op** and `cssSha256` is unchanged.
+
+**Umbrella #232 status.** Increments 1–6 and the phase-2a/2b/2c sweeps are all
+landed and green, so the component-substitution
 scope and the shared form vocabulary are complete; the umbrella stays **open**
 (*Part of #232*) only for the page-by-page rollout tracked in
 [`ubuntu-migration-plan.md`](ubuntu-migration-plan.md) — rows 1–15 are still ⬜
@@ -205,15 +226,17 @@ moved to [`ubuntu-migration-plan.md`](ubuntu-migration-plan.md)** after the API
 moved under `/api` and every view gained a stable path (`spa_page` in
 `src/lib.rs` ↔ `TAB_ROUTES` in `web/app.js` — keep them in sync):
 
-0. **Stage 2b (in progress)** — cards: the **first-admin sign-in** and the
-   **first-run setup wizard** are now twins built on Vanilla `p-card`
+0. **Stage 2b** — cards: ✅ the **first-admin sign-in** and the
+   **first-run setup wizard** are twins built on Vanilla `p-card`
    (`p-card__header` + `p-card__content`) with the ruled header, `.65rem`
    field rhythm and full-width `p-button--positive` action (#229). The
    wizard's native dialog keeps its modal behaviour and backdrop but is left
    chromeless so the inner `p-card` is the single frame, matching the auth
    overlay exactly. Its first-customer field is prefilled with the `Tucano
    Time` example. Element ids are unchanged, so the jsdom + wizard smoke
-   suites stay the gate. The remaining `.card` sites follow below.
+   suites stay the gate. The **remaining `.card` sites followed in phase 2c**
+   (see the phase-2c note above): all 15 are `p-card`, the Day entry form is
+   the modal body, and the bespoke `.card` rules are gone.
 1. **Stage 2a** — tables: ✅ the customer/project/task/expense registers (inc 2)
    and the submission/user/credential/catalog/recurring/retainer registers
    (phase 2a) are `p-card` shells — the dense registers use `p-table--mobile-card`,
