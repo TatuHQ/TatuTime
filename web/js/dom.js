@@ -123,6 +123,40 @@ export function fillSelect(select, options) {
 // harness drives the same buttons a real user sees. Resolution is wired to
 // the buttons directly (no `method="dialog"`), so behaviour does not depend
 // on the host implementing dialog form submission.
+//
+// #232 increment 4: every popup renders the official Vanilla `p-modal` overlay
+// (`p-modal` on the native <dialog>, a `p-modal__dialog` box inside it); only
+// the markup classes moved — the native element still owns the top layer,
+// ::backdrop, inert background and focus trap.
+
+// The native <dialog> returns focus to the control that opened it on close;
+// jsdom (and the getAttribute fallback path) does not, so make the contract
+// explicit for every dialog: wrap show/close to remember the opener and focus
+// it again on close. Idempotent, so wiring twice is harmless.
+export function initDialogFocusReturn() {
+  for (const dlg of document.querySelectorAll('dialog')) {
+    if (dlg.dataset.focusWired) continue;
+    dlg.dataset.focusWired = '1';
+    const show = dlg.showModal;
+    const close = dlg.close;
+    if (typeof show === 'function') {
+      dlg.showModal = function (...args) {
+        if (!(this.open === true || this.hasAttribute('open'))) this.__opener = document.activeElement;
+        return show.apply(this, args);
+      };
+    }
+    if (typeof close === 'function') {
+      dlg.close = function (...args) {
+        const wasOpen = this.open === true || this.hasAttribute('open');
+        const result = close.apply(this, args);
+        const opener = this.__opener;
+        this.__opener = null;
+        if (wasOpen && opener && opener.isConnected && typeof opener.focus === 'function') opener.focus();
+        return result;
+      };
+    }
+  }
+}
 
 export function dlgSettle(result) {
   const dlg = $('app-dialog');

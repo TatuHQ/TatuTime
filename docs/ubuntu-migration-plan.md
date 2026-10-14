@@ -33,10 +33,21 @@ component backlog.
   `.chip` / `.notif` skins are retired. Chips, badges and notifications shipped in
   stage 1, so the vendor bundle is unchanged again and `cssSha256` is still
   `c6b404f72a9fb86c5a1425af9f26b27870edf2e9da74c640dbb149390d936e05`.
+- **Dialogs (#232 increment 4)** — every popup is the official Vanilla `p-modal`
+  overlay on the native `<dialog>` element (top layer/`::backdrop`/inert/focus
+  trap kept from #102) wrapping a `p-modal__dialog` box with a
+  `p-modal__header`/`p-modal__title` and a `p-modal__footer`. The first-run
+  wizard keeps its #229 `p-card` frame and only its dialog becomes `p-modal`. The
+  nine bespoke `#…-dialog` skins, their aubergine `::backdrop` tint and the
+  generic `dialog`/`dialog h2` overrides are retired; only per-dialog `max-width`s
+  stay app-owned. A shared `initDialogFocusReturn()` returns focus to the invoker
+  on close. The component family shipped in stage 1, so the vendor bundle is
+  unchanged and `cssSha256` is still
+  `c6b404f72a9fb86c5a1425af9f26b27870edf2e9da74c640dbb149390d936e05`.
 
 ## Ground rules
 
-1. **One PR per page view**, merged into `develop`; review happens at the
+1. **One PR per page view**, merged into `main`; review happens at the
    page's URL before the next page starts.
 2. **Layout stays**: component substitution and styling only — no rearranging
    panels, moving controls or rewording flows unless a ticket says so.

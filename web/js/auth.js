@@ -4,7 +4,7 @@
 
 import { api } from './api.js';
 import { startApp } from './boot.js';
-import { $, announce, clearFormError, el, initDialog, showFormError } from './dom.js';
+import { $, announce, clearFormError, el, initDialog, initDialogFocusReturn, showFormError } from './dom.js';
 import { state } from './state.js';
 
 // ----------------------------------------------------------------- auth ---
@@ -93,6 +93,7 @@ export async function logout() {
 
 document.addEventListener('DOMContentLoaded', async () => {
   initDialog(); // one <dialog> for confirm/prompt/alert (#102)
+  initDialogFocusReturn(); // #232 inc 4: every popup returns focus to its opener
   $('auth-form').addEventListener('submit', onAuthSubmit);
   $('logout').addEventListener('click', logout);
   loadSsoProviders(); // advertise configured identity providers (#32)
