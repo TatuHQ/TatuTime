@@ -54,29 +54,20 @@ export function decorateUbuntuButton(button) {
   // official Vanilla chip skin — the generic button decorator must not stack
   // `p-button`/icons on top of them.
   if (button.classList.contains('p-chip__dismiss')) return;
-  // #191: `data-positive`/`data-icon` are the stable contract (a label or id
-  // rename can no longer silently strip the icon/colour); the old submit,
-  // class, id-allowlist and label-matching rules remain fallbacks.
-  const positive = button.dataset.positive === '1'
-    || button.type === 'submit' || button.classList.contains('primary')
-    || ['customer-new', 'expense-new', 'user-new', 'iw-save', 'ed-save'].includes(button.id);
+  // #191/#232 phase 2e: `data-positive`/`data-icon` are the *only* contract.
+  // The old submit-type / class / id-allowlist / label-matching fallbacks — and
+  // the label-mutating "+"-strip they brought — are gone: every creation site
+  // states what it wants, so a label or id rename can no longer silently strip
+  // a button's colour, and a data-driven label (a customer called "Copy Center")
+  // can no longer invent a glyph. Decoration is now a pure function of the two
+  // explicit attributes.
+  const positive = button.dataset.positive === '1';
   if (!button.classList.contains('link') && !button.classList.contains('danger')) {
     button.classList.add(positive ? 'p-button--positive' : 'p-button');
   }
   if (button.querySelector('[class*="p-icon--"]')) return;
-  const text = button.textContent.trim();
-  const icon = button.dataset.icon
-    ?? (text.startsWith('+') ? 'plus'
-      : text === 'Edit' ? 'edit'
-        : text === 'Delete' ? 'delete'
-          : text.startsWith('Copy') ? 'copy'
-            : text === 'Start timer' ? 'play'
-              : text === 'Stop' ? 'stop' : null);
+  const icon = button.dataset.icon;
   if (icon) {
-    if (!button.dataset.icon && text.startsWith('+')) {
-      const label = [...button.childNodes].find((node) => node.nodeType === Node.TEXT_NODE && node.textContent.trim().startsWith('+'));
-      if (label) label.textContent = label.textContent.replace(/^\s*\+\s*/, '');
-    }
     const graphic = ubuntuIcon(icon);
     if (positive) graphic.classList.add('is-dark');
     button.prepend(graphic);

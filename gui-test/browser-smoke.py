@@ -149,6 +149,38 @@ TAB_SELECTED = (
     " }})();"
 )
 
+# #232 phase 2e: `decorateUbuntuButton` reads only `data-icon`/`data-positive`
+# now — it no longer infers a button's icon or colour from its label, type or id.
+# This probe proves the attribute contract on every routed view: a submit or
+# `.primary` button must *state* `data-positive="1"`; a positive button must
+# really carry the positive skin; a `data-icon` button must end up with the
+# matching glyph (so the attribute is honoured, not guessed); and no rendered
+# label keeps the leading "+" the deleted label-mutation used to strip. It also
+# samples one positive and one neutral Vanilla button background so the caller
+# can prove the two skins paint differently.
+BUTTON_DECORATION = (
+    "var all = document.querySelectorAll('button');"
+    "var badSubmit = [], badPrimary = [], badSkin = [], badIcon = [], plus = [];"
+    "for (var i = 0; i < all.length; i++) {"
+    "  var b = all[i];"
+    "  if (b.getAttribute('role') === 'tab' || b.classList.contains('p-chip__dismiss')) continue;"
+    "  var name = b.id || b.textContent.trim();"
+    "  if (b.type === 'submit' && b.getAttribute('data-positive') !== '1') badSubmit.push(name);"
+    "  if (b.classList.contains('primary') && b.getAttribute('data-positive') !== '1') badPrimary.push(name);"
+    "  if (b.getAttribute('data-positive') === '1' && !b.classList.contains('link')"
+    "      && !b.classList.contains('danger') && !b.classList.contains('p-button--positive')) badSkin.push(name);"
+    "  var icon = b.getAttribute('data-icon');"
+    "  if (icon && !b.querySelector('i.p-icon--' + icon)) badIcon.push(name + ' -> ' + icon);"
+    "  if (b.textContent.trim().charAt(0) === '+') plus.push(name);"
+    "}"
+    "var pos = document.querySelector(\"button[data-positive='1']:not(.link):not(.danger)\");"
+    "var neu = document.querySelector('button.p-button:not(.p-button--positive):not(.link):not(.danger)');"
+    "return JSON.stringify({ badSubmit: badSubmit, badPrimary: badPrimary, badSkin: badSkin,"
+    " badIcon: badIcon, plus: plus,"
+    " posBg: pos ? getComputedStyle(pos).backgroundColor : null,"
+    " neuBg: neu ? getComputedStyle(neu).backgroundColor : null });"
+)
+
 
 # ---------------------------------------------------------------------------
 # Marionette client (protocol 2 and 3): a length-prefixed JSON wire protocol.
@@ -312,6 +344,10 @@ class Gate:
         # message that arrived during an earlier step is reported once, against
         # the step that produced it, and never re-counted later.
         self.console_reported = set()
+        # #232 phase 2e: the last positive/neutral Vanilla button backgrounds
+        # sampled during walk_views, compared once the walk has finished.
+        self._positive_bg = None
+        self._neutral_bg = None
         self.cookie = ""
         self.started = time.time()
 
@@ -803,6 +839,18 @@ class Gate:
                 structured,
                 f"structural probe failed for {panel}: {probe}",
             )
+            deco = json.loads(self.marionette.script(BUTTON_DECORATION))
+            issues = (deco["badSubmit"] + deco["badPrimary"] + deco["badSkin"]
+                      + deco["badIcon"] + deco["plus"])
+            self.check(
+                f"{path} buttons declare the decoration they rely on (#232 phase 2e)",
+                not issues,
+                "buttons relying on a deleted fallback: " + "; ".join(issues),
+            )
+            if deco["posBg"]:
+                self._positive_bg = deco["posBg"]
+            if deco["neuBg"]:
+                self._neutral_bg = deco["neuBg"]
             self.drain_console(f"view {path}")
 
     # ------------------------------------------------ forms (#232 phase 2b) --
@@ -1216,6 +1264,14 @@ class Gate:
         self.sign_in()
         self.drain_console("sign-in")
         self.walk_views()
+        self.check(
+            "a data-positive button paints the positive skin, distinct from a "
+            "neutral Vanilla button (#232 phase 2e)",
+            self._positive_bg is not None and self._neutral_bg is not None
+            and self._positive_bg != self._neutral_bg,
+            f"positive={self._positive_bg!r} neutral={self._neutral_bg!r}",
+            info=f"positive bg {self._positive_bg}, neutral bg {self._neutral_bg}",
+        )
         self.forms_audit()
         self.invoice_sort_audit()
         if self.web_dir:
