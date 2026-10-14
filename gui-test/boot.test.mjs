@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { JSDOM } from 'jsdom';
 import { loadAppSource } from './load-app.mjs';
+import { waitFor, yieldToEventLoop } from './wait-for.mjs';
 
 const html = readFileSync(new URL('../web/index.html', import.meta.url), 'utf8');
 const app = loadAppSource();
@@ -80,11 +81,10 @@ api.get = async (path) => {
 api.post = async () => ({});
 `;
   const { dom, document } = makeDom(stub);
-  // Poll for boot completion (the DOMContentLoaded handler is async).
-  for (let i = 0; i < 100; i += 1) {
-    if (document.getElementById('version').textContent) break;
-    await new Promise((done) => setTimeout(done, 10));
-  }
+  // Wait for boot completion (the DOMContentLoaded handler is async): #265.
+  await waitFor(() => document.getElementById('version').textContent === 'TucanoTime', {
+    message: 'the member boot to complete',
+  });
   assert.equal(
     document.getElementById('version').textContent,
     'TucanoTime',
@@ -165,6 +165,7 @@ test('partly-paid invoices lock entries in the preview, paid ones do not (#217)'
 
 test('rapid day navigation renders the newest response, not an older one (#188)', async () => {
   const { dom, context, document } = makeDom();
+  let releaseStale;
   context.api.get = (path) => {
     if (path.startsWith('/entries?date=')) {
       const date = decodeURIComponent(path.slice('/entries?date='.length));
@@ -180,18 +181,28 @@ test('rapid day navigation renders the newest response, not an older one (#188)'
         }],
       };
       if (date === '2026-10-01') {
-        // The FIRST (older) navigation resolves LAST: without the sequence
-        // guard its 1h render would clobber the 5h one.
-        return new Promise((done) => setTimeout(() => done(body), 20));
+        // The FIRST (older) navigation resolves LAST: hold it open until the
+        // newest render has landed, then release it deterministically (#265)
+        // instead of racing a fixed sleep. Without the sequence guard its 1h
+        // render would clobber the 5h one.
+        return new Promise((done) => {
+          releaseStale = () => done(body);
+        });
       }
       return Promise.resolve(body);
     }
     return Promise.resolve({ submissions: [], invoices: [], notifications: [], entries: [] });
   };
   document.getElementById('day-date').value = '2026-09-30';
-  context.navigateDay(1); // → 10-01, delayed response
-  context.navigateDay(1); // → 10-02, resolves immediately
-  await new Promise((done) => setTimeout(done, 60)); // let the late response land
+  const stale = context.navigateDay(1); // → 10-01, held open
+  const newest = context.navigateDay(1); // → 10-02, resolves immediately
+  await newest;
+  await waitFor(() => document.getElementById('day-total').textContent === '5:00', {
+    message: 'the newest day response to render its 5:00 total',
+  });
+  releaseStale(); // let the stale 10-01 response land last ...
+  await stale;    // ... and its (guarded) render attempt run to completion
+  await yieldToEventLoop();
   assert.equal(
     document.getElementById('day-total').textContent,
     '5:00',
@@ -203,20 +214,32 @@ test('rapid day navigation renders the newest response, not an older one (#188)'
 test('rapid calendar navigation renders the newest month response (#188)', async () => {
   const { dom, context, document } = makeDom();
   context.calState.month = '2026-06';
+  let releaseJune;
   context.api.get = (path) => {
     if (path.includes('from=2026-06-01')) {
-      return new Promise((done) => setTimeout(() => done({ entries: [{
-        id: 'june', date: '2026-06-03', hours: 1, project_code: 'OLD',
-      }] }), 30));
+      // Held open so the older month resolves LAST, deterministically (#265):
+      // the newest render must already be on screen when it arrives.
+      return new Promise((done) => {
+        releaseJune = () => done({ entries: [{
+          id: 'june', date: '2026-06-03', hours: 1, project_code: 'OLD',
+        }] });
+      });
     }
     return Promise.resolve({ entries: [{
       id: 'july', date: '2026-07-04', hours: 5, project_code: 'NEW',
     }] });
   };
-  const older = context.refreshTimeCal();
+  context.calState.month = '2026-06';
+  const older = context.refreshTimeCal(); // June, held open
   context.calState.month = '2026-07';
-  const newer = context.refreshTimeCal();
-  await Promise.all([older, newer]);
+  const newer = context.refreshTimeCal(); // July, resolves immediately
+  await newer;
+  await waitFor(() => /5:00 logged/.test(document.getElementById('cal-total').textContent), {
+    message: 'the newest month response to render its 5:00 total',
+  });
+  releaseJune(); // the stale June response arrives late ...
+  await older;   // ... and its (guarded) render attempt runs to completion
+  await yieldToEventLoop();
   assert.equal(document.getElementById('cal-label').textContent, 'Jul 2026');
   assert.match(document.getElementById('cal-total').textContent, /5:00 logged/);
   assert.equal(document.querySelector('#cal-grid .cal-chip')?.textContent, 'NEW');

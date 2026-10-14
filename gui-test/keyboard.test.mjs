@@ -10,6 +10,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { JSDOM } from 'jsdom';
 import { loadAppSource } from './load-app.mjs';
+import { waitFor } from './wait-for.mjs';
 
 const html = readFileSync(new URL('../web/index.html', import.meta.url), 'utf8');
 const app = loadAppSource();
@@ -237,9 +238,12 @@ window.d = { showDialog };`;
 }
 
 // The always-registered DOMContentLoaded handler calls showAuth() on a fresh
-// harness (no session), which focuses the sign-in field. Let it settle before
-// asserting anything about focus.
-const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+// harness (no session), which focuses the sign-in field. Wait for that focus
+// (#265) before asserting anything about it, rather than yielding one fixed turn
+// of the event loop and hoping the handler had already landed.
+const settle = (document) => waitFor(() => document.activeElement.id === 'auth-email', {
+    message: 'the sign-in handler to focus the email field',
+});
 
 const dialogOpen = (dlg) => dlg.open === true || dlg.hasAttribute('open');
 const escape = (dom, dlg) => dlg.dispatchEvent(
@@ -248,7 +252,7 @@ const escape = (dom, dlg) => dlg.dispatchEvent(
 
 test('confirm dialog focuses in on open, ESC closes and returns focus (#232 inc 4)', async () => {
     const { dom, d, document } = dialogSetup();
-    await settle();
+    await settle(document);
     const invoker = document.getElementById('day-add');
     invoker.focus();
     const pending = d.showDialog({ title: 'Please confirm', message: 'Delete this?', okLabel: 'Delete', cancelLabel: 'Cancel' });
@@ -265,7 +269,7 @@ test('confirm dialog focuses in on open, ESC closes and returns focus (#232 inc 
 
 test('customer dialog focuses in, ESC closes, focus and name resolve (#232 inc 4)', async () => {
     const { dom, document } = dialogSetup();
-    await settle();
+    await settle(document);
     document.getElementById('panel-customers').hidden = false; // the invoker must be focusable
     const invoker = document.getElementById('customer-new');
     invoker.focus();
