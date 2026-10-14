@@ -124,6 +124,33 @@ widths. Recorded correction to earlier backlog prose: the plan listed the
 Invoices Open|All control as a tablist to move onto `p-tabs`, but it is a
 `role="group"` of `aria-pressed` toggle buttons, so it keeps the `.seg` /
 `.seg-btn` segmented-control skin. `vf-p-tabs` shipped in stage 1, so
+
+**Increment 6 (cleanup)** — the last planned increment audits `styles.css` for
+the rules the earlier increments left dead and shrinks it to the layout shell
+plus the app-owned grids and rhythm. No `.badge` / `.chip` / `.notif` / dialog /
+tab skin remains: increments 1–5 already deleted that vocabulary, so the audit
+instead proves the eight surviving rules whose outcome the cascade had already
+decided — a dependency-free shadowing check (a later rule with the identical
+selector re-declares every property the earlier one set; the redundant inverse
+with equal values; and the specificity-scoped duplicates) flags the
+`.nav-label`/`.hint`/`.foot` font-size base, the `.card` `box-shadow` superseded
+by the card skin, the `#entry-dialog .p-modal__dialog` width duplicated between
+the dialog list and its #145 section, the second `.inv-overview` `align-items`,
+the overridden `#inv-chart` height, the `#week-table` `white-space` and
+`row-total` repeats, and the duplicate `.day-bar.p-card` column track — all
+deleted. The `#dlg-input` colour defect increment 4 deferred is fixed
+(`var(--text)` → `var(--fg)`) and a new `gui-test/css-tokens.test.mjs` guard
+fails the build if any `var(--…)` in `styles.css` is not defined in **both**
+themes (verified red against the pre-fix sheet). The component set is unchanged,
+so `npm run build:ubuntu` is a **no-op** and `cssSha256` is unchanged.
+
+**Umbrella #232 status.** Increments 1–6 are all landed and green, so the
+issue's component-substitution scope is complete; the umbrella stays **open**
+(*Part of #232*) only for the page-by-page rollout tracked in
+[`ubuntu-migration-plan.md`](ubuntu-migration-plan.md) — rows 1–15 are still ⬜
+(the Invoices `p-table--sortable` register, the user/submission registers, and
+the per-page manual light/dark + assistive-technology sign-off in ground rules
+4–5) — and the `decorateUbuntuButton` label-matching fallback noted below.
 `npm run build:ubuntu` is a **no-op** and `cssSha256` is unchanged.
 
 The rules the plan holds to: no global reset (the editable timesheet grid is

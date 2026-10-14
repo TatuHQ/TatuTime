@@ -57,6 +57,24 @@ component backlog.
   correction: the Invoices Open|All control named below is a `role="group"` of
   `aria-pressed` toggle buttons, not a tablist — it keeps the app segmented skin.
 
+- **CSS cleanup (#232 increment 6)** — the stylesheet is reduced to the layout
+  shell + the app-owned grids and rhythm. The audit confirms no retired
+  `.badge`/`.chip`/`.notif`/dialog/tab skin survives (increments 1–5 deleted
+  them) and removes the eight rules the cascade had already shadowed (see the
+  increment-6 note in [`ubuntu-design.md`](ubuntu-design.md)), together with the
+  deferred `#dlg-input { color: var(--text) }` fix (`--fg`) and a new
+  `gui-test/css-tokens.test.mjs` guard that every `var(--…)` resolves in both
+  themes. No component family changed → `npm run build:ubuntu` is a **no-op**
+  and `cssSha256` is still
+  `c6b404f72a9fb86c5a1425af9f26b27870edf2e9da74c640dbb149390d936e05`.
+
+**Umbrella status.** With increment 6 the six planned PRs are all merged, but
+#232 stays **open** (*Part of*): the page map above is still ⬜ — every row
+needs its own PR and the manual light/dark + keyboard/AT review of ground rules
+4–5, including the Invoices `p-table--sortable` register and the user/submission
+registers — and the `decorateUbuntuButton` label-matching fallback is still to
+retire. Those are what a later ticket needs before it can `Closes #232`.
+
 ## Ground rules
 
 1. **One PR per page view**, merged into `main`; review happens at the
