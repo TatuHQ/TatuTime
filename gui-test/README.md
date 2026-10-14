@@ -1,4 +1,4 @@
-# GUI harness (jsdom)
+# GUI harness (jsdom + real browser)
 
 Headless smoke test that loads `web/index.html` + `web/app.js` into jsdom and
 drives the real forms against a running server (default `http://localhost:8099`).
@@ -11,7 +11,8 @@ cd gui-test && npm install && npm test
 
 `npm test` is the live-server smoke flow only. The full CI gate is
 `node contrast.mjs`, the offline jsdom unit suites (`npm run test:jsdom` —
-every `*.test.mjs` file) and finally `npm test`, in that order; run all three
+every `*.test.mjs` file), `npm test` and then the real-browser gate
+(`python3 gui-test/browser-smoke.py`, see below), in that order; run all four
 locally before opening a GUI PR.
 
 Checks cover: login, day view (#12) rows/week strip/copy-forward, inline add
@@ -71,14 +72,71 @@ unresolvable, so the suites fail on missing files instead of on the app.
 
 **Blind spot to know about.** [`load-app.mjs`](./load-app.mjs) concatenates the
 module sources in file order into one scope, so the jsdom suites resolve no
-module URL, enforce no MIME type and never evaluate in the browser's module
-order. A specifier that resolves to the wrong URL (the #264 regression) or a
-module cycle is therefore invisible here. Those classes are covered instead by
-the served-graph crawl in
+module URL, enforce no MIME type, drive no CSS cascade and never evaluate in the
+browser's module order. A specifier that resolves to the wrong URL (the #264
+regression), a module cycle, a boot-time exception, a CSP violation or a cascade
+regression are therefore invisible here. Structural coverage lives in
 `tests/contract.rs::gui_module_graph_is_served_with_js_mime` (each specifier
-resolved against the URL of the module that declares it: 200 + JS MIME per hop)
-and by [`module-order.test.mjs`](./module-order.test.mjs), which evaluates the
-real graph in the browser's depth-first post-order.
+resolved against the URL of the module that declares it: 200 + JS MIME per hop),
+[`module-order.test.mjs`](./module-order.test.mjs) (the real graph evaluated in
+the browser's depth-first post-order) and
+[`dialog-display.test.mjs`](./dialog-display.test.mjs) (the closed-dialog
+cascade guard) — and the *behavioural* coverage is the real-browser gate below.
+
+## Real-browser gate (`browser-smoke.py`) — the three shipped defects
+
+Three user-visible defects reached production through a fully green CI because
+every other GUI guard runs in jsdom: a cascade regression that painted every
+closed dialog on load (#296), and an ES-module graph whose specifiers resolved
+to URLs that do not exist, so the browser refused every module on a non-JS MIME
+type (#297).
+
+[`browser-smoke.py`](./browser-smoke.py) closes that gap. It is a **standard library
+only** Python 3 script (`socket`, `http.client`, `subprocess`, `json`, `base64`)
+that speaks Firefox's **Marionette** wire protocol directly — no geckodriver, no
+Playwright/Puppeteer, no npm package, no Rust crate.
+
+```sh
+cargo build --locked --release            # or: the CI container build step
+python3 gui-test/browser-smoke.py         # embedded/production assets
+python3 gui-test/browser-smoke.py --dev-web-dir   # TUCANO_WEB_DIR=./web + live-reload probe
+```
+
+It boots the release binary on a **free ephemeral port** with a **fresh `mktemp -d`
+data dir** (never the developer's `data/`), kills the server *and* Firefox on every
+exit path and prints a `PASS`/`FAIL` line per assertion. Exit codes: `0` all
+passed, `1` assertion failure(s), `2` the gate could not run (no Firefox/binary,
+protocol error). It asserts:
+
+1. the shell loads: HTTP 200 + `text/html`, `readyState === 'complete'`, title;
+2. **no console message at all** — a live `nsIConsoleService` listener installed
+   from the parent process *before* the first navigation, so a boot exception or a
+   CSP violation cannot slip through a race. The only exclusion is
+   `resource://gre/`-sourced Firefox-internal noise (a JSWindowActor teardown race
+   that any fast programmatic navigation of a form-heavy page can trigger);
+3. the module graph **executed** in the browser: every specifier fetched against
+   its declaring module's URL (200 + JS MIME, the #297 class) *and* the app booted
+   (the auth overlay, hidden in the markup, is revealed only by a module);
+4. the **CSS cascade is real**: every closed `<dialog>` computes `display: none`,
+   a deliberately opened one is laid out, and both `/styles.css` and
+   `/vendor/ubuntu/components.css` loaded with rules applied;
+5. light/dark: toggling the app's own `data-theme` control changes the computed
+   background and foreground;
+6. an **authenticated walk** — a throwaway admin via `/api/auth/bootstrap`, sign-in
+   through the real form, then every route in `TAB_ROUTES` (`/timesheets/day…week…
+   calendar`, `/customers`, `/projects`, `/tasks`, `/invoices`, `/expenses`,
+   `/approvals`, `/reports`, `/settings/*`), asserting per view that its tab is
+   selected, its panel is not hidden **and has a layout box**, its primary region
+   is rendered, and no console error appeared.
+
+`--dev-web-dir` additionally proves the dev live-reload contract: the reload client
+is an external `/_dev/reload.js` asset (never an inline script the app's own
+`script-src 'self'` would block), served with a JS MIME type, and an edit under
+`web/` reloads the browser by itself.
+
+It is wired into the `gui-test` job in [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)
+as a host step (the pinned containers carry no browser). A preflight step fails —
+never skips — when Firefox or `python3` is missing.
 
 ## Visual evidence (screenshots) — #140/#142/#133/#141
 

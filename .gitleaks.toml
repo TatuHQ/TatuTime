@@ -60,6 +60,11 @@ regexes = [
     '''a-plain-secret-long-enough-for-hs256''',
     '''MIIEowIBAAKCAQEA1234567890abcdefghijklmnopqrstuvwxyz''',
     '''SENTINEL-c0ffee-4815162342-abcdefghijklmnop''',
+    # LOCAL (browser smoke gate): the throwaway administrator password
+    # `gui-test/browser-smoke.py` mints in its own `mktemp -d` data dir. A
+    # reviewed synthetic fixture that guards nothing; matched by exact value, so
+    # no real credential can be allowed by it.
+    '''smoke-pass-123456''',
     '''(?i)^true|false|null$''',
     '''^(?i:a+|b+|c+|d+|e+|f+|g+|h+|i+|j+|k+|l+|m+|n+|o+|p+|q+|r+|s+|t+|u+|v+|w+|x+|y+|z+|\*+|\.+)$''',
     '''^\$(?:\d+|{\d+})$''',

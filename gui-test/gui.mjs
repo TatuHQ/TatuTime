@@ -591,8 +591,19 @@ check('panels lead with their action, not a duplicate H2',
 // section (#182) — no shared selection state anymore.
 const projBtn = [...window.document.querySelectorAll('#customer-table button')].find((b) => b.textContent === 'Projects');
 projBtn.dispatchEvent(new window.Event('click', { bubbles: true }));
-await waitFor(() => !byId('panel-projects').hidden && byId('proj-filter-customer').value === acmeOpt.value, {
-  message: 'the row action to open the Projects section scoped to ACME',
+// The checks below read the *rendered* scoped list (scope label, empty state and
+// rows). Waiting only for the panel and the picker raced the table re-render the
+// click starts — the recurring gui-test flake (#265), green only when the runner
+// happened to be fast. Await the post-condition the checks actually read.
+const scopedProjectRows = () => [...window.document.querySelectorAll('#project-table tbody tr')];
+const projectsScopedToAcme = () => !byId('panel-projects').hidden
+  && byId('proj-filter-customer').value === acmeOpt.value
+  && /ACME/.test(byId('project-scope-label').textContent)
+  && byId('projects-empty-state').hidden
+  && scopedProjectRows().length >= 1
+  && scopedProjectRows().every((r) => r.cells[1].textContent === 'ACME');
+await waitFor(projectsScopedToAcme, {
+  message: 'the Projects section to render rows scoped to ACME',
 });
 check('row action opens the Projects section scoped to that customer',
   !window.document.getElementById('panel-projects').hidden
@@ -636,6 +647,12 @@ check('project save closes popup and restores toolbar focus',
   !projectDialog.open && window.document.activeElement.id === 'project-new');
 
 // ---- TASK MANAGER (#38): add a task to MKT-2, then log time against it ----
+// settle() drains the POST the form started, but the table rebuild is the *next*
+// request: await the row this block edits, not merely a quiet moment (#265).
+await waitFor(() => [...window.document.querySelectorAll('#project-table tbody tr')]
+  .some((r) => r.cells[0].textContent === 'MKT-2'), {
+  message: 'the Projects table to render the saved MKT-2 row',
+});
 const projRows = [...window.document.querySelectorAll('#project-table tbody tr')];
 const mktRow = projRows.find((r) => r.cells[0].textContent === 'MKT-2');
 const projectEdit = [...mktRow.querySelectorAll('button')].find((button) => button.textContent === 'Edit');
@@ -648,8 +665,16 @@ projectDialog.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape',
 check('project Escape closes its popup', !projectDialog.open);
 const tasksBtn = [...mktRow.querySelectorAll('button')].find((b) => b.textContent === 'Tasks');
 tasksBtn.dispatchEvent(new window.Event('click', { bubbles: true }));
-await waitFor(() => !byId('panel-tasks').hidden && byId('task-filter-project').value === 'MKT-2', {
-  message: 'the project row Tasks action to open the Tasks section scoped to ACME / MKT-2',
+// Same weak-predicate shape as the Projects action above: the checks read the
+// rendered scoped state (both pickers, the scope label, the empty state), so
+// await that render rather than the panel plus one picker.
+const tasksScopedToMkt2 = () => !byId('panel-tasks').hidden
+  && byId('task-filter-customer').value === acmeOpt.value
+  && byId('task-filter-project').value === 'MKT-2'
+  && /ACME \/ MKT-2/.test(byId('task-scope-label').textContent)
+  && !byId('tasks-empty-state').hidden;
+await waitFor(tasksScopedToMkt2, {
+  message: 'the Tasks section to render scoped to ACME / MKT-2',
 });
 check('project row Tasks action opens the Tasks section with both filters set',
   !window.document.getElementById('panel-tasks').hidden
