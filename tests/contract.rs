@@ -397,16 +397,19 @@ async fn trace_probe(
 
 /// The path set the mounted router actually serves, read back from axum's
 /// `Debug` of the route node (the only route introspection axum offers). The
-/// always-present fallback routes (`/`, `/{*…}`) and the dev-only SSE endpoint
-/// `/_dev/reload` (404 outside dev mode) are not JSON-API operations and are
-/// dropped. If axum changes its `Debug` shape this fails loudly rather than
-/// silently under-checking, which is the right failure mode for a test.
+/// always-present fallback routes (`/`, `/{*…}`) and the dev-only `/_dev/*`
+/// endpoints — the live-reload SSE stream and its `/_dev/reload.js` client,
+/// both 404 outside dev mode — are not JSON-API operations and are dropped.
+/// If axum changes its `Debug` shape this fails loudly rather than silently
+/// under-checking, which is the right failure mode for a test.
 fn router_paths(router: &Router) -> std::collections::BTreeSet<String> {
     format!("{router:?}")
         .split('"')
         .skip(1)
         .step_by(2)
-        .filter(|t| t.starts_with('/') && !t.contains("{*") && *t != "/" && *t != "/_dev/reload")
+        .filter(|t| {
+            t.starts_with('/') && !t.contains("{*") && *t != "/" && !t.starts_with("/_dev/")
+        })
         .map(str::to_string)
         .collect()
 }

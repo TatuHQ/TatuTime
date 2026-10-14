@@ -503,6 +503,12 @@ pub fn build_router(state: AppState) -> Router {
                 move || dev_reload(tx.clone())
             }),
         )
+        // The client half of the same feature, also dev-only. It is served as a
+        // real asset rather than inlined into the HTML because the app's own
+        // `script-src 'self'` refuses inline scripts: as an inline snippet the
+        // browser never ran it, so an edit under web/ did nothing until a
+        // manual refresh (and every dev page reported a CSP violation).
+        .route("/_dev/reload.js", get(dev_reload_script))
         .fallback(static_assets)
         .layer(axum::middleware::from_fn(csrf_guard))
         .layer(axum::middleware::from_fn(security_headers))
@@ -637,10 +643,11 @@ fn spa_page(path: &str) -> bool {
 ///
 /// **Dev mode** (`TUCANO_WEB_DIR=/path/to/web`): files are read from disk on
 /// every request, so editing HTML/CSS/JS takes effect on the next browser
-/// refresh with no Rust rebuild. A tiny `<script>` is injected into every
-/// HTML response that opens an SSE connection to `/_dev/reload`; the server
-/// sends a `reload` event whenever it detects a file change, and the script
-/// calls `location.reload()`.
+/// refresh with no Rust rebuild. Every HTML response gets a
+/// `<script src="/_dev/reload.js">` tag — an external asset, never an inline
+/// script, so `script-src 'self'` permits it — which opens an SSE connection
+/// to `/_dev/reload`; the server sends a `reload` event whenever it detects a
+/// file change and the script calls `location.reload()`.
 ///
 /// Unknown non-API paths 404 with the JSON error shape so no path or asset
 /// enumeration leaks internals (production) or filesystem paths (dev).
@@ -672,16 +679,12 @@ async fn static_assets(uri: axum::http::Uri) -> Response {
         return match std::fs::read(&full_path) {
             Ok(bytes) => {
                 let ct = content_type(rel);
-                // Inject the live-reload script into every HTML page so the
-                // browser auto-refreshes when the watcher fires.
+                // Point every HTML page at the live-reload asset so the browser
+                // auto-refreshes when the watcher fires. A `<script src>` (not
+                // an inline script) is what makes it legal under the app's own
+                // `script-src 'self'` CSP.
                 let body: axum::body::Body = if ct.starts_with("text/html") {
-                    const SNIPPET: &[u8] = br#"<script>
-(function(){
-  var es = new EventSource('/_dev/reload');
-  es.addEventListener('reload', function(){ location.reload(); });
-  es.onerror = function(){ setTimeout(function(){ location.reload(); }, 1000); };
-})();
-</script>"#;
+                    const SNIPPET: &[u8] = br#"<script src="/_dev/reload.js"></script>"#;
                     let mut out = bytes;
                     out.extend_from_slice(SNIPPET);
                     out.into()
@@ -728,6 +731,47 @@ async fn static_assets(uri: axum::http::Uri) -> Response {
             .into_response(),
     }
 }
+
+/// The dev live-reload client, served as a real asset (`/_dev/reload.js`).
+///
+/// This is the client half of [`dev_reload`]: it opens the `EventSource` and
+/// reloads the page when the server announces a change. It must be an external
+/// script because the app's CSP is `script-src 'self'` — as an inline snippet
+/// the browser refused to execute it, so dev edits required a manual refresh
+/// and every dev page logged a CSP violation (#dev live-reload).
+///
+/// Dev-only, exactly like the SSE endpoint: without `TUCANO_WEB_DIR` it 404s
+/// with the standard error shape, and no copy exists in the embedded bundle.
+async fn dev_reload_script() -> Response {
+    if std::env::var("TUCANO_WEB_DIR").is_err() {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({
+                "error": { "code": "not_found", "message": "resource does not exist" }
+            })),
+        )
+            .into_response();
+    }
+    (
+        [(
+            axum::http::header::CONTENT_TYPE,
+            "text/javascript; charset=utf-8",
+        )],
+        DEV_RELOAD_JS,
+    )
+        .into_response()
+}
+
+/// Body of `/_dev/reload.js`. Kept byte-identical in behaviour to the snippet
+/// it replaces: on a `reload` event, refresh; if the stream drops, retry by
+/// reloading, which re-establishes the connection.
+const DEV_RELOAD_JS: &str = "\
+(function () {
+  var es = new EventSource('/_dev/reload');
+  es.addEventListener('reload', function () { location.reload(); });
+  es.onerror = function () { setTimeout(function () { location.reload(); }, 1000); };
+})();
+";
 
 /// SSE endpoint used in dev mode only (`TUCANO_WEB_DIR` set).
 ///
