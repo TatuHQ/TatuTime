@@ -47,6 +47,10 @@ export function ubuntuIcon(name) {
 
 export function decorateUbuntuButton(button) {
   if (button.getAttribute('role') === 'tab') return;
+  // #232 increment 3: a chip's own controls (its dismiss button) carry the
+  // official Vanilla chip skin — the generic button decorator must not stack
+  // `p-button`/icons on top of them.
+  if (button.classList.contains('p-chip__dismiss')) return;
   // #191: `data-positive`/`data-icon` are the stable contract (a label or id
   // rename can no longer silently strip the icon/colour); the old submit,
   // class, id-allowlist and label-matching rules remain fallbacks.
@@ -88,6 +92,19 @@ export function rowAction(cls, text, fn, title) {
     attrs: title ? { title } : {},
     on: { click: fn },
   });
+}
+
+// #232 increment 3: the official status pill. Vanilla 4.59 deprecates
+// `p-status-label` — "the status label has been merged into the Chip component"
+// (canonical/vanilla-framework#5535) — so a status renders as `p-chip` +
+// `p-chip__value`. `is-inline` drops the chip's block margin so the pill sits on
+// a table cell / note baseline; the app's pre-existing binary emphasis (the old
+// `.badge.on` vs `.badge`) maps to `p-chip--positive` vs the neutral chip. The
+// label enters through `textContent` only.
+export function statusChip(text, emphasised = false) {
+  return el('span', { cls: `p-chip is-inline${emphasised ? ' p-chip--positive' : ''}` }, [
+    el('span', { cls: 'p-chip__value', text }),
+  ]);
 }
 
 export function fillSelect(select, options) {

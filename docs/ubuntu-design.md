@@ -59,6 +59,24 @@ footer is not a mobile-card shape. No new component family was needed (tables an
 cards shipped in stage 1), so `npm run build:ubuntu` is a **no-op** and the
 `manifest.json` `cssSha256` is unchanged.
 
+**Increment 3 (chips / badges / notifications)** renders every status pill as the
+official Vanilla chip — `p-chip` + `p-chip__value`, with `is-inline` so the pill
+sits on a table / note baseline — through one shared `statusChip` builder in
+`web/js/dom.js`, retiring the bespoke `.badge` / `.badge.on` rules. Vanilla 4.59
+**deprecates** `p-status-label` ("merged into the Chip component",
+canonical/vanilla-framework#5535), which is why the chip — not the label pattern
+this backlog originally named — is the successor; the app's pre-existing binary
+emphasis (`.badge.on`) maps to `p-chip--positive` vs the neutral chip, a
+deliberate colour-of-meaning change from the old aubergine pill. The editable
+expense-category chips become `p-chip` (`__value` + the official `__dismiss`
+close control); the notification list renders the canonical
+`p-notification--<severity>` + `p-notification__content` structure, severity wired
+to the backend `kind` (every kind emitted today is informational), while the
+polite `#live-region` and field-level `role="alert"` announcement surfaces are
+unchanged. No new component family was needed (chips, badges and notifications
+shipped in stage 1), so `npm run build:ubuntu` is a **no-op** and the
+`manifest.json` `cssSha256` is unchanged.
+
 The rules the plan holds to: no global reset (the editable timesheet grid is
 app-owned and must keep its dense cell geometry), the rejected GOV.UK direction
 (#175) stays rejected, and automated contrast coverage is never presented as
@@ -83,11 +101,15 @@ moved under `/api` and every view gained a stable path (`spa_page` in
 1. **Stage 2a** — tables: the customer/project/task/expense/submission/user
    registers onto `p-table` (invoice register gains `p-table--sortable`;
    dense registers gain the mobile-card pattern for narrow screens).
-2. **Stage 2b** — cards/chips/badges: `.card`, `.chip`, `.badge` become
-   `p-card`, `p-chip`, `p-badge` adapters.
-3. **Stage 2c** — notifications and modal dialogs: the `.notif` list onto
-   `p-notification`; the nine bespoke `<dialog>` skins onto `p-modal` while
-   keeping the native dialog element (#102 security behaviour unchanged).
+2. **Stage 2b** — cards/chips/badges: ✅ cards (#229, #232 inc 2); chips/badges
+   (#232 inc 3) — `.card`/`.chip`/`.badge` are now `p-card`/`p-chip` adapters. The
+   old backlog named `p-badge`, but the shipped `p-badge` is a **numeric counter**
+   (4ch-wide, overflow hidden), so text statuses are the chip (see the
+   increment-3 note); the count badge has no caller in this GUI.
+3. **Stage 2c** — notifications and modal dialogs: notifications ✅ (#232 inc 3,
+   the `.notif` list is now canonical `p-notification`); the nine bespoke
+   `<dialog>` skins onto `p-modal` still pending, keeping the native dialog
+   element (#102 security behaviour unchanged).
 4. **Stage 3** — sidebar tabs and segment controls onto `p-tabs`; retire the
    label-matching fallback in `decorateUbuntuButton` once every creation site
    passes `data-icon`/`data-positive` (attribute support shipped with #191).

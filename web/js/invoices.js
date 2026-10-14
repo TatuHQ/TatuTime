@@ -5,7 +5,7 @@
 import { api } from './api.js';
 import { catalogItems } from './billing.js';
 import { startApp } from './boot.js';
-import { $, announce, askConfirm, askPrompt, clearFormError, el, formatMoney, rowAction, showFormError } from './dom.js';
+import { $, announce, askConfirm, askPrompt, clearFormError, el, formatMoney, rowAction, showFormError, statusChip } from './dom.js';
 import { createSeqGuard } from './seq.js';
 import { customerName, state } from './state.js';
 import { invalidateLockCache, weekLockIds } from './timesheet.js';
@@ -88,7 +88,7 @@ export async function refreshInvoices() {
         el('td', { cls: 'num', text: `${inv.currency} ${formatMoney(inv.total_minor)}` }),
         el('td', { cls: 'num', text: open ? `${inv.currency} ${formatMoney(balance)}` : '\u2014' }),
         el('td', {}, [
-          el('span', { cls: open ? 'badge on' : 'badge', text: inv.status.replace('_', ' ') }),
+          statusChip(inv.status.replace('_', ' '), open),
         ]),
         el('td', { cls: 'actions-col' }, actions),
       ]),

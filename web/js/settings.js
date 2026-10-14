@@ -5,7 +5,7 @@
 import { api } from './api.js';
 import { showAuth } from './auth.js';
 import { refreshCatalog } from './billing.js';
-import { $, announce, askConfirm, clearFormError, el, fillSelect, formatMoney, showFormError } from './dom.js';
+import { $, announce, askConfirm, clearFormError, el, fillSelect, formatMoney, showFormError, statusChip } from './dom.js';
 
 // --------------------------------------------------------------- settings --
 
@@ -298,7 +298,7 @@ export async function refreshConfig() {
         el('th', { attrs: { scope: 'row', title: row.description }, text: row.key }),
         el('td', { cls: 'num', text: configValueForInput(row.value) }),
         el('td', {}, [
-          el('span', { cls: row.source === 'default' ? 'badge' : 'badge on', text: row.source }),
+          statusChip(row.source, row.source !== 'default'),
         ]),
       ]),
     ),
