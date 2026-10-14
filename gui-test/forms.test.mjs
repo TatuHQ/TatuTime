@@ -3,7 +3,8 @@
 // `p-form__group` / `p-form__label` / `p-form__control` / `p-form-help-text` /
 // `p-form-validation__message` (in a `p-form-validation is-error` wrapper), and
 // every button-creation path now states its own `data-icon`/`data-positive`
-// instead of relying on `decorateUbuntuButton`'s label/type/id fallbacks. This
+// instead of relying on `decorateUbuntuButton`'s label/type/id fallbacks, which
+// phase 2e then deleted outright. This
 // offline jsdom suite (same harness as registers.test.mjs / chips.test.mjs)
 // pins the vocabulary, the label<->control pairing, the preserved field
 // contract, the CSS that left the app sheet and the button attribute coverage.
@@ -41,7 +42,7 @@ function setup() {
     dom.window.HTMLDialogElement.prototype.showModal = function () { this.open = true; };
     dom.window.HTMLDialogElement.prototype.close = function () { this.open = false; };
     const stub = `
-window.f = { api, state, refreshCatalog, iwLoadProjects, fillSelect, $ };`;
+window.f = { api, state, refreshCatalog, iwLoadProjects, fillSelect, $, decorateUbuntuButton };`;
     dom.window.eval(`${app}\n${stub}`);
     return { dom, document: dom.window.document, f: dom.window.f };
 }
@@ -194,34 +195,63 @@ test('every error stays a role=alert validation message while hidden (#232 phase
 });
 
 // ------------------------------------------------- button attribute contract --
+//
+// #232 phase 2e: `decorateUbuntuButton` no longer infers anything — its old
+// submit-type / class / id-allowlist / label-matching fallbacks (and the
+// label-mutating "+"-strip they brought) are deleted, so decoration is a pure
+// function of `data-icon` and `data-positive`. This guard asserts both halves of
+// that contract: (1) the decorator adds nothing when the two attributes are
+// absent, so reintroducing a fallback fails here; and (2) no rendered button
+// relies on the deleted fallback — every button that needs a colour or a glyph
+// states it, with the coverage pinned so dropping an attribute also fails.
 
-test('every shell button states its icon and positive flag, so the fallback is redundant (#232 phase 2b)', () => {
-    const { dom, document } = shell();
-    const ALLOW = new Set(['customer-new', 'expense-new', 'user-new', 'iw-save', 'ed-save']);
-    const missingPositive = [];
-    const missingIcon = [];
+test('decoration is attribute-only and every rendered button states what it needs (#232 phase 2e)', () => {
+    const { dom, document, f } = setup();
+    const label = (b) => b.id || b.textContent.trim() || b.outerHTML.slice(0, 40);
+
+    // (1) No inference. Decorate a clone of every shell button with its
+    // decoration attributes stripped: nothing may be re-derived from the label,
+    // the type or the id.
     for (const button of document.querySelectorAll('button')) {
         if (button.getAttribute('role') === 'tab' || button.classList.contains('p-chip__dismiss')) continue;
-        const cls = [...button.classList].join(' ');
-        const text = button.textContent.trim();
-        const byType = button.type === 'submit' || button.classList.contains('primary') || ALLOW.has(button.id);
-        if (byType && button.dataset.positive !== '1') missingPositive.push(button.id || text);
-        if (button.querySelector('[class*="p-icon--"]')) continue; // an explicit icon child already
-        const hasExplicit = Object.prototype.hasOwnProperty.call(button.dataset, 'icon');
-        const derived = text.startsWith('+') ? 'plus'
-            : text === 'Edit' ? 'edit'
-                : text === 'Delete' ? 'delete'
-                    : text.startsWith('Copy') ? 'copy'
-                        : text === 'Start timer' ? 'play'
-                            : text === 'Stop' ? 'stop' : null;
-        if (derived && !hasExplicit) missingIcon.push(`${button.id || text} -> ${derived}`);
+        const clone = button.cloneNode(true);
+        clone.removeAttribute('data-icon');
+        clone.removeAttribute('data-positive');
+        clone.classList.remove('p-button', 'p-button--positive');
+        clone.querySelectorAll('i[class*="p-icon--"]').forEach((icon) => icon.remove());
+        assert.equal(clone.querySelector('[class*="p-icon--"]'), null, 'the clone starts with no icon');
+        f.decorateUbuntuButton(clone);
+        assert.equal(clone.querySelector('[class*="p-icon--"]'), null,
+            `${label(button)} must not gain an icon without data-icon`);
+        assert.equal(clone.classList.contains('p-button--positive'), false,
+            `${label(button)} must not become positive without data-positive`);
+        if (!clone.classList.contains('link') && !clone.classList.contains('danger')) {
+            assert.ok(clone.classList.contains('p-button'), `${label(button)} still gets the neutral skin`);
+        }
     }
-    assert.deepEqual(missingPositive, [], 'every button the decorator would call positive states it');
-    assert.deepEqual(missingIcon, [], 'every button whose icon came from its label states data-icon');
-    // The label text no longer carries the "+" the decorator used to strip, so
-    // the markup and the rendering agree.
-    assert.equal(document.querySelectorAll('button').length > 0, true);
-    assert.equal(/<button[^>]*>\s*\+/.test(html), false, 'no button label keeps a leading "+"');
+
+    // (2) Coverage. A form submit control is always the primary action here, so
+    // it must say so; the legacy `.primary` class may decorate a button but must
+    // never be the only positive signal (that fallback is deleted).
+    const submits = [...document.querySelectorAll('button[type="submit"]')];
+    assert.ok(submits.length > 0, 'the shell has form submit controls');
+    for (const b of submits) assert.equal(b.dataset.positive, '1', `submit ${label(b)} states data-positive`);
+    for (const b of document.querySelectorAll('button.primary')) {
+        assert.equal(b.dataset.positive, '1', `.primary button ${label(b)} also states data-positive`);
+    }
+
+    // Pinned coverage: dropping a data-* attribute from any shell button makes
+    // one of these counts drop and fails the guard.
+    const icons = [...document.querySelectorAll('button[data-icon]')];
+    assert.equal(icons.length, 14, 'every icon-bearing shell button states data-icon');
+    const vocab = {};
+    for (const b of icons) vocab[b.dataset.icon] = (vocab[b.dataset.icon] || 0) + 1;
+    assert.deepEqual(vocab, { plus: 9, copy: 2, play: 2, stop: 1 }, 'the shell icon vocabulary is pinned');
+    assert.equal(document.querySelectorAll('button[data-positive]').length, 31,
+        'every positive shell button states data-positive');
+
+    // The deleted label-mutation leaves no trace: no rendered label keeps a "+".
+    assert.equal(/<button[^>]*>\s*\+/.test(html), false, 'no button label carries a leading "+"');
     dom.window.close();
 });
 
