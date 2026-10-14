@@ -502,9 +502,14 @@ dialog.p-modal::backdrop { background: transparent; }
 /* #12/#108 parity: each day column header is the same 2×2 box as the Day
    view's week strip — the date top-left, the per-day status icon top-right
    (success when the day has an entry, history when it is empty) and the
-   weekday name bottom-left. Scoped to the day columns (`[data-date]`) so the
-   Project and Week header cells keep their plain flow. */
-#week-table.grid thead th[data-date] { display: grid; grid-template-columns: 1fr auto; grid-template-rows: auto auto; align-items: start; gap: 0 .3rem; }
+   weekday name bottom-left.
+   The grid MUST live on the inner `.wk-head` span, never on the `th` itself: a
+   `display` other than `table-cell` on a `th` drops its cell role, the browser
+   wraps it in an anonymous cell, and every day header collapses into a single
+   column — the titles stop lining up with their day columns. jsdom computes no
+   layout, so this was invisible there; measured in Firefox and pinned by
+   css-tokens.test.mjs and browser-smoke.py. */
+#week-table.grid thead th .wk-head { display: grid; grid-template-columns: 1fr auto; grid-template-rows: auto auto; align-items: start; gap: 0 .3rem; }
 #week-table.grid thead th .wk-date { grid-column: 1; grid-row: 1; font-weight: 400; font-size: .8rem; opacity: .8; }
 #week-table.grid thead th .wk-clock { grid-column: 2; grid-row: 1; justify-self: end; align-self: start; color: var(--muted); line-height: 1; }
 #week-table.grid thead th .wk-dow { grid-column: 1; grid-row: 2; font-weight: 700; }

@@ -474,10 +474,15 @@ export async function refreshWeek() {
           data: { date: d },
         },
         [
-          el('span', { cls: 'wk-date', text: `${dd} ${MONTH_NAMES[mm - 1]}` }),
-          el('span', { cls: 'wk-dow', text: new Date(d).toUTCString().slice(0, 3) }),
-          el('span', { cls: 'wk-clock', attrs: { 'aria-hidden': 'true' } }, [
-            ubuntuIcon(hasEntry ? 'success' : 'history'),
+          // The grid lives on an inner span: `display: grid` on the `th` itself
+          // drops its table-cell role and collapses every column header into one
+          // (see styles.css). The `th` must stay a real table cell.
+          el('span', { cls: 'wk-head' }, [
+            el('span', { cls: 'wk-date', text: `${dd} ${MONTH_NAMES[mm - 1]}` }),
+            el('span', { cls: 'wk-dow', text: new Date(d).toUTCString().slice(0, 3) }),
+            el('span', { cls: 'wk-clock', attrs: { 'aria-hidden': 'true' } }, [
+              ubuntuIcon(hasEntry ? 'success' : 'history'),
+            ]),
           ]),
         ],
       );

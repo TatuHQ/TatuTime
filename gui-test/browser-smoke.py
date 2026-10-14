@@ -181,6 +181,34 @@ BUTTON_DECORATION = (
     " neuBg: neu ? getComputedStyle(neu).backgroundColor : null });"
 )
 
+# #12/#108 follow-up: the Week view's 2x2 day-column headers must sit IN their
+# column. A `display` other than `table-cell` on the `<th>` drops its table-cell
+# role, Firefox wraps it in an anonymous cell, and all seven day headers collapse
+# into one column — the titles stop lining up with the days below them. jsdom
+# computes no layout, so only a real browser can see this: compare each header
+# cell's box against the matching footer cell (the footer row always has all
+# nine columns, even when the week is empty).
+WEEK_COLUMN_ALIGNMENT = (
+    "var t = document.getElementById('week-table');"
+    "if (!t) return 'no week table';"
+    "var head = t.tHead && t.tHead.rows[0];"
+    "var foot = t.tFoot && t.tFoot.rows[0];"
+    "if (!head || !foot) return 'no header/footer row';"
+    "var ths = head.cells, tds = foot.cells;"
+    "if (ths.length !== 9 || tds.length !== 9) {"
+    "  return 'unexpected cell count ' + ths.length + '/' + tds.length;"
+    "}"
+    "var bad = [];"
+    "for (var i = 0; i < ths.length; i++) {"
+    "  var a = ths[i].getBoundingClientRect(), b = tds[i].getBoundingClientRect();"
+    "  if (Math.abs(a.left - b.left) > 1 || Math.abs(a.width - b.width) > 1) {"
+    "    bad.push(i + ': header x=' + Math.round(a.left) + ' w=' + Math.round(a.width)"
+    "             + ' vs column x=' + Math.round(b.left) + ' w=' + Math.round(b.width));"
+    "  }"
+    "}"
+    "return bad.length ? bad.join('; ') : 'ok';"
+)
+
 
 # ---------------------------------------------------------------------------
 # Marionette client (protocol 2 and 3): a length-prefixed JSON wire protocol.
@@ -839,6 +867,13 @@ class Gate:
                 structured,
                 f"structural probe failed for {panel}: {probe}",
             )
+            if path == "/timesheets/week":
+                align = self.marionette.script(WEEK_COLUMN_ALIGNMENT)
+                self.check(
+                    "/timesheets/week day headers share their column box (#12)",
+                    align == "ok",
+                    f"header cells no longer align with the days below them: {align}",
+                )
             deco = json.loads(self.marionette.script(BUTTON_DECORATION))
             issues = (deco["badSubmit"] + deco["badPrimary"] + deco["badSkin"]
                       + deco["badIcon"] + deco["plus"])
@@ -884,9 +919,9 @@ class Gate:
             "the bespoke .field/.hint/.form-error markup is gone and the official "
             "form vocabulary is in place (#232 phase 2b)",
             counts["field"] == 0 and counts["hint"] == 0 and counts["formError"] == 0
-            and counts["groups"] == 113 and counts["labels"] == 109
-            and counts["controls"] == 109 and counts["help"] == 27
-            and counts["messages"] == counts["errorGroups"] == 22,
+            and counts["groups"] == 116 and counts["labels"] == 112
+            and counts["controls"] == 112 and counts["help"] == 28
+            and counts["messages"] == counts["errorGroups"] == 23,
             f"counts={counts}",
             info=f"{counts['groups']} groups, {counts['help']} help texts, "
                  f"{counts['messages']} validation messages",
