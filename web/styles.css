@@ -367,6 +367,19 @@ td.cell.locked .cell-input { opacity: .6; }
    colours and scrolling come from the vendored component classes. The overlay
    paints its own dim, so the native ::backdrop is cleared. */
 dialog.p-modal { border: 0; max-width: none; max-height: none; }
+/* Closed-state guard (regression fix, #232 increment 4): that reset neutralises
+   the UA *box* but not the state that matters — the vendored `.p-modal
+   { display: flex }` is an AUTHOR declaration, and the cascade compares a
+   declaration's origin BEFORE its specificity, so it beats the UA stylesheet's
+   `dialog:not([open]) { display: none }` however specific that UA rule is. A
+   closed dialog therefore stayed rendered and every popup painted as a fixed
+   full-viewport overlay on load. Re-assert the non-rendered state at author
+   level: `dialog.p-modal:not([open])` (0,2,1) out-specifies `.p-modal` (0,1,0)
+   and comes later in the sheet, so it wins. Opening the dialog sets `[open]`
+   (`showModal()`), the guard stops matching, and the vendored overlay — top
+   layer, ::backdrop, inert background, focus trap — takes over unchanged.
+   Pinned by gui-test/dialog-display.test.mjs. */
+dialog.p-modal:not([open]) { display: none; }
 dialog.p-modal::backdrop { background: transparent; }
 /* Per-dialog widths stay app-owned (the pattern caps at 80rem — far too wide
    for these focused forms). */
