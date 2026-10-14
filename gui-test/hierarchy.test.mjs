@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { JSDOM } from 'jsdom';
 import { loadAppSource } from './load-app.mjs';
+import { waitFor } from './wait-for.mjs';
 
 const html = readFileSync(new URL('../web/index.html', import.meta.url), 'utf8');
 const app = loadAppSource();
@@ -52,7 +53,10 @@ window.h = {
   return { dom, h: dom.window.h, document: dom.window.document };
 }
 
-const tick = (ms = 60) => new Promise((done) => setTimeout(done, ms));
+// #265: wait for the render a filter/navigation call started (the state the
+// assertions read) instead of sleeping a fixed tick that only passed when the
+// runner happened to be fast.
+const rowsIn = (document, selector) => [...document.querySelectorAll(selector)];
 
 test('Setup exposes three sibling sections with tab/panel wiring (#182)', () => {
   const { dom, document } = setup();
@@ -74,7 +78,10 @@ test('Setup exposes three sibling sections with tab/panel wiring (#182)', () => 
 test('section navigation shows one panel at a time and scopes project rows (#182)', async () => {
   const { dom, h, document } = setup();
   await h.openProjectsFor(null); // all customers
-  await tick();
+  await waitFor(() => document.getElementById('panel-projects').hidden === false
+    && rowsIn(document, '#project-table tbody tr').length === 3, {
+    message: 'the all-customers project list to render',
+  });
   assert.equal(document.getElementById('panel-projects').hidden, false);
   assert.equal(document.getElementById('panel-customers').hidden, true);
   const allRows = [...document.querySelectorAll('#project-table tbody tr')];
@@ -82,7 +89,9 @@ test('section navigation shows one panel at a time and scopes project rows (#182
   assert.equal(allRows[0].cells[1].textContent, 'ACME', 'Customer column present');
   // Cross-navigation from the Customers section filters the Projects section.
   await h.openProjectsFor('c2');
-  await tick();
+  await waitFor(() => rowsIn(document, '#project-table tbody tr').length === 1, {
+    message: 'the project list to re-render scoped to Globex',
+  });
   const scoped = [...document.querySelectorAll('#project-table tbody tr')];
   assert.equal(scoped.length, 1);
   assert.equal(scoped[0].cells[0].textContent.trim(), 'GX-1');
@@ -92,7 +101,9 @@ test('section navigation shows one panel at a time and scopes project rows (#182
   const sel = document.getElementById('proj-filter-customer');
   sel.value = '';
   sel.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
-  await tick();
+  await waitFor(() => rowsIn(document, '#project-table tbody tr').length === 3, {
+    message: 'clearing the filter to re-render all customers',
+  });
   assert.equal(document.querySelectorAll('#project-table tbody tr').length, 3);
   assert.match(document.getElementById('live-region').textContent, /all customers/i);
   dom.window.close();
@@ -101,7 +112,10 @@ test('section navigation shows one panel at a time and scopes project rows (#182
 test('tasks filters are dependent and the project choices follow the customer (#182)', async () => {
   const { dom, h, document } = setup();
   await h.openTasksFor('c1', 'MKT-2');
-  await tick();
+  await waitFor(() => document.getElementById('panel-tasks').hidden === false
+    && document.getElementById('task-filter-project').value === 'MKT-2', {
+    message: 'the task list to re-render scoped to ACME / MKT-2',
+  });
   assert.equal(document.getElementById('panel-tasks').hidden, false);
   assert.equal(document.getElementById('task-filter-customer').value, 'c1');
   const proj = document.getElementById('task-filter-project');
@@ -120,7 +134,9 @@ test('tasks filters are dependent and the project choices follow the customer (#
   const cust = document.getElementById('task-filter-customer');
   cust.value = '';
   cust.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
-  await tick();
+  await waitFor(() => proj.value === '' && proj.disabled === true, {
+    message: 'clearing the customer to reset the dependent project pick',
+  });
   assert.equal(proj.value, '', 'child selection reset with the parent');
   assert.equal(proj.disabled, true, 'project filter disabled without a customer');
   assert.equal(document.getElementById('task-table').hidden, true);
@@ -132,13 +148,17 @@ test('tasks filters are dependent and the project choices follow the customer (#
 test('tasks list filters to the selected project and announces (#182)', async () => {
   const { dom, h, document } = setup();
   await h.openTasksFor('c1', '');
-  await tick();
   // Customer only: no task list yet — empty state explains the next step.
+  await waitFor(() => /choose a project/i.test(document.getElementById('tasks-empty-state').textContent), {
+    message: 'the customer-only task view to explain the next step',
+  });
   assert.match(document.getElementById('tasks-empty-state').textContent, /choose a project/i);
   const proj = document.getElementById('task-filter-project');
   proj.value = 'MKT-2';
   proj.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
-  await tick();
+  await waitFor(() => document.querySelector('#task-table tbody tr th')?.textContent === 'W-1', {
+    message: 'the scoped task list to render its W-1 row',
+  });
   assert.equal(document.querySelector('#task-table tbody tr th').textContent, 'W-1');
   assert.match(document.getElementById('live-region').textContent, /ACME \/ MKT-2/);
   dom.window.close();
@@ -149,10 +169,15 @@ test('refreshProjectTable is the single owner of the filter select value (#219)'
   // still leave the control truthful (before #219 it showed a stale value).
   const { dom, h, document } = setup();
   await h.openProjectsFor('c1');
-  await tick();
+  await waitFor(() => document.getElementById('proj-filter-customer').value === 'c1', {
+    message: 'the project list to render scoped to ACME',
+  });
   h.state.projectsFilter = 'c2'; // what saveProject does after saving elsewhere
   await h.refreshProjectTable();
-  await tick();
+  await waitFor(() => document.getElementById('proj-filter-customer').value === 'c2'
+    && rowsIn(document, '#project-table tbody tr').length === 1, {
+    message: 'the re-render to re-sync the filter select from state',
+  });
   assert.equal(document.getElementById('proj-filter-customer').value, 'c2',
     'select re-syncs from state on every render');
   assert.equal(document.querySelectorAll('#project-table tbody tr').length, 1);
