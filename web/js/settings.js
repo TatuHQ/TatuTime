@@ -46,10 +46,10 @@ export function renderUsers() {
       el('td', { attrs: { 'data-heading': 'Status' }, text: user.active ? 'active' : 'inactive' }),
       el('td', { attrs: { 'data-heading': 'Rates' }, text: `${formatMoney(user.default_rate_minor)} / ${formatMoney(user.cost_rate_minor)}` }),
       el('td', { cls: 'actions-col', attrs: { 'data-heading': 'Actions' } }, [
-        el('button', { cls: 'link', type: 'button', text: 'Edit', on: { click: () => editUser(user) } }),
+        el('button', { cls: 'link', type: 'button', text: 'Edit', data: { icon: 'edit' }, on: { click: () => editUser(user) } }),
         el('button', { cls: 'link', type: 'button', text: user.active ? 'Deactivate' : 'Activate', on: { click: () => toggleUserActive(user.id, !user.active) } }),
         el('button', { cls: 'link', type: 'button', text: 'Change password', on: { click: () => changeUserPassword(user) } }),
-        el('button', { cls: 'link danger', type: 'button', text: 'Delete', on: { click: () => deleteUser(user) } }),
+        el('button', { cls: 'link danger', type: 'button', text: 'Delete', data: { icon: 'delete' }, on: { click: () => deleteUser(user) } }),
       ]),
     ]);
     tbody.appendChild(row);
@@ -243,6 +243,7 @@ export async function refreshSecrets() {
               cls: 'danger',
               type: 'button',
               text: 'Delete',
+              data: { icon: 'delete' },
               on: { click: () => deleteSecret(s.key) },
             }),
           ]),

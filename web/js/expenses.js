@@ -29,6 +29,7 @@ export async function refreshCategories() {
             type: 'button',
             cls: 'chip-edit',
             text: 'Edit',
+            data: { icon: 'edit' },
             attrs: { 'aria-label': `Edit category ${cat.name}` },
             on: { click: () => startCategoryEdit(cat) },
           }),
@@ -149,6 +150,7 @@ export async function refreshExpenses() {
             cls: 'danger',
             type: 'button',
             text: 'Delete',
+            data: { icon: 'delete' },
             on: {
               click: async () => {
                 if (!(await askConfirm('Delete this expense?'))) return;

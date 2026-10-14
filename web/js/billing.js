@@ -46,7 +46,7 @@ export async function iwLoadProjects() {
   box.textContent = '';
   const cid = $('iw-customer').value;
   if (!cid || !iw.from || !iw.to || iw.from > iw.to) {
-    box.appendChild(el('span', { cls: 'hint', text: 'Pick a valid period first.' }));
+    box.appendChild(el('span', { cls: 'p-form-help-text', text: 'Pick a valid period first.' }));
     return;
   }
   const [cust, entries, invoices] = await Promise.all([
@@ -71,17 +71,20 @@ export async function iwLoadProjects() {
     const hours = unbilledBy.get(p.code);
     if (!hours) continue;
     shown += 1;
-    const cb = el('input', { attrs: { type: 'checkbox', id: `iw-p-${p.code}`, value: p.code } });
+    // #232 phase 2b: the generated project tick-box adopts the official
+    // p-form__group / p-form__label / p-form__control vocabulary, like every
+    // static field in web/index.html.
+    const cb = el('input', { cls: 'p-form__control', attrs: { type: 'checkbox', id: `iw-p-${p.code}`, value: p.code } });
     box.appendChild(
-      el('div', { cls: 'field checkbox' }, [
-        el('label', { attrs: { for: cb.id } }, [
+      el('div', { cls: 'p-form__group' }, [
+        el('label', { cls: 'p-form__label', attrs: { for: cb.id } }, [
           cb,
           el('span', { text: `${p.code} — ${p.name} · ${(hours / 100).toFixed(2)} h unbilled` }),
         ]),
       ]),
     );
   }
-  if (!shown) box.appendChild(el('span', { cls: 'hint', text: 'No uninvoiced billable work in this period.' }));
+  if (!shown) box.appendChild(el('span', { cls: 'p-form-help-text', text: 'No uninvoiced billable work in this period.' }));
 }
 
 export function iwShow() {
@@ -227,7 +230,7 @@ export async function refreshCatalog() {
   for (const it of catalogItems) {
     const actions = [
       el('button', {
-        type: 'button', cls: 'link', text: 'Edit',
+        type: 'button', cls: 'link', text: 'Edit', data: { icon: 'edit' },
         on: {
           click: () => {
             $('item-id').value = it.id;
@@ -260,7 +263,7 @@ export async function refreshCatalog() {
         },
       }),
       el('button', {
-        type: 'button', cls: 'danger', text: 'Delete',
+        type: 'button', cls: 'danger', text: 'Delete', data: { icon: 'delete' },
         on: {
           click: async () => {
             if (!(await askConfirm(`Delete catalog item "${it.name}"? Existing invoice lines keep their snapshot.`))) return;
@@ -434,7 +437,7 @@ export async function retShow(id) {
         text: `${String(t.created_at).slice(0, 10)} \u2014 ${t.kind} ${sign}${formatMoney(t.amount_minor)}${t.reason ? ` \u00b7 ${t.reason}` : ''}`,
       }));
     }
-    if (!ul.children.length) ul.appendChild(el('li', { cls: 'hint', text: 'No transactions yet.' }));
+    if (!ul.children.length) ul.appendChild(el('li', { cls: 'p-form-help-text', text: 'No transactions yet.' }));
     announce('Retainer ledger shown.');
   } catch (err) {
     announce(`History failed: ${err.message}`);

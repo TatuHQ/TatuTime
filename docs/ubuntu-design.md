@@ -159,14 +159,38 @@ invoice line editor and the Invoices `p-table--sortable` register are deliberate
 left to their own increments. The component set is unchanged, so
 `npm run build:ubuntu` is a **no-op** and `cssSha256` is unchanged.
 
-**Umbrella #232 status.** Increments 1–6 and the phase-2a register sweep are all
-landed and green, so the component-substitution scope is complete; the umbrella
-stays **open** (*Part of #232*) only for the page-by-page rollout tracked in
+**#232 phase 2b (forms).** The last bespoke form vocabulary is gone: every
+`.field` row — 113 wrappers in `web/index.html` plus the builders in `web/js` —
+is the official `p-form__group`, with `p-form__label` on its label and
+`p-form__control` on its control (109 pairs, all verified in a real browser),
+the 27 panel/dialog hints are `p-form-help-text`, and each of the 22 error
+paragraphs is a `p-form-validation__message` inside a `p-form-validation
+is-error` group. The retired `.field`, `.hint` and `.form-error` skins leave
+`styles.css`, which keeps only the rhythm Vanilla does not express: the constant
+`.65rem` row rhythm (the base input's own margin sits *inside* the group, and
+`.p-form--stacked` only spaces groups at >= 1036px), the 1rem tick box, and the
+grouped-fieldset frame (the base `fieldset` rule tints and clips). Two decisions
+are flagged for the maintainer's visual sign-off: `.p-form-help-text { margin:
+revert }` keeps the class's `margin-top: -.5rem` pull-up out of panel copy that
+follows a heading rather than an input, and the error ink moves from the app's
+`--danger` to Vanilla's negative token (AA in both themes, `#c7162b` light /
+`#d17b85` dark). The base-element audit also found a pre-existing defect —
+`#expense-dialog input { width: 100% }` also stretches `#expense-billable` — left
+in place for a follow-up decision rather than changed silently here. `styles.css`
+is 698 lines / 386 rules → 715 / 383; the component set is unchanged, so
+`npm run build:ubuntu` is a **no-op** and `cssSha256` is unchanged. Guards:
+`gui-test/forms.test.mjs` (vocabulary, pairing, frozen field contract, button
+attribute coverage) and the real-browser gate's new form audit (80 → 86 embedded
+/ 86 → 92 dev checks).
+
+**Umbrella #232 status.** Increments 1–6, the phase-2a register sweep and the
+phase-2b form sweep are all landed and green, so the component-substitution
+scope and the shared form vocabulary are complete; the umbrella stays **open**
+(*Part of #232*) only for the page-by-page rollout tracked in
 [`ubuntu-migration-plan.md`](ubuntu-migration-plan.md) — rows 1–15 are still ⬜
-(the remaining per-page form/dialog adapters, the Invoices `p-table--sortable`
-register in its own increment, and the per-page manual light/dark +
-assistive-technology sign-off in ground rules 4–5) — and the
-`decorateUbuntuButton` label-matching fallback noted below.
+(the per-page manual light/dark + assistive-technology sign-off in ground rules
+4–5, and the Invoices `p-table--sortable` register in its own increment) — and
+for deleting the now-redundant `decorateUbuntuButton` fallbacks (phase 2e).
 `npm run build:ubuntu` is a **no-op** and `cssSha256` is unchanged.
 
 The rules the plan holds to: no global reset (the editable timesheet grid is
@@ -208,9 +232,17 @@ moved under `/api` and every view gained a stable path (`spa_page` in
    twin frame for the wizard.
 4. **Stage 3** — ✅ sidebar tabs and segment controls onto the official
    `p-tabs` vocabulary (#232 inc 5; the `.p-tabs` container is intentionally not
-   used — see the increment note above). Still open: retire the label-matching
-   fallback in `decorateUbuntuButton` once every creation site passes
-   `data-icon`/`data-positive` (attribute support shipped with #191).
+   used — see the increment note above). Still open: delete the label/type/id
+   fallbacks in `decorateUbuntuButton` (phase 2e) — every shell and builder
+   creation site now states `data-icon`/`data-positive`, so the fallbacks are
+   redundant (attribute support shipped with #191).
+5. **Stage 2d — forms**: ✅ fields, hints and error messages (#232 phase 2b) —
+   `p-form__group`/`p-form__label`/`p-form__control` rows, `p-form-help-text`
+   hints and `p-form-validation__message` errors replace `.field`, `.hint` and
+   `.form-error`; the app-owned rhythm, tick box and fieldset frame stay (see
+   the phase-2b note above, which also lists the two sign-off flags). Still
+   open: the horizontal filter/tool bars, the `#dlg-input` prompt skin and the
+   `.theme-switch`/`.cols-pop` controls, which are not stacked form rows.
 
 ## Applied Changes
 

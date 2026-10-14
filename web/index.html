@@ -15,25 +15,27 @@
     <form id="auth-form" class="p-card auth-card">
       <header class="p-card__header">
         <h1 id="auth-title" class="auth-title">Sign in</h1>
-        <p id="auth-sub" class="hint"></p>
+        <p id="auth-sub" class="p-form-help-text"></p>
       </header>
       <div class="p-card__content">
-        <div class="field" id="auth-name-field" hidden>
-          <label for="auth-name">Your name</label>
-          <input id="auth-name" maxlength="120" autocomplete="name">
+        <div class="p-form__group" id="auth-name-field" hidden>
+          <label class="p-form__label" for="auth-name">Your name</label>
+          <input class="p-form__control" id="auth-name" maxlength="120" autocomplete="name">
         </div>
-        <div class="field">
-          <label for="auth-email">Email</label>
-          <input id="auth-email" type="email" autocomplete="username" required>
+        <div class="p-form__group">
+          <label class="p-form__label" for="auth-email">Email</label>
+          <input class="p-form__control" id="auth-email" type="email" autocomplete="username" required>
         </div>
-        <div class="field">
-          <label for="auth-password">Password</label>
-          <input id="auth-password" type="password" autocomplete="current-password" minlength="8" required>
+        <div class="p-form__group">
+          <label class="p-form__label" for="auth-password">Password</label>
+          <input class="p-form__control" id="auth-password" type="password" autocomplete="current-password" minlength="8" required>
         </div>
-        <p class="form-error" id="auth-error" role="alert" hidden></p>
-        <button type="submit" id="auth-submit" class="p-button--positive">Sign in</button>
+        <div class="p-form-validation is-error">
+          <p class="p-form-validation__message" id="auth-error" role="alert" hidden></p>
+        </div>
+        <button data-positive="1" type="submit" id="auth-submit" class="p-button--positive">Sign in</button>
         <div id="sso-box" hidden>
-          <p class="hint">Single sign-on <span class="beta">Beta</span></p>
+          <p class="p-form-help-text">Single sign-on <span class="beta">Beta</span></p>
           <div id="sso-buttons"></div>
         </div>
       </div>
@@ -106,7 +108,7 @@
            page title instead of adding outline structure (Ubuntu guidance:
            one H1 per page, H2s for real sections). -->
       <div class="ts-head">
-        <button type="button" id="day-add" class="primary" data-icon="plus">Track time</button>
+        <button data-positive="1" type="button" id="day-add" class="primary" data-icon="plus">Track time</button>
         <!-- #232 increment 5: Day | Week | Calendar is the official
              p-tabs__list (the id/sibling order stay put — gui.mjs pins
              #day-add's next sibling). -->
@@ -156,13 +158,13 @@
         </thead>
         <tbody></tbody>
         <tfoot><tr>
-          <th scope="row"><button type="button" id="day-add-bottom" class="link">+ Track time</button></th>
+          <th scope="row"><button type="button" id="day-add-bottom" class="link" data-icon="plus">Track time</button></th>
           <td colspan="3" class="day-total-cell">Total: <span id="day-total" class="num"></span></td>
         </tr></tfoot>
       </table>
       <p id="day-empty" class="day-empty p-notification p-notification--information" hidden>Nothing logged on this day yet. Use <strong>Track time</strong> to add an entry, or copy projects from an earlier day below.</p>
       <div class="copy-bar p-card p-card--muted">
-        <button type="button" id="copy-previous" class="secondary">Copy from previous day</button>
+        <button type="button" id="copy-previous" class="secondary" data-icon="copy">Copy from previous day</button>
         <ul id="copy-rows" class="copy-rows" aria-label="Projects copied from an earlier day"></ul>
       </div>
 
@@ -178,36 +180,38 @@
       <header class="p-modal__header">
         <h2 class="p-modal__title" id="entry-form-title">Add an entry</h2>
       </header>
-      <p class="hint" id="entry-form-date"></p>
+      <p class="p-form-help-text" id="entry-form-date"></p>
       <form id="entry-form" class="card">
         <input type="hidden" id="entry-id">
-        <div class="field">
-          <label for="entry-customer">Customer</label>
-          <select id="entry-customer" name="customer_id" required></select>
+        <div class="p-form__group">
+          <label class="p-form__label" for="entry-customer">Customer</label>
+          <select class="p-form__control" id="entry-customer" name="customer_id" required></select>
         </div>
-        <div class="field">
-          <label for="entry-project">Project code</label>
-          <select id="entry-project" name="project_code" required></select>
+        <div class="p-form__group">
+          <label class="p-form__label" for="entry-project">Project code</label>
+          <select class="p-form__control" id="entry-project" name="project_code" required></select>
         </div>
-        <div class="field">
-          <label for="entry-task">Task (optional)</label>
-          <select id="entry-task" name="task_code"></select>
+        <div class="p-form__group">
+          <label class="p-form__label" for="entry-task">Task (optional)</label>
+          <select class="p-form__control" id="entry-task" name="task_code"></select>
         </div>
         <input type="hidden" id="entry-date" name="date">
-        <div class="field">
-          <label for="entry-hours">Hours (0.01–24.00)</label>
-          <input type="number" id="entry-hours" name="hours" min="0.01" max="24" step="0.01" required inputmode="decimal">
+        <div class="p-form__group">
+          <label class="p-form__label" for="entry-hours">Hours (0.01–24.00)</label>
+          <input class="p-form__control" type="number" id="entry-hours" name="hours" min="0.01" max="24" step="0.01" required inputmode="decimal">
         </div>
-        <div class="field">
-          <label for="entry-note">Note</label>
-          <textarea id="entry-note" name="note" maxlength="500" rows="2"></textarea>
+        <div class="p-form__group">
+          <label class="p-form__label" for="entry-note">Note</label>
+          <textarea class="p-form__control" id="entry-note" name="note" maxlength="500" rows="2"></textarea>
         </div>
-        <div class="field checkbox">
-          <label for="entry-billable"><input type="checkbox" id="entry-billable" name="billable" checked> Billable</label>
+        <div class="p-form__group">
+          <label class="p-form__label" for="entry-billable"><input class="p-form__control" type="checkbox" id="entry-billable" name="billable" checked> Billable</label>
         </div>
-        <p class="form-error" id="entry-error" role="alert" hidden></p>
+        <div class="p-form-validation is-error">
+          <p class="p-form-validation__message" id="entry-error" role="alert" hidden></p>
+        </div>
         <footer class="buttons p-modal__footer">
-          <button type="submit" id="entry-save" class="p-button--positive">Save entry</button>
+          <button data-positive="1" type="submit" id="entry-save" class="p-button--positive">Save entry</button>
           <button type="button" class="p-button" id="entry-cancel" hidden>Cancel edit</button>
         </footer>
       </form>
@@ -228,12 +232,12 @@
           <button type="button" id="week-today" class="link">Return to this week</button>
         </div>
       </div>
-      <p class="hint">Type hours into a cell and press Enter or click away to save. Clearing a cell deletes that entry.</p>
+      <p class="p-form-help-text">Type hours into a cell and press Enter or click away to save. Clearing a cell deletes that entry.</p>
       <div class="table-scroll">
         <table id="week-table" class="grid"></table>
       </div>
       <div class="week-controls">
-        <button type="button" id="week-copy-previous" class="secondary">Copy from previous week</button>
+        <button type="button" id="week-copy-previous" class="secondary" data-icon="copy">Copy from previous week</button>
       </div>
     </section>
 
@@ -248,14 +252,14 @@
         <h2 id="cal-label">Calendar</h2>
         <button type="button" id="cal-next" aria-label="Next month" title="Next month"><i class="p-icon--chevron-right" aria-hidden="true"></i></button>
         <button type="button" id="cal-today" class="secondary">Today</button>
-        <span id="cal-total" class="hint" role="status" aria-live="polite"></span>
+        <span id="cal-total" class="p-form-help-text" role="status" aria-live="polite"></span>
       </div>
       <table id="cal-grid">
         <caption class="sr-only">Logged hours by day</caption>
         <thead><tr><th scope="col">Mon</th><th scope="col">Tue</th><th scope="col">Wed</th><th scope="col">Thu</th><th scope="col">Fri</th><th scope="col">Sat</th><th scope="col">Sun</th></tr></thead>
         <tbody></tbody>
       </table>
-      <p class="hint">Click a day with entries to open it in the Day view. This calendar shows your logged time; the Calendar events section below lists imported calendar items (#36).</p>
+      <p class="p-form-help-text">Click a day with entries to open it in the Day view. This calendar shows your logged time; the Calendar events section below lists imported calendar items (#36).</p>
     </section>
 
     </section><!-- /panel-timesheet -->
@@ -271,7 +275,7 @@
             <button type="button" id="customer-new" data-icon="plus" data-positive="1">Customer</button>
           </div>
         </div>
-        <p class="hint">Projects and tasks have their own Setup sections; the <strong>Projects</strong> action on a row opens that customer&#39;s projects.</p>
+        <p class="p-form-help-text">Projects and tasks have their own Setup sections; the <strong>Projects</strong> action on a row opens that customer&#39;s projects.</p>
         <div class="table-scroll"><table id="customer-table" class="p-table--mobile-card">
           <caption class="sr-only">All customers</caption>
           <thead><tr><th scope="col">Name</th><th scope="col">Default rate</th><th scope="col">Status</th><th scope="col" class="actions-col">Actions</th></tr></thead>
@@ -290,7 +294,7 @@
             <button type="button" id="project-new" data-icon="plus" data-positive="1">Project</button>
           </div>
         </div>
-        <p class="hint scope-hint">Projects <span id="project-scope-label" class="scope-label"></span></p>
+        <p class="p-form-help-text scope-hint">Projects <span id="project-scope-label" class="scope-label"></span></p>
         <p id="projects-empty-state" class="workspace-empty">No projects yet. Use <strong>+ Project</strong> to add one.</p>
         <div class="table-scroll"><table id="project-table" class="p-table--mobile-card" hidden>
           <caption class="sr-only">Projects</caption>
@@ -312,7 +316,7 @@
             <button type="button" id="task-new" data-icon="plus" data-positive="1">Task</button>
           </div>
         </div>
-        <p class="hint scope-hint">Tasks <span id="task-scope-label" class="scope-label"></span></p>
+        <p class="p-form-help-text scope-hint">Tasks <span id="task-scope-label" class="scope-label"></span></p>
         <p id="tasks-empty-state" class="workspace-empty">Choose a customer and a project to list their tasks.</p>
         <div class="table-scroll"><table id="task-table" class="p-table--mobile-card" hidden>
           <caption class="sr-only">Tasks</caption>
@@ -333,7 +337,7 @@
             <select id="report-group"><option value="customer">Customer</option><option value="project">Project</option><option value="person">Person</option><option value="week">ISO week</option></select>
             <label for="report-billable">Work</label>
             <select id="report-billable"><option value="">All</option><option value="true">Billable</option><option value="false">Non-billable</option></select>
-            <button type="submit" class="secondary">Run</button>
+            <button data-positive="1" type="submit" class="secondary">Run</button>
             <a id="csv-link" class="button-link" href="#" download="timesheet.csv" hidden>Download CSV</a>
           </form>
         </div>
@@ -367,30 +371,30 @@
       </div>
       <div class="invoice-workspace">
       <section class="invoice-create-column" aria-label="Create invoice">
-      <p id="invoice-summary" class="hint" role="status" aria-live="polite"></p>
+      <p id="invoice-summary" class="p-form-help-text" role="status" aria-live="polite"></p>
       <!-- #134: tracked-work path only; manual lines are a separate path below. -->
       <div id="invoice-wizard" class="card" role="group" aria-label="Invoice wizard">
         <h3 id="iw-title">Create from tracked work — 1 of 3: customer and source</h3>
         <div id="iw-step1">
-          <div class="field"><label for="iw-customer">Customer</label><select id="iw-customer"></select></div>
-          <div class="field checkbox"><label for="iw-expenses"><input type="checkbox" id="iw-expenses" checked>
+          <div class="p-form__group"><label class="p-form__label" for="iw-customer">Customer</label><select class="p-form__control" id="iw-customer"></select></div>
+          <div class="p-form__group"><label class="p-form__label" for="iw-expenses"><input class="p-form__control" type="checkbox" id="iw-expenses" checked>
             Include billable expenses (#25)</label></div>
         </div>
         <div id="iw-step2" hidden>
-          <div class="field"><label for="iw-preset">Period</label><select id="iw-preset">
+          <div class="p-form__group"><label class="p-form__label" for="iw-preset">Period</label><select class="p-form__control" id="iw-preset">
             <option value="this-month" selected>This month</option>
             <option value="last-month">Last month</option>
             <option value="this-week">This week</option>
             <option value="custom">Custom dates</option>
           </select></div>
-          <div class="field"><label for="iw-from">From</label><input type="date" id="iw-from"></div>
-          <div class="field"><label for="iw-to">To</label><input type="date" id="iw-to"></div>
-          <fieldset class="field"><legend>Projects with uninvoiced work</legend>
-            <div id="iw-projects"><span class="hint">Loading…</span></div>
+          <div class="p-form__group"><label class="p-form__label" for="iw-from">From</label><input class="p-form__control" type="date" id="iw-from"></div>
+          <div class="p-form__group"><label class="p-form__label" for="iw-to">To</label><input class="p-form__control" type="date" id="iw-to"></div>
+          <fieldset class="p-form__group"><legend>Projects with uninvoiced work</legend>
+            <div id="iw-projects"><span class="p-form-help-text">Loading…</span></div>
           </fieldset>
         </div>
         <div id="iw-step3" hidden>
-          <div class="field"><label for="iw-grouping">Group lines by</label><select id="iw-grouping">
+          <div class="p-form__group"><label class="p-form__label" for="iw-grouping">Group lines by</label><select class="p-form__control" id="iw-grouping">
             <option value="project" selected>Project</option>
             <option value="task">Task</option>
             <option value="detailed">Every line</option>
@@ -398,10 +402,12 @@
           <dl id="iw-summary" class="ip-facts"></dl>
           <ul id="iw-lines"></ul>
         </div>
-        <p class="form-error" id="iw-error" role="alert" hidden></p>
+        <div class="p-form-validation is-error">
+          <p class="p-form-validation__message" id="iw-error" role="alert" hidden></p>
+        </div>
         <div class="buttons">
           <button type="button" id="iw-back" class="secondary" hidden>Back</button>
-          <button type="button" id="iw-next" class="primary">Next</button>
+          <button data-positive="1" type="button" id="iw-next" class="primary">Next</button>
           <button type="button" id="iw-save" class="primary" data-positive="1" hidden>Save draft</button>
         </div>
       </div>
@@ -412,19 +418,21 @@
       <div id="invoice-editor" class="card" role="region" aria-label="Invoice line editor" hidden>
         <div class="ip-head"><h3 id="ed-title">Manual invoice</h3>
           <button type="button" id="ed-close" class="link secondary">Close editor</button></div>
-        <div class="field"><label for="ed-customer">Customer</label><select id="ed-customer"></select></div>
+        <div class="p-form__group"><label class="p-form__label" for="ed-customer">Customer</label><select class="p-form__control" id="ed-customer"></select></div>
         <div class="table-scroll"><table id="ed-lines">
           <caption class="sr-only">Invoice lines</caption>
           <thead><tr><th scope="col">Description</th><th scope="col">Type</th><th scope="col">Qty</th><th scope="col">Unit price</th><th scope="col" class="num">Amount</th><th scope="col" class="actions-col"></th></tr></thead>
           <tbody></tbody>
         </table></div>
-        <div class="buttons"><button type="button" id="ed-add" class="secondary">+ Add line</button></div>
+        <div class="buttons"><button type="button" id="ed-add" class="secondary" data-icon="plus">Add line</button></div>
         <div class="invoice-editor-adjustments">
-          <div class="field"><label for="ed-discount">Discount %</label><input id="ed-discount" type="number" min="0" max="100" step="0.01" value="0" inputmode="decimal"></div>
-          <div class="field"><label for="ed-tax">VAT %</label><input id="ed-tax" type="number" min="0" max="100" step="0.01" value="0" inputmode="decimal"></div>
+          <div class="p-form__group"><label class="p-form__label" for="ed-discount">Discount %</label><input class="p-form__control" id="ed-discount" type="number" min="0" max="100" step="0.01" value="0" inputmode="decimal"></div>
+          <div class="p-form__group"><label class="p-form__label" for="ed-tax">VAT %</label><input class="p-form__control" id="ed-tax" type="number" min="0" max="100" step="0.01" value="0" inputmode="decimal"></div>
         </div>
         <dl id="ed-totals" class="ip-facts"></dl>
-        <p class="form-error" id="ed-error" role="alert" hidden></p>
+        <div class="p-form-validation is-error">
+          <p class="p-form-validation__message" id="ed-error" role="alert" hidden></p>
+        </div>
         <div class="buttons"><button type="button" id="ed-save" class="primary" data-positive="1">Save draft</button></div>
       </div>
       </section>
@@ -470,8 +478,8 @@
         <dl id="ip-facts" class="ip-facts"></dl>
         <p id="ip-subject" class="ip-subject"></p>
         <div id="ip-letter" class="ip-letter"></div>
-        <p id="ip-pdf-state" class="hint" hidden></p>
-        <div class="buttons"><button type="button" id="ip-download" class="primary">Download PDF</button></div>
+        <p id="ip-pdf-state" class="p-form-help-text" hidden></p>
+        <div class="buttons"><button data-positive="1" type="button" id="ip-download" class="primary">Download PDF</button></div>
       </div>
       </section>
       </div>
@@ -480,31 +488,35 @@
       <details class="invoice-legacy">
         <summary>Legacy direct draft generator</summary>
         <form id="invoice-form" class="card">
-          <div class="field"><label for="invoice-customer">Customer</label><select id="invoice-customer" required></select></div>
-          <div class="field"><label for="invoice-from">From</label><input type="date" id="invoice-from" required></div>
-          <div class="field"><label for="invoice-to">To</label><input type="date" id="invoice-to" required></div>
-          <p class="form-error" id="invoice-error" role="alert" hidden></p>
-          <div class="buttons"><button type="submit" id="invoice-generate" class="secondary">Generate draft</button></div>
+          <div class="p-form__group"><label class="p-form__label" for="invoice-customer">Customer</label><select class="p-form__control" id="invoice-customer" required></select></div>
+          <div class="p-form__group"><label class="p-form__label" for="invoice-from">From</label><input class="p-form__control" type="date" id="invoice-from" required></div>
+          <div class="p-form__group"><label class="p-form__label" for="invoice-to">To</label><input class="p-form__control" type="date" id="invoice-to" required></div>
+          <div class="p-form-validation is-error">
+            <p class="p-form-validation__message" id="invoice-error" role="alert" hidden></p>
+          </div>
+          <div class="buttons"><button data-positive="1" type="submit" id="invoice-generate" class="secondary">Generate draft</button></div>
         </form>
       </details>
       <div class="advanced-billing-grid">
       <section class="advanced-billing-section" aria-labelledby="recurring-title">
       <h2>Recurring schedules</h2>
-      <p class="hint">The daily scheduler (#61/#26) generates a draft invoice when a period closes for each <strong>active</strong> schedule. Paused schedules wait where they left off. Generated drafts still need an explicit Issue.</p>
+      <p class="p-form-help-text">The daily scheduler (#61/#26) generates a draft invoice when a period closes for each <strong>active</strong> schedule. Paused schedules wait where they left off. Generated drafts still need an explicit Issue.</p>
       <form id="rec-form" class="card">
-        <div class="field"><label for="rec-customer">Customer</label><select id="rec-customer" required></select></div>
-        <div class="field"><label for="rec-cadence">Cadence</label><select id="rec-cadence">
+        <div class="p-form__group"><label class="p-form__label" for="rec-customer">Customer</label><select class="p-form__control" id="rec-customer" required></select></div>
+        <div class="p-form__group"><label class="p-form__label" for="rec-cadence">Cadence</label><select class="p-form__control" id="rec-cadence">
           <option value="weekly">Weekly</option>
           <option value="monthly" selected>Monthly</option>
           <option value="quarterly">Quarterly</option>
         </select></div>
-        <div class="field"><label for="rec-mode">Bills</label><select id="rec-mode">
+        <div class="p-form__group"><label class="p-form__label" for="rec-mode">Bills</label><select class="p-form__control" id="rec-mode">
           <option value="time" selected>Tracked time + expenses</option>
           <option value="retainer">Fixed retainer</option>
         </select></div>
-        <div class="field"><label for="rec-amount">Retainer amount (only for fixed retainer)</label><input id="rec-amount" type="number" min="0" step="0.01" value="0" inputmode="decimal"></div>
-        <p class="form-error" id="rec-error" role="alert" hidden></p>
-        <div class="buttons"><button type="submit" id="rec-add">Add schedule</button></div>
+        <div class="p-form__group"><label class="p-form__label" for="rec-amount">Retainer amount (only for fixed retainer)</label><input class="p-form__control" id="rec-amount" type="number" min="0" step="0.01" value="0" inputmode="decimal"></div>
+        <div class="p-form-validation is-error">
+          <p class="p-form-validation__message" id="rec-error" role="alert" hidden></p>
+        </div>
+        <div class="buttons"><button data-positive="1" type="submit" id="rec-add">Add schedule</button></div>
       </form>
       <div class="p-card">
       <div class="table-scroll"><table id="rec-table" class="p-table--mobile-card">
@@ -517,13 +529,15 @@
       </section>
       <section class="advanced-billing-section" aria-labelledby="retainer-title">
       <h2 id="retainer-title">Retainers</h2>
-      <p class="hint">Advance funds held for a customer/project (#144). The balance is always the reconciled ledger; a draw applies funds and is <strong>not</strong> an invoice payment. Closing is final.</p>
+      <p class="p-form-help-text">Advance funds held for a customer/project (#144). The balance is always the reconciled ledger; a draw applies funds and is <strong>not</strong> an invoice payment. Closing is final.</p>
       <form id="ret-form" class="card">
-        <div class="field"><label for="ret-customer">Customer</label><select id="ret-customer" required></select></div>
-        <div class="field"><label for="ret-project">Project</label><select id="ret-project" required></select></div>
-        <div class="field"><label for="ret-opening">Opening funds (optional)</label><input id="ret-opening" type="number" min="0" step="0.01" value="0" inputmode="decimal"></div>
-        <p class="form-error" id="ret-error" role="alert" hidden></p>
-        <div class="buttons"><button type="submit" id="ret-add">Create retainer</button></div>
+        <div class="p-form__group"><label class="p-form__label" for="ret-customer">Customer</label><select class="p-form__control" id="ret-customer" required></select></div>
+        <div class="p-form__group"><label class="p-form__label" for="ret-project">Project</label><select class="p-form__control" id="ret-project" required></select></div>
+        <div class="p-form__group"><label class="p-form__label" for="ret-opening">Opening funds (optional)</label><input class="p-form__control" id="ret-opening" type="number" min="0" step="0.01" value="0" inputmode="decimal"></div>
+        <div class="p-form-validation is-error">
+          <p class="p-form-validation__message" id="ret-error" role="alert" hidden></p>
+        </div>
+        <div class="buttons"><button data-positive="1" type="submit" id="ret-add">Create retainer</button></div>
       </form>
       <div class="p-card">
       <div class="table-scroll"><table id="ret-table" class="p-table--mobile-card">
@@ -562,16 +576,18 @@
         <h2 class="p-modal__title" id="expense-dialog-title">Record an expense</h2>
       </header>
       <form id="expense-form">
-        <div class="field"><label for="expense-date">Date</label><input type="date" id="expense-date" required></div>
-        <div class="field"><label for="expense-customer">Customer</label><select id="expense-customer" required></select></div>
-        <div class="field"><label for="expense-project">Project (optional)</label><select id="expense-project"></select></div>
-        <div class="field"><label for="expense-category">Category</label><select id="expense-category"></select></div>
-        <div class="field"><label for="expense-amount">Amount (e.g. 125.00)</label><input id="expense-amount" type="number" min="0" step="0.01" required inputmode="decimal"></div>
-        <div class="field"><label for="expense-currency">Currency</label><input id="expense-currency" maxlength="3" placeholder="EUR" required></div>
-        <div class="field checkbox"><label for="expense-billable"><input type="checkbox" id="expense-billable" checked> Billable</label></div>
-        <div class="field"><label for="expense-note">Note</label><input id="expense-note" maxlength="500"></div>
-        <p class="form-error" id="expense-error" role="alert" hidden></p>
-        <footer class="buttons p-modal__footer"><button type="submit">Save expense</button><button type="button" id="expense-cancel" class="secondary">Cancel</button></footer>
+        <div class="p-form__group"><label class="p-form__label" for="expense-date">Date</label><input class="p-form__control" type="date" id="expense-date" required></div>
+        <div class="p-form__group"><label class="p-form__label" for="expense-customer">Customer</label><select class="p-form__control" id="expense-customer" required></select></div>
+        <div class="p-form__group"><label class="p-form__label" for="expense-project">Project (optional)</label><select class="p-form__control" id="expense-project"></select></div>
+        <div class="p-form__group"><label class="p-form__label" for="expense-category">Category</label><select class="p-form__control" id="expense-category"></select></div>
+        <div class="p-form__group"><label class="p-form__label" for="expense-amount">Amount (e.g. 125.00)</label><input class="p-form__control" id="expense-amount" type="number" min="0" step="0.01" required inputmode="decimal"></div>
+        <div class="p-form__group"><label class="p-form__label" for="expense-currency">Currency</label><input class="p-form__control" id="expense-currency" maxlength="3" placeholder="EUR" required></div>
+        <div class="p-form__group"><label class="p-form__label" for="expense-billable"><input class="p-form__control" type="checkbox" id="expense-billable" checked> Billable</label></div>
+        <div class="p-form__group"><label class="p-form__label" for="expense-note">Note</label><input class="p-form__control" id="expense-note" maxlength="500"></div>
+        <div class="p-form-validation is-error">
+          <p class="p-form-validation__message" id="expense-error" role="alert" hidden></p>
+        </div>
+        <footer class="buttons p-modal__footer"><button data-positive="1" type="submit">Save expense</button><button type="button" id="expense-cancel" class="secondary">Cancel</button></footer>
       </form>
       </div>
       </dialog>
@@ -581,10 +597,12 @@
           <h2 class="p-modal__title" id="expense-category-title">Add expense category</h2>
         </header>
         <form id="expense-category-form">
-          <div class="field"><label for="expense-category-name">Category name</label><input id="expense-category-name" maxlength="120" required autocomplete="off"></div>
-          <p class="hint">Categories can be managed later in Settings → Expense categories.</p>
-          <p class="form-error" id="expense-category-error" role="alert" hidden></p>
-          <footer class="buttons p-modal__footer"><button type="submit" class="primary">Add category</button><button type="button" id="expense-category-cancel" class="secondary">Cancel</button></footer>
+          <div class="p-form__group"><label class="p-form__label" for="expense-category-name">Category name</label><input class="p-form__control" id="expense-category-name" maxlength="120" required autocomplete="off"></div>
+          <p class="p-form-help-text">Categories can be managed later in Settings → Expense categories.</p>
+          <div class="p-form-validation is-error">
+            <p class="p-form-validation__message" id="expense-category-error" role="alert" hidden></p>
+          </div>
+          <footer class="buttons p-modal__footer"><button data-positive="1" type="submit" class="primary">Add category</button><button type="button" id="expense-category-cancel" class="secondary">Cancel</button></footer>
         </form>
         </div>
       </dialog>
@@ -599,10 +617,12 @@
       <form id="submission-form" class="bar">
         <label for="submission-week">Week starting</label>
         <input type="date" id="submission-week" required>
-        <button type="submit">Submit week</button>
+        <button data-positive="1" type="submit">Submit week</button>
       </form>
       </div>
-      <p class="form-error" id="submission-error" role="alert" hidden></p>
+      <div class="p-form-validation is-error">
+        <p class="p-form-validation__message" id="submission-error" role="alert" hidden></p>
+      </div>
       <div class="table-scroll"><table id="submission-table" class="p-table--mobile-card">
         <caption class="sr-only">Submissions</caption>
         <thead><tr><th scope="col">Week</th><th scope="col">Entries</th><th scope="col">State</th><th scope="col">Comment</th><th scope="col" class="actions-col">Actions</th></tr></thead>
@@ -649,17 +669,19 @@
         </header>
         <form id="user-form">
           <input type="hidden" id="user-id">
-          <div class="field"><label for="user-name">Name</label><input id="user-name" maxlength="120" required autocomplete="name"></div>
-          <div class="field"><label for="user-email">Email</label><input id="user-email" type="email" maxlength="254" required autocomplete="email"></div>
-          <div class="field" id="user-password-field"><label for="user-password">Initial password</label><input id="user-password" type="password" minlength="8" autocomplete="new-password" required></div>
-          <div class="field"><label for="user-role">Role</label><select id="user-role"><option value="member">Member</option><option value="admin">Administrator</option></select></div>
-          <div class="field checkbox"><label for="user-active"><input id="user-active" type="checkbox" checked> Active</label></div>
+          <div class="p-form__group"><label class="p-form__label" for="user-name">Name</label><input class="p-form__control" id="user-name" maxlength="120" required autocomplete="name"></div>
+          <div class="p-form__group"><label class="p-form__label" for="user-email">Email</label><input class="p-form__control" id="user-email" type="email" maxlength="254" required autocomplete="email"></div>
+          <div class="p-form__group" id="user-password-field"><label class="p-form__label" for="user-password">Initial password</label><input class="p-form__control" id="user-password" type="password" minlength="8" autocomplete="new-password" required></div>
+          <div class="p-form__group"><label class="p-form__label" for="user-role">Role</label><select class="p-form__control" id="user-role"><option value="member">Member</option><option value="admin">Administrator</option></select></div>
+          <div class="p-form__group"><label class="p-form__label" for="user-active"><input class="p-form__control" id="user-active" type="checkbox" checked> Active</label></div>
           <details><summary>Billing and cost rates</summary>
-          <div class="field"><label for="user-default-rate">Default hourly rate</label><input id="user-default-rate" type="number" min="0" max="1000000" step="0.01" inputmode="decimal" value="0"></div>
-          <div class="field"><label for="user-cost-rate">Hourly cost rate</label><input id="user-cost-rate" type="number" min="0" max="1000000" step="0.01" inputmode="decimal" value="0"></div>
+          <div class="p-form__group"><label class="p-form__label" for="user-default-rate">Default hourly rate</label><input class="p-form__control" id="user-default-rate" type="number" min="0" max="1000000" step="0.01" inputmode="decimal" value="0"></div>
+          <div class="p-form__group"><label class="p-form__label" for="user-cost-rate">Hourly cost rate</label><input class="p-form__control" id="user-cost-rate" type="number" min="0" max="1000000" step="0.01" inputmode="decimal" value="0"></div>
           </details>
-          <p class="form-error" id="user-error" role="alert" hidden></p>
-          <footer class="buttons p-modal__footer"><button type="submit" id="user-save" class="p-button--positive">Add user</button><button type="button" class="p-button" id="user-cancel">Cancel</button></footer>
+          <div class="p-form-validation is-error">
+            <p class="p-form-validation__message" id="user-error" role="alert" hidden></p>
+          </div>
+          <footer class="buttons p-modal__footer"><button data-positive="1" type="submit" id="user-save" class="p-button--positive">Add user</button><button type="button" class="p-button" id="user-cancel">Cancel</button></footer>
         </form>
         </div>
         </dialog>
@@ -670,9 +692,11 @@
           </header>
           <form id="user-password-form">
             <input type="hidden" id="user-password-id">
-            <div class="field"><label for="user-new-password">New password</label><input type="password" id="user-new-password" minlength="8" autocomplete="new-password" required></div>
-            <p id="user-password-error" class="form-error" role="alert" hidden></p>
-            <footer class="buttons p-modal__footer"><button type="submit" class="p-button--positive">Change password</button><button type="button" id="user-password-cancel" class="p-button">Cancel</button></footer>
+            <div class="p-form__group"><label class="p-form__label" for="user-new-password">New password</label><input class="p-form__control" type="password" id="user-new-password" minlength="8" autocomplete="new-password" required></div>
+            <div class="p-form-validation is-error">
+              <p class="p-form-validation__message" id="user-password-error" role="alert" hidden></p>
+            </div>
+            <footer class="buttons p-modal__footer"><button data-positive="1" type="submit" class="p-button--positive">Change password</button><button type="button" id="user-password-cancel" class="p-button">Cancel</button></footer>
           </form>
           </div>
         </dialog>
@@ -687,14 +711,16 @@
 
       <section id="settings-panel-security" class="settings-panel" role="tabpanel" aria-labelledby="settings-tab-security" tabindex="0">
         <h2>Integration credentials <span class="beta">Beta</span></h2>
-      <p class="hint">Store provider secrets (Stripe, OAuth, SMTP, calendar feeds) encrypted at rest. The integrations that consume these are <strong>Beta</strong> — not yet wired to live providers.</p>
-      <p id="vault-status" class="hint"></p>
-      <p id="email-status" class="hint" role="status" aria-live="polite"></p>
+      <p class="p-form-help-text">Store provider secrets (Stripe, OAuth, SMTP, calendar feeds) encrypted at rest. The integrations that consume these are <strong>Beta</strong> — not yet wired to live providers.</p>
+      <p id="vault-status" class="p-form-help-text"></p>
+      <p id="email-status" class="p-form-help-text" role="status" aria-live="polite"></p>
       <form id="secret-form" class="card">
-        <div class="field"><label for="secret-key">Key (e.g. stripe.secret_key)</label><input id="secret-key" maxlength="100" required></div>
-        <div class="field"><label for="secret-value">Value</label><input id="secret-value" type="password" autocomplete="off" required></div>
-        <p class="form-error" id="secret-error" role="alert" hidden></p>
-        <div class="buttons"><button type="submit" id="secret-save">Save secret</button></div>
+        <div class="p-form__group"><label class="p-form__label" for="secret-key">Key (e.g. stripe.secret_key)</label><input class="p-form__control" id="secret-key" maxlength="100" required></div>
+        <div class="p-form__group"><label class="p-form__label" for="secret-value">Value</label><input class="p-form__control" id="secret-value" type="password" autocomplete="off" required></div>
+        <div class="p-form-validation is-error">
+          <p class="p-form-validation__message" id="secret-error" role="alert" hidden></p>
+        </div>
+        <div class="buttons"><button data-positive="1" type="submit" id="secret-save">Save secret</button></div>
       </form>
       <!-- #232 phase 2a (registers): the credential register is a Vanilla
            p-card using the p-table--mobile-card row pattern. -->
@@ -708,7 +734,7 @@
       </div>
 
       <h2>Runtime configuration <span class="beta">Beta</span></h2>
-      <p class="hint">Effective settings, resolved <strong>env &gt; config.json &gt; default</strong> and stored on the data volume — a restart or image update keeps them (#94).</p>
+      <p class="p-form-help-text">Effective settings, resolved <strong>env &gt; config.json &gt; default</strong> and stored on the data volume — a restart or image update keeps them (#94).</p>
       <!-- #232 phase 2a (registers): the configuration summary is a plain
            official table inside a Vanilla p-card (key/value/source, not a
            mobile-card list). -->
@@ -720,69 +746,75 @@
       </table></div>
       </div>
       <form id="config-form" class="card">
-        <div class="field"><label for="config-key">Setting</label><select id="config-key"></select></div>
-        <div class="field"><label for="config-value">New value</label><input id="config-value" maxlength="300"></div>
-        <p class="form-error" id="config-error" role="alert" hidden></p>
-        <div class="buttons"><button type="submit" id="config-save">Apply to config.json</button></div>
+        <div class="p-form__group"><label class="p-form__label" for="config-key">Setting</label><select class="p-form__control" id="config-key"></select></div>
+        <div class="p-form__group"><label class="p-form__label" for="config-value">New value</label><input class="p-form__control" id="config-value" maxlength="300"></div>
+        <div class="p-form-validation is-error">
+          <p class="p-form-validation__message" id="config-error" role="alert" hidden></p>
+        </div>
+        <div class="buttons"><button data-positive="1" type="submit" id="config-save">Apply to config.json</button></div>
       </form>
       </section>
 
       <section id="settings-panel-expenses" class="settings-panel" role="tabpanel" aria-labelledby="settings-tab-expenses" tabindex="0" hidden>
         <h2>Expense categories</h2>
-        <p class="hint">Choose the categories available when recording expenses. Removing a category is blocked while an expense still uses it.</p>
+        <p class="p-form-help-text">Choose the categories available when recording expenses. Removing a category is blocked while an expense still uses it.</p>
         <form id="category-form" class="bar">
           <input type="hidden" id="category-id">
           <label for="category-name">Category name</label>
           <input id="category-name" maxlength="120" required autocomplete="off">
-          <button type="submit" id="category-save" class="primary">Add category</button>
+          <button data-positive="1" type="submit" id="category-save" class="primary">Add category</button>
           <button type="button" id="category-cancel" class="secondary" hidden>Cancel edit</button>
         </form>
-        <p class="form-error" id="category-error" role="alert" hidden></p>
+        <div class="p-form-validation is-error">
+          <p class="p-form-validation__message" id="category-error" role="alert" hidden></p>
+        </div>
         <ul id="category-list" class="chips"></ul>
       </section>
 
       <section id="settings-panel-invoice" class="settings-panel" role="tabpanel" aria-labelledby="settings-tab-invoice" tabindex="0" hidden>
       <h2>Invoice settings: company, appearance, messages</h2>
-      <p class="hint">Printed on invoice documents and emails (#138). Leave the name empty to keep the boot-time <code>org_name</code> setting; due terms and message wording live in the invoice template below (one store, no parallel defaults).</p>
+      <p class="p-form-help-text">Printed on invoice documents and emails (#138). Leave the name empty to keep the boot-time <code>org_name</code> setting; due terms and message wording live in the invoice template below (one store, no parallel defaults).</p>
       <form id="org-form" class="card">
-        <div class="field"><label for="org-name">Company name</label><input id="org-name" maxlength="120" autocomplete="off"></div>
-        <div class="field"><label for="org-legal">VAT / company id</label><input id="org-legal" maxlength="60" autocomplete="off" placeholder="BE0123456789"></div>
-        <div class="field"><label for="org-street">Street</label><input id="org-street" maxlength="120" autocomplete="off"></div>
-        <div class="field"><label for="org-city">City</label><input id="org-city" maxlength="80" autocomplete="off"></div>
-        <div class="field"><label for="org-postal">Postal code</label><input id="org-postal" maxlength="16" autocomplete="off"></div>
-        <div class="field"><label for="org-country">Country</label><input id="org-country" maxlength="56" autocomplete="off"></div>
-                <div class="field"><label for="org-from">Email sender display name</label><input id="org-from" maxlength="120" autocomplete="off" placeholder="TucanoTime (#146)"></div>
-        <div class="field"><label for="org-reply">Reply-To address</label><input id="org-reply" type="email" maxlength="200" autocomplete="off" placeholder="billing@yourcompany.test"></div>
-        <div class="field"><label for="org-accent">Invoice accent color (#rrggbb)</label>
-          <span class="accent-row"><input id="org-accent" maxlength="7" pattern="^#[0-9a-fA-F]{6}$" placeholder="#E95420" autocomplete="off"><span id="accent-swatch" class="accent-swatch" aria-hidden="true"></span></span></div>
-        <p class="form-error" id="org-error" role="alert" hidden></p>
-        <div class="buttons"><button type="submit" id="org-save">Save company info</button></div>
+        <div class="p-form__group"><label class="p-form__label" for="org-name">Company name</label><input class="p-form__control" id="org-name" maxlength="120" autocomplete="off"></div>
+        <div class="p-form__group"><label class="p-form__label" for="org-legal">VAT / company id</label><input class="p-form__control" id="org-legal" maxlength="60" autocomplete="off" placeholder="BE0123456789"></div>
+        <div class="p-form__group"><label class="p-form__label" for="org-street">Street</label><input class="p-form__control" id="org-street" maxlength="120" autocomplete="off"></div>
+        <div class="p-form__group"><label class="p-form__label" for="org-city">City</label><input class="p-form__control" id="org-city" maxlength="80" autocomplete="off"></div>
+        <div class="p-form__group"><label class="p-form__label" for="org-postal">Postal code</label><input class="p-form__control" id="org-postal" maxlength="16" autocomplete="off"></div>
+        <div class="p-form__group"><label class="p-form__label" for="org-country">Country</label><input class="p-form__control" id="org-country" maxlength="56" autocomplete="off"></div>
+                <div class="p-form__group"><label class="p-form__label" for="org-from">Email sender display name</label><input class="p-form__control" id="org-from" maxlength="120" autocomplete="off" placeholder="TucanoTime (#146)"></div>
+        <div class="p-form__group"><label class="p-form__label" for="org-reply">Reply-To address</label><input class="p-form__control" id="org-reply" type="email" maxlength="200" autocomplete="off" placeholder="billing@yourcompany.test"></div>
+        <div class="p-form__group"><label class="p-form__label" for="org-accent">Invoice accent color (#rrggbb)</label>
+          <span class="accent-row"><input class="p-form__control" id="org-accent" maxlength="7" pattern="^#[0-9a-fA-F]{6}$" placeholder="#E95420" autocomplete="off"><span id="accent-swatch" class="accent-swatch" aria-hidden="true"></span></span></div>
+        <div class="p-form-validation is-error">
+          <p class="p-form-validation__message" id="org-error" role="alert" hidden></p>
+        </div>
+        <div class="buttons"><button data-positive="1" type="submit" id="org-save">Save company info</button></div>
       </form>
 
       <h2>Invoice template</h2>
-      <p class="hint">Subject, body and footer for invoice documents and emails (#116). <code>%variable%</code> placeholders resolve at issue/render time; unknown variables are rejected on save. Leave everything empty to keep the built-in wording.</p>
+      <p class="p-form-help-text">Subject, body and footer for invoice documents and emails (#116). <code>%variable%</code> placeholders resolve at issue/render time; unknown variables are rejected on save. Leave everything empty to keep the built-in wording.</p>
       <h3>Field labels</h3>
-      <p class="hint">Rename what the invoice <em>document</em> shows (#147). The API and stored field names never change; blank keeps the built-in word.</p>
+      <p class="p-form-help-text">Rename what the invoice <em>document</em> shows (#147). The API and stored field names never change; blank keeps the built-in word.</p>
       <div id="labels-form" class="card">
-        <div class="field"><label for="lb-description">Line column label</label><input id="lb-description" maxlength="40" autocomplete="off" placeholder="Description"></div>
-        <div class="field"><label for="lb-quantity">Quantity column label</label><input id="lb-quantity" maxlength="40" autocomplete="off" placeholder="Hours"></div>
-        <div class="field"><label for="lb-unit-price">Unit price column label</label><input id="lb-unit-price" maxlength="40" autocomplete="off" placeholder="Rate"></div>
-        <div class="field"><label for="lb-subtotal">Subtotal label</label><input id="lb-subtotal" maxlength="40" autocomplete="off" placeholder="Subtotal"></div>
-        <div class="field"><label for="lb-discount">Discount label</label><input id="lb-discount" maxlength="40" autocomplete="off" placeholder="Discount"></div>
-        <div class="field"><label for="lb-tax">VAT label</label><input id="lb-tax" maxlength="40" autocomplete="off" placeholder="VAT"></div>
-        <div class="field"><label for="lb-total">Total label</label><input id="lb-total" maxlength="40" autocomplete="off" placeholder="Total"></div>
+        <div class="p-form__group"><label class="p-form__label" for="lb-description">Line column label</label><input class="p-form__control" id="lb-description" maxlength="40" autocomplete="off" placeholder="Description"></div>
+        <div class="p-form__group"><label class="p-form__label" for="lb-quantity">Quantity column label</label><input class="p-form__control" id="lb-quantity" maxlength="40" autocomplete="off" placeholder="Hours"></div>
+        <div class="p-form__group"><label class="p-form__label" for="lb-unit-price">Unit price column label</label><input class="p-form__control" id="lb-unit-price" maxlength="40" autocomplete="off" placeholder="Rate"></div>
+        <div class="p-form__group"><label class="p-form__label" for="lb-subtotal">Subtotal label</label><input class="p-form__control" id="lb-subtotal" maxlength="40" autocomplete="off" placeholder="Subtotal"></div>
+        <div class="p-form__group"><label class="p-form__label" for="lb-discount">Discount label</label><input class="p-form__control" id="lb-discount" maxlength="40" autocomplete="off" placeholder="Discount"></div>
+        <div class="p-form__group"><label class="p-form__label" for="lb-tax">VAT label</label><input class="p-form__control" id="lb-tax" maxlength="40" autocomplete="off" placeholder="VAT"></div>
+        <div class="p-form__group"><label class="p-form__label" for="lb-total">Total label</label><input class="p-form__control" id="lb-total" maxlength="40" autocomplete="off" placeholder="Total"></div>
         <div class="buttons"><button type="button" id="lb-reset" class="secondary">Use built-in labels</button></div>
       </div>
 
       <form id="template-form" class="card">
-        <div class="field"><label for="template-subject">Subject (max 120)</label>
-          <input id="template-subject" maxlength="120" autocomplete="off" placeholder="Invoice %invoice_number% for %customer_name%"></div>
-        <div class="field"><label for="template-body">Body (markdown: #, ##, ###, **bold**, *italic*, - bullets, 1. lists)</label>
-          <textarea id="template-body" maxlength="8000" rows="5" placeholder="Dear %customer_name%,&#10;&#10;Here is the work for %invoice_issue_month% %invoice_issue_year%."></textarea></div>
-        <div class="field"><label for="template-footer">Footer (markdown, e.g. bank details)</label>
-          <textarea id="template-footer" maxlength="8000" rows="3"></textarea></div>
-        <div class="field"><label for="template-terms">Default payment terms</label>
-          <select id="template-terms">
+        <div class="p-form__group"><label class="p-form__label" for="template-subject">Subject (max 120)</label>
+          <input class="p-form__control" id="template-subject" maxlength="120" autocomplete="off" placeholder="Invoice %invoice_number% for %customer_name%"></div>
+        <div class="p-form__group"><label class="p-form__label" for="template-body">Body (markdown: #, ##, ###, **bold**, *italic*, - bullets, 1. lists)</label>
+          <textarea class="p-form__control" id="template-body" maxlength="8000" rows="5" placeholder="Dear %customer_name%,&#10;&#10;Here is the work for %invoice_issue_month% %invoice_issue_year%."></textarea></div>
+        <div class="p-form__group"><label class="p-form__label" for="template-footer">Footer (markdown, e.g. bank details)</label>
+          <textarea class="p-form__control" id="template-footer" maxlength="8000" rows="3"></textarea></div>
+        <div class="p-form__group"><label class="p-form__label" for="template-terms">Default payment terms</label>
+          <select class="p-form__control" id="template-terms">
             <option value="">Legacy (net-14 from period end)</option>
             <option value="upon_receipt">Upon Receipt</option>
             <option value="net_15">NET 15</option>
@@ -791,12 +823,14 @@
             <option value="net_45">NET 45</option>
             <option value="custom">Custom (n days)</option>
           </select></div>
-        <div class="field" id="template-terms-days-field" hidden>
-          <label for="template-terms-days">Days (1-365)</label>
-          <input id="template-terms-days" type="number" min="1" max="365" step="1" inputmode="numeric">
+        <div class="p-form__group" id="template-terms-days-field" hidden>
+          <label class="p-form__label" for="template-terms-days">Days (1-365)</label>
+          <input class="p-form__control" id="template-terms-days" type="number" min="1" max="365" step="1" inputmode="numeric">
         </div>
-        <p class="form-error" id="template-error" role="alert" hidden></p>
-        <div class="buttons"><button type="submit" id="template-save">Save template</button></div>
+        <div class="p-form-validation is-error">
+          <p class="p-form-validation__message" id="template-error" role="alert" hidden></p>
+        </div>
+        <div class="buttons"><button data-positive="1" type="submit" id="template-save">Save template</button></div>
       </form>
       <!-- #232 phase 2a (registers): the placeholder cheat-sheet is a plain
            official table inside a Vanilla p-card (a reference list, not a
@@ -817,16 +851,18 @@
 
       <section id="settings-panel-catalog" class="settings-panel" role="tabpanel" aria-labelledby="settings-tab-catalog" tabindex="0" hidden>
       <h2>Product / Service catalog</h2>
-      <p class="hint">Reusable manual-invoice line types (#147): name, type, default unit price. Archiving hides an item from new picks without touching history.</p>
+      <p class="p-form-help-text">Reusable manual-invoice line types (#147): name, type, default unit price. Archiving hides an item from new picks without touching history.</p>
       <form id="item-form" class="card">
         <input type="hidden" id="item-id">
-        <div class="field"><label for="item-name">Name</label><input id="item-name" maxlength="120" required autocomplete="off"></div>
-        <div class="field"><label for="item-kind">Type</label><select id="item-kind"><option value="service">Service</option><option value="product">Product</option></select></div>
-        <div class="field"><label for="item-desc">Description</label><textarea id="item-desc" maxlength="500" rows="2"></textarea></div>
-        <div class="field"><label for="item-price">Default unit price</label><input id="item-price" type="number" min="0" step="0.01" value="0" inputmode="decimal"></div>
-        <div class="field"><label for="item-currency">Currency</label><input id="item-currency" maxlength="3" value="EUR"></div>
-        <p class="form-error" id="item-error" role="alert" hidden></p>
-        <div class="buttons"><button type="submit" id="item-save">Save item</button><button type="button" class="secondary" id="item-cancel" hidden>Cancel</button></div>
+        <div class="p-form__group"><label class="p-form__label" for="item-name">Name</label><input class="p-form__control" id="item-name" maxlength="120" required autocomplete="off"></div>
+        <div class="p-form__group"><label class="p-form__label" for="item-kind">Type</label><select class="p-form__control" id="item-kind"><option value="service">Service</option><option value="product">Product</option></select></div>
+        <div class="p-form__group"><label class="p-form__label" for="item-desc">Description</label><textarea class="p-form__control" id="item-desc" maxlength="500" rows="2"></textarea></div>
+        <div class="p-form__group"><label class="p-form__label" for="item-price">Default unit price</label><input class="p-form__control" id="item-price" type="number" min="0" step="0.01" value="0" inputmode="decimal"></div>
+        <div class="p-form__group"><label class="p-form__label" for="item-currency">Currency</label><input class="p-form__control" id="item-currency" maxlength="3" value="EUR"></div>
+        <div class="p-form-validation is-error">
+          <p class="p-form-validation__message" id="item-error" role="alert" hidden></p>
+        </div>
+        <div class="buttons"><button data-positive="1" type="submit" id="item-save">Save item</button><button type="button" class="secondary" id="item-cancel" hidden>Cancel</button></div>
       </form>
       <div class="p-card">
       <div class="table-scroll"><table id="item-table" class="p-table--mobile-card">
@@ -859,7 +895,7 @@
     </label>
     <footer class="p-modal__footer">
       <button id="dlg-cancel" class="secondary" type="button">Cancel</button>
-      <button id="dlg-ok" class="primary" type="button">OK</button>
+      <button data-positive="1" id="dlg-ok" class="primary" type="button">OK</button>
     </footer>
     </div>
   </dialog>
@@ -876,32 +912,34 @@
             <p>Let's get you recording time in under a minute: add your first customer, then a project for it. You can finish this at any time — progress is kept server-side as you go.</p>
           </div>
           <div id="wz-step-1" class="wz-step" hidden>
-            <div class="field"><label for="wz-cust-name">Customer name</label>
-              <input id="wz-cust-name" maxlength="120" autocomplete="off" value="Tucano Time" placeholder="Acme Ltd."></div>
-            <div class="field"><label for="wz-cust-currency">Currency (ISO-4217)</label>
-              <input id="wz-cust-currency" maxlength="3" value="EUR"></div>
-            <div class="field"><label for="wz-cust-rate">Default hourly rate (e.g. 60.00)</label>
-              <input id="wz-cust-rate" type="number" min="0" step="0.01" value="60.00" inputmode="decimal"></div>
+            <div class="p-form__group"><label class="p-form__label" for="wz-cust-name">Customer name</label>
+              <input class="p-form__control" id="wz-cust-name" maxlength="120" autocomplete="off" value="Tucano Time" placeholder="Acme Ltd."></div>
+            <div class="p-form__group"><label class="p-form__label" for="wz-cust-currency">Currency (ISO-4217)</label>
+              <input class="p-form__control" id="wz-cust-currency" maxlength="3" value="EUR"></div>
+            <div class="p-form__group"><label class="p-form__label" for="wz-cust-rate">Default hourly rate (e.g. 60.00)</label>
+              <input class="p-form__control" id="wz-cust-rate" type="number" min="0" step="0.01" value="60.00" inputmode="decimal"></div>
           </div>
           <div id="wz-step-2" class="wz-step" hidden>
-            <div class="field" id="wz-pick-customer-field"><label for="wz-project-customer">Add a project to</label>
-              <select id="wz-project-customer"></select></div>
-            <div class="field"><label for="wz-project-code">Project code</label>
-              <input id="wz-project-code" maxlength="24" autocomplete="off" placeholder="WEB-1"></div>
-            <div class="field"><label for="wz-project-name">Project name (optional)</label>
-              <input id="wz-project-name" maxlength="120" autocomplete="off"></div>
-            <div class="field"><label for="wz-project-currency">Currency (from customer default)</label>
-              <input id="wz-project-currency" maxlength="3"></div>
-            <div class="field"><label for="wz-project-rate">Hourly rate (from customer default)</label>
-              <input id="wz-project-rate" type="number" min="0" step="0.01" inputmode="decimal"></div>
+            <div class="p-form__group" id="wz-pick-customer-field"><label class="p-form__label" for="wz-project-customer">Add a project to</label>
+              <select class="p-form__control" id="wz-project-customer"></select></div>
+            <div class="p-form__group"><label class="p-form__label" for="wz-project-code">Project code</label>
+              <input class="p-form__control" id="wz-project-code" maxlength="24" autocomplete="off" placeholder="WEB-1"></div>
+            <div class="p-form__group"><label class="p-form__label" for="wz-project-name">Project name (optional)</label>
+              <input class="p-form__control" id="wz-project-name" maxlength="120" autocomplete="off"></div>
+            <div class="p-form__group"><label class="p-form__label" for="wz-project-currency">Currency (from customer default)</label>
+              <input class="p-form__control" id="wz-project-currency" maxlength="3"></div>
+            <div class="p-form__group"><label class="p-form__label" for="wz-project-rate">Hourly rate (from customer default)</label>
+              <input class="p-form__control" id="wz-project-rate" type="number" min="0" step="0.01" inputmode="decimal"></div>
           </div>
           <div id="wz-step-3" class="wz-step" hidden>
             <p id="wz-done-text"></p>
             <p>The entry form is open with your new customer and project selected — record your first time entry straight away.</p>
           </div>
         </div>
-        <p class="form-error" id="wz-error" role="alert" hidden></p>
-        <p id="wz-status" role="status" aria-live="polite" class="hint"></p>
+        <div class="p-form-validation is-error">
+          <p class="p-form-validation__message" id="wz-error" role="alert" hidden></p>
+        </div>
+        <p id="wz-status" role="status" aria-live="polite" class="p-form-help-text"></p>
         <div class="dlg-actions">
           <button id="wz-later" class="p-button" type="button">Skip</button>
           <button id="wz-back" class="p-button" type="button">Back</button>
@@ -929,27 +967,27 @@
       </header>
       <form id="customer-form">
         <input type="hidden" id="customer-id">
-        <div class="field"><label for="customer-name">Name</label><input id="customer-name" maxlength="120" required></div>
-        <div class="field"><label for="customer-currency">Default currency (ISO-4217)</label><input id="customer-currency" maxlength="3" placeholder="EUR" required></div>
-        <div class="field"><label for="customer-rate">Default hourly rate (e.g. 60.00)</label><input id="customer-rate" type="number" min="0" step="0.01" required inputmode="decimal"></div>
-        <div class="field"><label for="customer-email">Billing email (optional, for invoice delivery)</label><input id="customer-email" type="email" maxlength="200" autocomplete="off"></div>
+        <div class="p-form__group"><label class="p-form__label" for="customer-name">Name</label><input class="p-form__control" id="customer-name" maxlength="120" required></div>
+        <div class="p-form__group"><label class="p-form__label" for="customer-currency">Default currency (ISO-4217)</label><input class="p-form__control" id="customer-currency" maxlength="3" placeholder="EUR" required></div>
+        <div class="p-form__group"><label class="p-form__label" for="customer-rate">Default hourly rate (e.g. 60.00)</label><input class="p-form__control" id="customer-rate" type="number" min="0" step="0.01" required inputmode="decimal"></div>
+        <div class="p-form__group"><label class="p-form__label" for="customer-email">Billing email (optional, for invoice delivery)</label><input class="p-form__control" id="customer-email" type="email" maxlength="200" autocomplete="off"></div>
         <details class="customer-extra-details">
           <summary>Billing and invoice defaults</summary>
-        <fieldset class="field"><legend>Billing details (#139)</legend>
-          <div class="field"><label for="cust-street">Street</label><input id="cust-street" maxlength="120" autocomplete="off"></div>
-          <div class="field"><label for="cust-city">City</label><input id="cust-city" maxlength="80" autocomplete="off"></div>
-          <div class="field"><label for="cust-postal">Postal code</label><input id="cust-postal" maxlength="16" autocomplete="off"></div>
-          <div class="field"><label for="cust-country">Country</label><input id="cust-country" maxlength="56" autocomplete="off"></div>
-          <div class="field"><label for="cust-tax">Default VAT % (e.g. 21 or 20.5)</label><input id="cust-tax" type="number" min="0" max="100" step="0.01" value="0" inputmode="decimal"></div>
-          <div class="field"><label for="cust-discount">Default discount %</label><input id="cust-discount" type="number" min="0" max="100" step="0.01" value="0" inputmode="decimal"></div>
-          <div class="field"><span id="contacts-label">Contacts (one may be the billing recipient)</span>
+        <fieldset class="p-form__group"><legend>Billing details (#139)</legend>
+          <div class="p-form__group"><label class="p-form__label" for="cust-street">Street</label><input class="p-form__control" id="cust-street" maxlength="120" autocomplete="off"></div>
+          <div class="p-form__group"><label class="p-form__label" for="cust-city">City</label><input class="p-form__control" id="cust-city" maxlength="80" autocomplete="off"></div>
+          <div class="p-form__group"><label class="p-form__label" for="cust-postal">Postal code</label><input class="p-form__control" id="cust-postal" maxlength="16" autocomplete="off"></div>
+          <div class="p-form__group"><label class="p-form__label" for="cust-country">Country</label><input class="p-form__control" id="cust-country" maxlength="56" autocomplete="off"></div>
+          <div class="p-form__group"><label class="p-form__label" for="cust-tax">Default VAT % (e.g. 21 or 20.5)</label><input class="p-form__control" id="cust-tax" type="number" min="0" max="100" step="0.01" value="0" inputmode="decimal"></div>
+          <div class="p-form__group"><label class="p-form__label" for="cust-discount">Default discount %</label><input class="p-form__control" id="cust-discount" type="number" min="0" max="100" step="0.01" value="0" inputmode="decimal"></div>
+          <div class="p-form__group"><span id="contacts-label">Contacts (one may be the billing recipient)</span>
             <div id="contact-rows"></div>
-            <button type="button" id="contact-add" class="p-button">+ Add contact</button>
+            <button type="button" id="contact-add" class="p-button" data-icon="plus">Add contact</button>
           </div>
         </fieldset>
-        <fieldset class="field"><legend>Invoice document (#116)</legend>
-          <div class="field"><label for="customer-terms">Payment terms (due date at issue)</label>
-            <select id="customer-terms">
+        <fieldset class="p-form__group"><legend>Invoice document (#116)</legend>
+          <div class="p-form__group"><label class="p-form__label" for="customer-terms">Payment terms (due date at issue)</label>
+            <select class="p-form__control" id="customer-terms">
               <option value="">Org default / net-14</option>
               <option value="upon_receipt">Upon Receipt</option>
               <option value="net_15">NET 15</option>
@@ -958,19 +996,21 @@
               <option value="net_45">NET 45</option>
               <option value="custom">Custom (n days)</option>
             </select></div>
-          <div class="field" id="customer-terms-days-field" hidden>
-            <label for="customer-terms-days">Days (1–365)</label>
-            <input id="customer-terms-days" type="number" min="1" max="365" step="1" inputmode="numeric">
+          <div class="p-form__group" id="customer-terms-days-field" hidden>
+            <label class="p-form__label" for="customer-terms-days">Days (1–365)</label>
+            <input class="p-form__control" id="customer-terms-days" type="number" min="1" max="365" step="1" inputmode="numeric">
           </div>
-          <div class="field"><label for="customer-subject">Invoice subject override (%variables% allowed)</label>
-            <input id="customer-subject" maxlength="120" autocomplete="off"></div>
-          <div class="field"><label for="customer-notes">Invoice notes (markdown subset, appended after the footer)</label>
-            <textarea id="customer-notes" maxlength="4000" rows="3"></textarea></div>
+          <div class="p-form__group"><label class="p-form__label" for="customer-subject">Invoice subject override (%variables% allowed)</label>
+            <input class="p-form__control" id="customer-subject" maxlength="120" autocomplete="off"></div>
+          <div class="p-form__group"><label class="p-form__label" for="customer-notes">Invoice notes (markdown subset, appended after the footer)</label>
+            <textarea class="p-form__control" id="customer-notes" maxlength="4000" rows="3"></textarea></div>
         </fieldset>
         </details>
-        <div class="field checkbox"><label for="customer-active"><input type="checkbox" id="customer-active" checked> Active</label></div>
-        <p class="form-error" id="customer-error" role="alert" hidden></p>
-        <footer class="buttons p-modal__footer"><button type="submit" id="customer-save" class="p-button--positive">Add customer</button><button type="button" class="p-button" id="customer-cancel">Cancel</button></footer>
+        <div class="p-form__group"><label class="p-form__label" for="customer-active"><input class="p-form__control" type="checkbox" id="customer-active" checked> Active</label></div>
+        <div class="p-form-validation is-error">
+          <p class="p-form-validation__message" id="customer-error" role="alert" hidden></p>
+        </div>
+        <footer class="buttons p-modal__footer"><button data-positive="1" type="submit" id="customer-save" class="p-button--positive">Add customer</button><button type="button" class="p-button" id="customer-cancel">Cancel</button></footer>
       </form>
       </div>
       </dialog>
@@ -979,17 +1019,19 @@
       <header class="p-modal__header">
         <h2 class="p-modal__title" id="project-dialog-title">Add project</h2>
       </header>
-      <p id="project-dialog-parent" class="hint"></p>
+      <p id="project-dialog-parent" class="p-form-help-text"></p>
       <form id="project-form">
         <input type="hidden" id="project-original-code">
-        <div class="field"><label for="project-parent-customer">Customer</label><select id="project-parent-customer" required></select></div>
-        <div class="field"><label for="project-code">Project code</label><input id="project-code" maxlength="24" required></div>
-        <div class="field"><label for="project-name">Name</label><input id="project-name" maxlength="120"></div>
-        <div class="field"><label for="project-currency">Currency (ISO-4217)</label><input id="project-currency" maxlength="3" placeholder="EUR" required></div>
-        <div class="field"><label for="project-rate">Hourly rate (e.g. 95.00)</label><input id="project-rate" type="number" min="0" step="0.01" placeholder="0.00" required inputmode="decimal"></div>
-        <div class="field checkbox"><label for="project-active"><input type="checkbox" id="project-active" checked> Active</label></div>
-        <p class="form-error" id="project-error" role="alert" hidden></p>
-        <footer class="buttons p-modal__footer"><button type="submit" id="project-save" class="p-button--positive">Add project</button><button type="button" class="p-button" id="project-cancel">Cancel</button></footer>
+        <div class="p-form__group"><label class="p-form__label" for="project-parent-customer">Customer</label><select class="p-form__control" id="project-parent-customer" required></select></div>
+        <div class="p-form__group"><label class="p-form__label" for="project-code">Project code</label><input class="p-form__control" id="project-code" maxlength="24" required></div>
+        <div class="p-form__group"><label class="p-form__label" for="project-name">Name</label><input class="p-form__control" id="project-name" maxlength="120"></div>
+        <div class="p-form__group"><label class="p-form__label" for="project-currency">Currency (ISO-4217)</label><input class="p-form__control" id="project-currency" maxlength="3" placeholder="EUR" required></div>
+        <div class="p-form__group"><label class="p-form__label" for="project-rate">Hourly rate (e.g. 95.00)</label><input class="p-form__control" id="project-rate" type="number" min="0" step="0.01" placeholder="0.00" required inputmode="decimal"></div>
+        <div class="p-form__group"><label class="p-form__label" for="project-active"><input class="p-form__control" type="checkbox" id="project-active" checked> Active</label></div>
+        <div class="p-form-validation is-error">
+          <p class="p-form-validation__message" id="project-error" role="alert" hidden></p>
+        </div>
+        <footer class="buttons p-modal__footer"><button data-positive="1" type="submit" id="project-save" class="p-button--positive">Add project</button><button type="button" class="p-button" id="project-cancel">Cancel</button></footer>
       </form>
       </div>
       </dialog>
@@ -998,16 +1040,18 @@
       <header class="p-modal__header">
         <h2 class="p-modal__title" id="task-dialog-title">Add task</h2>
       </header>
-      <p id="task-dialog-parent" class="hint"></p>
+      <p id="task-dialog-parent" class="p-form-help-text"></p>
       <form id="task-form">
         <input type="hidden" id="task-original-code">
-        <div class="field"><label for="task-parent-customer">Customer</label><select id="task-parent-customer" required></select></div>
-        <div class="field"><label for="task-parent-project">Project</label><select id="task-parent-project" required></select></div>
-        <div class="field"><label for="task-code">Task code</label><input id="task-code" maxlength="24" required></div>
-        <div class="field"><label for="task-name">Name</label><input id="task-name" maxlength="120"></div>
-        <div class="field checkbox"><label for="task-active"><input type="checkbox" id="task-active" checked> Active</label></div>
-        <p class="form-error" id="task-error" role="alert" hidden></p>
-        <footer class="buttons p-modal__footer"><button type="submit" id="task-save" class="p-button--positive">Add task</button><button type="button" class="p-button" id="task-cancel">Cancel</button></footer>
+        <div class="p-form__group"><label class="p-form__label" for="task-parent-customer">Customer</label><select class="p-form__control" id="task-parent-customer" required></select></div>
+        <div class="p-form__group"><label class="p-form__label" for="task-parent-project">Project</label><select class="p-form__control" id="task-parent-project" required></select></div>
+        <div class="p-form__group"><label class="p-form__label" for="task-code">Task code</label><input class="p-form__control" id="task-code" maxlength="24" required></div>
+        <div class="p-form__group"><label class="p-form__label" for="task-name">Name</label><input class="p-form__control" id="task-name" maxlength="120"></div>
+        <div class="p-form__group"><label class="p-form__label" for="task-active"><input class="p-form__control" type="checkbox" id="task-active" checked> Active</label></div>
+        <div class="p-form-validation is-error">
+          <p class="p-form-validation__message" id="task-error" role="alert" hidden></p>
+        </div>
+        <footer class="buttons p-modal__footer"><button data-positive="1" type="submit" id="task-save" class="p-button--positive">Add task</button><button type="button" class="p-button" id="task-cancel">Cancel</button></footer>
       </form>
       </div>
       </dialog>

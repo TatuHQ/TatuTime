@@ -75,7 +75,8 @@ test('announcement surfaces stay the polite live region and alert errors (#232 i
   assert.equal(live.getAttribute('role'), 'status');
   assert.equal(live.getAttribute('aria-live'), 'polite');
   assert.equal(live.classList.contains('p-notification'), false, 'live region is not a notification node');
-  assert.ok(document.querySelectorAll('.form-error[role="alert"]').length > 0, 'field errors stay role=alert');
+  // #232 phase 2b: the error paragraphs are the official validation messages now.
+  assert.ok(document.querySelectorAll('.p-form-validation__message[role="alert"]').length > 0, 'field errors stay role=alert');
   assert.ok(document.getElementById('day-empty').classList.contains('p-notification'), 'day-empty keeps the official class');
   dom.window.close();
 });
