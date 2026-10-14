@@ -181,7 +181,7 @@
         <h2 class="p-modal__title" id="entry-form-title">Add an entry</h2>
       </header>
       <p class="p-form-help-text" id="entry-form-date"></p>
-      <form id="entry-form" class="card">
+      <form id="entry-form">
         <input type="hidden" id="entry-id">
         <div class="p-form__group">
           <label class="p-form__label" for="entry-customer">Customer</label>
@@ -373,8 +373,10 @@
       <section class="invoice-create-column" aria-label="Create invoice">
       <p id="invoice-summary" class="p-form-help-text" role="status" aria-live="polite"></p>
       <!-- #134: tracked-work path only; manual lines are a separate path below. -->
-      <div id="invoice-wizard" class="card" role="group" aria-label="Invoice wizard">
-        <h3 id="iw-title">Create from tracked work — 1 of 3: customer and source</h3>
+      <div id="invoice-wizard" class="p-card" role="group" aria-label="Invoice wizard">
+        <div class="p-card__header">
+          <h3 id="iw-title">Create from tracked work — 1 of 3: customer and source</h3>
+        </div>
         <div id="iw-step1">
           <div class="p-form__group"><label class="p-form__label" for="iw-customer">Customer</label><select class="p-form__control" id="iw-customer"></select></div>
           <div class="p-form__group"><label class="p-form__label" for="iw-expenses"><input class="p-form__control" type="checkbox" id="iw-expenses" checked>
@@ -415,8 +417,8 @@
         <button type="button" id="manual-new" class="secondary">New manual invoice</button>
       </div>
       <!-- #143: manual lines + draft editing editor. -->
-      <div id="invoice-editor" class="card" role="region" aria-label="Invoice line editor" hidden>
-        <div class="ip-head"><h3 id="ed-title">Manual invoice</h3>
+      <div id="invoice-editor" class="p-card" role="region" aria-label="Invoice line editor" hidden>
+        <div class="p-card__header ip-head"><h3 id="ed-title">Manual invoice</h3>
           <button type="button" id="ed-close" class="link secondary">Close editor</button></div>
         <div class="p-form__group"><label class="p-form__label" for="ed-customer">Customer</label><select class="p-form__control" id="ed-customer"></select></div>
         <div class="table-scroll"><table id="ed-lines">
@@ -470,8 +472,8 @@
       </table></div>
       <p id="invoice-empty" hidden>No invoices yet.</p>
       <!-- #133: row selection opens the live document preview. -->
-      <div id="invoice-preview" class="card" role="region" aria-label="Invoice document preview" hidden>
-        <div class="ip-head">
+      <div id="invoice-preview" class="p-card" role="region" aria-label="Invoice document preview" hidden>
+        <div class="p-card__header ip-head">
           <h2 class="ip-title">Invoice document</h2>
           <button type="button" id="ip-close" class="link secondary">Close preview</button>
         </div>
@@ -487,7 +489,7 @@
       <summary>Advanced billing tools: recurring schedules and retainers</summary>
       <details class="invoice-legacy">
         <summary>Legacy direct draft generator</summary>
-        <form id="invoice-form" class="card">
+        <form id="invoice-form" class="p-card">
           <div class="p-form__group"><label class="p-form__label" for="invoice-customer">Customer</label><select class="p-form__control" id="invoice-customer" required></select></div>
           <div class="p-form__group"><label class="p-form__label" for="invoice-from">From</label><input class="p-form__control" type="date" id="invoice-from" required></div>
           <div class="p-form__group"><label class="p-form__label" for="invoice-to">To</label><input class="p-form__control" type="date" id="invoice-to" required></div>
@@ -501,7 +503,7 @@
       <section class="advanced-billing-section" aria-labelledby="recurring-title">
       <h2>Recurring schedules</h2>
       <p class="p-form-help-text">The daily scheduler (#61/#26) generates a draft invoice when a period closes for each <strong>active</strong> schedule. Paused schedules wait where they left off. Generated drafts still need an explicit Issue.</p>
-      <form id="rec-form" class="card">
+      <form id="rec-form" class="p-card">
         <div class="p-form__group"><label class="p-form__label" for="rec-customer">Customer</label><select class="p-form__control" id="rec-customer" required></select></div>
         <div class="p-form__group"><label class="p-form__label" for="rec-cadence">Cadence</label><select class="p-form__control" id="rec-cadence">
           <option value="weekly">Weekly</option>
@@ -530,7 +532,7 @@
       <section class="advanced-billing-section" aria-labelledby="retainer-title">
       <h2 id="retainer-title">Retainers</h2>
       <p class="p-form-help-text">Advance funds held for a customer/project (#144). The balance is always the reconciled ledger; a draw applies funds and is <strong>not</strong> an invoice payment. Closing is final.</p>
-      <form id="ret-form" class="card">
+      <form id="ret-form" class="p-card">
         <div class="p-form__group"><label class="p-form__label" for="ret-customer">Customer</label><select class="p-form__control" id="ret-customer" required></select></div>
         <div class="p-form__group"><label class="p-form__label" for="ret-project">Project</label><select class="p-form__control" id="ret-project" required></select></div>
         <div class="p-form__group"><label class="p-form__label" for="ret-opening">Opening funds (optional)</label><input class="p-form__control" id="ret-opening" type="number" min="0" step="0.01" value="0" inputmode="decimal"></div>
@@ -547,8 +549,8 @@
       </table></div>
       <p id="ret-empty" hidden>No retainers yet.</p>
       </div>
-      <div id="ret-detail" class="card" role="region" aria-label="Retainer history" hidden>
-        <div class="ip-head"><h3 id="ret-detail-title">Ledger</h3>
+      <div id="ret-detail" class="p-card" role="region" aria-label="Retainer history" hidden>
+        <div class="p-card__header ip-head"><h3 id="ret-detail-title">Ledger</h3>
         <button type="button" id="ret-detail-close" class="link secondary">Close</button></div>
         <ul id="ret-history"></ul>
       </div>
@@ -714,7 +716,7 @@
       <p class="p-form-help-text">Store provider secrets (Stripe, OAuth, SMTP, calendar feeds) encrypted at rest. The integrations that consume these are <strong>Beta</strong> — not yet wired to live providers.</p>
       <p id="vault-status" class="p-form-help-text"></p>
       <p id="email-status" class="p-form-help-text" role="status" aria-live="polite"></p>
-      <form id="secret-form" class="card">
+      <form id="secret-form" class="p-card">
         <div class="p-form__group"><label class="p-form__label" for="secret-key">Key (e.g. stripe.secret_key)</label><input class="p-form__control" id="secret-key" maxlength="100" required></div>
         <div class="p-form__group"><label class="p-form__label" for="secret-value">Value</label><input class="p-form__control" id="secret-value" type="password" autocomplete="off" required></div>
         <div class="p-form-validation is-error">
@@ -745,7 +747,7 @@
         <tbody></tbody>
       </table></div>
       </div>
-      <form id="config-form" class="card">
+      <form id="config-form" class="p-card">
         <div class="p-form__group"><label class="p-form__label" for="config-key">Setting</label><select class="p-form__control" id="config-key"></select></div>
         <div class="p-form__group"><label class="p-form__label" for="config-value">New value</label><input class="p-form__control" id="config-value" maxlength="300"></div>
         <div class="p-form-validation is-error">
@@ -774,7 +776,7 @@
       <section id="settings-panel-invoice" class="settings-panel" role="tabpanel" aria-labelledby="settings-tab-invoice" tabindex="0" hidden>
       <h2>Invoice settings: company, appearance, messages</h2>
       <p class="p-form-help-text">Printed on invoice documents and emails (#138). Leave the name empty to keep the boot-time <code>org_name</code> setting; due terms and message wording live in the invoice template below (one store, no parallel defaults).</p>
-      <form id="org-form" class="card">
+      <form id="org-form" class="p-card">
         <div class="p-form__group"><label class="p-form__label" for="org-name">Company name</label><input class="p-form__control" id="org-name" maxlength="120" autocomplete="off"></div>
         <div class="p-form__group"><label class="p-form__label" for="org-legal">VAT / company id</label><input class="p-form__control" id="org-legal" maxlength="60" autocomplete="off" placeholder="BE0123456789"></div>
         <div class="p-form__group"><label class="p-form__label" for="org-street">Street</label><input class="p-form__control" id="org-street" maxlength="120" autocomplete="off"></div>
@@ -795,7 +797,7 @@
       <p class="p-form-help-text">Subject, body and footer for invoice documents and emails (#116). <code>%variable%</code> placeholders resolve at issue/render time; unknown variables are rejected on save. Leave everything empty to keep the built-in wording.</p>
       <h3>Field labels</h3>
       <p class="p-form-help-text">Rename what the invoice <em>document</em> shows (#147). The API and stored field names never change; blank keeps the built-in word.</p>
-      <div id="labels-form" class="card">
+      <div id="labels-form" class="p-card">
         <div class="p-form__group"><label class="p-form__label" for="lb-description">Line column label</label><input class="p-form__control" id="lb-description" maxlength="40" autocomplete="off" placeholder="Description"></div>
         <div class="p-form__group"><label class="p-form__label" for="lb-quantity">Quantity column label</label><input class="p-form__control" id="lb-quantity" maxlength="40" autocomplete="off" placeholder="Hours"></div>
         <div class="p-form__group"><label class="p-form__label" for="lb-unit-price">Unit price column label</label><input class="p-form__control" id="lb-unit-price" maxlength="40" autocomplete="off" placeholder="Rate"></div>
@@ -806,7 +808,7 @@
         <div class="buttons"><button type="button" id="lb-reset" class="secondary">Use built-in labels</button></div>
       </div>
 
-      <form id="template-form" class="card">
+      <form id="template-form" class="p-card">
         <div class="p-form__group"><label class="p-form__label" for="template-subject">Subject (max 120)</label>
           <input class="p-form__control" id="template-subject" maxlength="120" autocomplete="off" placeholder="Invoice %invoice_number% for %customer_name%"></div>
         <div class="p-form__group"><label class="p-form__label" for="template-body">Body (markdown: #, ##, ###, **bold**, *italic*, - bullets, 1. lists)</label>
@@ -842,8 +844,10 @@
         <tbody></tbody>
       </table></div>
       </div>
-      <div id="template-preview" class="card" hidden>
-        <h3>Preview - newest invoice</h3>
+      <div id="template-preview" class="p-card" hidden>
+        <div class="p-card__header">
+          <h3>Preview - newest invoice</h3>
+        </div>
         <p id="template-preview-subject"></p>
         <div id="template-preview-body"></div>
       </div>
@@ -852,7 +856,7 @@
       <section id="settings-panel-catalog" class="settings-panel" role="tabpanel" aria-labelledby="settings-tab-catalog" tabindex="0" hidden>
       <h2>Product / Service catalog</h2>
       <p class="p-form-help-text">Reusable manual-invoice line types (#147): name, type, default unit price. Archiving hides an item from new picks without touching history.</p>
-      <form id="item-form" class="card">
+      <form id="item-form" class="p-card">
         <input type="hidden" id="item-id">
         <div class="p-form__group"><label class="p-form__label" for="item-name">Name</label><input class="p-form__control" id="item-name" maxlength="120" required autocomplete="off"></div>
         <div class="p-form__group"><label class="p-form__label" for="item-kind">Type</label><select class="p-form__control" id="item-kind"><option value="service">Service</option><option value="product">Product</option></select></div>

@@ -104,7 +104,26 @@ component backlog.
   so `npm run build:ubuntu` is a **no-op** and `cssSha256` stays
   `c6b404f72a9fb86c5a1425af9f26b27870edf2e9da74c640dbb149390d936e05`.
 
-**Umbrella status.** With increment 6, phase 2a and phase 2b the planned PRs are
+- **Bespoke cards retired (#232 phase 2c)** — the last `.card` skin leaves the
+  sheet: all 15 former `.card` sites (the invoice wizard/editor/preview regions,
+  the retainer ledger, the template preview and every settings/advanced-billing
+  form) are the official `p-card`, with the heading-slot panels (wizard, editor,
+  preview, retainer ledger, template preview) using `p-card__header`. The Day
+  entry form **drops** the class rather than gaining `p-card` — it is the body of
+  a `p-modal__dialog`, which already supplies the frame — and the four bespoke
+  rules the conversion replaced (`.card`, `.settings-panel > .card`,
+  `#entry-dialog form.card`, `.advanced-billing-section .card`) are deleted.
+  `p-card__footer` is **not** used: Vanilla 4.59 ships no such class. The
+  increment also fixes a defect the phase-2b review surfaced —
+  `#expense-dialog input { width: 100% }` (1,0,1) out-specified the 1rem tick-box
+  sizing (0,2,1) by id count, so `#expense-billable` painted 100% wide; the width
+  rule is scoped to `input:not([type="checkbox"]):not([type="radio"])` and pinned
+  by `gui-test/input-width.test.mjs` and the browser gate. `styles.css` moves
+  from 715 lines / 383 rules to 724 / 379 (375 comment-stripped); the component
+  family is unchanged, so `npm run build:ubuntu` is a **no-op** and `cssSha256`
+  stays `c6b404f72a9fb86c5a1425af9f26b27870edf2e9da74c640dbb149390d936e05`.
+
+**Umbrella status.** With increment 6 and phases 2a–2c the planned PRs are
 all merged, but #232 stays **open** (*Part of*): the page map above is still ⬜ —
 every row needs the manual light/dark + keyboard/AT review of ground rules 4–5,
 including the Invoices `p-table--sortable` register — and the now-redundant
@@ -172,6 +191,14 @@ keyboard/AT review has not happened yet. Deliberately still app-owned: the
 horizontal filter/tool bars (`.bar`, `.filter-field`), the `#dlg-input` prompt
 skin, the `.theme-switch` fieldset and the `.cols-pop` column picker.
 
+**#232 phase 2c progress (cards).** Every bespoke `.card` is retired in favour of
+the official `p-card` (see the phase-2c bullet above), so the last card skin left
+the sheet; but the rows stay ⬜ for the same reason as 2a/2b — the per-page
+light/dark + keyboard/AT review has not happened yet — and the Invoices sortable
+register (phase 2d) is still to come. Deliberately still app-owned: the
+horizontal filter/tool bars (`.bar`, `.filter-field`), the `#dlg-input` prompt
+skin, the `.theme-switch` fieldset and the `.cols-pop` column picker.
+
 ## Order and per-page scope
 
 The sequence deliberately front-loads the shared adapters (Day carries the
@@ -208,9 +235,10 @@ patterns). Each page lists what "migrated" means — nothing layout-level.
     adapters.
 14. **Settings — Products & services.** Item catalog table + dialog.
 15. **Settings — Expense categories.** Table + dialog; final cleanup PR: retire
-    the bespoke `.card`/`.bar`/`.field` skins that have no remaining users and
-    shrink `web/styles.css` (split into its own PR when it exceeds a page's
-    worth of churn).
+    the bespoke `.bar` skin that has no remaining users and shrink
+    `web/styles.css` (split into its own PR when it exceeds a page's worth of
+    churn). The `.card` skin this item used to name was retired early in
+    **phase 2c**.
 
 ## Per-page review workflow
 
