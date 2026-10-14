@@ -2,10 +2,15 @@
 // wire fetch to the live server, run boot(), then simulate adding an entry
 // and creating a customer through the actual forms. Verifies the presentation
 // layer drives the API and renders results.
+//
+// Waiting convention (#265): never assert against wall-clock. Either waitFor()
+// the condition the next check depends on, or settle() the requests the
+// previous interaction started — see gui-test/README.md.
 
 import { JSDOM, VirtualConsole } from 'jsdom';
 import fs from 'node:fs';
 import { loadAppSource } from './load-app.mjs';
+import { waitFor } from './wait-for.mjs';
 
 // CI serves on :8099; local runs can point elsewhere (TT_GUI_BASE) so a
 // dev's harness server can never shadow the runner's own container.
@@ -33,13 +38,21 @@ if (window.HTMLDialogElement && !window.HTMLDialogElement.prototype.showModal) {
 }
 
 // Cookie-aware fetch for the whole harness: attaches the session once logged in.
+// Requests are counted so settle() can wait for the UI's own work to drain
+// instead of sleeping a fixed tick (#265).
 const _fetch = globalThis.fetch.bind(globalThis);
 let SESSION_COOKIE = '';
+let inFlight = 0;
 function fetch(url, init = {}) {
   const headers = { ...(init.headers || {}) };
   if (SESSION_COOKIE && !('Cookie' in headers)) headers.Cookie = SESSION_COOKIE;
   headers['X-CSRF-Protection'] = '1';
-  return _fetch(url, { ...init, headers });
+  inFlight += 1;
+  const done = () => { inFlight -= 1; };
+  return _fetch(url, { ...init, headers }).then(
+    (response) => { done(); return response; },
+    (error) => { done(); throw error; },
+  );
 }
 
 // window.fetch resolves root-relative paths against BASE and uses the wrapper.
@@ -69,12 +82,33 @@ SESSION_COOKIE = (loginRes.headers.get('set-cookie') || '').split(';')[0];
 // wizard (#111) creates ACME + P-9 through the real UI below, exercising the
 // trigger, the steps and the prefill rule end-to-end.
 
-function tick(ms = 60) { return new Promise((r) => setTimeout(r, ms)); }
+// Helpers for the waiting convention (#265).
+const byId = (id) => window.document.getElementById(id);
+const dialogOpen = (el) => el.open === true || el.hasAttribute('open');
+
+// Wait until the work the interactions so far started has drained: no request
+// the UI opened is still in flight, and a two-poll quiet window gives the
+// re-render that follows the last one a turn to run. Used where the next check
+// reads server-fed data (a table, a total, a live announcement); a purely local
+// DOM state is waited for directly with waitFor().
+async function settle(message = 'the UI to finish its outstanding work') {
+  let quietPolls = 0;
+  await waitFor(() => {
+    if (inFlight > 0) {
+      quietPolls = 0;
+      return false;
+    }
+    quietPolls += 1;
+    return quietPolls >= 2;
+  }, { message });
+}
 
 // Inject and run the real app, then fire DOMContentLoaded.
 window.eval(appJs);
 window.document.dispatchEvent(new window.Event('DOMContentLoaded', { bubbles: true }));
-await tick(200);
+await waitFor(() => byId('version').textContent === 'TucanoTime', {
+  message: 'the app to finish booting after DOMContentLoaded',
+});
 
 let failures = 0;
 function check(name, cond) {
@@ -86,7 +120,7 @@ function check(name, cond) {
 // drafts/paid go through the All tab first.
 const showAllInvoices = async () => {
   window.document.getElementById('inv-tab-all').dispatchEvent(new window.Event('click', { bubbles: true }));
-  await tick(300);
+  await settle('the invoice table to reload for the All tab');
 };
 
 // ---- FIRST-RUN WIZARD (#111): auto-open on zero customers ----
@@ -140,7 +174,9 @@ check('Cancel hides timer setup and returns focus to its action',
 window.document.getElementById('wizard-open').dispatchEvent(new window.Event('click', { bubbles: true }));
 check('the icon reopens the wizard fresh', wzOpen() && !window.document.getElementById('wz-step-0').hidden);
 window.document.getElementById('wz-next').dispatchEvent(new window.Event('click', { bubbles: true }));
-await tick(80);
+await waitFor(() => !byId('wz-step-1').hidden && byId('wz-step-0').hidden, {
+  message: 'the wizard to advance to the customer step',
+});
 check('Next advances to the customer step', !window.document.getElementById('wz-step-1').hidden && window.document.getElementById('wz-step-0').hidden);
 // #229: the first-customer field is prefilled with the example name, so a
 // fresh setup needs no typing (still editable).
@@ -149,7 +185,9 @@ check('customer name is prefilled with the Tucano Time example',
 // Clear the prefill and submit: an empty name must refuse to save.
 window.document.getElementById('wz-cust-name').value = '';
 window.document.getElementById('wz-next').dispatchEvent(new window.Event('click', { bubbles: true }));
-await tick(80);
+await waitFor(() => !byId('wz-error').hidden && !byId('wz-step-1').hidden, {
+  message: 'the wizard to show its inline customer-name error',
+});
 check('empty customer name shows an inline error (no silent partial save)',
   !window.document.getElementById('wz-error').hidden
   && !window.document.getElementById('wz-step-1').hidden);
@@ -157,7 +195,9 @@ window.document.getElementById('wz-cust-name').value = 'ACME';
 window.document.getElementById('wz-cust-currency').value = 'eur';
 window.document.getElementById('wz-cust-rate').value = '60.00';
 window.document.getElementById('wz-next').dispatchEvent(new window.Event('click', { bubbles: true }));
-await tick(400);
+await waitFor(() => !byId('wz-step-2').hidden && byId('wz-project-currency').value === 'EUR', {
+  message: 'the wizard to save ACME and prefill the project step',
+});
 check('wizard advanced to the project step', !window.document.getElementById('wz-step-2').hidden);
 check('project currency/rate prefilled from the customer default (#11)',
   window.document.getElementById('wz-project-currency').value === 'EUR'
@@ -165,7 +205,9 @@ check('project currency/rate prefilled from the customer default (#11)',
 window.document.getElementById('wz-project-code').value = 'p-9';
 window.document.getElementById('wz-project-name').value = 'Portal';
 window.document.getElementById('wz-next').dispatchEvent(new window.Event('click', { bubbles: true }));
-await tick(400);
+await waitFor(() => !byId('wz-step-3').hidden && byId('wz-done-text').textContent.includes('ACME'), {
+  message: 'the wizard to create the project and reach the done step',
+});
 const custs111 = (await (await fetch(BASE + '/api/customers', { headers: { Cookie: SESSION_COOKIE } })).json()).customers;
 const acme111 = custs111.find((c) => c.name === 'ACME');
 const projs111 = acme111
@@ -179,7 +221,9 @@ check('done step names what was set up',
   && window.document.getElementById('wz-done-text').textContent.includes('ACME'));
 // Finish: dialog closes, Day view with the pair preselected.
 window.document.getElementById('wz-next').dispatchEvent(new window.Event('click', { bubbles: true }));
-await tick(500);
+await waitFor(() => !wzOpen() && byId('entry-project').value === 'P-9', {
+  message: 'the wizard to close and preselect the new customer and project',
+});
 check('wizard closed on finish', !wzOpen());
 check('lands on the Timesheets (Day) view',
   window.document.getElementById('tab-timesheet').getAttribute('aria-selected') === 'true');
@@ -188,7 +232,9 @@ check('new customer + project preselected in the entry form',
   && window.document.getElementById('entry-project').value === 'P-9');
 // Reopen with customers present jumps straight to the project step.
 window.document.getElementById('wizard-open').dispatchEvent(new window.Event('click', { bubbles: true }));
-await tick(120);
+await waitFor(() => wzOpen() && !byId('wz-step-2').hidden && byId('wz-step-0').hidden, {
+  message: 'the reopened wizard to jump to the project step',
+});
 check('reopen with existing customers skips straight to the project step',
   wzOpen() && !window.document.getElementById('wz-step-2').hidden && window.document.getElementById('wz-step-0').hidden);
 window.document.getElementById('wz-later').dispatchEvent(new window.Event('click', { bubbles: true }));
@@ -201,7 +247,9 @@ dom2.window.URL.createObjectURL = () => 'blob:jsdom-stub';
 dom2.window.URL.revokeObjectURL = () => {};
 dom2.window.eval(appJs);
 dom2.window.document.dispatchEvent(new window.Event('DOMContentLoaded', { bubbles: true }));
-await tick(600);
+await waitFor(() => dom2.window.document.getElementById('version').textContent === 'TucanoTime', {
+  message: 'the second app instance to finish booting',
+});
 check('wizard never auto-opens again once a customer exists',
   !(dom2.window.document.getElementById('wizard-dialog').open === true
     || dom2.window.document.getElementById('wizard-dialog').hasAttribute('open')));
@@ -215,7 +263,9 @@ check('customer picker populated', [...customerSelect.options].some((o) => o.tex
 const acmeOpt = [...customerSelect.options].find((o) => o.textContent.includes('ACME'));
 customerSelect.value = acmeOpt.value;
 customerSelect.dispatchEvent(new window.Event('change', { bubbles: true }));
-await tick(150);
+await waitFor(() => [...byId('entry-project').options].some((o) => o.value === 'P-9'), {
+  message: 'the project picker to load the ACME projects',
+});
 
 const projectSelect = window.document.getElementById('entry-project');
 const p9 = [...projectSelect.options].find((o) => o.value === 'P-9');
@@ -228,7 +278,9 @@ window.document.getElementById('entry-note').value = 'gui-test entry';
 
 const entryForm = window.document.getElementById('entry-form');
 entryForm.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
-await tick(250);
+await waitFor(() => byId('day-total').textContent.trim() === '4:15', {
+  message: 'the day table to re-render with the new 4.25h entry',
+});
 
 // ---- verify the entry actually reached the server through the form ----
 const day = await (await fetch(BASE + '/api/entries?date=2026-11-11')).json();
@@ -256,30 +308,37 @@ check('aria-live region announced an add', /added|updated/i.test(live));
   check('dialog kept the day just logged (#145)', window.document.getElementById('entry-date').value === '2026-11-11');
   window.document.getElementById('day-add').click();
   window.document.getElementById('entry-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
-  await tick(100);
+  await waitFor(() => isOpen() && !byId('entry-error').hidden, {
+    message: 'the invalid entry to keep the dialog open with its error',
+  });
   check('invalid entry keeps the popup open with its error',
     isOpen() && !window.document.getElementById('entry-error').hidden);
   edlg.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-  await tick(150);
+  await waitFor(
+    () => !isOpen() && /Entry cancelled . nothing was saved/i.test(byId('live-region').textContent),
+    { message: 'Escape to close the entry dialog and announce the cancel' },
+  );
   check('Escape cancels and closes the dialog (#145)', !isOpen());
   check('cancel announces nothing was saved (#145)',
     /Entry cancelled . nothing was saved/i.test(window.document.getElementById('live-region').textContent));
   const before = (await (await fetch(BASE + '/api/entries?date=2026-11-11', { headers: { Cookie: SESSION_COOKIE } })).json()).entries.length;
   window.document.getElementById('entry-hours').value = '7';
   window.document.getElementById('entry-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
-  await tick(200);
+  await settle('the ignored submit to leave the app idle');
   const after = (await (await fetch(BASE + '/api/entries?date=2026-11-11', { headers: { Cookie: SESSION_COOKIE } })).json()).entries.length;
   check('cancelling then not submitting saved nothing (#145)', after === before);
   // Edit opens the dialog pre-filled with the Update label.
   const editBtn = [...window.document.querySelectorAll('#day-table tbody button')].find((b) => /edit/i.test(b.textContent));
   if (editBtn) {
     editBtn.dispatchEvent(new window.Event('click', { bubbles: true }));
-    await tick(200);
+    await waitFor(() => isOpen() && byId('entry-save').textContent === 'Update entry' && byId('entry-hours').value !== '', {
+      message: 'the edit action to open the dialog pre-filled',
+    });
     check('edit opens the dialog pre-filled (#145)',
       isOpen() && window.document.getElementById('entry-save').textContent === 'Update entry'
       && window.document.getElementById('entry-hours').value !== '');
     window.document.getElementById('entry-cancel').dispatchEvent(new window.Event('click', { bubbles: true }));
-    await tick(150);
+    await waitFor(() => !isOpen(), { message: 'the cancelled edit to close the dialog' });
     check('cancel edit returns to the timesheet (#145)', !isOpen());
   }
 }
@@ -291,22 +350,22 @@ const isOpen = () => dlgNode.open === true || dlgNode.hasAttribute('open');
 const dayRow0 = window.document.querySelector('#day-table tbody tr');
 const dlgDel = [...dayRow0.querySelectorAll('button')].find((b) => b.textContent === 'Delete');
 dlgDel.dispatchEvent(new window.Event('click', { bubbles: true }));
-await tick(120);
+await waitFor(() => isOpen(), { message: 'the delete action to open the inline dialog' });
 check('delete click opens the inline dialog', isOpen());
 check(
   'dialog message names the entry being deleted',
   /Delete this entry \(4\.25h on P-9\)/.test(window.document.getElementById('dlg-message').textContent),
 );
 window.document.getElementById('dlg-cancel').dispatchEvent(new window.Event('click', { bubbles: true }));
-await tick(120);
+await waitFor(() => !isOpen(), { message: 'the confirm dialog to close on cancel' });
 check('dialog closes on cancel', !isOpen());
 const kept = await (await fetch(BASE + '/api/entries?date=2026-11-11')).json();
 check('cancel keeps the entry (nothing deleted)', kept.entries.some((e) => e.id === made.id));
 // Confirm path: same flow, OK accepts and the entry disappears.
 dlgDel.dispatchEvent(new window.Event('click', { bubbles: true }));
-await tick(120);
+await waitFor(() => isOpen(), { message: 'the confirm dialog to reopen for the delete' });
 window.document.getElementById('dlg-ok').dispatchEvent(new window.Event('click', { bubbles: true }));
-await tick(400);
+await settle('the confirmed delete to reach the server and re-render the day');
 const gone = await (await fetch(BASE + '/api/entries?date=2026-11-11')).json();
 check('confirming in the dialog deletes the entry', !gone.entries.some((e) => e.id === made.id));
 // Restore the entry (later checks assert the 4.25h day) and re-render.
@@ -319,9 +378,13 @@ await postJson('/api/entries', {
   billable: true,
 });
 window.document.getElementById('day-prev').dispatchEvent(new window.Event('click', { bubbles: true }));
-await tick(150);
+await settle('the previous-day render');
 window.document.getElementById('day-next').dispatchEvent(new window.Event('click', { bubbles: true }));
-await tick(250);
+await waitFor(() => {
+  const selected = window.document.querySelector('#week-strip .ws-day.selected');
+  return byId('day-date').value === '2026-11-11'
+    && !!selected && selected.dataset.date === '2026-11-11' && selected.textContent.includes('4:15');
+}, { message: 'the day navigator to return to 2026-11-11 with its week-strip total' });
 
 // ---- DAY REDESIGN (#12): row structure, week strip, navigator, copy-forward ----
 const mainCell = rows[0].querySelector('.entry-main');
@@ -340,19 +403,26 @@ check('selected day emphasised with H:MM total', selDay && selDay.dataset.date =
 check('week strip shows week total', window.document.querySelector('.ws-week').textContent.trim() === 'Week total 4:15');
 
 window.document.getElementById('day-next').dispatchEvent(new window.Event('click', { bubbles: true }));
-await tick(200);
+await waitFor(() => {
+  const selected = window.document.querySelector('#week-strip .ws-day.selected');
+  return byId('day-date').value === '2026-11-12'
+    && !!selected && selected.dataset.date === '2026-11-12';
+}, { message: 'the day navigator to move forward to 2026-11-12' });
 check('day navigator moves forward', window.document.getElementById('day-date').value === '2026-11-12');
 
 const copyButton = window.document.getElementById('copy-previous');
 check('copy previous day is a button rather than a dropdown',
   copyButton.tagName === 'BUTTON' && !window.document.getElementById('copy-days'));
 copyButton.click();
-await tick(200);
+await waitFor(() => {
+  const row = window.document.querySelector('#copy-rows .copy-row');
+  return !!row && row.textContent.includes('P-9');
+}, { message: 'copy previous day to list the P-9 row' });
 const copyRow = window.document.querySelector('#copy-rows .copy-row');
 check('copy previous day lists the P-9 row', !!copyRow && copyRow.textContent.includes('P-9'));
 copyRow.querySelector('input').value = '3';
 copyRow.querySelector('button').dispatchEvent(new window.Event('click', { bubbles: true }));
-await tick(250);
+await settle('the copied row to save through the API');
 const day12 = await (await fetch(BASE + '/api/entries?date=2026-11-12')).json();
 const copied = day12.entries.find((e) => e.project_code === 'P-9' && e.hours === 3);
 check('copied row saved through the API', !!copied);
@@ -366,7 +436,7 @@ await fetch(`${BASE}/api/entries/${copied.id}`, { method: 'DELETE', headers: { C
 // driving its forms; do the same here instead of relying on the old lenient
 // no-op-free focus into the hidden customers panel.
 window.document.getElementById('tab-customers').dispatchEvent(new window.Event('click', { bubbles: true }));
-await tick(250);
+await waitFor(() => !byId('panel-customers').hidden, { message: 'the Customers section to show' });
 const custForm = window.document.getElementById('customer-form');
 const customerDialog = window.document.getElementById('customer-dialog');
 check('customer form is in a closed popup initially',
@@ -385,7 +455,7 @@ window.document.getElementById('customer-name').value = 'Globex';
 window.document.getElementById('customer-currency').value = 'usd';
 window.document.getElementById('customer-rate').value = '45.50';
 custForm.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
-await tick(250);
+await settle('the customer form to save Globex and refresh every picker');
 
 const customers = (await (await fetch(BASE + '/api/customers')).json()).customers;
 const globex = customers.find((c) => c.name === 'Globex');
@@ -407,7 +477,9 @@ window.document.getElementById('report-from').value = '2026-11-01';
 window.document.getElementById('report-to').value = '2026-11-30';
 window.document.getElementById('report-group').value = 'project';
 reportForm.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
-await tick(250);
+await waitFor(() => window.document.querySelectorAll('#report-table tbody tr').length >= 1, {
+  message: 'the report query to render grouped rows',
+});
 const reportRows = window.document.querySelectorAll('#report-table tbody tr');
 check('report renders grouped rows', reportRows.length >= 1);
 const csvHref = window.document.getElementById('csv-link').getAttribute('href');
@@ -416,7 +488,9 @@ check('CSV download link wired', csvHref && csvHref.includes('export.csv'));
 // ---- tab keyboard nav moves selection ----
 const tabDay = window.document.getElementById('ts-day');
 tabDay.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
-await tick(50);
+await waitFor(() => byId('ts-week').getAttribute('aria-selected') === 'true', {
+  message: 'the arrow key to move the Day|Week tab selection',
+});
 check('arrow key switches tab', window.document.getElementById('ts-week').getAttribute('aria-selected') === 'true');
 
 // ---- WEEK GRID VIEW (#13): inline editable cells ----
@@ -424,7 +498,10 @@ const tabWeek = window.document.getElementById('ts-week');
 tabWeek.dispatchEvent(new window.Event('click', { bubbles: true }));
 window.document.getElementById('week-date').value = '2026-11-11';
 window.document.getElementById('week-date').dispatchEvent(new window.Event('change', { bubbles: true }));
-await tick(300);
+await waitFor(() => {
+  const row = window.document.querySelector('#week-table tbody tr');
+  return !!row && row.textContent.includes('ACME') && row.textContent.includes('P-9');
+}, { message: 'the week grid to render the ACME / P-9 row' });
 const wkRows = window.document.querySelectorAll('#week-table tbody tr');
 const wkRowText = wkRows[0] ? wkRows[0].textContent : '';
 check('week grid renders the ACME / P-9 row', wkRowText.includes('ACME') && wkRowText.includes('P-9'));
@@ -440,7 +517,9 @@ check('week total footer is H:MM', window.document.querySelector('#week-table tf
 const emptyCell = cellOf('2026-11-09');
 emptyCell.value = '2.5';
 emptyCell.dispatchEvent(new window.Event('focusout', { bubbles: true }));
-await tick(400);
+await waitFor(() => window.document.querySelector('#week-table tbody tr .row-total').textContent.trim() === '6:45', {
+  message: 'the inline cell save to update the week row total to 6:45',
+});
 const sep9 = await (await fetch(BASE + '/api/entries?date=2026-11-09')).json();
 check('inline cell save created an entry via POST', sep9.entries.some((e) => e.hours === 2.5 && e.project_code === 'P-9'));
 check('row total updated to 6:45 after inline save', window.document.querySelector('#week-table tbody tr .row-total').textContent.trim() === '6:45');
@@ -450,14 +529,16 @@ const savedCell = cellOf('2026-11-09');
 check('cleared cell re-rendered with the saved value', savedCell && savedCell.value === '2.50');
 savedCell.value = '';
 savedCell.dispatchEvent(new window.Event('focusout', { bubbles: true }));
-await tick(150);
+await waitFor(() => byId('app-dialog').open === true || byId('app-dialog').hasAttribute('open'), {
+  message: 'clearing a cell to ask for confirmation in the dialog',
+});
 check(
   'clearing a cell asks for confirmation in the dialog',
   window.document.getElementById('app-dialog').open === true
     || window.document.getElementById('app-dialog').hasAttribute('open'),
 );
 window.document.getElementById('dlg-ok').dispatchEvent(new window.Event('click', { bubbles: true }));
-await tick(400);
+await settle('the cleared cell to delete through the API');
 const sep9b = await (await fetch(BASE + '/api/entries?date=2026-11-09')).json();
 check('clearing the cell deleted the entry', sep9b.entries.every((e) => e.hours !== 2.5));
 
@@ -465,12 +546,16 @@ check('clearing the cell deleted the entry', sep9b.entries.every((e) => e.hours 
 const flag = window.document.querySelector('#week-table .note-flag');
 check('note affordance shown on entry cells', !!flag);
 flag.dispatchEvent(new window.Event('click', { bubbles: true }));
-await tick(250);
+await waitFor(() => byId('app-dialog').open === true || byId('app-dialog').hasAttribute('open'), {
+  message: 'the note editor to open in the grid',
+});
 const noteDlgOpen = window.document.getElementById('app-dialog').open === true
   || window.document.getElementById('app-dialog').hasAttribute('open');
 check('note editor opens in the grid (#126)', noteDlgOpen);
 window.document.getElementById('dlg-cancel').dispatchEvent(new window.Event('click', { bubbles: true }));
-await tick(200);
+await waitFor(() => /Note unchanged/i.test(byId('live-region').textContent), {
+  message: 'the cancelled note edit to announce the note is unchanged',
+});
 check('cancel leaves the note unchanged (#126)',
   /Note unchanged/i.test(window.document.getElementById('live-region').textContent));
 window.document.getElementById('ts-week').dispatchEvent(new window.Event('click', { bubbles: true }));
@@ -485,7 +570,7 @@ check('copy previous week is a button rather than a dropdown',
 // ---- PROJECT FORM: prefill from customer + required currency/rate (#11) ----
 const tabCust = window.document.getElementById('tab-customers');
 tabCust.dispatchEvent(new window.Event('click', { bubbles: true }));
-await tick(250);
+await waitFor(() => !byId('panel-customers').hidden, { message: 'the Customers section to show' });
 // #182: three Setup sections replace the combined workspace.
 check('Setup nav exposes Customers, Projects and Tasks sections',
   ['tab-customers', 'tab-projects', 'tab-tasks'].every((id) => window.document.getElementById(id)));
@@ -506,7 +591,9 @@ check('panels lead with their action, not a duplicate H2',
 // section (#182) — no shared selection state anymore.
 const projBtn = [...window.document.querySelectorAll('#customer-table button')].find((b) => b.textContent === 'Projects');
 projBtn.dispatchEvent(new window.Event('click', { bubbles: true }));
-await tick(250);
+await waitFor(() => !byId('panel-projects').hidden && byId('proj-filter-customer').value === acmeOpt.value, {
+  message: 'the row action to open the Projects section scoped to ACME',
+});
 check('row action opens the Projects section scoped to that customer',
   !window.document.getElementById('panel-projects').hidden
   && window.document.getElementById('proj-filter-customer').value === acmeOpt.value
@@ -541,7 +628,7 @@ window.document.getElementById('project-new').click();
 window.document.getElementById('project-code').value = 'mkt-2';
 window.document.getElementById('project-rate').value = '95.00';
 window.document.getElementById('project-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
-await tick(250);
+await settle('the project form to save MKT-2');
 const projs = (await (await fetch(BASE + `/api/customers/${acmeOpt.value}/projects`)).json()).projects;
 const mkt = projs.find((p) => p.code === 'MKT-2');
 check('project form created MKT-2 with prefilled EUR + override rate', mkt && mkt.currency === 'EUR' && mkt.rate_minor === 9500);
@@ -561,7 +648,9 @@ projectDialog.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape',
 check('project Escape closes its popup', !projectDialog.open);
 const tasksBtn = [...mktRow.querySelectorAll('button')].find((b) => b.textContent === 'Tasks');
 tasksBtn.dispatchEvent(new window.Event('click', { bubbles: true }));
-await tick(150);
+await waitFor(() => !byId('panel-tasks').hidden && byId('task-filter-project').value === 'MKT-2', {
+  message: 'the project row Tasks action to open the Tasks section scoped to ACME / MKT-2',
+});
 check('project row Tasks action opens the Tasks section with both filters set',
   !window.document.getElementById('panel-tasks').hidden
   && window.document.getElementById('task-filter-customer').value === acmeOpt.value
@@ -571,17 +660,23 @@ check('project row Tasks action opens the Tasks section with both filters set',
   const custSel = window.document.getElementById('task-filter-customer');
   custSel.value = '';
   custSel.dispatchEvent(new window.Event('change', { bubbles: true }));
-  await tick(200);
+  await waitFor(() => byId('task-filter-project').value === '' && !byId('tasks-empty-state').hidden, {
+    message: 'clearing the customer to reset the dependent project filter',
+  });
   const projSel = window.document.getElementById('task-filter-project');
   check('clearing the customer resets the dependent project filter',
     projSel.value === '' && projSel.disabled === true
     && !window.document.getElementById('tasks-empty-state').hidden);
   custSel.value = acmeOpt.value;
   custSel.dispatchEvent(new window.Event('change', { bubbles: true }));
-  await tick(200);
+  await waitFor(() => [...byId('task-filter-project').options].some((o) => o.value === 'MKT-2'), {
+    message: 're-selecting the customer to repopulate its project choices',
+  });
   projSel.value = 'MKT-2';
   projSel.dispatchEvent(new window.Event('change', { bubbles: true }));
-  await tick(200);
+  await waitFor(() => /No tasks on this project yet/.test(byId('tasks-empty-state').textContent), {
+    message: 'the scoped task list to render its empty state',
+  });
   check('re-selecting the scoped project restores its scoped state',
     !window.document.getElementById('tasks-empty-state').hidden
     && /No tasks on this project yet/.test(window.document.getElementById('tasks-empty-state').textContent)
@@ -589,7 +684,9 @@ check('project row Tasks action opens the Tasks section with both filters set',
 }
 const taskDialog = window.document.getElementById('task-dialog');
 window.document.getElementById('task-new').click();
-await tick(200);
+await waitFor(() => dialogOpen(taskDialog) && byId('task-dialog-parent').textContent === 'ACME / MKT-2', {
+  message: 'the task popup to open with its customer and project path',
+});
 check('+ Task opens its popup with the customer/project path',
   taskDialog.open && window.document.getElementById('task-dialog-parent').textContent === 'ACME / MKT-2'
   && window.document.activeElement.id === 'task-code');
@@ -599,19 +696,23 @@ check('task popup preselects customer and project dropdowns',
   taskCustomer.value === acmeOpt.value && taskProject.value === 'MKT-2');
 taskCustomer.value = globex.id;
 taskCustomer.dispatchEvent(new window.Event('change', { bubbles: true }));
-await tick(150);
+await waitFor(() => ![...taskProject.options].some((option) => option.value === 'MKT-2'), {
+  message: 'changing the task customer to drop the unrelated project option',
+});
 check('changing task customer clears unrelated project options',
   ![...taskProject.options].some((option) => option.value === 'MKT-2'));
 taskCustomer.value = acmeOpt.value;
 taskCustomer.dispatchEvent(new window.Event('change', { bubbles: true }));
-await tick(150);
+await waitFor(() => [...taskProject.options].some((option) => option.value === 'MKT-2'), {
+  message: 're-selecting ACME to restore the MKT-2 project option',
+});
 taskProject.value = 'MKT-2';
 window.document.getElementById('task-code').value = 't1';
 window.document.getElementById('task-name').value = 'Sprint';
 check('task popup has no rate or currency override controls',
   !window.document.getElementById('task-rate') && !window.document.getElementById('task-currency'));
 window.document.getElementById('task-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
-await tick(250);
+await settle('the task form to save T1');
 const tasks = (await (await fetch(BASE + `/api/customers/${acmeOpt.value}/projects/MKT-2/tasks`)).json()).tasks;
 const t1 = tasks.find((t) => t.code === 'T1');
 check('task created without billing override fields',
@@ -619,7 +720,9 @@ check('task created without billing override fields',
 check('task save closes its popup', !taskDialog.open);
 const taskEdit = [...window.document.querySelectorAll('#task-table tbody button')].find((button) => button.textContent === 'Edit');
 taskEdit.click();
-await tick(150);
+await waitFor(() => taskDialog.open && byId('task-code').value === 'T1', {
+  message: 'task Edit to open its populated popup',
+});
 check('task Edit opens its populated popup',
   taskDialog.open && window.document.getElementById('task-code').value === 'T1');
 check('editing a task locks its parent dropdowns', taskCustomer.disabled && taskProject.disabled);
@@ -630,18 +733,22 @@ check('task Escape closes its popup', !taskDialog.open);
 const custSel2 = window.document.getElementById('entry-customer');
 custSel2.value = acmeOpt.value;
 custSel2.dispatchEvent(new window.Event('change', { bubbles: true }));
-await tick(150);
+await waitFor(() => [...byId('entry-project').options].some((o) => o.value === 'MKT-2'), {
+  message: 'the entry project picker to load MKT-2',
+});
 const projSel = window.document.getElementById('entry-project');
 projSel.value = 'MKT-2';
 projSel.dispatchEvent(new window.Event('change', { bubbles: true }));
-await tick(150);
+await waitFor(() => [...byId('entry-task').options].some((o) => o.value === 'T1'), {
+  message: 'the entry task picker to load T1',
+});
 const taskSel = window.document.getElementById('entry-task');
 check('entry task picker loaded T1', [...taskSel.options].some((o) => o.value === 'T1'));
 taskSel.value = 'T1';
 window.document.getElementById('entry-date').value = '2026-12-01';
 window.document.getElementById('entry-hours').value = '1';
 window.document.getElementById('entry-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
-await tick(250);
+await settle('the task-based entry to save');
 const dec = (await (await fetch(BASE + '/api/entries?date=2026-12-01')).json()).entries;
 check('entry logged against task T1', dec.some((e) => e.task_code === 'T1'));
 
@@ -652,7 +759,7 @@ window.document.getElementById('invoice-customer').value = acmeOpt.value;
 window.document.getElementById('invoice-from').value = '2026-12-01';
 window.document.getElementById('invoice-to').value = '2026-12-31';
 window.document.getElementById('invoice-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
-await tick(300);
+await settle('the invoice form to generate the ACME draft');
 const invs = (await (await fetch(BASE + '/api/invoices')).json()).invoices;
 const acmeInv = invs.find((i) => i.customer_id === acmeOpt.value);
 check('draft invoice generated', !!acmeInv && acmeInv.status === 'draft');
@@ -686,12 +793,17 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
   // Re-pull the table so the rows reflect the API-side issue (the invoice was
   // issued over fetch, not through the UI).
   window.document.getElementById('tab-invoices').dispatchEvent(new window.Event('click', { bubbles: true }));
-  await tick(350);
+  await waitFor(() => [...window.document.querySelectorAll('#invoice-table tbody button')]
+    .some((b) => b.textContent === 'Preview' && b.closest('tr').textContent.includes(acmeInv.number)), {
+    message: 'the issued invoice row to offer Preview',
+  });
   const pvBtn = [...window.document.querySelectorAll('#invoice-table tbody button')]
     .find((b) => b.textContent === 'Preview' && b.closest('tr').textContent.includes(acmeInv.number));
   check('invoice rows offer a Preview action (#133)', !!pvBtn);
   pvBtn.dispatchEvent(new window.Event('click', { bubbles: true }));
-  await tick(450);
+  await waitFor(() => byId('invoice-preview').hidden === false && byId('ip-subject').textContent.includes(acmeInv.number), {
+    message: 'the preview panel to render the issued invoice document',
+  });
   const panel = window.document.getElementById('invoice-preview');
   check('preview panel opens on selection (#133)', panel.hidden === false);
   const facts = window.document.getElementById('ip-facts').textContent;
@@ -704,7 +816,7 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
   check('issued invoice offers Download PDF from the preview (#133)',
     window.document.getElementById('ip-download').hidden === false);
   panel.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-  await tick(120);
+  await waitFor(() => panel.hidden === true, { message: 'Escape to close the preview' });
   check('Escape closes the preview (#133)', panel.hidden === true);
   await showAllInvoices(); // #135 default Open tab hides drafts
   // A draft says "no document yet" instead of offering a 409 download.
@@ -719,11 +831,16 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
     body: JSON.stringify({ customer_id: acmeOpt.value, from: '2029-01-01', to: '2029-01-31' }),
   })).json();
   window.document.getElementById('tab-invoices').dispatchEvent(new window.Event('click', { bubbles: true }));
-  await tick(350);
+  await waitFor(() => [...window.document.querySelectorAll('#invoice-table tbody button')]
+    .some((b) => b.textContent === 'Preview' && b.closest('tr').textContent.includes(draft.number)), {
+    message: 'the draft invoice row to offer Preview',
+  });
   const dBtn = [...window.document.querySelectorAll('#invoice-table tbody button')]
     .find((b) => b.textContent === 'Preview' && b.closest('tr').textContent.includes(draft.number));
   dBtn.dispatchEvent(new window.Event('click', { bubbles: true }));
-  await tick(400);
+  await waitFor(() => byId('ip-download').hidden === true && byId('ip-pdf-state').hidden === false, {
+    message: 'the draft preview to explain the missing archive',
+  });
   check('draft preview explains the missing archive, hides Download (#133)',
     window.document.getElementById('ip-download').hidden === true
     && window.document.getElementById('ip-pdf-state').hidden === false
@@ -740,18 +857,25 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
     body: JSON.stringify({ date: '2026-12-25', customer_id: acmeOpt.value, project_code: 'P-9', hours: 3.5, note: 'xmas call' }),
   });
   window.document.getElementById('ts-cal').dispatchEvent(new window.Event('click', { bubbles: true }));
-  await tick(400);
+  await waitFor(() => byId('panel-calendar').hidden === false, { message: 'the calendar month grid to show' });
   const calPanel = window.document.getElementById('panel-calendar');
   check('calendar tab shows the month grid (#140)', calPanel.hidden === false);
   // Navigate to Dec 2026 (initial month follows the displayed day; walk forward).
   let guard = 0;
   while (!window.document.getElementById('cal-label').textContent.includes('Dec 2026') && guard < 24) {
+    const label = window.document.getElementById('cal-label').textContent;
     window.document.getElementById('cal-next').dispatchEvent(new window.Event('click', { bubbles: true }));
-    await tick(120);
+    await waitFor(() => window.document.getElementById('cal-label').textContent !== label, {
+      message: 'the calendar to render the next month',
+    });
     guard += 1;
   }
   check('month navigation reaches Dec 2026 (#140)',
     window.document.getElementById('cal-label').textContent.includes('Dec 2026'));
+  await waitFor(() => [...calPanel.querySelectorAll('td.cal-cell.has button')]
+    .some((b) => (b.getAttribute('aria-label') || '').includes('25 Dec 2026')), {
+    message: 'the Dec 2026 grid to render the 25 Dec entry',
+  });
   const xmas = [...calPanel.querySelectorAll('td.cal-cell.has button')]
     .find((b) => (b.getAttribute('aria-label') || '').includes('25 Dec 2026'));
   check('day cell shows hours + project chip (#140)',
@@ -760,7 +884,11 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
     /Dec 2026: .+ logged/.test(window.document.getElementById('cal-total').textContent));
   if (xmas) {
     xmas.dispatchEvent(new window.Event('click', { bubbles: true }));
-    await tick(300);
+    await waitFor(() => byId('ts-day').getAttribute('aria-selected') === 'true'
+      && byId('day-date').value === '2026-12-25'
+      && /Opened 2026-12-25/.test(byId('live-region').textContent), {
+      message: 'the clicked calendar day to hand over to the Day view',
+    });
     check('clicking a day hands over to the Day view (#140)',
       window.document.getElementById('ts-day').getAttribute('aria-selected') === 'true'
       && window.document.getElementById('day-date').value === '2026-12-25'
@@ -768,28 +896,37 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
   }
   const empty = [...calPanel.querySelectorAll('td.cal-cell:not(.has) .cal-plain')].length;
   check('entry-less days render plain (#140)', empty > 20);
-  window.document.getElementById('cal-today').dispatchEvent(new window.Event('click', { bubbles: true }));
-  await tick(200);
   const curMonth = new Date().toISOString().slice(0, 7);
+  const curMonthName = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][Number(curMonth.slice(5,7)) - 1];
+  window.document.getElementById('cal-today').dispatchEvent(new window.Event('click', { bubbles: true }));
+  await waitFor(() => byId('cal-label').textContent.includes(curMonthName), {
+    message: `Today to jump back to the current month (${curMonthName})`,
+  });
   check('Today jumps to the current month (#140)',
-    window.document.getElementById('cal-label').textContent.includes(
-      ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][Number(curMonth.slice(5,7)) - 1]));
+    window.document.getElementById('cal-label').textContent.includes(curMonthName));
   // #231: with the Calendar segment active, leave Timesheets via the sidebar rail.
   // The panel sat *outside* panel-timesheet once, so nothing hid it and the month
   // grid stayed visible on every section. jsdom's `hidden` does not inherit, so
   // assert both halves: the panel nests inside the section, and navigation hides
   // the section.
   window.document.getElementById('ts-cal').dispatchEvent(new window.Event('click', { bubbles: true }));
-  await tick(400);
+  await waitFor(() => !byId('panel-calendar').hidden && byId('panel-calendar').closest('#panel-timesheet') !== null, {
+    message: 'the calendar segment panel to nest inside the timesheet section',
+  });
   check('calendar segment panel nests inside the timesheet section (#231)',
     window.document.getElementById('panel-calendar').closest('#panel-timesheet') !== null
     && window.document.getElementById('panel-calendar').hidden === false);
   window.document.getElementById('tab-invoices').dispatchEvent(new window.Event('click', { bubbles: true }));
-  await tick(350);
+  await waitFor(() => byId('panel-timesheet').hidden === true, {
+    message: 'navigating away to hide the timesheet section',
+  });
   check('navigating away hides the timesheet section that contains the calendar (#231)',
     window.document.getElementById('panel-timesheet').hidden === true);
   window.document.getElementById('tab-timesheet').dispatchEvent(new window.Event('click', { bubbles: true }));
-  await tick(400);
+  await waitFor(() => !byId('panel-timesheet').hidden && !byId('panel-calendar').hidden
+    && byId('ts-cal').getAttribute('aria-selected') === 'true', {
+    message: 'returning to Timesheets to keep the calendar segment selected',
+  });
   check('returning to Timesheets keeps the calendar segment selected and shown (#231)',
     window.document.getElementById('panel-timesheet').hidden === false
     && window.document.getElementById('panel-calendar').hidden === false
@@ -800,7 +937,10 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
 // ---- FIELD LABELS + CATALOG (#147) ----
 {
   window.document.getElementById('tab-settings').dispatchEvent(new window.Event('click', { bubbles: true }));
-  await tick(350);
+  await waitFor(() => [...window.document.querySelectorAll('#settings-tabs [role="tab"]')].map((tab) => tab.id).join(',') ===
+    'settings-tab-security,settings-tab-users,settings-tab-invoice,settings-tab-catalog,settings-tab-expenses', {
+    message: 'the Settings section to render its tab bar',
+  });
   check('Settings tab bar includes Users, Security, Invoice documents, and Products & services',
     [...window.document.querySelectorAll('#settings-tabs [role="tab"]')].map((tab) => tab.id).join(',') ===
     'settings-tab-security,settings-tab-users,settings-tab-invoice,settings-tab-catalog,settings-tab-expenses');
@@ -824,7 +964,7 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
   window.document.getElementById('user-default-rate').value = '45.67';
   window.document.getElementById('user-cost-rate').value = '12.34';
   window.document.getElementById('user-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
-  await tick(500);
+  await settle('the user form to save the new user');
   const usersResult = await (await fetch(BASE + '/api/users')).json();
   const managed = usersResult.users.find((user) => user.email === 'managed-qa@test.local');
   check('user popup creates exact minor-unit rates and closes',
@@ -845,7 +985,9 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
   check('user Edit hides and clears the password field', userDialog.open && window.document.getElementById('user-password-field').hidden && !window.document.getElementById('user-password').value);
   window.document.getElementById('user-name').value = 'Managed Updated';
   window.document.getElementById('user-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
-  await tick(350);
+  await waitFor(() => !userDialog.open && window.document.querySelector('#user-table tbody').textContent.includes('Managed Updated'), {
+    message: 'the user edit to save, close the popup and re-render the table',
+  });
   check('user edit saves and closes', !userDialog.open && window.document.querySelector('#user-table tbody').textContent.includes('Managed Updated'));
   userAction('Change password').click();
   const passwordDialog = window.document.getElementById('user-password-dialog');
@@ -853,31 +995,45 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
   check('password change uses an empty masked popup', passwordDialog.open && newPassword.type === 'password' && !newPassword.value);
   newPassword.value = 'short';
   window.document.getElementById('user-password-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
-  await tick(200);
+  await waitFor(() => passwordDialog.open && !byId('user-password-error').hidden, {
+    message: 'the short password to keep the popup open with its error',
+  });
   check('invalid password stays open with an error', passwordDialog.open && !window.document.getElementById('user-password-error').hidden);
   newPassword.value = 'managed-new-password1';
   window.document.getElementById('user-password-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
-  await tick(400);
+  await waitFor(() => !passwordDialog.open && !newPassword.value, {
+    message: 'the successful password change to close and clear the secret',
+  });
   check('successful password change closes and clears secret', !passwordDialog.open && !newPassword.value);
   userAction('Deactivate').click();
-  await tick(300);
+  await settle('the deactivation to reach the server and re-render the user table');
   const userStatusFilter = window.document.getElementById('user-filter-active');
   userStatusFilter.value = 'false';
   userStatusFilter.dispatchEvent(new window.Event('change', { bubbles: true }));
-  await tick(300); // the filter re-renders asynchronously; without this the
-  // check below read the pre-deactivation DOM and passed only by luck —
-  // it failed + crashed (userAction('Activate') undefined) on a loaded runner.
+  // The filter re-renders asynchronously (#265): wait for the deactivated user
+  // to appear instead of reading the pre-deactivation DOM, which passed only by
+  // luck and crashed (userAction('Activate') undefined) on a loaded runner.
+  await waitFor(() => !!userAction('Activate'), {
+    message: 'the inactive filter to re-render with the deactivated user',
+  });
   check('inactive filter shows deactivated user', !!userAction('Activate'));
   userAction('Activate').click();
-  await tick(300);
+  await waitFor(() => !window.document.getElementById('user-empty').hidden, {
+    message: 'the inactive results to empty after reactivation',
+  });
   check('reactivation removes user from inactive results', !window.document.getElementById('user-empty').hidden);
   userStatusFilter.value = '';
   userStatusFilter.dispatchEvent(new window.Event('change', { bubbles: true }));
-  await tick(250); // same race: the all-status re-render must land before Delete acts
+  // Same race (#265): the all-status re-render must land before Delete acts.
+  await waitFor(() => !!userAction('Delete'), {
+    message: 'the all-status re-render to offer the Delete action',
+  });
   userAction('Delete').click();
-  await tick(100);
+  await waitFor(() => dialogOpen(byId('app-dialog')), { message: 'the delete-user confirm dialog to open' });
   window.document.getElementById('dlg-ok').click();
-  await tick(350);
+  await waitFor(() => !window.document.getElementById('user-empty').hidden, {
+    message: 'the confirmed deletion to remove the unused user',
+  });
   check('confirmed deletion removes unused user', !window.document.getElementById('user-empty').hidden);
   userSearch.value = '';
   userSearch.dispatchEvent(new window.Event('input', { bubbles: true }));
@@ -891,7 +1047,7 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
   window.document.getElementById('item-desc').value = 'On-site engineering visit';
   window.document.getElementById('item-price').value = '120.00';
   window.document.getElementById('item-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
-  await tick(400);
+  await settle('the catalog item form to save Site visit');
   const cat = (await (await fetch(BASE + '/api/admin/item-types', { headers: { Cookie: SESSION_COOKIE } })).json()).item_types;
   check('catalog item created via the form (#147)', cat.length === 1 && cat[0].name === 'Site visit' && cat[0].default_price_minor === 12000);
   window.document.getElementById('settings-tab-invoice').dispatchEvent(new window.Event('click', { bubbles: true }));
@@ -902,20 +1058,24 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
   window.document.getElementById('lb-total').value = 'Amount due';
   window.document.getElementById('lb-description').value = 'Work performed';
   window.document.getElementById('template-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
-  await tick(400);
+  await settle('the invoice template to save its field labels');
   const tpl = (await (await fetch(BASE + '/api/admin/invoice-template', { headers: { Cookie: SESSION_COOKIE } })).json()).template;
   check('field labels persist with the template (#147)',
     tpl.labels.total === 'Amount due' && tpl.labels.description === 'Work performed');
   window.document.getElementById('tab-invoices').dispatchEvent(new window.Event('click', { bubbles: true }));
-  await tick(300);
+  await waitFor(() => !byId('panel-invoices').hidden, { message: 'the Invoices section to show' });
   window.document.getElementById('manual-new').dispatchEvent(new window.Event('click', { bubbles: true }));
-  await tick(200);
+  await waitFor(() => window.document.querySelector('#ed-lines tbody tr') !== null, {
+    message: 'the manual invoice editor to open with a line row',
+  });
   const edRow = window.document.querySelector('#ed-lines tbody tr');
   const itemSel = edRow.querySelector('select');
   check('editor row offers catalog items (#147)', [...itemSel.options].some((o) => o.textContent.includes('Site visit')));
   itemSel.value = [...itemSel.options].find((o) => o.textContent.includes('Site visit')).value;
   itemSel.dispatchEvent(new window.Event('change', { bubbles: true }));
-  await tick(150);
+  await waitFor(() => edRow.querySelectorAll('input[type=number]')[1].value === '120.00', {
+    message: 'the catalog selection to prefill the line price',
+  });
   const nums = edRow.querySelectorAll('input[type=number]');
   check('catalog selection prefills description and price (#147)',
     edRow.querySelector('input[type=text]').value.includes('On-site') && nums[1].value === '120.00');
@@ -925,10 +1085,12 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
 // ---- MANUAL LINES + DRAFT EDITOR (#143) ----
 {
   window.document.getElementById('tab-invoices').dispatchEvent(new window.Event('click', { bubbles: true }));
-  await tick(300);
+  await settle('the Invoices section to reload before opening the manual editor');
   window.document.getElementById('invoice-customer').value = acmeOpt.value;
   window.document.getElementById('manual-new').dispatchEvent(new window.Event('click', { bubbles: true }));
-  await tick(200);
+  await waitFor(() => byId('invoice-editor').hidden === false && byId('invoice-editor').querySelectorAll('tbody tr').length === 1, {
+    message: 'the manual editor to open with one line row',
+  });
   const edPanel = window.document.getElementById('invoice-editor');
   check('manual editor opens with a line row (#143)', edPanel.hidden === false
     && edPanel.querySelectorAll('tbody tr').length === 1);
@@ -942,19 +1104,23 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
   };
   fill(edPanel.querySelector('tbody tr'), 'Office seat', 'product', '2.50', '40.00');
   window.document.getElementById('ed-add').dispatchEvent(new window.Event('click', { bubbles: true }));
-  await tick(120);
+  await waitFor(() => edPanel.querySelectorAll('tbody tr').length === 2, {
+    message: 'the editor to append a second line row',
+  });
   fill([...edPanel.querySelectorAll('tbody tr')][1], 'Setup service', 'service', '1.00', '50.00');
   window.document.getElementById('ed-discount').value = '10';
   window.document.getElementById('ed-discount').dispatchEvent(new window.Event('input', { bubbles: true }));
   window.document.getElementById('ed-tax').value = '21';
   window.document.getElementById('ed-tax').dispatchEvent(new window.Event('input', { bubbles: true }));
-  await tick(150);
+  await waitFor(() => byId('ed-totals').textContent.includes('163.35'), {
+    message: 'the editor totals to recompute with tax and discount',
+  });
   const totalsTxt = window.document.getElementById('ed-totals').textContent;
   check('live totals use exact integer math (#143)',
     totalsTxt.includes('150.00') && totalsTxt.includes('-15.00') && totalsTxt.includes('28.35') && totalsTxt.includes('163.35'),
     totalsTxt);
   window.document.getElementById('ed-save').dispatchEvent(new window.Event('click', { bubbles: true }));
-  await tick(500);
+  await settle('the manual draft to save');
   const mInvs = (await (await fetch(BASE + '/api/invoices', { headers: { Cookie: SESSION_COOKIE } })).json()).invoices;
   const manual = mInvs.find((i) => i.total_minor === 16335 && i.status === 'draft');
   check('manual draft saved with server-computed totals (#143)', !!manual && manual.lines.length === 2
@@ -965,17 +1131,19 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
     !(await (await fetch(BASE + `/api/invoices/${manual.id}/pdf`, { headers: { Cookie: SESSION_COOKIE } }))).ok);
   // Re-edit the draft through the Edit action and save unchanged.
   window.document.getElementById('tab-invoices').dispatchEvent(new window.Event('click', { bubbles: true }));
-  await tick(350);
+  await settle('the invoice table to reload for the draft Edit action');
   const editBtn = [...window.document.querySelectorAll('#invoice-table tbody button')]
     .find((b) => b.textContent === 'Edit' && b.closest('tr').textContent.includes(manual.number));
   check('draft rows offer Edit (#143)', !!editBtn);
   editBtn.dispatchEvent(new window.Event('click', { bubbles: true }));
-  await tick(450);
+  await waitFor(() => byId('ed-lines').querySelectorAll('tbody tr').length === 2, {
+    message: 'the editor to reopen with the stored manual lines',
+  });
   check('editor reopens with stored manual lines (#143)',
     window.document.getElementById('ed-lines').querySelectorAll('tbody tr').length === 2
     && [...window.document.querySelectorAll('#ed-lines tbody input[type=text]')].some((x) => x.value === 'Office seat'));
   window.document.getElementById('ed-save').dispatchEvent(new window.Event('click', { bubbles: true }));
-  await tick(500);
+  await settle('the idempotent re-save to finish');
   const after = await (await fetch(BASE + `/api/invoices/${manual.id}`, { headers: { Cookie: SESSION_COOKIE } })).json();
   check('idempotent re-save keeps totals (#143)', after.total_minor === 16335 && after.lines.length === 2);
 }
@@ -992,7 +1160,9 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
   const invsBefore = (await (await fetch(BASE + '/api/invoices', { headers: { Cookie: SESSION_COOKIE } })).json()).invoices.length;
   window.document.getElementById('iw-customer').value = acmeOpt.value;
   window.document.getElementById('iw-next').dispatchEvent(new window.Event('click', { bubbles: true }));
-  await tick(300);
+  await waitFor(() => byId('iw-step2').hidden === false, {
+    message: 'the invoice wizard to advance to step 2',
+  });
   check('wizard advances to step 2 with period controls (#134)',
     window.document.getElementById('iw-step2').hidden === false
     && !!window.document.getElementById('iw-preset')
@@ -1001,15 +1171,19 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
   window.document.getElementById('iw-preset').dispatchEvent(new window.Event('change', { bubbles: true }));
   window.document.getElementById('iw-from').value = '2027-03-01';
   window.document.getElementById('iw-from').dispatchEvent(new window.Event('change', { bubbles: true }));
-  await tick(200);
+  await settle('the wizard period to reload from the new start date');
   window.document.getElementById('iw-to').value = '2027-03-31';
   window.document.getElementById('iw-to').dispatchEvent(new window.Event('change', { bubbles: true }));
-  await tick(250);
+  await waitFor(() => !!byId('iw-p-MKT-2'), {
+    message: 'the wizard to list the MKT-2 project for the period',
+  });
   const cb = window.document.getElementById('iw-p-MKT-2');
   check('wizard finds the March work for MKT-2 (#134)', !!cb && /3\.00/.test(cb.closest('label').textContent));
   cb.checked = true;
   window.document.getElementById('iw-next').dispatchEvent(new window.Event('click', { bubbles: true }));
-  await tick(700);
+  await waitFor(() => byId('iw-step3').hidden === false && byId('iw-summary').textContent.includes('285.00'), {
+    message: 'the wizard review step to show the grouped 285.00 total',
+  });
   const review = window.document.getElementById('iw-summary').textContent + ' | ' + window.document.getElementById('iw-lines').textContent;
   check('review shows grouped lines and the 285.00 total (#134)',
     review.includes('285.00') && /MKT-2/.test(review));
@@ -1019,7 +1193,9 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
   const invsMid = (await (await fetch(BASE + '/api/invoices', { headers: { Cookie: SESSION_COOKIE } })).json()).invoices.length;
   check('preview persisted nothing before Save (#134)', invsMid === invsBefore);
   window.document.getElementById('iw-save').dispatchEvent(new window.Event('click', { bubbles: true }));
-  await tick(500);
+  await waitFor(() => byId('iw-step1').hidden === false, {
+    message: 'the wizard to save the draft and reset to step 1',
+  });
   const invsAfter = (await (await fetch(BASE + '/api/invoices', { headers: { Cookie: SESSION_COOKIE } })).json()).invoices;
   const wizardDraft = invsAfter.find((i) => i.total_minor === 28500 && i.status === 'draft');
   check('Save creates exactly one draft from the selection (#134)',
@@ -1034,15 +1210,19 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
 // ---- RETAINERS (#144): create, add, draw, history, guards ----
 {
   window.document.getElementById('tab-invoices').dispatchEvent(new window.Event('click', { bubbles: true }));
-  await tick(350);
+  await settle('the Invoices section to reload before creating the retainer');
   window.document.getElementById('ret-customer').value = acmeOpt.value;
   window.document.getElementById('ret-customer').dispatchEvent(new window.Event('change', { bubbles: true }));
-  await tick(200);
+  await waitFor(() => window.document.getElementById('ret-project').options.length > 1, {
+    message: 'the retainer project picker to load the customer projects',
+  });
   const projSel = window.document.getElementById('ret-project');
   projSel.value = projSel.options[projSel.options.length - 1].value; // P-9 (seeded by wizard earlier)
   window.document.getElementById('ret-opening').value = '500.00';
   window.document.getElementById('ret-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
-  await tick(450);
+  await waitFor(() => window.document.querySelector('#ret-table tbody tr') !== null, {
+    message: 'the created retainer to render in the table',
+  });
   let rets = (await (await fetch(BASE + '/api/retainers', { headers: { Cookie: SESSION_COOKIE } })).json()).retainers;
   check('retainer created with opening funds (#144)', rets.length === 1 && rets[0].balance_minor === 50000 && rets[0].status === 'open');
   const row = window.document.querySelector('#ret-table tbody tr');
@@ -1052,7 +1232,9 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
   row.querySelectorAll('button').forEach((b) => {
     if (b.textContent === 'History') b.dispatchEvent(new window.Event('click', { bubbles: true }));
   });
-  await tick(250);
+  await waitFor(() => byId('ret-detail').hidden === false && /opening\s\+500\.00/.test(byId('ret-history').textContent), {
+    message: 'the retainer history panel to show the opening entry',
+  });
   check('history panel shows the opening entry (#144)',
     window.document.getElementById('ret-detail').hidden === false
     && /opening\s\+500\.00/.test(window.document.getElementById('ret-history').textContent));
@@ -1061,10 +1243,10 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
   row.querySelectorAll('button').forEach((b) => {
     if (b.textContent === 'Add funds') b.dispatchEvent(new window.Event('click', { bubbles: true }));
   });
-  await tick(200);
+  await waitFor(() => dialogOpen(byId('app-dialog')), { message: 'the add-funds prompt to open' });
   window.document.getElementById('dlg-input').value = '100.00';
   window.document.getElementById('dlg-ok').dispatchEvent(new window.Event('click', { bubbles: true }));
-  await tick(450);
+  await settle('the add-funds dialog to commit its ledger entry');
   rets = (await (await fetch(BASE + '/api/retainers', { headers: { Cookie: SESSION_COOKIE } })).json()).retainers;
   check('add funds credits the ledger (#144)', rets[0].balance_minor === 60000);
   // Draw with a reason.
@@ -1072,13 +1254,13 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
   row2.querySelectorAll('button').forEach((b) => {
     if (b.textContent === 'Draw funds') b.dispatchEvent(new window.Event('click', { bubbles: true }));
   });
-  await tick(200);
+  await waitFor(() => dialogOpen(byId('app-dialog')), { message: 'the draw-funds prompt to open' });
   window.document.getElementById('dlg-input').value = '25.00';
   window.document.getElementById('dlg-ok').dispatchEvent(new window.Event('click', { bubbles: true }));
-  await tick(250);
+  await settle('the draw-funds reason step to open');
   window.document.getElementById('dlg-input').value = 'advance against March work';
   window.document.getElementById('dlg-ok').dispatchEvent(new window.Event('click', { bubbles: true }));
-  await tick(450);
+  await settle('the draw to commit and reduce the ledger balance');
   rets = (await (await fetch(BASE + '/api/retainers', { headers: { Cookie: SESSION_COOKIE } })).json()).retainers;
   check('draw reduces balance with reason (#144)', rets[0].balance_minor === 57500
     && /draw recorded/i.test(window.document.getElementById('live-region').textContent));
@@ -1086,13 +1268,13 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
   row2.querySelectorAll('button').forEach((b) => {
     if (b.textContent === 'Draw funds') b.dispatchEvent(new window.Event('click', { bubbles: true }));
   });
-  await tick(200);
+  await waitFor(() => dialogOpen(byId('app-dialog')), { message: 'the over-draw prompt to open' });
   window.document.getElementById('dlg-input').value = '999.00';
   window.document.getElementById('dlg-ok').dispatchEvent(new window.Event('click', { bubbles: true }));
-  await tick(250);
+  await settle('the over-draw reason step to open');
   window.document.getElementById('dlg-input').value = 'greed';
   window.document.getElementById('dlg-ok').dispatchEvent(new window.Event('click', { bubbles: true }));
-  await tick(450);
+  await settle('the refused over-draw to settle');
   rets = (await (await fetch(BASE + '/api/retainers', { headers: { Cookie: SESSION_COOKIE } })).json()).retainers;
   check('overdraw refused, balance intact (#144)', rets[0].balance_minor === 57500
     && /Draw failed/i.test(window.document.getElementById('live-region').textContent));
@@ -1101,11 +1283,13 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
 // ---- RECURRING SCHEDULE MANAGEMENT (#136) ----
 {
   window.document.getElementById('tab-invoices').dispatchEvent(new window.Event('click', { bubbles: true }));
-  await tick(350);
+  await settle('the Invoices section to reload before creating the schedule');
   window.document.getElementById('rec-customer').value = acmeOpt.value;
   window.document.getElementById('rec-mode').value = 'retainer';
   window.document.getElementById('rec-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
-  await tick(300);
+  await waitFor(() => !byId('rec-error').hidden, {
+    message: 'the amount-less retainer schedule to show its inline error',
+  });
   check('retainer schedule with 0 amount shows inline error (#136)',
     !window.document.getElementById('rec-error').hidden
     && /retainer/i.test(window.document.getElementById('rec-error').textContent));
@@ -1114,13 +1298,18 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
   window.document.getElementById('rec-mode').value = 'time';
   window.document.getElementById('rec-cadence').value = 'quarterly';
   window.document.getElementById('rec-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
-  await tick(400);
+  await waitFor(() => [...window.document.querySelectorAll('#rec-table tbody button')].some((b) => b.textContent === 'Pause'), {
+    message: 'the created schedule to render with its Pause action',
+  });
   const recs = (await (await fetch(BASE + '/api/schedules', { headers: { Cookie: SESSION_COOKIE } })).json()).schedules;
   check('schedule created via the form (#136)', recs.length === 1 && recs[0].cadence === 'quarterly' && recs[0].active === true);
   const pauseBtn = [...window.document.querySelectorAll('#rec-table tbody button')].find((b) => b.textContent === 'Pause');
   check('active schedule offers Pause (#136)', !!pauseBtn);
   pauseBtn.dispatchEvent(new window.Event('click', { bubbles: true }));
-  await tick(400);
+  await waitFor(() => {
+    const row = window.document.querySelector('#rec-table tbody tr');
+    return !!row && [...row.querySelectorAll('button')].some((b) => b.textContent === 'Resume');
+  }, { message: 'the paused schedule row to re-render and offer Resume' });
   check('pause persists and announces (#136)',
     (await (await fetch(BASE + '/api/schedules', { headers: { Cookie: SESSION_COOKIE } })).json()).schedules[0].active === false
     && /paused/i.test(window.document.getElementById('live-region').textContent));
@@ -1129,14 +1318,19 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
     /paused/i.test(row.textContent) && /never/i.test(row.textContent));
   const resumeBtn = [...row.querySelectorAll('button')].find((b) => b.textContent === 'Resume');
   resumeBtn.dispatchEvent(new window.Event('click', { bubbles: true }));
-  await tick(300);
+  await waitFor(() => {
+    const row = window.document.querySelector('#rec-table tbody tr');
+    return !!row && [...row.querySelectorAll('button')].some((b) => b.textContent === 'Pause');
+  }, { message: 'the resumed schedule row to re-render and offer Pause again' });
   check('resume works (#136)',
     (await (await fetch(BASE + '/api/schedules', { headers: { Cookie: SESSION_COOKIE } })).json()).schedules[0].active === true);
   const delBtn = [...window.document.querySelectorAll('#rec-table tbody button')].find((b) => b.textContent === 'Delete');
   delBtn.dispatchEvent(new window.Event('click', { bubbles: true }));
-  await tick(200);
+  await waitFor(() => dialogOpen(byId('app-dialog')), { message: 'the delete-schedule confirm dialog to open' });
   window.document.getElementById('dlg-ok').dispatchEvent(new window.Event('click', { bubbles: true }));
-  await tick(300);
+  await waitFor(() => !window.document.getElementById('rec-empty').hidden, {
+    message: 'the deleted schedule to leave the empty state visible',
+  });
   check('delete removes the schedule (#136)',
     (await (await fetch(BASE + '/api/schedules', { headers: { Cookie: SESSION_COOKIE } })).json()).schedules.length === 0
     && !window.document.getElementById('rec-empty').hidden);
@@ -1146,46 +1340,58 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
 // ---- INVOICE OVERVIEW (#135): tabs, search, sort, columns, tiles, keyboard ----
 {
   window.document.getElementById('tab-invoices').dispatchEvent(new window.Event('click', { bubbles: true }));
-  await tick(350);
+  await waitFor(() => window.document.getElementById('inv-chart').querySelectorAll('.inv-bar').length === 24, {
+    message: 'the invoice overview tiles and chart to render',
+  });
   check('overview tiles + chart render (#135)',
     /EUR \d/.test(window.document.getElementById('inv-tile-open').textContent)
     && window.document.getElementById('inv-chart').querySelectorAll('.inv-bar').length === 24);
   const countRows = () => window.document.querySelectorAll('#invoice-table tbody tr').length;
   const openRows = countRows();
   window.document.getElementById('inv-tab-all').dispatchEvent(new window.Event('click', { bubbles: true }));
-  await tick(350);
+  await settle('the invoice table to reload for the All tab');
   check('All tab shows at least the Open rows (#135)', countRows() >= openRows);
   const sBox = window.document.getElementById('invoice-search');
   sBox.value = 'ZZZ-no-match';
   sBox.dispatchEvent(new window.Event('input', { bubbles: true }));
-  await tick(400);
+  await waitFor(() => window.document.getElementById('invoice-empty').hidden === false, {
+    message: 'the unmatched invoice search to show its empty state',
+  });
   check('search empty-state is explicit (#135)',
     window.document.getElementById('invoice-empty').hidden === false
     && /match the current filters/i.test(window.document.getElementById('invoice-empty').textContent));
   sBox.value = 'INV';
   sBox.dispatchEvent(new window.Event('input', { bubbles: true }));
-  await tick(350);
+  await waitFor(() => countRows() >= 1, { message: 'the INV search to match rows again' });
   check('search matches by number (#135)', countRows() >= 1);
   sBox.value = '';
   sBox.dispatchEvent(new window.Event('input', { bubbles: true }));
-  await tick(350);
+  await settle('the cleared invoice search to re-render before switching tabs');
   window.document.getElementById('inv-tab-all').dispatchEvent(new window.Event('click', { bubbles: true }));
-  await tick(300);
+  await waitFor(() => countRows() > 1, { message: 'the All tab to list the invoices to sort' });
   // sort by total desc then asc
   const totalBtn = window.document.querySelector('.sort-th[data-col="total"]');
+  const sortedTotals = () => [...window.document.querySelectorAll('#invoice-table tbody tr')].map((r) => r.children[3].textContent);
   totalBtn.dispatchEvent(new window.Event('click', { bubbles: true }));
-  await tick(300);
-  const asc = [...window.document.querySelectorAll('#invoice-table tbody tr')].map((r) => r.children[3].textContent);
+  await waitFor(() => totalBtn.closest('th').getAttribute('aria-sort') === 'ascending', {
+    message: 'sorting by total to render ascending',
+  });
+  const asc = sortedTotals();
   totalBtn.dispatchEvent(new window.Event('click', { bubbles: true }));
-  await tick(300);
-  const desc = [...window.document.querySelectorAll('#invoice-table tbody tr')].map((r) => r.children[3].textContent);
+  await waitFor(() => JSON.stringify(sortedTotals()) !== JSON.stringify(asc)
+    && totalBtn.closest('th').getAttribute('aria-sort') === 'descending', {
+    message: 'sorting by total again to re-render the rows in the opposite order',
+  });
+  const desc = sortedTotals();
   check('sorting by total toggles direction (#135)', asc.length > 1 && JSON.stringify(asc) !== JSON.stringify(desc)
     && totalBtn.closest('th').getAttribute('aria-sort') === 'descending');
   // column toggle
   const colCb = window.document.querySelector('.inv-col[value="customer"]');
   colCb.checked = false;
   colCb.dispatchEvent(new window.Event('change', { bubbles: true }));
-  await tick(150);
+  await waitFor(() => window.document.querySelector('#invoice-table tbody tr').children[1].hidden === true, {
+    message: 'the column toggle to hide the customer column',
+  });
   check('column toggle hides the customer column (#135)',
     window.document.querySelector('#invoice-table tbody tr').children[1].hidden === true);
   colCb.checked = true;
@@ -1193,7 +1399,10 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
   // keyboard selection opens the #133 preview
   const kbRow = window.document.querySelector('#invoice-table tbody tr');
   kbRow.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-  await tick(400);
+  await waitFor(() => byId('invoice-preview').hidden === false
+    && /Previewing invoice/.test(byId('live-region').textContent), {
+    message: 'keyboard Enter on a row to open the preview',
+  });
   check('keyboard Enter on a row opens the preview (#135/#133)',
     window.document.getElementById('invoice-preview').hidden === false
     && /Previewing invoice/.test(window.document.getElementById('live-region').textContent));
@@ -1216,12 +1425,18 @@ check('invoice email endpoint sends to the billing address', emailRes.status ===
 
 // The GUI shows an Email button on the issued invoice and announces the send.
 window.document.getElementById('tab-invoices').dispatchEvent(new window.Event('click', { bubbles: true }));
-await tick(300); // tab is shown -> refreshInvoices() re-pulls, now reflecting the issued state
+// Tab is shown -> refreshInvoices() re-pulls; wait for the issued-state Email
+// action instead of racing the refresh (#265).
+await waitFor(() => [...window.document.querySelectorAll('#invoice-table tbody button')].some((b) => b.textContent === 'Email'), {
+  message: 'the invoice table to re-pull and offer the Email action',
+});
 const emailBtn = [...window.document.querySelectorAll('#invoice-table tbody button')].find((b) => b.textContent === 'Email');
 check('issued invoice renders an Email button', !!emailBtn);
 if (emailBtn) {
   emailBtn.dispatchEvent(new window.Event('click', { bubbles: true }));
-  await tick(300);
+  await waitFor(() => /billing@acme.test/.test(byId('live-region').textContent), {
+    message: 'the Email action to announce the send',
+  });
   {
   const t = window.document.getElementById('live-region').textContent;
   // #130 honesty: either a real send (smtp) or an explicit NOT-sent with the
@@ -1245,7 +1460,9 @@ if (pdfBtn) {
     return node;
   };
   pdfBtn.dispatchEvent(new window.Event('click', { bubbles: true }));
-  await tick(400);
+  await waitFor(() => savedName !== null && /Invoice PDF downloaded/i.test(byId('live-region').textContent), {
+    message: 'the PDF download to click its numbered blob link',
+  });
   window.document.createElement = origCreate;
   check('PDF button saves the numbered file', !!savedName && /^INV-\d+\.pdf$/.test(savedName));
   check('PDF download announces success', /Invoice PDF downloaded/i.test(window.document.getElementById('live-region').textContent));
@@ -1255,12 +1472,14 @@ const copyBtn = [...window.document.querySelectorAll('#invoice-table tbody butto
 check('issued invoice renders an Email copy button', !!copyBtn);
 if (copyBtn) {
   copyBtn.dispatchEvent(new window.Event('click', { bubbles: true }));
-  await tick(200);
+  await waitFor(() => dialogOpen(byId('app-dialog')), { message: 'the Email copy prompt to open' });
   const dlg = window.document.getElementById('app-dialog');
   check('Email copy prompts for a recipient address', dlg.open === true || dlg.hasAttribute('open'));
   window.document.getElementById('dlg-input').value = 'accountant@gui.test';
   window.document.getElementById('dlg-ok').dispatchEvent(new window.Event('click', { bubbles: true }));
-  await tick(400);
+  await waitFor(() => /accountant@gui.test/.test(byId('live-region').textContent), {
+    message: 'the Email copy to announce its recipient',
+  });
   check('Email copy announces honestly', /accountant@gui.test/.test(window.document.getElementById('live-region').textContent));
   const audit = await (await fetch(BASE + '/api/audit', { headers: { Cookie: SESSION_COOKIE } })).json();
   check(
@@ -1290,7 +1509,9 @@ check('invoice rows no longer render a Sync button (#129)', !rowBtns().includes(
   const stJson = await stRes.json();
   check('accounting status endpoint responds', stRes.status === 200 && Array.isArray(stJson.records));
   window.document.getElementById('tab-invoices').dispatchEvent(new window.Event('click', { bubbles: true }));
-  await tick(300);
+  await waitFor(() => rowBtns().includes('PDF') && rowBtns().includes('Email copy'), {
+    message: 'the paid row to re-render with its PDF and Email copy actions',
+  });
   check('paid row still offers PDF + Email copy after the trim (#129)',
     rowBtns().includes('PDF') && rowBtns().includes('Email copy'));
 
@@ -1304,7 +1525,7 @@ check('invoice rows no longer render a Sync button (#129)', !rowBtns().includes(
 // ---- EXPENSES (#23): popup entry, seeded categories, and Settings CRUD ----
 const tabExp = window.document.getElementById('tab-expenses');
 tabExp.dispatchEvent(new window.Event('click', { bubbles: true }));
-await tick(250);
+await waitFor(() => !byId('panel-expenses').hidden, { message: 'the Expenses section to show' });
 let cats = (await (await fetch(BASE + '/api/categories')).json()).categories;
 check('fresh installation seeds five common expense categories',
   ['Food', 'Travel', 'Lodging', 'Supplies', 'Software'].every((name) => cats.some((category) => category.name === name)));
@@ -1323,26 +1544,26 @@ catPicker.dispatchEvent(new window.Event('change', { bubbles: true }));
 check('Add new category opens the quick-add popup', window.document.getElementById('expense-category-dialog').open === true);
 window.document.getElementById('expense-category-name').value = 'Client Visit';
 window.document.getElementById('expense-category-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
-await tick(250);
+await settle('the quick-added expense category to save and select');
 cats = (await (await fetch(BASE + '/api/categories')).json()).categories;
 const clientVisit = cats.find((category) => category.name === 'Client Visit');
 check('quick-added category is persisted and selected', !!clientVisit && catPicker.value === clientVisit.id);
 window.document.getElementById('expense-date').value = '2026-10-05';
 window.document.getElementById('expense-customer').value = acmeOpt.value;
 window.document.getElementById('expense-customer').dispatchEvent(new window.Event('change', { bubbles: true }));
-await tick(150);
+await settle('the expense form to follow the customer change');
 window.document.getElementById('expense-category').value = clientVisit.id;
 window.document.getElementById('expense-amount').value = '125.00';
 window.document.getElementById('expense-currency').value = 'EUR';
 window.document.getElementById('expense-note').value = 'client visit flight';
 window.document.getElementById('expense-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
-await tick(250);
+await settle('the expense to save through the popup');
 const exps = (await (await fetch(BASE + '/api/expenses')).json()).expenses;
 const ex = exps.find((e) => e.note === 'client visit flight');
 check('expense created via popup with category + amount', ex && ex.amount_minor === 12500 && ex.category_id === clientVisit.id);
 check('successful expense save closes popup', window.document.getElementById('expense-dialog').open === false);
 window.document.getElementById('tab-settings').dispatchEvent(new window.Event('click', { bubbles: true }));
-await tick(250);
+await waitFor(() => !byId('panel-settings').hidden, { message: 'the Settings section to show' });
 window.document.getElementById('settings-tab-expenses').dispatchEvent(new window.Event('click', { bubbles: true }));
 check('Expense categories has a dedicated Settings panel',
   window.document.getElementById('settings-tab-expenses').getAttribute('aria-selected') === 'true'
@@ -1351,7 +1572,7 @@ const editClientVisit = window.document.querySelector('#category-list button[ari
 editClientVisit.dispatchEvent(new window.Event('click', { bubbles: true }));
 window.document.getElementById('category-name').value = 'Client visit costs';
 window.document.getElementById('category-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
-await tick(250);
+await settle('the edited expense category to save');
 cats = (await (await fetch(BASE + '/api/categories')).json()).categories;
 check('Settings category form updates existing category via PUT',
   cats.some((category) => category.id === clientVisit.id && category.name === 'Client visit costs'));
@@ -1362,7 +1583,7 @@ const tabSub = window.document.getElementById('tab-submissions');
 tabSub.dispatchEvent(new window.Event('click', { bubbles: true }));
 window.document.getElementById('submission-week').value = '2027-01-04';
 window.document.getElementById('submission-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
-await tick(250);
+await settle('the week submission to be created');
 const subs = (await (await fetch(BASE + '/api/submissions')).json()).submissions;
 const jan = subs.find((x) => x.week_start === '2027-01-04');
 check('submission created via GUI', jan && jan.state === 'submitted' && jan.entry_ids.includes(fresh.id));
@@ -1374,7 +1595,9 @@ window.document.getElementById('ts-week').dispatchEvent(new window.Event('click'
 const weekDateEl = window.document.getElementById('week-date');
 weekDateEl.value = '2026-12-07';
 weekDateEl.dispatchEvent(new window.Event('change', { bubbles: true }));
-await tick(300);
+await waitFor(() => window.document.querySelector('#week-table tbody .week-empty-notice') !== null, {
+  message: 'the empty week to render its notice row',
+});
 const emptyWeekNotice = window.document.querySelector('#week-table tbody .week-empty-notice');
 check('empty week keeps its table and headers visible',
   !window.document.getElementById('week-table').hidden
@@ -1387,7 +1610,9 @@ check('empty week notice spans every column inside the table',
 // Copy last week's project rows into an empty week (MKT-2 has 2026-12-01).
 const copyWeeks = window.document.getElementById('week-copy-previous');
 copyWeeks.click();
-await tick(400);
+await waitFor(() => [...window.document.querySelectorAll('#week-table tbody tr')].some((r) => r.textContent.includes('MKT-2')), {
+  message: 'copy-from-last-week to add the MKT-2 row',
+});
 const wkBody = window.document.querySelector('#week-table tbody');
 const copiedRow = [...wkBody.querySelectorAll('tr')].find((r) => r.textContent.includes('MKT-2'));
 check('copy-from-last-week added the MKT-2 row', !!copiedRow);
@@ -1399,26 +1624,34 @@ check('copied row total is 0:00', copiedRow && copiedRow.querySelector('.row-tot
 // #128: re-copy is idempotent and says so; empty copied rows belong to THIS
 // week (gone when viewing another week, back when returning).
 copyWeeks.click();
-await tick(400);
+await waitFor(() => /Already copied|already in this week/i.test(byId('live-region').textContent), {
+  message: 'the re-copy to announce its idempotency',
+});
 const rowsAfter2 = [...window.document.querySelectorAll('#week-table tbody tr')].filter((r) => r.textContent.includes('MKT-2')).length;
 check('re-copy adds no duplicate rows (#128)', rowsAfter2 === 1);
 check('re-copy announces idempotency (#128)',
   /Already copied|already in this week/i.test(window.document.getElementById('live-region').textContent));
 weekDateEl.value = '2026-12-14';
 weekDateEl.dispatchEvent(new window.Event('change', { bubbles: true }));
-await tick(300);
+await waitFor(() => ![...window.document.querySelectorAll('#week-table tbody tr')].some((r) => r.textContent.includes('MKT-2')), {
+  message: 'the other week to render without the copied rows',
+});
 check('copied empty rows do not leak into other weeks (#128)',
   ![...window.document.querySelectorAll('#week-table tbody tr')].some((r) => r.textContent.includes('MKT-2')));
 weekDateEl.value = '2026-12-07';
 weekDateEl.dispatchEvent(new window.Event('change', { bubbles: true }));
-await tick(300);
+await waitFor(() => [...window.document.querySelectorAll('#week-table tbody tr')].some((r) => r.textContent.includes('MKT-2')), {
+  message: 'the copied rows to return when the week is redisplayed',
+});
 check('copied rows return when the week is redisplayed (#128)',
   [...window.document.querySelectorAll('#week-table tbody tr')].some((r) => r.textContent.includes('MKT-2')));
 
 // Lock column: the submitted 2027-01 week renders its cell disabled.
 weekDateEl.value = '2027-01-05';
 weekDateEl.dispatchEvent(new window.Event('change', { bubbles: true }));
-await tick(300);
+await waitFor(() => window.document.querySelector('#week-table input.cell-input[data-date="2027-01-05"]') !== null, {
+  message: 'the submitted week to render its locked cell',
+});
 const janRow = [...window.document.querySelectorAll('#week-table tbody tr')].find(
   (r) => r.textContent.includes('P-9') && r.textContent.includes('ACME'),
 );
@@ -1429,7 +1662,9 @@ check('locked row marked for the lock column', !!lockedCell && lockedCell.closes
 
 // ---- CONFIG (#94): effective config renders + edit persists + source flips ----
 window.document.getElementById('tab-settings').dispatchEvent(new window.Event('click', { bubbles: true }));
-await tick(250);
+await waitFor(() => window.document.querySelectorAll('#config-table tbody tr').length >= 5, {
+  message: 'the config table to render its whitelisted rows',
+});
 window.document.getElementById('settings-tab-security').dispatchEvent(new window.Event('click', { bubbles: true }));
 const cfgRows = [...window.document.querySelectorAll('#config-table tbody tr')];
 check('config table renders whitelisted rows', cfgRows.length >= 5);
@@ -1439,7 +1674,11 @@ if (daysRow) {
   window.document.getElementById('config-key').value = 'reminder_days';
   window.document.getElementById('config-value').value = '12';
   window.document.getElementById('config-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
-  await tick(300);
+  await waitFor(() => {
+    const row = [...window.document.querySelectorAll('#config-table tbody tr')]
+      .find((r) => r.cells[0].textContent === 'reminder_days');
+    return !!row && row.cells[1].textContent === '12';
+  }, { message: 'the edited config row to re-render with its new value' });
   const after = [...window.document.querySelectorAll('#config-table tbody tr')].find((r) => r.cells[0].textContent === 'reminder_days');
   check('edit persists to config.json and source becomes file', after.cells[1].textContent === '12' && after.cells[2].textContent === 'file');
 }
@@ -1449,7 +1688,9 @@ check('secret-shaped config keys are refused', badCfg.status === 422);
 
 // ---- INVOICE TEMPLATE (#116): admin editor, cheat-sheet, rejection, preview ----
 window.document.getElementById('tab-settings').dispatchEvent(new window.Event('click', { bubbles: true }));
-await tick(300);
+await waitFor(() => /Email delivery:/i.test(byId('email-status').textContent), {
+  message: 'the Settings email transport state to render',
+});
 window.document.getElementById('settings-tab-security').dispatchEvent(new window.Event('click', { bubbles: true }));
 check('Settings discloses the email transport state (#130)',
   /Email delivery:/i.test(window.document.getElementById('email-status').textContent));
@@ -1467,14 +1708,16 @@ window.document.getElementById('settings-tab-invoice').dispatchEvent(new window.
     window.document.getElementById('accent-swatch').style.background !== '');
   window.document.getElementById('org-name').value = 'Acme Invoice Co';
   window.document.getElementById('org-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
-  await tick(350);
+  await settle('the organisation sender settings to save');
   const o = await (await fetch(BASE + '/api/admin/org', { headers: { Cookie: SESSION_COOKIE } })).json();
   check('sender display name + reply-to + accent persist (#146)',
     o.from_name === 'Tucano Billing Desk' && o.reply_to === 'invoices@acme.test' && o.accent === '#e95420');
   // Invalid reply-to refuses with an inline error and stores nothing.
   set('org-reply', 'not-an-email');
   window.document.getElementById('org-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
-  await tick(300);
+  await waitFor(() => !byId('org-error').hidden && /reply/i.test(byId('org-error').textContent), {
+    message: 'the invalid Reply-To to show its inline error',
+  });
   const o2 = await (await fetch(BASE + '/api/admin/org', { headers: { Cookie: SESSION_COOKIE } })).json();
   check('invalid Reply-To shows inline error and persists nothing (#146)',
     !window.document.getElementById('org-error').hidden
@@ -1489,7 +1732,7 @@ check('company identity form saves and reloads (#138)', await (async () => {
   window.document.getElementById('org-city').value = 'Milan';
   window.document.getElementById('org-country').value = 'IT';
   window.document.getElementById('org-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
-  await tick(350);
+  await settle('the company identity form to save');
   const o = await (await fetch(BASE + '/api/admin/org', { headers: { Cookie: SESSION_COOKIE } })).json();
   return o.name === 'Tucano SRL' && o.legal_id === 'BE0987654321' && o.address.country === 'IT'
     && !window.document.getElementById('org-error').hidden === false;
@@ -1505,7 +1748,9 @@ window.document.getElementById('template-terms').value = 'net_30';
 window.document.getElementById('template-terms').dispatchEvent(new window.Event('change', { bubbles: true }));
 window.document.getElementById('template-body').value = 'bad %nope% here';
 window.document.getElementById('template-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
-await tick(300);
+await waitFor(() => !byId('template-error').hidden, {
+  message: 'the unknown template variable to show its inline error',
+});
 check('unknown %variable% shows an inline error', !window.document.getElementById('template-error').hidden
   && window.document.getElementById('template-error').textContent.includes('%nope%'));
 // Fix it and save; terms select toggles the days field for custom.
@@ -1515,7 +1760,7 @@ window.document.getElementById('template-terms').dispatchEvent(new window.Event(
 check('custom terms reveal the days input', !window.document.getElementById('template-terms-days-field').hidden);
 window.document.getElementById('template-terms-days').value = '21';
 window.document.getElementById('template-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
-await tick(300);
+await settle('the template with custom terms to save');
 const tpl = await (await fetch(BASE + '/api/admin/invoice-template', { headers: { Cookie: SESSION_COOKIE } })).json();
 check('template saved with custom terms', tpl.template.body.includes('%customer_name%') && tpl.template.payment_terms.kind === 'custom' && tpl.template.payment_terms.days === 21);
 check('template save announced', /template saved/i.test(window.document.getElementById('live-region').textContent));
@@ -1529,7 +1774,7 @@ window.document.getElementById('customer-terms').value = 'upon_receipt';
 window.document.getElementById('customer-subject').value = 'INV %invoice_number% for %customer_name%';
 window.document.getElementById('customer-notes').value = 'Please quote the invoice number.';
 window.document.getElementById('customer-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
-await tick(400);
+await settle('the Termy LLC customer to save');
 const termCusts = (await (await fetch(BASE + '/api/customers', { headers: { Cookie: SESSION_COOKIE } })).json()).customers;
 const termy = termCusts.find((c) => c.name === 'Termy LLC');
 check('customer invoice fields persist via the form', !!termy && termy.payment_terms.kind === 'upon_receipt'
@@ -1554,7 +1799,7 @@ check('customer invoice fields persist via the form', !!termy && termy.payment_t
     inputs[3].checked = true; // billing contact
   }
   window.document.getElementById('customer-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
-  await tick(400);
+  await settle('the AddrCo customer to save');
   const addrCusts = (await (await fetch(BASE + '/api/customers', { headers: { Cookie: SESSION_COOKIE } })).json()).customers;
   const addrCo = addrCusts.find((x) => x.name === 'AddrCo');
   check('customer address + VAT persist via the form (#139)',
@@ -1565,7 +1810,9 @@ check('customer invoice fields persist via the form', !!termy && termy.payment_t
 
 // Document preview card uses GET /invoices/{id}/document on the newest invoice.
 window.document.getElementById('tab-settings').dispatchEvent(new window.Event('click', { bubbles: true }));
-await tick(400);
+await waitFor(() => byId('template-preview').hidden === false && byId('template-preview-subject').textContent.includes('Invoice '), {
+  message: 'the template preview card to render the subject',
+});
 const prev = window.document.getElementById('template-preview');
 check('template preview card shows the rendered subject', !prev.hidden
   && window.document.getElementById('template-preview-subject').textContent.includes('Invoice '));
@@ -1585,7 +1832,10 @@ const inv114 = await (await fetch(BASE + '/api/invoices', {
 })).json();
 await fetch(`${BASE}/api/invoices/${inv114.id}/issue`, { method: 'POST', headers: { Cookie: SESSION_COOKIE, 'X-CSRF-Protection': '1' } });
 window.document.getElementById('tab-invoices').dispatchEvent(new window.Event('click', { bubbles: true }));
-await tick(300);
+await waitFor(() => [...window.document.querySelectorAll('#invoice-table tbody tr')]
+  .filter((r) => r.textContent.includes(inv114.number)).length === 1, {
+  message: 'the issued invoice row to render with its balance',
+});
 const balCells = [...window.document.querySelectorAll('#invoice-table tbody tr')]
   .filter((r) => r.textContent.includes(inv114.number))
   .map((r) => r.children[4].textContent.trim());
@@ -1595,15 +1845,19 @@ const recBtn = [...window.document.querySelectorAll('#invoice-table tbody button
 check('issued invoice renders Record payment (replacing Mark paid)', !!recBtn);
 if (recBtn) {
   recBtn.dispatchEvent(new window.Event('click', { bubbles: true }));
-  await tick(200);
+  await waitFor(() => /^\d+\.\d\d$/.test(byId('dlg-input').value), {
+    message: 'the record-payment dialog to prefill the outstanding balance',
+  });
   const dlgIn = window.document.getElementById('dlg-input');
   check('record-payment dialog prefills the balance', /^\d+\.\d\d$/.test(dlgIn.value));
   const owed = dlgIn.value;
   dlgIn.value = '10.00';
   window.document.getElementById('dlg-ok').dispatchEvent(new window.Event('click', { bubbles: true }));
-  await tick(200);
+  await settle('the payment reference step to open');
   window.document.getElementById('dlg-ok').dispatchEvent(new window.Event('click', { bubbles: true })); // reference step: empty ok
-  await tick(400);
+  await waitFor(() => /still outstanding/i.test(byId('live-region').textContent), {
+    message: 'the partial payment to announce the remaining balance',
+  });
   const after = await (await fetch(`${BASE}/api/invoices/${inv114.id}`, { headers: { Cookie: SESSION_COOKIE } })).json();
   check('partial payment recorded as partly_paid with a ledger line', after.status === 'partly_paid' && after.payments.length === 1 && after.payments[0].amount_minor === 1000);
   check('record payment announces remaining balance', /still outstanding/i.test(window.document.getElementById('live-region').textContent));
@@ -1613,12 +1867,14 @@ if (recBtn) {
   check('partly_paid invoice offers Write off', !!woBtn);
   if (woBtn) {
     woBtn.dispatchEvent(new window.Event('click', { bubbles: true }));
-    await tick(200);
+    await waitFor(() => dialogOpen(byId('app-dialog')), { message: 'the write-off reason prompt to open' });
     window.document.getElementById('dlg-input').value = 'goodwill waiver';
     window.document.getElementById('dlg-ok').dispatchEvent(new window.Event('click', { bubbles: true }));
-    await tick(200);
+    await settle('the write-off confirm step to open');
     window.document.getElementById('dlg-ok').dispatchEvent(new window.Event('click', { bubbles: true })); // confirm step
-    await tick(400);
+    await waitFor(() => /written off/i.test(byId('live-region').textContent), {
+      message: 'the write-off to be announced',
+    });
     const wo = await (await fetch(`${BASE}/api/invoices/${inv114.id}`, { headers: { Cookie: SESSION_COOKIE } })).json();
     check('write-off finalizes with the reason', wo.status === 'written_off' && wo.write_off_reason === 'goodwill waiver');
     check('write-off announced', /written off/i.test(window.document.getElementById('live-region').textContent));
@@ -1645,13 +1901,13 @@ if (recBtn) {
   // Fixtures: customers through the GUI (keeps the shared pickers fresh),
   // project + task over the API on the unique customer.
   window.document.getElementById('tab-customers').dispatchEvent(new window.Event('click', { bubbles: true }));
-  await tick(250);
+  await waitFor(() => !byId('panel-customers').hidden, { message: 'the Customers section to show' });
   const mkCustomer = async (name) => {
     window.document.getElementById('customer-name').value = name;
     window.document.getElementById('customer-currency').value = 'EUR';
     window.document.getElementById('customer-rate').value = '90';
     window.document.getElementById('customer-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
-    await tick(350);
+    await settle(`the fixture customer ${name} to save`);
     return (await getJson('/api/customers')).customers.find((c) => c.name === name);
   };
   const wfCust = await mkCustomer(`WF-${tag}`);
@@ -1661,32 +1917,44 @@ if (recBtn) {
 
   // ---- DAY: one billable entry with a note through the dialog (#145) ----
   window.document.getElementById('tab-timesheet').dispatchEvent(new window.Event('click', { bubbles: true }));
-  await tick(250);
+  await waitFor(() => !byId('panel-timesheet').hidden, { message: 'the Timesheets section to show' });
   window.document.getElementById('ts-day').dispatchEvent(new window.Event('click', { bubbles: true }));
-  await tick(200);
+  await waitFor(() => byId('ts-day').getAttribute('aria-selected') === 'true', {
+    message: 'the Day segment to be selected',
+  });
   const wfDay = window.document.getElementById('day-date');
   wfDay.value = '2031-04-11';
   ev(wfDay, 'change');
-  await tick(250);
+  await waitFor(() => {
+    const selected = window.document.querySelector('#week-strip .ws-day.selected');
+    return byId('day-date').value === '2031-04-11'
+      && !!selected && selected.dataset.date === '2031-04-11';
+  }, { message: 'the Day view to load 2031-04-11' });
   window.document.getElementById('day-add').dispatchEvent(new window.Event('click', { bubbles: true }));
-  await tick(150);
+  await waitFor(() => dialogOpen(byId('entry-dialog')), { message: 'the Track time entry dialog to open' });
   const wfDlg = window.document.getElementById('entry-dialog');
   check('Track time opens the entry dialog (#141/#145)', wfDlg.open === true || wfDlg.hasAttribute('open'));
   const wfCustSel = window.document.getElementById('entry-customer');
   wfCustSel.value = wfCust.id;
   ev(wfCustSel, 'change');
-  await tick(250);
+  await waitFor(() => [...byId('entry-project').options].some((o) => o.value === 'W1'), {
+    message: 'the entry project picker to load W1',
+  });
   const wfProjSel = window.document.getElementById('entry-project');
   wfProjSel.value = 'W1';
   ev(wfProjSel, 'change');
-  await tick(250);
+  await waitFor(() => [...byId('entry-task').options].some((o) => o.value === 'T1'), {
+    message: 'the entry task picker to load T1',
+  });
   window.document.getElementById('entry-task').value = 'T1';
   window.document.getElementById('entry-hours').value = '3.25';
   window.document.getElementById('entry-note').value = 'wf: legal research';
   window.document.getElementById('entry-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
-  await tick(450);
+  await waitFor(() => byId('day-total').textContent.trim() === '3:15', {
+    message: 'the Day view to reconcile the new 3.25h entry',
+  });
   wfDlg.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-  await tick(150);
+  await waitFor(() => !dialogOpen(byId('entry-dialog')), { message: 'Escape to close the entry dialog' });
   const wfEntry = (await getJson('/api/entries?date=2031-04-11')).entries
     .find((e) => e.customer_id === wfCust.id && e.project_code === 'W1');
   check('day entry created on the task, billable, with note (#141)',
@@ -1708,7 +1976,9 @@ if (recBtn) {
   const wfWeek = window.document.getElementById('week-date');
   wfWeek.value = '2031-04-07';
   ev(wfWeek, 'change');
-  await tick(400);
+  await waitFor(() => window.document.querySelector('#week-table input[data-date="2031-04-11"][data-task="T1"]') !== null, {
+    message: 'the week grid to render the W1 \u00b7 T1 task-level row',
+  });
   const wfRow = [...window.document.querySelectorAll('#week-table tbody tr')].find((r) => r.textContent.includes('W1 \u00b7 T1'));
   const wfCell = window.document.querySelector('#week-table input[data-date="2031-04-11"][data-task="T1"]');
   check('week renders the task-level row with the entry cell (#141/#137)',
@@ -1721,35 +1991,41 @@ if (recBtn) {
 
   // ---- TRACKED INVOICE WIZARD (#134): review, then save DRAFT ----
   window.document.getElementById('tab-invoices').dispatchEvent(new window.Event('click', { bubbles: true }));
-  await tick(300);
+  await settle('the Invoices section to reload before reading the draft count');
   const invsBefore = (await getJson('/api/invoices')).invoices.length;
   window.document.getElementById('iw-customer').value = wfCust.id;
   window.document.getElementById('iw-next').dispatchEvent(new window.Event('click', { bubbles: true }));
-  await tick(300);
+  await waitFor(() => byId('iw-step2').hidden === false, { message: 'the invoice wizard to advance to step 2' });
   window.document.getElementById('iw-preset').value = 'custom';
   ev(window.document.getElementById('iw-preset'), 'change');
   const wfFrom = window.document.getElementById('iw-from');
   wfFrom.value = '2031-04-01';
   ev(wfFrom, 'change');
-  await tick(200);
+  await settle('the wizard period to reload from the new start date');
   const wfTo = window.document.getElementById('iw-to');
   wfTo.value = '2031-04-30';
   ev(wfTo, 'change');
-  await tick(300);
+  await waitFor(() => /W1.*3\.25 h unbilled/.test(byId('iw-projects').textContent), {
+    message: 'the wizard to list the fixture project with its unbilled hours',
+  });
   const wfBox = window.document.getElementById('iw-projects');
   check('wizard lists exactly the fixture project with unbilled hours (#141)',
     /W1.*3\.25 h unbilled/.test(wfBox.textContent)
     && wfBox.querySelectorAll('input[type=checkbox]').length === 1);
   wfBox.querySelector('input[type=checkbox]').checked = true;
   window.document.getElementById('iw-next').dispatchEvent(new window.Event('click', { bubbles: true }));
-  await tick(600);
+  await waitFor(() => /227\.50/.test(byId('iw-summary').textContent + byId('iw-lines').textContent), {
+    message: 'the wizard review to total the fixture line at 227.50 EUR',
+  });
   const wfReview = window.document.getElementById('iw-summary').textContent + ' | ' + window.document.getElementById('iw-lines').textContent;
   check('review shows the exact line, currency and 227.50 EUR (#141)',
     /227\.50/.test(wfReview) && /EUR/.test(wfReview) && /W1/.test(wfReview));
   check('review is persisted nothing before Save (#141)',
     (await getJson('/api/invoices')).invoices.length === invsBefore);
   window.document.getElementById('iw-save').dispatchEvent(new window.Event('click', { bubbles: true }));
-  await tick(550);
+  await waitFor(() => /Draft INV-\d+ created from 1 line/.test(byId('live-region').textContent), {
+    message: 'saving the wizard selection to announce the draft',
+  });
   check('save announced a draft with Issue still ahead (#141)',
     /Draft INV-\d+ created from 1 line/.test(window.document.getElementById('live-region').textContent));
   const wfInv = (await getJson('/api/invoices')).invoices.find((i) => i.customer_id === wfCust.id);
@@ -1774,14 +2050,18 @@ if (recBtn) {
   const wfAll = window.document.getElementById('inv-tab-all');
   const wfSearch = window.document.getElementById('invoice-search');
   wfOpen.dispatchEvent(new window.Event('click', { bubbles: true }));
-  await tick(300);
+  await waitFor(() => wfOpen.getAttribute('aria-pressed') === 'true', {
+    message: 'the Open tab to become the active invoice filter',
+  });
   wfSearch.value = wfInv.number;
   ev(wfSearch, 'input');
-  await tick(300);
+  await settle('the draft-number search to re-render the Open list');
   const openHas = [...window.document.querySelectorAll('#invoice-table tbody tr')]
     .some((r) => r.textContent.includes(wfInv.number));
   wfAll.dispatchEvent(new window.Event('click', { bubbles: true }));
-  await tick(300);
+  await waitFor(() => [...window.document.querySelectorAll('#invoice-table tbody tr')].some((r) => r.textContent.includes(wfInv.number)), {
+    message: 'the All tab to list the searched draft',
+  });
   const allHas = [...window.document.querySelectorAll('#invoice-table tbody tr')]
     .some((r) => r.textContent.includes(wfInv.number));
   check('draft invisible on Open, searchable on All; tab states honest (#141/#135)',
@@ -1789,26 +2069,30 @@ if (recBtn) {
     && wfOpen.getAttribute('aria-pressed') === 'false');
   wfSearch.value = '';
   ev(wfSearch, 'input');
-  await tick(200);
+  await settle('the cleared draft-number search to re-render');
 
   // ---- NO BILLABLE WORK: explains itself, persists nothing (#141) ----
   window.document.getElementById('iw-customer').value = weCust.id;
   window.document.getElementById('iw-next').dispatchEvent(new window.Event('click', { bubbles: true }));
-  await tick(300);
+  await waitFor(() => byId('iw-step2').hidden === false, { message: 'the invoice wizard to advance to step 2' });
   window.document.getElementById('iw-preset').value = 'custom';
   ev(window.document.getElementById('iw-preset'), 'change');
   const weFrom = window.document.getElementById('iw-from');
   weFrom.value = '2031-05-01';
   ev(weFrom, 'change');
-  await tick(200);
+  await settle('the wizard period to reload from the new start date');
   const weTo = window.document.getElementById('iw-to');
   weTo.value = '2031-05-31';
   ev(weTo, 'change');
-  await tick(300);
+  await waitFor(() => /No uninvoiced billable work/i.test(byId('iw-projects').textContent), {
+    message: 'the empty period to explain there is no billable work',
+  });
   check('empty period explains there is no billable work (#141)',
     /No uninvoiced billable work/i.test(window.document.getElementById('iw-projects').textContent));
   window.document.getElementById('iw-next').dispatchEvent(new window.Event('click', { bubbles: true }));
-  await tick(450);
+  await waitFor(() => !byId('iw-error').hidden, {
+    message: 'forcing an empty period to show its inline error',
+  });
   const weErr = window.document.getElementById('iw-error');
   check('forcing an empty period errors inline and drafts nothing (#141)',
     weErr.hidden === false && /no billable|nothing/i.test(weErr.textContent)
