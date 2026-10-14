@@ -6,9 +6,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { JSDOM } from 'jsdom';
+import { loadAppSource } from './load-app.mjs';
 
 const html = readFileSync(new URL('../web/index.html', import.meta.url), 'utf8');
-const app = readFileSync(new URL('../web/app.js', import.meta.url), 'utf8');
+const app = loadAppSource();
 
 const customers = [
   { id: 'c1', name: 'ACME', currency: 'EUR', default_rate_minor: 6000, active: true, email: '' },

@@ -32,7 +32,7 @@ use crate::domain::{
 use crate::domain::{Submission, SubmissionState};
 use crate::error::ApiError;
 use crate::report;
-use crate::store::Store;
+use crate::store::{Store, StoreError};
 
 pub mod auth;
 pub mod entries_reports;
@@ -71,7 +71,7 @@ impl FromRequestParts<AppState> for AuthUser {
         parts: &mut axum::http::request::Parts,
         state: &AppState,
     ) -> Result<Self, Self::Rejection> {
-        authenticate(state, &parts.headers).map(AuthUser)
+        authenticate(state, &parts.headers).await.map(AuthUser)
     }
 }
 
@@ -169,6 +169,9 @@ impl AppState {
         let locks = Arc::new(crate::lock::CombinedLocks::new(vec![
             Box::new(crate::lock::InvoiceLock::new(store.clone())),
             Box::new(crate::lock::SubmissionLock::new(store.clone())),
+            // #255/#190: reimbursement claims (#24) lock their expenses through
+            // the same seam instead of a direct scan in `api::expenses`.
+            Box::new(crate::lock::ClaimLock::new(store.clone())),
         ]));
         let audit = Arc::new(crate::audit::AuditLog::new(store.root()));
         let revocations = Arc::new(crate::revoke::Revocations::new(store.root()));
@@ -264,7 +267,12 @@ fn ephemeral_session() -> Session {
 }
 
 /// Resolve the current user from the request's session cookie.
-fn authenticate(state: &AppState, headers: &http::HeaderMap) -> Result<User, ApiError> {
+///
+/// #254: the two per-request disk reads (`revoked.json` and the user document,
+/// both re-parsed on every call) run on the blocking pool, never on an async
+/// worker. Ordering, freshness (the revocation file is still read on every
+/// request — review B6) and error mapping are unchanged.
+async fn authenticate(state: &AppState, headers: &http::HeaderMap) -> Result<User, ApiError> {
     let unauth = || {
         ApiError::new(
             StatusCode::UNAUTHORIZED,
@@ -281,13 +289,23 @@ fn authenticate(state: &AppState, headers: &http::HeaderMap) -> Result<User, Api
         .session
         .verify(token, state.clock.now())
         .ok_or_else(unauth)?;
-    if state.revocations.is_revoked(&claims.jti, state.clock.now()) {
-        return Err(unauth()); // logged out (#45)
-    }
-    let user = state.store.get_user(claims.uid)?.ok_or_else(unauth)?;
-    if claims.session_version != user.session_version {
-        return Err(unauth()); // credential or role changed since session issuance
-    }
+    let store = state.store.clone();
+    let revocations = state.revocations.clone();
+    let now = state.clock.now();
+    let jti = claims.jti.clone();
+    let uid = claims.uid;
+    let session_version = claims.session_version;
+    let user = blocking("auth user load", move || {
+        if revocations.is_revoked(&jti, now) {
+            return Err(unauth()); // logged out (#45)
+        }
+        let user = store.get_user(uid)?.ok_or_else(unauth)?;
+        if session_version != user.session_version {
+            return Err(unauth()); // credential or role changed since session issuance
+        }
+        Ok(user)
+    })
+    .await?;
     if !user.active {
         return Err(ApiError::new(
             StatusCode::FORBIDDEN,
@@ -327,15 +345,21 @@ pub(crate) struct NewUser {
     pub(crate) cost_rate_minor: u64,
 }
 
-pub(crate) fn new_user(
+pub(crate) async fn new_user(
     name: &str,
     email: &str,
     password: &str,
     p: NewUser,
     app: &AppState,
 ) -> Result<User, ApiError> {
-    let password_hash = crate::auth::hash_password(password)
-        .map_err(|_| ApiError::internal("password hashing failed".into()))?;
+    // #254: argon2id is deliberately ~50–100 ms of CPU — hash on the blocking
+    // pool so a burst of account creations cannot saturate the async workers.
+    let password = password.to_owned();
+    let password_hash = blocking("password hashing", move || {
+        crate::auth::hash_password(&password)
+            .map_err(|_| ApiError::internal("password hashing failed".into()))
+    })
+    .await?;
     let user = User {
         id: Uuid::new_v4(),
         name: name.to_owned(),
@@ -348,7 +372,11 @@ pub(crate) fn new_user(
         created_at: app.clock.now(),
         session_version: 1,
     };
-    app.store.put_user(&user)?;
+    let user_for_write = user.clone();
+    store_blocking("user write", &app.store, move |s| {
+        s.put_user(&user_for_write)
+    })
+    .await?;
     Ok(user)
 }
 
@@ -364,10 +392,6 @@ pub(crate) fn get_customer(store: &Store, id: Uuid) -> Result<Customer, ApiError
         .ok_or_else(|| ApiError::not_found("customer"))
 }
 
-pub(crate) fn entry_json(e: &Entry) -> serde_json::Value {
-    serde_json::to_value(e).unwrap_or(serde_json::Value::Null)
-}
-
 /// Run blocking work on the blocking pool and join it, in one place (the
 /// `spawn_blocking` + `JoinError` boilerplate lived in four handlers). The
 /// closure maps its own domain error into the endpoint's `ApiError`; a
@@ -380,6 +404,40 @@ pub(crate) async fn blocking<T: Send + 'static>(
     tokio::task::spawn_blocking(work)
         .await
         .map_err(|_| ApiError::internal(format!("{ctx} panicked")))?
+}
+
+/// Offload a synchronous `Store` operation to the blocking pool (#254). The
+/// store is entirely `std::fs`, and on contention its writer lock even polls
+/// with `std::thread::sleep` up to 5 s — running any of that on an async worker
+/// stalls unrelated requests. `T` must be `Send`; a `StoreError` maps through
+/// `From` into the usual API error shape, so the response contract is unchanged.
+pub(crate) async fn store_blocking<T, F>(
+    ctx: &str,
+    store: &Arc<Store>,
+    work: F,
+) -> Result<T, ApiError>
+where
+    T: Send + 'static,
+    F: FnOnce(&Store) -> Result<T, StoreError> + Send + 'static,
+{
+    let store = Arc::clone(store);
+    blocking(ctx, move || Ok(work(&store)?)).await
+}
+
+/// Append one audit line on the blocking pool (#254): `record` opens and writes
+/// `audit.log` under a mutex, which must not happen on an async worker. The
+/// write is best-effort by design, so a join failure is ignored, exactly as the
+/// synchronous call ignored an unwritable log.
+pub(crate) async fn record_audit(app: &AppState, event: &str, subject: &str) {
+    let audit = app.audit.clone();
+    let event = event.to_owned();
+    let subject = subject.to_owned();
+    let now = app.clock.now();
+    let _ = blocking("audit append", move || {
+        audit.record(&event, &subject, now);
+        Ok(())
+    })
+    .await;
 }
 
 /// The payments/accounting/sso provider lookup shape: a disabled or unknown
@@ -433,7 +491,7 @@ pub async fn require_auth(
     mut req: Request,
     next: axum::middleware::Next,
 ) -> Result<Response, ApiError> {
-    let user = authenticate(&app, req.headers())?;
+    let user = authenticate(&app, req.headers()).await?;
     req.extensions_mut().insert(user);
     Ok(next.run(req).await)
 }
@@ -444,7 +502,7 @@ pub async fn require_admin(
     mut req: Request,
     next: axum::middleware::Next,
 ) -> Result<Response, ApiError> {
-    let user = authenticate(&app, req.headers())?;
+    let user = authenticate(&app, req.headers()).await?;
     if user.role != Role::Admin {
         return Err(ApiError::new(
             StatusCode::FORBIDDEN,

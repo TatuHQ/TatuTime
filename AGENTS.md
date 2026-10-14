@@ -51,18 +51,24 @@ The GUI is a presentation layer and nothing more — it never reads storage.
 - **Secret vault (#77):** admin-entered integration credentials are encrypted at
   rest with `TUCANO_SECRET_KEY` (32 bytes) and never returned to clients (masked
   hints only) or logged. Fail-closed: unset key ⇒ vault disabled.
-- **Locking (#18 seam):** entry edits/deletes consult `CombinedLocks`, which
-  composes `InvoiceLock` (entries on an *open* invoice — `status.is_open()` is
-  exactly `issued | partly_paid`, #8/#114 — so settling or writing off an
-  invoice **releases** its entries: deliberate lifecycle, not an oversight.
-  A closed invoice can never change (rates/hours are snapshotted at issue),
-  while the timesheet stays correctable; a partly-paid invoice is still
-  collectable and keeps its entries frozen) and `SubmissionLock` (entries in a
-  submitted/approved week, #16). Reads are never blocked. If the lock state
-  cannot be verified the write is refused fail-closed with 503
-  `lock_unavailable` (#185) — never allowed because the check was inconclusive.
-  Reimbursement claims (#24) lock their expenses via a direct scan in
-  `api::expenses`, not through this seam (see the #190 follow-up note).
+- **Locking (#18 seam):** entry edits/deletes and expense deletes consult
+  `CombinedLocks`, which composes `InvoiceLock` (entries **and** expenses on an
+  *open* invoice — `status.is_open()` is exactly `issued | partly_paid`,
+  #8/#114 — so settling or writing off an invoice **releases** its records:
+  deliberate lifecycle, not an oversight. A closed invoice can never change
+  (rates/hours are snapshotted at issue), while the timesheet stays
+  correctable; a partly-paid invoice is still collectable and keeps its records
+  frozen), `SubmissionLock` (entries in a submitted/approved week, #16) and
+  `ClaimLock` (expenses on a submitted/approved reimbursement claim, #24 — the
+  #190 follow-up, no longer a direct scan in `api::expenses`). Reads are never
+  blocked. If the lock state cannot be verified the write is refused fail-closed
+  with 503 `lock_unavailable` (#185) — never allowed because the check was
+  inconclusive. All three providers answer from one memoized
+  `store::LockSnapshot` keyed on the source collections' directory mtimes
+  (#255): a per-record check no longer re-reads every invoice/submission/claim
+  document, a changed directory stamp forces a single re-scan (so the set can
+  never go stale behind an atomic tmp+rename write), and a scan failure is
+  never cached.
 - Every payload is validated against the contract before any write
   (`deny_unknown_fields` + `domain::validate_*`); no partial persistence.
   Errors use the single JSON shape in `openapi.json`; responses never expose
@@ -77,7 +83,7 @@ The GUI is a presentation layer and nothing more — it never reads storage.
   `/approvals`, `/reports`, `/settings/security|users|invoices|catalog|
   expenses`). `spa_page` (lib.rs) is the case-insensitive allowlist serving
   `index.html`; unknown paths keep the JSON 404. `TAB_ROUTES`/`DEFAULT_ROUTE`
-  in `web/app.js` mirror that list — change both together.
+  in `web/js/route.js` mirror that list; `tests::route_parity` fails the build if the two drift (#264).
 - `web/` is dependency-free vanilla HTML/CSS/JS embedded via rust-embed (no
   build step). All DOM data is inserted with `textContent`, never `innerHTML`.
 - **Auth (#19):** users are file-based (`users/<id>.json`), passwords argon2id,
@@ -88,13 +94,28 @@ The GUI is a presentation layer and nothing more — it never reads storage.
   the `Secure` cookie flag is the independent `TUCANO_SECURE_COOKIES` axis
   (default on iff `TUCANO_ENV=production`; `=0` allows plain-HTTP LAN serving,
   review A5). `password_hash` is never serialised to clients.
+- **SSO (#32, #260):** identity providers (OIDC/signed-token, SAML stub) are
+  additive to local login and JIT-provision members from a verified assertion.
+  `allowed_domains` is a **fail-closed allow-list**: only listed domains are
+  trusted and an empty/unset list denies every domain — `registry_from_vault`
+  then registers no provider and logs a loud boot error (#260, mirroring vault
+  #77). Provider secrets stay in the vault/env, never in the repo or responses.
 - **RBAC / private-per-user (#51):** entries and expenses carry `user_id` (the
   author). A **member** sees/edits only their own records; an **admin** sees all
   and owns `/api/invoices` (admin tier) and submission approval. Enforce via
   `visible_to()` on reads and by ownership check on mutations (a non-owned record
   returns 404, not 403, to avoid leaking existence). Customers/projects/tasks/
   categories are shared org-wide reference data (any authenticated user).
-- **Invoices (#8):** generated from a period's billable, not-yet-invoiced entries; each line snapshots the resolved rate at generation, so a later rate change never rewrites an issued invoice. Issuing sets `status=issued`, which the `InvoiceLock` (a `lock::EntryLock` provider wired in `AppState`) uses to reject edits/deletes of referenced entries with 409. Draft invoices do not lock. Invoice number is sequential (`INV-0001`).
+- **Invoices (#8):** generated from a period's billable, not-yet-invoiced entries; each line snapshots the resolved rate at generation, so a later rate change never rewrites an issued invoice. Issuing sets `status=issued`, which the `InvoiceLock` (a `lock::EntryLock` provider wired in `AppState`) uses to reject edits/deletes of referenced entries with 409. Draft invoices do not lock. Every builder (the API draft/preview pipeline and the recurring scheduler) resolves already-invoiced lines through one shared predicate, `domain::already_invoiced`, which excludes **every non-draft** invoice: settling (`paid`/`partly_paid`) or writing off an invoice releases its entries from the edit lock but never re-bills them (#248). Invoice number is sequential (`INV-0001`).
+- **HTTP status codes (C8):** a `POST` returns **201** when it mints a new,
+  client-addressable resource (`POST /api/customers`, `/api/entries`,
+  `/api/invoices`, `/api/invoices/{id}/checkout` → a new payment session, …).
+  It returns **200** when it is a *command or transition on an existing
+  resource* and hands back that resource's new state (`/invoices/{id}/issue`,
+  `/invoices/{id}/pay`, `/timer/stop` — which materialises the derived entry
+  but is a stop of the existing timer — and `/claims/{id}/submit`). The two
+  borderline cases are deliberate, not drift; the codes are pinned in
+  `openapi.json`.
 
 ### Commands
 

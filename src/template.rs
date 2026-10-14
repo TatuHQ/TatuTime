@@ -458,8 +458,10 @@ pub fn apply_doc_content(doc: &mut Doc, content: &DocContent) {
         blocks.append(&mut doc.blocks);
         doc.blocks = blocks;
     }
+    // #256: `doc.footer` is replaced wholesale below, so drain it by move
+    // rather than cloning it first.
     let mut footer = content.footer.clone();
-    footer.append(&mut doc.footer.clone());
+    footer.append(&mut doc.footer);
     doc.footer = footer;
     if !content.notes.is_empty() {
         doc.footer.extend_from_slice(&content.notes);

@@ -1,0 +1,550 @@
+// billing.js — TucanoTime GUI module (ES-module split of web/app.js, #264).
+// Moved from the original monolithic app.js; behaviour is unchanged.
+
+
+import { api } from './api.js';
+import { $, addDays, announce, askConfirm, askPrompt, clearFormError, el, formatMoney, isoDate, mondayOf, rowAction, showFormError, statusChip } from './dom.js';
+import { ed, parseHundredths, refreshInvoices } from './invoices.js';
+import { customerName, state } from './state.js';
+
+// --------------------------------------------------- invoice wizard (#134) --
+//
+// Harvest-shaped staged flow over the SAME server pipeline: preview via
+// POST /invoices/preview (nothing persisted), save via the existing
+// POST /invoices with project selection. Draft-only: issue/email/sync stay
+// separate explicit actions on the table.
+
+export const iw = { step: 1, from: '', to: '', preview: null };
+
+export function iwPresetRange(preset) {
+  const today = isoDate(new Date());
+  const d = new Date(`${today}T00:00:00Z`);
+  const first = (y, m) => `${y}-${String(m + 1).padStart(2, '0')}-01`;
+  const lastDay = (y, m) => new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+  if (preset === 'this-month') {
+    iw.from = first(d.getUTCFullYear(), d.getUTCMonth());
+    iw.to = `${iw.from.slice(0, 7)}-${String(lastDay(d.getUTCFullYear(), d.getUTCMonth())).padStart(2, '0')}`;
+  } else if (preset === 'last-month') {
+    const m = d.getUTCMonth() === 0 ? 11 : d.getUTCMonth() - 1;
+    const y = d.getUTCMonth() === 0 ? d.getUTCFullYear() - 1 : d.getUTCFullYear();
+    iw.from = first(y, m);
+    iw.to = `${iw.from.slice(0, 7)}-${String(lastDay(y, m)).padStart(2, '0')}`;
+  } else if (preset === 'this-week') {
+    iw.from = mondayOf(today);
+    iw.to = addDays(iw.from, 6);
+  } else {
+    return; // custom: inputs keep whatever the user typed
+  }
+  $('iw-from').value = iw.from;
+  $('iw-to').value = iw.to;
+}
+
+export async function iwLoadProjects() {
+  iw.from = $('iw-from').value;
+  iw.to = $('iw-to').value;
+  const box = $('iw-projects');
+  box.textContent = '';
+  const cid = $('iw-customer').value;
+  if (!cid || !iw.from || !iw.to || iw.from > iw.to) {
+    box.appendChild(el('span', { cls: 'hint', text: 'Pick a valid period first.' }));
+    return;
+  }
+  const [cust, entries, invoices] = await Promise.all([
+    api.get(`/customers/${cid}`),
+    api.get(`/entries?from=${iw.from}&to=${iw.to}`),
+    api.get('/invoices'),
+  ]);
+  const billed = new Set();
+  for (const inv of invoices.invoices || []) {
+    if (inv.status !== 'draft') for (const l of inv.lines || []) if (l.entry_id) billed.add(l.entry_id);
+  }
+  const unbilledBy = new Map(); // project -> hundredths
+  for (const e of entries.entries || []) {
+    if (e.customer_id !== cid || !e.billable || billed.has(e.id) || !e.project_code) continue;
+    const k = e.project_code;
+    unbilledBy.set(k, (unbilledBy.get(k) || 0) + Math.round(Number(e.hours) * 100));
+  }
+  const projects = (await api.get(`/customers/${cid}/projects`)).projects || [];
+  let shown = 0;
+  for (const p of projects) {
+    if (!p.active) continue;
+    const hours = unbilledBy.get(p.code);
+    if (!hours) continue;
+    shown += 1;
+    const cb = el('input', { attrs: { type: 'checkbox', id: `iw-p-${p.code}`, value: p.code } });
+    box.appendChild(
+      el('div', { cls: 'field checkbox' }, [
+        el('label', { attrs: { for: cb.id } }, [
+          cb,
+          el('span', { text: `${p.code} — ${p.name} · ${(hours / 100).toFixed(2)} h unbilled` }),
+        ]),
+      ]),
+    );
+  }
+  if (!shown) box.appendChild(el('span', { cls: 'hint', text: 'No uninvoiced billable work in this period.' }));
+}
+
+export function iwShow() {
+  for (const n of [1, 2, 3]) $(`iw-step${n}`).hidden = n !== iw.step;
+  const titles = ['customer and source', 'period and projects', 'review and save'];
+  $('iw-title').textContent = `Create from tracked work — ${iw.step} of 3: ${titles[iw.step - 1]}`;
+  $('iw-back').hidden = iw.step === 1;
+  $('iw-next').hidden = iw.step === 3;
+  $('iw-save').hidden = iw.step !== 3;
+  clearFormError($('iw-error'));
+}
+
+export function iwSelectedProjects() {
+  return [...$('iw-projects').querySelectorAll('input:checked')].map((c) => c.value);
+}
+
+export async function iwNext() {
+  if (iw.step === 1) {
+    if (!$('iw-customer').value) {
+      showFormError($('iw-error'), { message: 'Pick a customer.' });
+      return;
+    }
+    iw.step = 2;
+    iwShow();
+    await iwLoadProjects();
+    return;
+  }
+  if (iw.step === 2) {
+    const picks = iwSelectedProjects();
+    if (!$('iw-from').value || !$('iw-to').value) {
+      showFormError($('iw-error'), { message: 'Enter the period.' });
+      return;
+    }
+    iw.from = $('iw-from').value;
+    iw.to = $('iw-to').value;
+    try {
+      iw.preview = await api.post('/invoices/preview', {
+        customer_id: $('iw-customer').value,
+        from: iw.from,
+        to: iw.to,
+        include_expenses: $('iw-expenses').checked,
+        project_codes: picks,
+      });
+      iwRenderReview();
+      iw.step = 3;
+      iwShow();
+    } catch (err) {
+      showFormError($('iw-error'), err);
+    }
+  }
+}
+
+export function iwRenderReview() {
+  const d = iw.preview;
+  if (!d) return;
+  const grouping = $('iw-grouping').value;
+  const dl = $('iw-summary');
+  dl.textContent = '';
+  const sum = (label, v) => {
+    dl.appendChild(el('dt', { text: label }));
+    dl.appendChild(el('dd', { text: v }));
+  };
+  sum('Customer', customerName(d.customer_id));
+  sum('Period', `${d.period_from} → ${d.period_to}`);
+  sum('Currency', d.currency);
+  sum('Lines', String((d.lines || []).length));
+  sum('Total', `${formatMoney(d.total_minor)} ${d.currency}`);
+  const ul = $('iw-lines');
+  ul.textContent = '';
+  const groups = new Map();
+  for (const l of d.lines || []) {
+    const key = grouping === 'project'
+      ? (l.project_code || 'general')
+      : grouping === 'task'
+        ? `${l.project_code || 'general'}${l.task_code ? ` / ${l.task_code}` : ''}`
+        : `${l.date} ${l.project_code || ''} ${l.note || l.kind}`;
+    if (!groups.has(key)) groups.set(key, { h: 0, amount: 0, n: 0 });
+    const g = groups.get(key);
+    g.h += l.hours || 0;
+    g.amount += l.amount_minor;
+    g.n += 1;
+  }
+  for (const [key, g] of groups) {
+    const detail = grouping === 'detailed'
+      ? `${g.n} line(s)`
+      : `${(g.h / 100).toFixed(2)} h · ${g.n} line(s)`;
+    ul.appendChild(el('li', { text: `${key}: ${detail} — ${formatMoney(g.amount)} ${d.currency}` }));
+  }
+}
+
+export async function iwSave() {
+  const picks = iwSelectedProjects();
+  try {
+    const created = await api.post('/invoices', {
+      customer_id: $('iw-customer').value,
+      from: iw.from,
+      to: iw.to,
+      include_expenses: $('iw-expenses').checked,
+      project_codes: picks,
+    });
+    announce(`Draft ${created.number} created from ${created.lines.length} line(s) — review, then Issue to lock and document it.`);
+    iw.step = 1;
+    iw.preview = null;
+    iwShow();
+    await refreshInvoices();
+  } catch (err) {
+    showFormError($('iw-error'), err);
+  }
+}
+
+export function iwInit() {
+  $('iw-back').addEventListener('click', () => {
+    iw.step = Math.max(1, iw.step - 1);
+    iwShow();
+    if (iw.step === 2) iwLoadProjects().catch?.(() => {});
+  });
+  $('iw-next').addEventListener('click', () => iwNext().catch?.(() => {}));
+  $('iw-save').addEventListener('click', iwSave);
+  $('iw-preset').addEventListener('change', () => {
+    iwPresetRange($('iw-preset').value);
+    iwLoadProjects().catch?.(() => {});
+  });
+  $('iw-from').addEventListener('change', () => iwLoadProjects().catch?.(() => {}));
+  $('iw-to').addEventListener('change', () => iwLoadProjects().catch?.(() => {}));
+  $('iw-grouping').addEventListener('change', iwRenderReview);
+  iwPresetRange('this-month');
+  iwShow();
+}
+
+// ------------------------------------------------ product/service catalog --
+
+export let catalogItems = [];
+
+export async function refreshCatalog() {
+  try {
+    catalogItems = (await api.get('/admin/item-types')).item_types || [];
+  } catch {
+    catalogItems = [];
+    return; // members: section is hidden anyway
+  }
+  const tbody = $('item-table').querySelector('tbody');
+  tbody.textContent = '';
+  for (const it of catalogItems) {
+    const actions = [
+      el('button', {
+        type: 'button', cls: 'link', text: 'Edit',
+        on: {
+          click: () => {
+            $('item-id').value = it.id;
+            $('item-name').value = it.name;
+            $('item-kind').value = it.kind;
+            $('item-desc').value = it.description || '';
+            $('item-price').value = (it.default_price_minor / 100).toFixed(2);
+            $('item-currency').value = it.currency;
+            $('item-save').textContent = 'Update item';
+            $('item-cancel').hidden = false;
+          },
+        },
+      }),
+      el('button', {
+        type: 'button', cls: 'link', text: it.active ? 'Archive' : 'Restore',
+        on: {
+          click: async () => {
+            try {
+              await api.put(`/admin/item-types/${it.id}`, {
+                name: it.name, kind: it.kind, description: it.description || '',
+                default_price_minor: it.default_price_minor, currency: it.currency,
+                active: !it.active,
+              });
+              announce(it.active ? 'Item archived.' : 'Item restored.');
+              await refreshCatalog();
+            } catch (err) {
+              announce(`Catalog change failed: ${err.message}`);
+            }
+          },
+        },
+      }),
+      el('button', {
+        type: 'button', cls: 'danger', text: 'Delete',
+        on: {
+          click: async () => {
+            if (!(await askConfirm(`Delete catalog item "${it.name}"? Existing invoice lines keep their snapshot.`))) return;
+            try {
+              await api.del(`/admin/item-types/${it.id}`);
+              announce('Item deleted.');
+              await refreshCatalog();
+            } catch (err) {
+              announce(`Delete failed: ${err.message}`);
+            }
+          },
+        },
+      }),
+    ];
+    tbody.appendChild(
+      el('tr', {}, [
+        el('th', { attrs: { scope: 'row' }, text: it.name }),
+        el('td', { text: it.kind }),
+        el('td', { cls: 'num', text: `${it.currency} ${formatMoney(it.default_price_minor)}` }),
+        el('td', {}, [statusChip(it.active ? 'active' : 'archived', it.active)]),
+        el('td', { cls: 'actions-col' }, actions),
+      ]),
+    );
+  }
+  $('item-table').hidden = catalogItems.length === 0;
+  $('item-empty').hidden = catalogItems.length !== 0;
+  for (const row of $('ed-lines').querySelectorAll('tbody tr')) {
+    row.__attachItemSelect?.();
+  }
+}
+
+export async function saveCatalogItem(evt) {
+  evt.preventDefault();
+  clearFormError($('item-error'));
+  const id = $('item-id').value;
+  const body = {
+    name: $('item-name').value.trim(),
+    kind: $('item-kind').value,
+    description: $('item-desc').value.trim(),
+    default_price_minor: parseHundredths($('item-price').value) || 0,
+    currency: $('item-currency').value.trim().toUpperCase() || null,
+    active: true,
+  };
+  try {
+    if (id) await api.put(`/admin/item-types/${id}`, body);
+    else await api.post('/admin/item-types', body);
+    announce(id ? 'Catalog item updated.' : 'Catalog item added.');
+    $('item-id').value = '';
+    $('item-form').reset();
+    $('item-price').value = '0';
+    $('item-currency').value = 'EUR';
+    $('item-save').textContent = 'Save item';
+    $('item-cancel').hidden = true;
+    await refreshCatalog();
+  } catch (err) {
+    showFormError($('item-error'), err);
+  }
+}
+
+// ------------------------------------------------------------ retainers ----
+//
+// #144: retainer balances over the Invoices tab. The GUI never shows a
+// stored balance — the server returns balance_minor reconciled from the
+// ledger, and the history view renders that same ledger. Add/draw/create
+// carry idempotency keys, so a double click can never double-post money.
+
+export async function refreshRetainers() {
+  let rows = [];
+  try {
+    rows = (await api.get('/retainers')).retainers || [];
+  } catch {
+    return; // members: admin surface
+  }
+  const tbody = $('ret-table').querySelector('tbody');
+  tbody.textContent = '';
+  for (const r of rows) {
+    const actions = [
+      el('button', { type: 'button', cls: 'link', text: 'History',
+        on: { click: () => retShow(r.id) } }),
+    ];
+    if (r.status === 'open') {
+      actions.push(
+        el('button', { type: 'button', cls: 'link', text: 'Add funds',
+          on: { click: () => retAdd(r) } }),
+        el('button', { type: 'button', cls: 'link', text: 'Draw funds',
+          on: { click: () => retDraw(r) } }),
+        el('button', { type: 'button', cls: 'danger', text: 'Close',
+          on: { click: () => retClose(r) } }),
+      );
+    }
+    tbody.appendChild(
+      el('tr', {}, [
+        el('th', { attrs: { scope: 'row' }, text: `${customerName(r.customer_id)} / ${r.project_code}` }),
+        el('td', { cls: 'num', text: `${r.currency} ${formatMoney(Math.max(r.balance_minor, 0))}` }),
+        el('td', {}, [statusChip(r.status, r.status === 'open')]),
+        el('td', { text: r.last_activity ? String(r.last_activity).slice(0, 10) : '\u2014' }),
+        el('td', { cls: 'actions-col' }, actions),
+      ]),
+    );
+  }
+  $('ret-table').hidden = rows.length === 0;
+  $('ret-empty').hidden = rows.length !== 0;
+}
+
+export async function retAdd(r) {
+  const amt = await askPrompt(`Add funds in ${r.currency} (e.g. 250.00):`, '');
+  if (!amt) return;
+  const minor = parseHundredths(amt);
+  if (!Number.isFinite(minor) || minor <= 0) {
+    announce('Enter a positive amount.');
+    return;
+  }
+  try {
+    const out = await api.post(`/retainers/${r.id}/credit`, {
+      amount_minor: minor, reason: '', idempotency_key: crypto.randomUUID(),
+    });
+    announce(`Retainer credited. Balance: ${r.currency} ${formatMoney(out.balance_minor)}.`);
+    await refreshRetainers();
+  } catch (err) {
+    announce(`Add funds failed: ${err.message}`);
+  }
+}
+
+export async function retDraw(r) {
+  const amt = await askPrompt(`Draw funds from ${r.currency} ${formatMoney(r.balance_minor)} balance:`, '');
+  if (!amt) return;
+  const minor = parseHundredths(amt);
+  if (!Number.isFinite(minor) || minor <= 0) {
+    announce('Enter a positive amount.');
+    return;
+  }
+  const reason = ((await askPrompt('Draw reason (required):')) || '').trim();
+  if (!reason) {
+    announce('Draw cancelled — a reason is required.');
+    return;
+  }
+  try {
+    await api.post(`/retainers/${r.id}/draw`, {
+      amount_minor: minor, reason, idempotency_key: crypto.randomUUID(),
+    });
+    announce('Draw recorded against the retainer (this is not an invoice payment).');
+    await refreshRetainers();
+  } catch (err) {
+    announce(`Draw failed: ${err.message}`);
+  }
+}
+
+export async function retClose(r) {
+  if (!(await askConfirm(`Close the retainer for ${customerName(r.customer_id)} / ${r.project_code}? History stays readable; funds can no longer be added or drawn.`))) return;
+  try {
+    await api.post(`/retainers/${r.id}`, {});
+    announce('Retainer closed.');
+    await refreshRetainers();
+  } catch (err) {
+    announce(`Close failed: ${err.message}`);
+  }
+}
+
+export async function retShow(id) {
+  try {
+    const d = await api.get(`/retainers/${id}`);
+    const ret = d.retainer;
+    $('ret-detail').hidden = false;
+    $('ret-detail-title').textContent =
+      `Ledger \u2014 ${customerName(ret.customer_id)} / ${ret.project_code} (${ret.currency} ${formatMoney(Math.max(d.balance_minor, 0))})`;
+    const ul = $('ret-history');
+    ul.textContent = '';
+    for (const t of ret.transactions) {
+      const sign = t.kind === 'draw' ? '\u2212' : '+';
+      ul.appendChild(el('li', {
+        text: `${String(t.created_at).slice(0, 10)} \u2014 ${t.kind} ${sign}${formatMoney(t.amount_minor)}${t.reason ? ` \u00b7 ${t.reason}` : ''}`,
+      }));
+    }
+    if (!ul.children.length) ul.appendChild(el('li', { cls: 'hint', text: 'No transactions yet.' }));
+    announce('Retainer ledger shown.');
+  } catch (err) {
+    announce(`History failed: ${err.message}`);
+  }
+}
+
+export async function createRetainer(evt) {
+  evt.preventDefault();
+  clearFormError($('ret-error'));
+  const opening = parseHundredths($('ret-opening').value || '0');
+  try {
+    await api.post('/retainers', {
+      customer_id: $('ret-customer').value,
+      project_code: $('ret-project').value,
+      opening_amount_minor: Number.isFinite(opening) ? opening : 0,
+      idempotency_key: crypto.randomUUID(),
+    });
+    announce('Retainer created.');
+    $('ret-opening').value = '0';
+    await refreshRetainers();
+  } catch (err) {
+    showFormError($('ret-error'), err);
+  }
+}
+
+// ------------------------------------------------- recurring schedules ----
+//
+// #136: management UI for the Phase-4 recurring engine (#26). The backend
+// already generates drafts for ACTIVE schedules; this surface lists them and
+// pauses/resumes/deletes without touching the billing cursor
+// (last_period_end), so a resumed schedule continues where it stopped.
+
+export async function refreshSchedules() {
+  let schedules = [];
+  try {
+    schedules = (await api.get('/schedules')).schedules || [];
+  } catch {
+    return; // members cannot see this admin surface
+  }
+  const tbody = $('rec-table').querySelector('tbody');
+  tbody.textContent = '';
+  const action = rowAction; // #189: shared builder
+  for (const scd of schedules) {
+    const active = scd.active !== false;
+    tbody.appendChild(
+      el('tr', {}, [
+        el('th', { attrs: { scope: 'row' }, text: customerName(scd.customer_id) }),
+        el('td', { text: scd.cadence }),
+        el('td', { text: scd.mode === 'retainer' ? 'Fixed retainer' : 'Time + expenses' }),
+        el('td', {
+          cls: 'num',
+          text: scd.mode === 'retainer' ? `${scd.currency} ${formatMoney(scd.retainer_amount_minor)}` : '\u2014',
+        }),
+        el('td', { text: scd.last_period_end || 'never' }),
+        el('td', {}, [
+          statusChip(active ? 'active' : 'paused', active),
+        ]),
+        el('td', { cls: 'actions-col' }, [
+          action('link', active ? 'Pause' : 'Resume', () => toggleSchedule(scd),
+            active ? 'Pause generation (drafts stop until resumed)' : 'Resume generation'),
+          action('danger', 'Delete', () => removeSchedule(scd), 'Delete the schedule'),
+        ]),
+      ]),
+    );
+  }
+  $('rec-table').hidden = schedules.length === 0;
+  $('rec-empty').hidden = schedules.length !== 0;
+}
+
+export async function addRecurring(evt) {
+  evt.preventDefault();
+  clearFormError($('rec-error'));
+  const cid = $('rec-customer').value;
+  const c = state.customers.find((x) => x.id === cid);
+  const body = {
+    customer_id: cid,
+    cadence: $('rec-cadence').value,
+    mode: $('rec-mode').value,
+    retainer_amount_minor: Math.round(Number($('rec-amount').value || 0) * 100),
+    currency: c ? c.currency : 'EUR',
+    active: true,
+  };
+  try {
+    await api.post('/schedules', body);
+    announce('Recurring schedule added.');
+    $('rec-amount').value = '0';
+    await refreshSchedules();
+  } catch (err) {
+    showFormError($('rec-error'), err);
+  }
+}
+
+export async function toggleSchedule(scd) {
+  try {
+    const next = await api.put(`/schedules/${scd.id}`, { active: scd.active === false });
+    announce(next.active ? 'Schedule resumed.' : 'Schedule paused.');
+    await refreshSchedules();
+  } catch (err) {
+    announce(`Schedule change failed: ${err.message}`);
+  }
+}
+
+export async function removeSchedule(scd) {
+  if (!(await askConfirm(`Delete the ${scd.cadence} schedule for ${customerName(scd.customer_id)}? Already-generated drafts are unaffected.`))) return;
+  try {
+    await api.del(`/schedules/${scd.id}`);
+    announce('Schedule deleted.');
+    await refreshSchedules();
+  } catch (err) {
+    announce(`Delete failed: ${err.message}`);
+  }
+}
+

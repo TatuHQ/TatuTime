@@ -7,7 +7,7 @@
       "name": "AGPL-3.0-or-later",
       "identifier": "AGPL-3.0-or-later"
     },
-    "description": "Timesheet system: daily/weekly time entries, customers and project codes with per-entity currencies and hourly rates. File-backed (no database); the API is the only writer below TUCANO_DATA_DIR. Access is private-per-user (#51): a member sees and edits only their own entries/expenses/submissions; an administrator sees all data and owns invoicing, approvals and user management (the /api/users and /api/invoices routes return 403 for members). Mutating endpoints may return 503 (Retry-After) under write contention (#62)."
+    "description": "Timesheet system: daily/weekly time entries, customers and project codes with per-entity currencies and hourly rates. File-backed (no database); the API is the only writer below TUCANO_DATA_DIR. Access is private-per-user (#51): a member sees and edits only their own entries/expenses/submissions; an administrator sees all data and owns invoicing, approvals and user management (the /api/users and /api/invoices routes return 403 for members). Mutating endpoints may return 503 (Retry-After) under write contention (#62). Mutating requests (POST/PUT/DELETE) must also carry the X-CSRF-Protection: 1 header (#46); without it the request is rejected 403 with code csrf. Exempt: POST /api/auth/login, /api/auth/bootstrap, /api/auth/sso/assertion and POST /api/payments/webhook/{provider}."
   },
   "servers": [
     {
@@ -49,6 +49,18 @@
     },
     {
       "name": "meta"
+    },
+    {
+      "name": "calendar"
+    },
+    {
+      "name": "admin"
+    },
+    {
+      "name": "retainers"
+    },
+    {
+      "name": "schedules"
     }
   ],
   "components": {
@@ -82,9 +94,25 @@
                   "conflict",
                   "bad_request",
                   "internal",
-                  "invalid_json",
                   "write_lock_busy",
-                  "lock_unavailable"
+                  "lock_unavailable",
+                  "csrf",
+                  "unauthenticated",
+                  "forbidden",
+                  "rate_limited",
+                  "initialised",
+                  "invalid_credentials",
+                  "disabled",
+                  "inactive",
+                  "sso_invalid",
+                  "bad_signature",
+                  "bad_state",
+                  "no_vault",
+                  "vault_disabled",
+                  "calendar_not_configured",
+                  "calendar_fetch",
+                  "email_failed",
+                  "oauth_exchange"
                 ]
               },
               "message": {
@@ -415,8 +443,7 @@
               "null"
             ],
             "minimum": 1,
-            "maximum": 100000000,
-            "minimum": 1
+            "maximum": 100000000
           }
         },
         "additionalProperties": false
@@ -2014,6 +2041,118 @@
         },
         "additionalProperties": false
       },
+      "InvoiceLineInput": {
+        "type": "object",
+        "required": [
+          "kind",
+          "date"
+        ],
+        "description": "A draft line as submitted to PUT /api/invoices/{id} (#143/#187). Mirrors the stored InvoiceLine but is an INPUT shape: only kind and date are mandatory, the rest default. Manual lines (kind=fixed with an item kind) are re-priced server-side, so their amount_minor is always recomputed. Tracked lines (entry_id/expense_id) must be echoed back exactly as stored: any changed field is refused 422, which is how the #8 rate snapshot stays immutable.",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "time",
+              "expense",
+              "fixed"
+            ]
+          },
+          "date": {
+            "type": "string",
+            "format": "date"
+          },
+          "entry_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "expense_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "project_code": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ProjectCode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "task_code": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ProjectCode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "hours": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Hours"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rate_minor": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "amount_minor": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Not client-authoritative: recomputed server-side for manual lines and verified against the stored snapshot for tracked lines."
+          },
+          "note": {
+            "type": "string",
+            "default": "",
+            "description": "Optional for manual lines (the manual description); tracked lines carry the stored note verbatim."
+          },
+          "quantity_hundredths": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "maximum": 1000000,
+            "description": "Manual lines: hundredths of a unit (#143)."
+          },
+          "unit_price_minor": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 100000000,
+            "description": "Manual lines: snapshot unit price (#143)."
+          },
+          "item_kind": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/LineItemKind"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
       "InvoiceEditInput": {
         "type": "object",
         "required": [
@@ -2026,7 +2165,7 @@
             "minItems": 1,
             "maxItems": 100,
             "items": {
-              "$ref": "#/components/schemas/InvoiceLine"
+              "$ref": "#/components/schemas/InvoiceLineInput"
             }
           },
           "tax_hundredths": {
@@ -2170,6 +2309,47 @@
           "open",
           "closed"
         ]
+      },
+      "Timer": {
+        "type": "object",
+        "required": [
+          "user_id",
+          "customer_id",
+          "project_code",
+          "started_at"
+        ],
+        "description": "A running timer for one user (#14): server-side state, at most one active timer per user.",
+        "properties": {
+          "user_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "customer_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_code": {
+            "$ref": "#/components/schemas/ProjectCode"
+          },
+          "task_code": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ProjectCode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "note": {
+            "type": "string"
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "additionalProperties": false
       },
       "TxKind": {
         "type": "string",
@@ -2342,6 +2522,16 @@
       }
     },
     "responses": {
+      "CsrfForbidden": {
+        "description": "CSRF header missing or wrong on a mutating request (#46): send X-CSRF-Protection: 1.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
       "ValidationError": {
         "description": "Payload failed validation before any write or side effect.",
         "content": {
@@ -2383,7 +2573,7 @@
         }
       },
       "Locked": {
-        "description": "A concurrent writer holds the store lock (#62); transient \u2014 retry. Sent with Retry-After.",
+        "description": "Transient lock condition; retry shortly. Sent with Retry-After. A concurrent writer holds the store lock (#62, code write_lock_busy) or an entry's lock state could not be verified and the write was refused fail-closed (#185, code lock_unavailable).",
         "headers": {
           "Retry-After": {
             "schema": {
@@ -2398,9 +2588,81 @@
             }
           }
         }
+      },
+      "Unauthorized": {
+        "description": "No valid session cookie, or an invalid/expired one (#19). Guarded operations require authentication; the body is the shared Error shape with code unauthenticated.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Forbidden": {
+        "description": "Authenticated but the request is refused: an administrator role is required (#51, code forbidden), the X-CSRF-Protection: 1 header is missing on a mutating request (#46, code csrf), the first-run setup has already been completed (code initialised), or the account is deactivated (code inactive).",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "RateLimited": {
+        "description": "Too many failed attempts within the window (#47, code rate_limited); retry once the window elapses or a successful attempt resets the key.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "BadGateway": {
+        "description": "An upstream dependency failed (codes calendar_fetch, email_failed, oauth_exchange); local state is unchanged and the operation may be retried.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "VaultUnavailable": {
+        "description": "The secret vault is not enabled or not configured (#77, codes vault_disabled, no_vault); integration credentials and features are unavailable.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "InternalError": {
+        "description": "Server-side failure (code internal). The body stays generic and never carries paths, stack traces or raw filesystem errors.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
       }
     },
     "parameters": {
+      "CsrfProtection": {
+        "name": "X-CSRF-Protection",
+        "in": "header",
+        "required": true,
+        "description": "CSRF guard (#46): mutating requests (POST/PUT/DELETE) must send this header with the literal value 1, otherwise the request is rejected 403 csrf. Exempt endpoints (no header required): POST /api/auth/login, /api/auth/bootstrap, /api/auth/sso/assertion and POST /api/payments/webhook/{provider}.",
+        "schema": {
+          "type": "string",
+          "enum": [
+            "1"
+          ]
+        }
+      },
       "DateParam": {
         "name": "date",
         "in": "query",
@@ -2415,15 +2677,37 @@
       "FromParam": {
         "name": "from",
         "in": "query",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "date",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "description": "Inclusive start of a range. A range query needs both from and to: the range-only endpoints answer 400 when either is absent. At most 400 days."
+      },
+      "ToParam": {
+        "name": "to",
+        "in": "query",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "date",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "description": "Inclusive end of a range. A range query needs both from and to: the range-only endpoints answer 400 when either is absent."
+      },
+      "OptionalFromParam": {
+        "name": "from",
+        "in": "query",
         "required": false,
         "schema": {
           "type": "string",
           "format": "date",
           "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
         },
-        "description": "Inclusive start of a range. Requires to; at most 400 days."
+        "description": "Optional inclusive start of a range filter; pairs with to."
       },
-      "ToParam": {
+      "OptionalToParam": {
         "name": "to",
         "in": "query",
         "required": false,
@@ -2432,7 +2716,7 @@
           "format": "date",
           "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
         },
-        "description": "Inclusive end of a range."
+        "description": "Optional inclusive end of a range filter; pairs with from."
       }
     }
   },
@@ -2444,6 +2728,7 @@
           "auth"
         ],
         "summary": "Configured SSO identity providers (#32), advertised pre-session",
+        "security": [],
         "responses": {
           "200": {
             "description": "Provider names.",
@@ -2506,6 +2791,7 @@
             }
           }
         },
+        "security": [],
         "responses": {
           "200": {
             "description": "Signed in; Set-Cookie session issued.",
@@ -2521,10 +2807,16 @@
             "$ref": "#/components/responses/BadRequest"
           },
           "401": {
-            "description": "Assertion failed verification or expired."
+            "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
-            "description": "Account deactivated."
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
           }
         }
       }
@@ -2590,10 +2882,13 @@
             }
           },
           "403": {
-            "description": "Already initialised."
+            "$ref": "#/components/responses/Forbidden"
           },
           "422": {
             "$ref": "#/components/responses/ValidationError"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
           }
         }
       }
@@ -2628,10 +2923,13 @@
             }
           },
           "401": {
-            "description": "Invalid credentials."
+            "$ref": "#/components/responses/Unauthorized"
           },
           "429": {
-            "description": "Too many failed attempts; try again later (#47)."
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
           }
         }
       }
@@ -2644,7 +2942,15 @@
         ],
         "summary": "Clear the session cookie",
         "security": [],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "403": {
+            "$ref": "#/components/responses/CsrfForbidden"
+          },
           "204": {
             "description": "Logged out."
           }
@@ -2670,7 +2976,7 @@
             }
           },
           "401": {
-            "description": "Not authenticated."
+            "$ref": "#/components/responses/Unauthorized"
           }
         }
       }
@@ -2678,11 +2984,15 @@
     "/api/users": {
       "get": {
         "operationId": "listUsers",
+        "x-admin-only": true,
         "tags": [
           "users"
         ],
         "summary": "List users (admin only)",
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "All users.",
             "content": {
@@ -2706,12 +3016,13 @@
             }
           },
           "403": {
-            "description": "Admin role required."
+            "$ref": "#/components/responses/Forbidden"
           }
         }
       },
       "post": {
         "operationId": "createUser",
+        "x-admin-only": true,
         "tags": [
           "users"
         ],
@@ -2726,7 +3037,15 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "201": {
             "description": "Created.",
             "content": {
@@ -2738,7 +3057,7 @@
             }
           },
           "403": {
-            "description": "Admin role required."
+            "$ref": "#/components/responses/Forbidden"
           },
           "409": {
             "$ref": "#/components/responses/Conflict"
@@ -2763,6 +3082,7 @@
       ],
       "put": {
         "operationId": "updateUser",
+        "x-admin-only": true,
         "tags": [
           "users"
         ],
@@ -2777,7 +3097,15 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "Updated user.",
             "content": {
@@ -2789,7 +3117,7 @@
             }
           },
           "403": {
-            "description": "Admin role required."
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -2804,16 +3132,25 @@
       },
       "delete": {
         "operationId": "deleteUser",
+        "x-admin-only": true,
         "tags": [
           "users"
         ],
         "summary": "Delete a user (admin only)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "204": {
             "description": "Deleted."
           },
           "403": {
-            "description": "Admin role required."
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -2838,6 +3175,7 @@
       ],
       "put": {
         "operationId": "changeUserPassword",
+        "x-admin-only": true,
         "tags": [
           "users"
         ],
@@ -2852,12 +3190,20 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "204": {
             "description": "Password changed; current sessions were revoked."
           },
           "403": {
-            "description": "Admin role required."
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -2954,6 +3300,9 @@
         ],
         "summary": "List customers, sorted by name",
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "All customers.",
             "content": {
@@ -2994,7 +3343,18 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/CsrfForbidden"
+          },
           "201": {
             "description": "Created; server assigns the id.",
             "content": {
@@ -3030,6 +3390,9 @@
         ],
         "summary": "Fetch one customer",
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "The customer.",
             "content": {
@@ -3061,7 +3424,18 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/CsrfForbidden"
+          },
           "200": {
             "description": "The updated customer.",
             "content": {
@@ -3086,7 +3460,18 @@
           "customers"
         ],
         "summary": "Delete a customer (must own no projects or entries)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/CsrfForbidden"
+          },
           "204": {
             "description": "Deleted."
           },
@@ -3118,6 +3503,9 @@
         ],
         "summary": "List a customer's projects, sorted by code",
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "Projects of this customer.",
             "content": {
@@ -3161,7 +3549,18 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/CsrfForbidden"
+          },
           "201": {
             "description": "Created.",
             "content": {
@@ -3211,6 +3610,9 @@
         ],
         "summary": "Fetch one project",
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "The project.",
             "content": {
@@ -3242,7 +3644,18 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/CsrfForbidden"
+          },
           "200": {
             "description": "Updated.",
             "content": {
@@ -3267,7 +3680,18 @@
           "projects"
         ],
         "summary": "Delete a project (must have no entries)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/CsrfForbidden"
+          },
           "204": {
             "description": "Deleted."
           },
@@ -3307,6 +3731,9 @@
         ],
         "summary": "List a project's tasks",
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "Tasks of this project.",
             "content": {
@@ -3350,7 +3777,18 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/CsrfForbidden"
+          },
           "201": {
             "description": "Created.",
             "content": {
@@ -3408,6 +3846,9 @@
         ],
         "summary": "Fetch one task",
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "The task.",
             "content": {
@@ -3439,7 +3880,18 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/CsrfForbidden"
+          },
           "200": {
             "description": "Updated.",
             "content": {
@@ -3464,7 +3916,18 @@
           "projects"
         ],
         "summary": "Delete a task (must have no entries)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/CsrfForbidden"
+          },
           "204": {
             "description": "Deleted."
           },
@@ -3478,17 +3941,6 @@
       }
     },
     "/api/entries": {
-      "parameters": [
-        {
-          "$ref": "#/components/parameters/DateParam"
-        },
-        {
-          "$ref": "#/components/parameters/FromParam"
-        },
-        {
-          "$ref": "#/components/parameters/ToParam"
-        }
-      ],
       "get": {
         "operationId": "listEntries",
         "tags": [
@@ -3496,7 +3948,21 @@
         ],
         "summary": "List entries for a day or an inclusive date range",
         "description": "Exactly one form: ?date=YYYY-MM-DD or ?from=...&to=... (span at most 400 days).",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/DateParam"
+          },
+          {
+            "$ref": "#/components/parameters/OptionalFromParam"
+          },
+          {
+            "$ref": "#/components/parameters/OptionalToParam"
+          }
+        ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "Matching entries, ordered by date then creation.",
             "content": {
@@ -3541,7 +4007,18 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/CsrfForbidden"
+          },
           "201": {
             "description": "Created; server assigns id and timestamps.",
             "content": {
@@ -3577,6 +4054,9 @@
         ],
         "summary": "Fetch one entry",
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "The entry.",
             "content": {
@@ -3608,7 +4088,18 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/CsrfForbidden"
+          },
           "200": {
             "description": "Updated.",
             "content": {
@@ -3624,6 +4115,12 @@
           },
           "422": {
             "$ref": "#/components/responses/ValidationError"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/Locked"
           }
         }
       },
@@ -3633,12 +4130,29 @@
           "entries"
         ],
         "summary": "Delete an entry",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/CsrfForbidden"
+          },
           "204": {
             "description": "Deleted."
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/Locked"
           }
         }
       }
@@ -3684,6 +4198,9 @@
         "summary": "Hours and amounts grouped by customer, project or ISO week",
         "description": "Amounts are computed with each entry's effective rate (project override, else customer default) at read time.",
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "Aggregated rows.",
             "content": {
@@ -3725,6 +4242,9 @@
         ],
         "summary": "One CSV row per entry: date, customer, code, hours, currency, hourly_rate, amount, note",
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "CSV document (formula-injection escaped).",
             "content": {
@@ -3744,11 +4264,18 @@
     "/api/reports/budgets": {
       "get": {
         "operationId": "budgetReport",
+        "x-admin-only": true,
         "tags": [
           "reports"
         ],
         "summary": "Budget burn vs budget for budgeted projects (#30)",
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "200": {
             "description": "Budget rows.",
             "content": {
@@ -3842,11 +4369,18 @@
       ],
       "get": {
         "operationId": "profitability",
+        "x-admin-only": true,
         "tags": [
           "reports"
         ],
         "summary": "Revenue vs cost (expenses + labour at cost rates) per customer and currency (#29, #186)",
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "200": {
             "description": "Profitability rows.",
             "content": {
@@ -3913,53 +4447,26 @@
         ],
         "summary": "Current running timer for the caller (with elapsed), or null (#14)",
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
-            "description": "Timer state.",
+            "description": "Timer state: the running timer with live elapsed, or null when no timer is running.",
             "content": {
               "application/json": {
                 "schema": {
-                  "nullable": true,
-                  "type": "object",
+                  "type": [
+                    "object",
+                    "null"
+                  ],
+                  "required": [
+                    "timer",
+                    "elapsed_seconds",
+                    "elapsed_hours"
+                  ],
                   "properties": {
                     "timer": {
-                      "type": "object",
-                      "required": [
-                        "user_id",
-                        "customer_id",
-                        "project_code",
-                        "started_at"
-                      ],
-                      "properties": {
-                        "user_id": {
-                          "type": "string",
-                          "format": "uuid"
-                        },
-                        "customer_id": {
-                          "type": "string",
-                          "format": "uuid"
-                        },
-                        "project_code": {
-                          "$ref": "#/components/schemas/ProjectCode"
-                        },
-                        "task_code": {
-                          "oneOf": [
-                            {
-                              "$ref": "#/components/schemas/ProjectCode"
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "note": {
-                          "type": "string"
-                        },
-                        "started_at": {
-                          "type": "string",
-                          "format": "date-time"
-                        }
-                      },
-                      "additionalProperties": false
+                      "$ref": "#/components/schemas/Timer"
                     },
                     "elapsed_seconds": {
                       "type": "integer"
@@ -4019,9 +4526,27 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/CsrfForbidden"
+          },
           "201": {
-            "description": "Started."
+            "description": "Started; the running timer is returned.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Timer"
+                }
+              }
+            }
           },
           "409": {
             "$ref": "#/components/responses/Conflict"
@@ -4037,7 +4562,18 @@
           "entries"
         ],
         "summary": "Discard the running timer without logging",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/CsrfForbidden"
+          },
           "204": {
             "description": "Discarded."
           }
@@ -4051,7 +4587,18 @@
           "entries"
         ],
         "summary": "Stop the timer and create a timer-sourced entry for the elapsed time",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/CsrfForbidden"
+          },
           "200": {
             "description": "Created entry.",
             "content": {
@@ -4071,6 +4618,7 @@
     "/api/calendar/oauth/start": {
       "get": {
         "operationId": "calendarOAuthStart",
+        "x-admin-only": true,
         "tags": [
           "calendar"
         ],
@@ -4091,6 +4639,9 @@
           }
         ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "Authorize URL.",
             "content": {
@@ -4114,7 +4665,7 @@
             "$ref": "#/components/responses/BadRequest"
           },
           "403": {
-            "description": "Admin role required."
+            "$ref": "#/components/responses/Forbidden"
           },
           "422": {
             "$ref": "#/components/responses/ValidationError"
@@ -4125,6 +4676,7 @@
     "/api/calendar/oauth/callback": {
       "get": {
         "operationId": "calendarOAuthCallback",
+        "x-admin-only": true,
         "tags": [
           "calendar"
         ],
@@ -4133,18 +4685,20 @@
           {
             "name": "code",
             "in": "query",
-            "required": true,
+            "required": false,
             "schema": {
               "type": "string"
-            }
+            },
+            "description": "Authorization code from the provider. The handler defaults it to the empty string and answers 400 when it is empty."
           },
           {
             "name": "state",
             "in": "query",
-            "required": true,
+            "required": false,
             "schema": {
               "type": "string"
-            }
+            },
+            "description": "Opaque state minted by /api/calendar/oauth/start. The handler defaults it to the empty string; an unknown or expired state is 401 bad_state."
           }
         ],
         "responses": {
@@ -4171,16 +4725,16 @@
             "$ref": "#/components/responses/BadRequest"
           },
           "401": {
-            "description": "Unknown or expired OAuth state."
+            "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
-            "description": "Admin role required."
+            "$ref": "#/components/responses/Forbidden"
           },
           "502": {
-            "description": "Authorization code exchange failed."
+            "$ref": "#/components/responses/BadGateway"
           },
           "503": {
-            "description": "Secret vault not enabled."
+            "$ref": "#/components/responses/VaultUnavailable"
           }
         }
       }
@@ -4201,6 +4755,9 @@
         ],
         "summary": "Calendar events overlapping the range, from the configured ICS feed (#15)",
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "Events.",
             "content": {
@@ -4251,10 +4808,13 @@
             }
           },
           "404": {
-            "description": "No calendar feed configured."
+            "$ref": "#/components/responses/NotFound"
           },
           "502": {
-            "description": "Feed fetch failed."
+            "$ref": "#/components/responses/BadGateway"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
           }
         }
       }
@@ -4267,6 +4827,9 @@
         ],
         "summary": "The caller's notifications, newest first, with unread count (#22)",
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "Notifications.",
             "content": {
@@ -4334,7 +4897,18 @@
           "entries"
         ],
         "summary": "Mark the caller's notifications read",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/CsrfForbidden"
+          },
           "204": {
             "description": "Marked."
           }
@@ -4344,11 +4918,15 @@
     "/api/schedules": {
       "get": {
         "operationId": "listSchedules",
+        "x-admin-only": true,
         "tags": [
           "invoices"
         ],
         "summary": "List recurring invoice schedules (admin)",
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "Schedules.",
             "content": {
@@ -4372,12 +4950,13 @@
             }
           },
           "403": {
-            "description": "Admin role required."
+            "$ref": "#/components/responses/Forbidden"
           }
         }
       },
       "post": {
         "operationId": "createSchedule",
+        "x-admin-only": true,
         "tags": [
           "invoices"
         ],
@@ -4392,7 +4971,15 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "201": {
             "description": "Created.",
             "content": {
@@ -4404,10 +4991,13 @@
             }
           },
           "403": {
-            "description": "Admin role required."
+            "$ref": "#/components/responses/Forbidden"
           },
           "422": {
             "$ref": "#/components/responses/ValidationError"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
           }
         }
       }
@@ -4426,16 +5016,25 @@
       ],
       "delete": {
         "operationId": "deleteSchedule",
+        "x-admin-only": true,
         "tags": [
           "invoices"
         ],
         "summary": "Delete a schedule (admin)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "204": {
             "description": "Deleted."
           },
           "403": {
-            "description": "Admin role required."
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -4444,6 +5043,7 @@
       },
       "put": {
         "operationId": "updateSchedule",
+        "x-admin-only": true,
         "tags": [
           "schedules"
         ],
@@ -4459,7 +5059,15 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "Updated schedule.",
             "content": {
@@ -4471,7 +5079,7 @@
             }
           },
           "403": {
-            "description": "Admin role required."
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -4485,11 +5093,18 @@
     "/api/invoices": {
       "get": {
         "operationId": "listInvoices",
+        "x-admin-only": true,
         "tags": [
           "invoices"
         ],
         "summary": "List invoices",
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "200": {
             "description": "All invoices.",
             "content": {
@@ -4516,6 +5131,7 @@
       },
       "post": {
         "operationId": "createInvoice",
+        "x-admin-only": true,
         "tags": [
           "invoices"
         ],
@@ -4530,7 +5146,18 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/CsrfForbidden"
+          },
           "201": {
             "description": "Draft invoice.",
             "content": {
@@ -4546,6 +5173,12 @@
           },
           "409": {
             "$ref": "#/components/responses/Conflict"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
           }
         }
       }
@@ -4564,11 +5197,18 @@
       ],
       "get": {
         "operationId": "getInvoice",
+        "x-admin-only": true,
         "tags": [
           "invoices"
         ],
         "summary": "Fetch one invoice",
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "200": {
             "description": "The invoice.",
             "content": {
@@ -4586,11 +5226,23 @@
       },
       "delete": {
         "operationId": "deleteInvoice",
+        "x-admin-only": true,
         "tags": [
           "invoices"
         ],
         "summary": "Delete a draft invoice",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/CsrfForbidden"
+          },
           "204": {
             "description": "Deleted."
           },
@@ -4604,18 +5256,13 @@
       },
       "put": {
         "operationId": "updateInvoiceDraft",
+        "x-admin-only": true,
         "tags": [
           "invoices"
         ],
         "parameters": [
           {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
+            "$ref": "#/components/parameters/CsrfProtection"
           }
         ],
         "summary": "Edit a draft invoice: replace lines and percentages (#143)",
@@ -4631,6 +5278,9 @@
           }
         },
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "Updated draft.",
             "content": {
@@ -4642,7 +5292,7 @@
             }
           },
           "403": {
-            "description": "Admin role required."
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -4670,11 +5320,23 @@
       ],
       "post": {
         "operationId": "issueInvoice",
+        "x-admin-only": true,
         "tags": [
           "invoices"
         ],
         "summary": "Issue a draft invoice (locks entries; archives the PDF, #113)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/CsrfForbidden"
+          },
           "200": {
             "description": "Issued invoice.",
             "content": {
@@ -4708,12 +5370,16 @@
       ],
       "get": {
         "operationId": "getInvoicePdf",
+        "x-admin-only": true,
         "tags": [
           "invoices"
         ],
         "summary": "Download the archived invoice PDF (#113); admin only",
         "description": "Returns the PDF archived at issue time, unmodified. A legacy issued invoice without an archive renders it from the snapshot-locked document on first read. Drafts are refused (409). Responses carry Content-Disposition and an ETag from the archive sha256.",
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "PDF document.",
             "headers": {
@@ -4734,7 +5400,7 @@
             }
           },
           "403": {
-            "description": "Admin role required."
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -4743,7 +5409,7 @@
             "$ref": "#/components/responses/Conflict"
           },
           "500": {
-            "description": "The archive could not be read or written."
+            "$ref": "#/components/responses/InternalError"
           }
         }
       }
@@ -4762,11 +5428,20 @@
       ],
       "post": {
         "operationId": "sendInvoiceEmail",
+        "x-admin-only": true,
         "tags": [
           "invoices"
         ],
         "summary": "Email an issued invoice to the customer's billing address (#35)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "Sent.",
             "content": {
@@ -4796,7 +5471,7 @@
             }
           },
           "403": {
-            "description": "Admin role required."
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -4808,7 +5483,7 @@
             "$ref": "#/components/responses/ValidationError"
           },
           "502": {
-            "description": "The email transport failed."
+            "$ref": "#/components/responses/BadGateway"
           }
         }
       }
@@ -4827,6 +5502,7 @@
       ],
       "post": {
         "operationId": "sendInvoiceEmailCopy",
+        "x-admin-only": true,
         "tags": [
           "invoices"
         ],
@@ -4857,7 +5533,15 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "Sent.",
             "content": {
@@ -4887,7 +5571,7 @@
             }
           },
           "403": {
-            "description": "Admin role required."
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -4899,7 +5583,7 @@
             "$ref": "#/components/responses/ValidationError"
           },
           "502": {
-            "description": "The email transport failed."
+            "$ref": "#/components/responses/BadGateway"
           }
         }
       }
@@ -4918,6 +5602,7 @@
       ],
       "post": {
         "operationId": "payInvoice",
+        "x-admin-only": true,
         "tags": [
           "invoices"
         ],
@@ -4948,7 +5633,18 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/CsrfForbidden"
+          },
           "200": {
             "description": "Paid invoice.",
             "content": {
@@ -4964,6 +5660,9 @@
           },
           "409": {
             "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
           }
         },
         "description": "amount_minor absent = the full remaining balance (legacy behaviour). 0 is a 422, over-balance a 409 \u2014 both without persistence. Settling the last cent flips to paid; anything less parks at partly_paid with a ledger entry."
@@ -4983,6 +5682,7 @@
       ],
       "post": {
         "operationId": "createCheckout",
+        "x-admin-only": true,
         "tags": [
           "invoices"
         ],
@@ -5010,7 +5710,15 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "201": {
             "description": "Checkout session.",
             "content": {
@@ -5047,13 +5755,16 @@
             "$ref": "#/components/responses/BadRequest"
           },
           "403": {
-            "description": "Admin role required."
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
             "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
           }
         }
       }
@@ -5079,16 +5790,43 @@
           "invoices"
         ],
         "summary": "Provider webhook (public; authenticated by HMAC signature) \u2014 verifies amount/currency against the invoice and marks it paid (#34, review A11)",
+        "parameters": [
+          {
+            "name": "x-webhook-signature",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Provider signature (HMAC) over the raw body. Optional at the transport layer: the provider verifier fails the request 401 bad_signature when it is missing or does not match."
+          },
+          {
+            "name": "stripe-signature",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Stripe's signature header, accepted in place of x-webhook-signature."
+          }
+        ],
         "requestBody": {
           "required": true,
+          "description": "Raw provider payload, forwarded to the provider verifier unparsed (the signature covers the exact bytes), which is why the body is read as a string rather than deserialized here.",
           "content": {
             "application/json": {
               "schema": {
                 "type": "object"
               }
+            },
+            "text/plain": {
+              "schema": {
+                "type": "string"
+              }
             }
           }
         },
+        "security": [],
         "responses": {
           "200": {
             "description": "Processed (paid / already_paid / ignored).",
@@ -5104,13 +5842,13 @@
             "$ref": "#/components/responses/BadRequest"
           },
           "401": {
-            "description": "Webhook signature verification failed."
+            "$ref": "#/components/responses/Unauthorized"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "description": "Amount below invoice total, currency mismatch, or invoice not issued."
+            "$ref": "#/components/responses/Conflict"
           }
         }
       }
@@ -5129,6 +5867,7 @@
       ],
       "post": {
         "operationId": "syncInvoice",
+        "x-admin-only": true,
         "tags": [
           "invoices"
         ],
@@ -5156,7 +5895,15 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "Sync record (status synced/failed; noop when already synced).",
             "content": {
@@ -5171,13 +5918,16 @@
             "$ref": "#/components/responses/BadRequest"
           },
           "403": {
-            "description": "Admin role required."
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
             "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
           }
         }
       }
@@ -5185,11 +5935,15 @@
     "/api/sync/accounting": {
       "get": {
         "operationId": "accountingSyncStatus",
+        "x-admin-only": true,
         "tags": [
           "invoices"
         ],
         "summary": "Visible accounting sync status: provider records + enabled providers (#33)",
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "Status.",
             "content": {
@@ -5268,7 +6022,7 @@
             }
           },
           "403": {
-            "description": "Admin role required."
+            "$ref": "#/components/responses/Forbidden"
           }
         }
       }
@@ -5276,11 +6030,18 @@
     "/api/invoices/summary": {
       "get": {
         "operationId": "invoiceSummary",
+        "x-admin-only": true,
         "tags": [
           "invoices"
         ],
         "summary": "Invoice status counts and outstanding totals for the dashboard",
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "200": {
             "description": "Summary.",
             "content": {
@@ -5305,11 +6066,18 @@
       ],
       "get": {
         "operationId": "invoiceReport",
+        "x-admin-only": true,
         "tags": [
           "invoices"
         ],
         "summary": "Revenue by customer and currency + status counts (#31, #186)",
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "200": {
             "description": "Report. Breaking change (#186): total_revenue_minor has been removed because summing minor units across currencies is invalid; use revenue_by_currency instead.",
             "content": {
@@ -5379,7 +6147,9 @@
                     },
                     "revenue_by_currency": {
                       "type": "object",
-                      "additionalProperties": { "type": "integer" },
+                      "additionalProperties": {
+                        "type": "integer"
+                      },
                       "description": "Non-draft revenue keyed by ISO-4217 code (#186: a flat total across currencies would sum unrelated minor units)."
                     },
                     "partly_paid": {
@@ -5393,6 +6163,9 @@
                 }
               }
             }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
           }
         }
       }
@@ -5400,11 +6173,18 @@
     "/api/invoices/export.csv": {
       "get": {
         "operationId": "invoiceExportCsv",
+        "x-admin-only": true,
         "tags": [
           "invoices"
         ],
         "summary": "CSV export of all invoices (#31)",
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "200": {
             "description": "CSV.",
             "content": {
@@ -5426,6 +6206,9 @@
         ],
         "summary": "List expense categories",
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "All categories.",
             "content": {
@@ -5466,7 +6249,18 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/CsrfForbidden"
+          },
           "201": {
             "description": "Created.",
             "content": {
@@ -5511,7 +6305,18 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/CsrfForbidden"
+          },
           "200": {
             "description": "Updated.",
             "content": {
@@ -5536,7 +6341,18 @@
           "expenses"
         ],
         "summary": "Delete a category (must be unused)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/CsrfForbidden"
+          },
           "204": {
             "description": "Deleted."
           },
@@ -5567,13 +6383,16 @@
             }
           },
           {
-            "$ref": "#/components/parameters/FromParam"
+            "$ref": "#/components/parameters/OptionalFromParam"
           },
           {
-            "$ref": "#/components/parameters/ToParam"
+            "$ref": "#/components/parameters/OptionalToParam"
           }
         ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "Matching expenses.",
             "content": {
@@ -5595,6 +6414,9 @@
                 }
               }
             }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
           }
         }
       },
@@ -5614,7 +6436,18 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/CsrfForbidden"
+          },
           "201": {
             "description": "Created.",
             "content": {
@@ -5650,6 +6483,9 @@
         ],
         "summary": "Fetch one expense",
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "The expense.",
             "content": {
@@ -5671,12 +6507,29 @@
           "expenses"
         ],
         "summary": "Delete an expense",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/CsrfForbidden"
+          },
           "204": {
             "description": "Deleted."
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/Locked"
           }
         }
       }
@@ -5684,11 +6537,15 @@
     "/api/audit": {
       "get": {
         "operationId": "auditLog",
+        "x-admin-only": true,
         "tags": [
           "users"
         ],
         "summary": "Recent security audit events (admin only, #52)",
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "Newest-first events.",
             "content": {
@@ -5712,7 +6569,7 @@
             }
           },
           "403": {
-            "description": "Admin role required."
+            "$ref": "#/components/responses/Forbidden"
           }
         }
       }
@@ -5720,11 +6577,15 @@
     "/api/admin/config": {
       "get": {
         "operationId": "adminConfig",
+        "x-admin-only": true,
         "tags": [
           "admin"
         ],
         "summary": "Effective externalised configuration: whitelist of non-secret knobs with value, source (env/file/default) and default (#94)",
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "Effective config.",
             "content": {
@@ -5787,12 +6648,13 @@
             }
           },
           "403": {
-            "description": "Admin role required."
+            "$ref": "#/components/responses/Forbidden"
           }
         }
       },
       "put": {
         "operationId": "updateAdminConfig",
+        "x-admin-only": true,
         "tags": [
           "admin"
         ],
@@ -5807,7 +6669,15 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "Persisted.",
             "content": {
@@ -5828,7 +6698,7 @@
             }
           },
           "403": {
-            "description": "Admin role required."
+            "$ref": "#/components/responses/Forbidden"
           },
           "422": {
             "$ref": "#/components/responses/ValidationError"
@@ -5839,11 +6709,15 @@
     "/api/admin/secrets": {
       "get": {
         "operationId": "listSecrets",
+        "x-admin-only": true,
         "tags": [
           "users"
         ],
         "summary": "List configured integration secrets with masked hints (admin only, #77)",
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "Secrets (names + masked hints, never values).",
             "content": {
@@ -5880,10 +6754,10 @@
             }
           },
           "403": {
-            "description": "Admin role required."
+            "$ref": "#/components/responses/Forbidden"
           },
           "503": {
-            "description": "Vault not configured (no TUCANO_SECRET_KEY)."
+            "$ref": "#/components/responses/VaultUnavailable"
           }
         }
       }
@@ -5901,6 +6775,7 @@
       ],
       "put": {
         "operationId": "setSecret",
+        "x-admin-only": true,
         "tags": [
           "users"
         ],
@@ -5924,39 +6799,56 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "204": {
             "description": "Stored."
           },
           "403": {
-            "description": "Admin role required."
+            "$ref": "#/components/responses/Forbidden"
           },
           "422": {
             "$ref": "#/components/responses/ValidationError"
           },
           "503": {
-            "description": "Vault not configured."
+            "$ref": "#/components/responses/VaultUnavailable"
           }
         }
       },
       "delete": {
         "operationId": "deleteSecret",
+        "x-admin-only": true,
         "tags": [
           "users"
         ],
         "summary": "Delete a secret",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "204": {
             "description": "Deleted."
           },
           "403": {
-            "description": "Admin role required."
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
           "503": {
-            "description": "Vault not configured."
+            "$ref": "#/components/responses/VaultUnavailable"
           }
         }
       }
@@ -5969,6 +6861,9 @@
         ],
         "summary": "List timesheet submissions",
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "All submissions.",
             "content": {
@@ -6009,7 +6904,18 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/CsrfForbidden"
+          },
           "201": {
             "description": "Submitted.",
             "content": {
@@ -6022,6 +6928,15 @@
           },
           "409": {
             "$ref": "#/components/responses/Conflict"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Locked"
           }
         }
       }
@@ -6054,7 +6969,18 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/CsrfForbidden"
+          },
           "200": {
             "description": "Updated submission.",
             "content": {
@@ -6070,6 +6996,9 @@
           },
           "409": {
             "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
           }
         }
       }
@@ -6082,6 +7011,9 @@
         ],
         "summary": "List reimbursement claims (own, or all for admin)",
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "Claims.",
             "content": {
@@ -6122,7 +7054,18 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/CsrfForbidden"
+          },
           "201": {
             "description": "Draft claim.",
             "content": {
@@ -6157,7 +7100,18 @@
           "expenses"
         ],
         "summary": "Submit a draft claim (locks its expenses)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/CsrfForbidden"
+          },
           "200": {
             "description": "Submitted claim.",
             "content": {
@@ -6191,6 +7145,7 @@
       ],
       "post": {
         "operationId": "decideClaim",
+        "x-admin-only": true,
         "tags": [
           "expenses"
         ],
@@ -6205,7 +7160,15 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "Updated claim.",
             "content": {
@@ -6217,13 +7180,16 @@
             }
           },
           "403": {
-            "description": "Admin role required."
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
             "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
           }
         }
       }
@@ -6231,11 +7197,15 @@
     "/api/admin/invoice-template": {
       "get": {
         "operationId": "getInvoiceTemplate",
+        "x-admin-only": true,
         "tags": [
           "invoices"
         ],
         "summary": "Read the org invoice template plus the %variable% cheatsheet (#116)",
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "Template (defaults when unset) and variables.",
             "content": {
@@ -6276,12 +7246,13 @@
             }
           },
           "403": {
-            "description": "Admin role required."
+            "$ref": "#/components/responses/Forbidden"
           }
         }
       },
       "put": {
         "operationId": "putInvoiceTemplate",
+        "x-admin-only": true,
         "tags": [
           "invoices"
         ],
@@ -6297,7 +7268,15 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "Stored template.",
             "content": {
@@ -6309,7 +7288,7 @@
             }
           },
           "403": {
-            "description": "Admin role required."
+            "$ref": "#/components/responses/Forbidden"
           },
           "422": {
             "$ref": "#/components/responses/ValidationError"
@@ -6331,12 +7310,16 @@
       ],
       "get": {
         "operationId": "getInvoiceDocument",
+        "x-admin-only": true,
         "tags": [
           "invoices"
         ],
         "summary": "Live {subject, html} preview of an invoice document (#116)",
         "description": "Resolved from the CURRENT template + customer (not a snapshot); the same content the PDF (#113) renders from. HTML is escaped markdown-subset output.",
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "Rendered document.",
             "content": {
@@ -6361,7 +7344,7 @@
             }
           },
           "403": {
-            "description": "Admin role required."
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -6383,6 +7366,7 @@
       ],
       "post": {
         "operationId": "writeOffInvoice",
+        "x-admin-only": true,
         "tags": [
           "invoices"
         ],
@@ -6409,7 +7393,15 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "Written-off invoice.",
             "content": {
@@ -6421,7 +7413,7 @@
             }
           },
           "403": {
-            "description": "Admin role required."
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -6438,11 +7430,15 @@
     "/api/admin/org": {
       "get": {
         "operationId": "getOrg",
+        "x-admin-only": true,
         "tags": [
           "invoices"
         ],
         "summary": "Company identity (#138)",
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "Org profile (defaults when unset).",
             "content": {
@@ -6454,12 +7450,13 @@
             }
           },
           "403": {
-            "description": "Admin role required."
+            "$ref": "#/components/responses/Forbidden"
           }
         }
       },
       "put": {
         "operationId": "putOrg",
+        "x-admin-only": true,
         "tags": [
           "invoices"
         ],
@@ -6475,7 +7472,15 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "Stored profile.",
             "content": {
@@ -6487,7 +7492,7 @@
             }
           },
           "403": {
-            "description": "Admin role required."
+            "$ref": "#/components/responses/Forbidden"
           },
           "422": {
             "$ref": "#/components/responses/ValidationError"
@@ -6498,6 +7503,7 @@
     "/api/invoices/manual": {
       "post": {
         "operationId": "createManualInvoice",
+        "x-admin-only": true,
         "tags": [
           "invoices"
         ],
@@ -6513,7 +7519,15 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "201": {
             "description": "Draft with number.",
             "content": {
@@ -6525,10 +7539,13 @@
             }
           },
           "403": {
-            "description": "Admin role required."
+            "$ref": "#/components/responses/Forbidden"
           },
           "422": {
             "$ref": "#/components/responses/ValidationError"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
           }
         }
       }
@@ -6536,6 +7553,7 @@
     "/api/invoices/preview": {
       "post": {
         "operationId": "previewInvoice",
+        "x-admin-only": true,
         "tags": [
           "invoices"
         ],
@@ -6551,7 +7569,15 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "Unsaved draft preview.",
             "content": {
@@ -6563,13 +7589,19 @@
             }
           },
           "403": {
-            "description": "Admin role required."
+            "$ref": "#/components/responses/Forbidden"
           },
           "409": {
             "$ref": "#/components/responses/Conflict"
           },
           "422": {
             "$ref": "#/components/responses/ValidationError"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
           }
         }
       }
@@ -6577,11 +7609,15 @@
     "/api/admin/item-types": {
       "get": {
         "operationId": "listItemTypes",
+        "x-admin-only": true,
         "tags": [
           "invoices"
         ],
         "summary": "Product/Service catalog incl. archived (#147)",
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "Catalog.",
             "content": {
@@ -6605,12 +7641,13 @@
             }
           },
           "403": {
-            "description": "Admin role required."
+            "$ref": "#/components/responses/Forbidden"
           }
         }
       },
       "post": {
         "operationId": "createItemType",
+        "x-admin-only": true,
         "tags": [
           "invoices"
         ],
@@ -6625,7 +7662,15 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "201": {
             "description": "Created.",
             "content": {
@@ -6637,7 +7682,7 @@
             }
           },
           "403": {
-            "description": "Admin role required."
+            "$ref": "#/components/responses/Forbidden"
           },
           "422": {
             "$ref": "#/components/responses/ValidationError"
@@ -6659,6 +7704,7 @@
       ],
       "put": {
         "operationId": "updateItemType",
+        "x-admin-only": true,
         "tags": [
           "invoices"
         ],
@@ -6673,7 +7719,15 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "Updated.",
             "content": {
@@ -6685,7 +7739,7 @@
             }
           },
           "403": {
-            "description": "Admin role required."
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -6697,16 +7751,25 @@
       },
       "delete": {
         "operationId": "deleteItemType",
+        "x-admin-only": true,
         "tags": [
           "invoices"
         ],
         "summary": "Delete a catalog item type (#147)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "204": {
             "description": "Deleted."
           },
           "403": {
-            "description": "Admin role required."
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -6717,11 +7780,15 @@
     "/api/retainers": {
       "get": {
         "operationId": "listRetainers",
+        "x-admin-only": true,
         "tags": [
           "retainers"
         ],
         "summary": "Retainer list with balances (#144)",
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "Summaries.",
             "content": {
@@ -6781,12 +7848,13 @@
             }
           },
           "403": {
-            "description": "Admin role required."
+            "$ref": "#/components/responses/Forbidden"
           }
         }
       },
       "post": {
         "operationId": "createRetainer",
+        "x-admin-only": true,
         "tags": [
           "retainers"
         ],
@@ -6801,7 +7869,15 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "201": {
             "description": "Retainer with reconciled balance.",
             "content": {
@@ -6826,7 +7902,7 @@
             }
           },
           "403": {
-            "description": "Admin role required."
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -6851,11 +7927,15 @@
       ],
       "get": {
         "operationId": "getRetainer",
+        "x-admin-only": true,
         "tags": [
           "retainers"
         ],
         "summary": "Retainer detail + full ledger (#144)",
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "Retainer with reconciled balance.",
             "content": {
@@ -6883,17 +7963,26 @@
             "$ref": "#/components/responses/NotFound"
           },
           "403": {
-            "description": "Admin role required."
+            "$ref": "#/components/responses/Forbidden"
           }
         }
       },
       "post": {
         "operationId": "closeRetainer",
+        "x-admin-only": true,
         "tags": [
           "retainers"
         ],
         "summary": "Close a retainer (final) (#144)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "Retainer with reconciled balance.",
             "content": {
@@ -6924,7 +8013,7 @@
             "$ref": "#/components/responses/Conflict"
           },
           "403": {
-            "description": "Admin role required."
+            "$ref": "#/components/responses/Forbidden"
           }
         }
       }
@@ -6943,6 +8032,7 @@
       ],
       "post": {
         "operationId": "creditRetainer",
+        "x-admin-only": true,
         "tags": [
           "retainers"
         ],
@@ -6958,7 +8048,15 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "Retainer with reconciled balance.",
             "content": {
@@ -6983,7 +8081,7 @@
             }
           },
           "403": {
-            "description": "Admin role required."
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -7011,6 +8109,7 @@
       ],
       "post": {
         "operationId": "drawRetainer",
+        "x-admin-only": true,
         "tags": [
           "retainers"
         ],
@@ -7026,7 +8125,15 @@
             }
           }
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
         "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "200": {
             "description": "Retainer with reconciled balance.",
             "content": {
@@ -7051,7 +8158,7 @@
             }
           },
           "403": {
-            "description": "Admin role required."
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
