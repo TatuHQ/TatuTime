@@ -12,8 +12,8 @@ import { waitFor, yieldToEventLoop } from './wait-for.mjs';
 const html = readFileSync(new URL('../web/index.html', import.meta.url), 'utf8');
 const app = loadAppSource();
 
-function makeDom(prelude = '') {
-  const dom = new JSDOM(html, { runScripts: 'outside-only', url: 'http://localhost/' });
+function makeDom(prelude = '', url = 'http://localhost/') {
+  const dom = new JSDOM(html, { runScripts: 'outside-only', url });
   dom.window.HTMLDialogElement.prototype.showModal = function () { this.open = true; };
   dom.window.HTMLDialogElement.prototype.close = function () { this.open = false; };
   const exports = `${app}
@@ -362,6 +362,46 @@ test('week "+ Add row" appends an empty project row and focuses its first cell (
       .filter((th) => th.textContent.includes('P-9')).length,
     1,
     'the duplicate is not added twice',
+  );
+  dom.window.close();
+});
+
+test('a deep link straight to the Calendar paints the month grid (#140)', async () => {
+  // Regression: startApp() painted Day and Week only, and applyRoute() selects
+  // the segment with the panel refresh suppressed, so reloading
+  // /timesheets/calendar left the month grid empty until the segment was
+  // clicked. The static shell's empty <tbody> hid this from structural probes.
+  const stub = `
+api.get = async (path) => {
+  if (path === '/auth/status') return { initialised: true };
+  if (path === '/auth/me') return { id: 'm1', name: 'Mem', email: 'm@x.test', role: 'member' };
+  if (path === '/auth/sso/providers') return { providers: [] };
+  if (path.startsWith('/entries?')) return { entries: [
+    { id: 'e1', date: '2026-10-07', hours: 2, customer_id: 'c1', project_code: 'P-9' },
+  ] };
+  if (path === '/invoices' || path === '/invoices/summary' || path === '/users'
+      || path === '/schedules' || path === '/retainers' || path.startsWith('/admin/')) {
+    const err = new Error('administrator role required');
+    err.status = 403;
+    throw err;
+  }
+  return { entries: [], customers: [], projects: [], submissions: [], expenses: [],
+           claims: [], notifications: [], categories: [], item_types: [], timer: null };
+};
+api.post = async () => ({});
+`;
+  const { dom, document } = makeDom(stub, 'http://localhost/timesheets/calendar');
+  await waitFor(() => document.getElementById('version').textContent === 'TucanoTime', {
+    message: 'the boot to complete on the Calendar deep link',
+  });
+  assert.equal(document.getElementById('ts-cal').getAttribute('aria-selected'), 'true',
+    'the deep link selects the Calendar segment');
+  assert.equal(document.getElementById('panel-calendar').hidden, false, 'the month panel is shown');
+  const cells = document.querySelectorAll('#cal-grid tbody td.cal-cell');
+  assert.ok(cells.length >= 28, `the month grid painted its day cells (got ${cells.length})`);
+  assert.ok(
+    /logged|nothing logged yet/.test(document.getElementById('cal-total').textContent),
+    'refreshTimeCal ran on boot (the month total is announced)',
   );
   dom.window.close();
 });

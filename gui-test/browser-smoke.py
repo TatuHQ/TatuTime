@@ -82,9 +82,14 @@ VIEWS = [
     ("/timesheets/week", "tab-timesheet", "panel-week",
      "(() => { const t = document.getElementById('week-table');"
      " return !!t && !!t.tHead && t.tHead.rows.length > 0; })()"),
+    # The static shell ships an empty <tbody>, so `querySelector('tbody')` alone
+    # passed while the month grid was never painted on a fresh navigation (the
+    # boot sequence painted Day and Week only). Require REAL rendered day cells.
     ("/timesheets/calendar", "tab-timesheet", "panel-calendar",
      "(() => { const t = document.getElementById('cal-grid');"
-     " return !!t && !!t.querySelector('tbody'); })()"),
+     " const b = t && t.tBodies[0];"
+     " return !!b && b.rows.length > 0"
+     " && b.querySelectorAll('td.cal-cell').length >= 28; })()"),
     ("/customers", "tab-customers", "panel-customers",
      "(() => { const t = document.getElementById('customer-table');"
      " return !!t && !!t.tHead && t.tBodies[0].rows.length >= 1; })()"),
