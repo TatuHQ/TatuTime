@@ -342,6 +342,9 @@ td.num, th.num, .ws-total.num { text-align: right; font-variant-numeric: tabular
 .entry-note { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #day-table td.entry-note .p-chip { margin-left: .35rem; }
 .entry-hours { font-variant-numeric: tabular-nums; font-weight: 600; }
+/* Day table Hours column (#107): centred inside its own track — right-
+   aligned it hugged the Actions column it sits beside. */
+#day-table th.num, #day-table td.num { text-align: center; }
 /* Aligned with the day table: same vertical rhythm as the row gaps
    (.45rem border-spacing) and the same content inset as .entry-main
    (.75rem), so the box and its button sit on the grid, not beside it.
