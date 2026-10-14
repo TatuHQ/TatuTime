@@ -144,13 +144,29 @@ fails the build if any `var(--…)` in `styles.css` is not defined in **both**
 themes (verified red against the pre-fix sheet). The component set is unchanged,
 so `npm run build:ubuntu` is a **no-op** and `cssSha256` is unchanged.
 
-**Umbrella #232 status.** Increments 1–6 are all landed and green, so the
-issue's component-substitution scope is complete; the umbrella stays **open**
-(*Part of #232*) only for the page-by-page rollout tracked in
+**Phase 2a (remaining registers, #232 follow-up)** wraps the last bespoke
+registers in the official `p-card` shell: the user, approval, credential, catalog
+and advanced-billing recurring/retainer registers adopt `p-table--mobile-card`
+(their renderers now emit `data-heading` labels), while the runtime-configuration
+and template-variable summaries keep a plain official table inside the card (a
+key/value + reference shape is not a mobile-card list). The `#user-table`
+`min-width`, the `#config-table` `display:block`/`overflow-x` hack and the
+`.advanced-billing-section table` `display:block`/`overflow-x` rule the conversion
+replaced are deleted (`styles.css` 701/389 → 698/386), and a new
+`gui-test/registers.test.mjs` guard pins the classes, the p-card ancestry, the
+frozen column order and the rendered row counts. The Day/Week/Calendar grids, the
+invoice line editor and the Invoices `p-table--sortable` register are deliberately
+left to their own increments. The component set is unchanged, so
+`npm run build:ubuntu` is a **no-op** and `cssSha256` is unchanged.
+
+**Umbrella #232 status.** Increments 1–6 and the phase-2a register sweep are all
+landed and green, so the component-substitution scope is complete; the umbrella
+stays **open** (*Part of #232*) only for the page-by-page rollout tracked in
 [`ubuntu-migration-plan.md`](ubuntu-migration-plan.md) — rows 1–15 are still ⬜
-(the Invoices `p-table--sortable` register, the user/submission registers, and
-the per-page manual light/dark + assistive-technology sign-off in ground rules
-4–5) — and the `decorateUbuntuButton` label-matching fallback noted below.
+(the remaining per-page form/dialog adapters, the Invoices `p-table--sortable`
+register in its own increment, and the per-page manual light/dark +
+assistive-technology sign-off in ground rules 4–5) — and the
+`decorateUbuntuButton` label-matching fallback noted below.
 `npm run build:ubuntu` is a **no-op** and `cssSha256` is unchanged.
 
 The rules the plan holds to: no global reset (the editable timesheet grid is
@@ -174,9 +190,11 @@ moved under `/api` and every view gained a stable path (`spa_page` in
    overlay exactly. Its first-customer field is prefilled with the `Tucano
    Time` example. Element ids are unchanged, so the jsdom + wizard smoke
    suites stay the gate. The remaining `.card` sites follow below.
-1. **Stage 2a** — tables: the customer/project/task/expense/submission/user
-   registers onto `p-table` (invoice register gains `p-table--sortable`;
-   dense registers gain the mobile-card pattern for narrow screens).
+1. **Stage 2a** — tables: ✅ the customer/project/task/expense registers (inc 2)
+   and the submission/user/credential/catalog/recurring/retainer registers
+   (phase 2a) are `p-card` shells — the dense registers use `p-table--mobile-card`,
+   the config/template-vars summaries a plain official table. Still open: the
+   Invoices register gains `p-table--sortable` in its own page increment.
 2. **Stage 2b** — cards/chips/badges: ✅ cards (#229, #232 inc 2); chips/badges
    (#232 inc 3) — `.card`/`.chip`/`.badge` are now `p-card`/`p-chip` adapters. The
    old backlog named `p-badge`, but the shipped `p-badge` is a **numeric counter**

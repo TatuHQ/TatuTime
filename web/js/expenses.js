@@ -224,12 +224,12 @@ export async function refreshSubmissions() {
     tbody.appendChild(
       el('tr', {}, [
         el('th', { attrs: { scope: 'row' }, text: `${s.week_start} → ${s.week_end}` }),
-        el('td', { cls: 'num', text: String(s.entry_ids.length) }),
-        el('td', {}, [
+        el('td', { cls: 'num', attrs: { 'data-heading': 'Entries' }, text: String(s.entry_ids.length) }),
+        el('td', { attrs: { 'data-heading': 'State' } }, [
           statusChip(s.state, s.state === 'approved'),
         ]),
-        el('td', { text: s.comment || '' }),
-        el('td', { cls: 'actions-col' }, actions),
+        el('td', { attrs: { 'data-heading': 'Comment' }, text: s.comment || '' }),
+        el('td', { cls: 'actions-col', attrs: { 'data-heading': 'Actions' } }, actions),
       ]),
     );
   }

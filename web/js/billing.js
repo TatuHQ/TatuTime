@@ -278,10 +278,10 @@ export async function refreshCatalog() {
     tbody.appendChild(
       el('tr', {}, [
         el('th', { attrs: { scope: 'row' }, text: it.name }),
-        el('td', { text: it.kind }),
-        el('td', { cls: 'num', text: `${it.currency} ${formatMoney(it.default_price_minor)}` }),
-        el('td', {}, [statusChip(it.active ? 'active' : 'archived', it.active)]),
-        el('td', { cls: 'actions-col' }, actions),
+        el('td', { attrs: { 'data-heading': 'Type' }, text: it.kind }),
+        el('td', { cls: 'num', attrs: { 'data-heading': 'Default price' }, text: `${it.currency} ${formatMoney(it.default_price_minor)}` }),
+        el('td', { attrs: { 'data-heading': 'Status' } }, [statusChip(it.active ? 'active' : 'archived', it.active)]),
+        el('td', { cls: 'actions-col', attrs: { 'data-heading': 'Actions' } }, actions),
       ]),
     );
   }
@@ -354,10 +354,10 @@ export async function refreshRetainers() {
     tbody.appendChild(
       el('tr', {}, [
         el('th', { attrs: { scope: 'row' }, text: `${customerName(r.customer_id)} / ${r.project_code}` }),
-        el('td', { cls: 'num', text: `${r.currency} ${formatMoney(Math.max(r.balance_minor, 0))}` }),
-        el('td', {}, [statusChip(r.status, r.status === 'open')]),
-        el('td', { text: r.last_activity ? String(r.last_activity).slice(0, 10) : '\u2014' }),
-        el('td', { cls: 'actions-col' }, actions),
+        el('td', { cls: 'num', attrs: { 'data-heading': 'Balance' }, text: `${r.currency} ${formatMoney(Math.max(r.balance_minor, 0))}` }),
+        el('td', { attrs: { 'data-heading': 'Status' } }, [statusChip(r.status, r.status === 'open')]),
+        el('td', { attrs: { 'data-heading': 'Last activity' }, text: r.last_activity ? String(r.last_activity).slice(0, 10) : '\u2014' }),
+        el('td', { cls: 'actions-col', attrs: { 'data-heading': 'Actions' } }, actions),
       ]),
     );
   }
@@ -482,17 +482,18 @@ export async function refreshSchedules() {
     tbody.appendChild(
       el('tr', {}, [
         el('th', { attrs: { scope: 'row' }, text: customerName(scd.customer_id) }),
-        el('td', { text: scd.cadence }),
-        el('td', { text: scd.mode === 'retainer' ? 'Fixed retainer' : 'Time + expenses' }),
+        el('td', { attrs: { 'data-heading': 'Cadence' }, text: scd.cadence }),
+        el('td', { attrs: { 'data-heading': 'Bills' }, text: scd.mode === 'retainer' ? 'Fixed retainer' : 'Time + expenses' }),
         el('td', {
           cls: 'num',
+          attrs: { 'data-heading': 'Retainer' },
           text: scd.mode === 'retainer' ? `${scd.currency} ${formatMoney(scd.retainer_amount_minor)}` : '\u2014',
         }),
-        el('td', { text: scd.last_period_end || 'never' }),
-        el('td', {}, [
+        el('td', { attrs: { 'data-heading': 'Last billed to' }, text: scd.last_period_end || 'never' }),
+        el('td', { attrs: { 'data-heading': 'Status' } }, [
           statusChip(active ? 'active' : 'paused', active),
         ]),
-        el('td', { cls: 'actions-col' }, [
+        el('td', { cls: 'actions-col', attrs: { 'data-heading': 'Actions' } }, [
           action('link', active ? 'Pause' : 'Resume', () => toggleSchedule(scd),
             active ? 'Pause generation (drafts stop until resumed)' : 'Resume generation'),
           action('danger', 'Delete', () => removeSchedule(scd), 'Delete the schedule'),

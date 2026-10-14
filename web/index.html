@@ -506,12 +506,14 @@
         <p class="form-error" id="rec-error" role="alert" hidden></p>
         <div class="buttons"><button type="submit" id="rec-add">Add schedule</button></div>
       </form>
-      <table id="rec-table">
+      <div class="p-card">
+      <div class="table-scroll"><table id="rec-table" class="p-table--mobile-card">
         <caption class="sr-only">Recurring invoice schedules</caption>
         <thead><tr><th scope="col">Customer</th><th scope="col">Cadence</th><th scope="col">Bills</th><th scope="col">Retainer</th><th scope="col">Last billed to</th><th scope="col">Status</th><th scope="col" class="actions-col">Actions</th></tr></thead>
         <tbody></tbody>
-      </table>
+      </table></div>
       <p id="rec-empty" hidden>No recurring schedules yet.</p>
+      </div>
       </section>
       <section class="advanced-billing-section" aria-labelledby="retainer-title">
       <h2 id="retainer-title">Retainers</h2>
@@ -523,12 +525,14 @@
         <p class="form-error" id="ret-error" role="alert" hidden></p>
         <div class="buttons"><button type="submit" id="ret-add">Create retainer</button></div>
       </form>
-      <table id="ret-table">
+      <div class="p-card">
+      <div class="table-scroll"><table id="ret-table" class="p-table--mobile-card">
         <caption class="sr-only">Retainer balances</caption>
         <thead><tr><th scope="col">Customer / project</th><th scope="col" class="num">Balance</th><th scope="col">Status</th><th scope="col">Last activity</th><th scope="col" class="actions-col">Actions</th></tr></thead>
         <tbody></tbody>
-      </table>
+      </table></div>
       <p id="ret-empty" hidden>No retainers yet.</p>
+      </div>
       <div id="ret-detail" class="card" role="region" aria-label="Retainer history" hidden>
         <div class="ip-head"><h3 id="ret-detail-title">Ledger</h3>
         <button type="button" id="ret-detail-close" class="link secondary">Close</button></div>
@@ -588,18 +592,24 @@
 
     <!-- SUBMISSIONS -->
     <section id="panel-submissions" role="tabpanel" aria-labelledby="tab-submissions" tabindex="0" hidden>
+      <!-- #232 phase 2a (registers): the approval register is a Vanilla
+           p-card; the submit-week bar is its p-card__header. -->
+      <div class="p-card">
+      <div class="p-card__header">
       <form id="submission-form" class="bar">
         <label for="submission-week">Week starting</label>
         <input type="date" id="submission-week" required>
         <button type="submit">Submit week</button>
       </form>
+      </div>
       <p class="form-error" id="submission-error" role="alert" hidden></p>
-      <table id="submission-table">
+      <div class="table-scroll"><table id="submission-table" class="p-table--mobile-card">
         <caption class="sr-only">Submissions</caption>
         <thead><tr><th scope="col">Week</th><th scope="col">Entries</th><th scope="col">State</th><th scope="col">Comment</th><th scope="col" class="actions-col">Actions</th></tr></thead>
         <tbody></tbody>
-      </table>
+      </table></div>
       <p id="submission-empty" hidden>No timesheets submitted yet.</p>
+      </div>
     </section>
 
     <!-- SETTINGS (admin) -->
@@ -617,7 +627,10 @@
       </div>
 
       <section id="settings-panel-users" class="settings-panel" role="tabpanel" aria-labelledby="settings-tab-users" tabindex="0" hidden>
-        <div class="panel-heading-row">
+        <!-- #232 phase 2a (registers): the user register is a Vanilla p-card;
+             the #230 heading slot becomes its p-card__header. -->
+        <div class="p-card">
+        <div class="p-card__header panel-heading-row">
           <h2>User management</h2>
           <div class="hierarchy-actions" role="group" aria-label="User actions">
             <button type="button" id="user-new" data-icon="plus" data-positive="1">User</button>
@@ -663,12 +676,13 @@
           </form>
           </div>
         </dialog>
-        <div class="table-scroll"><table id="user-table">
+        <div class="table-scroll"><table id="user-table" class="p-table--mobile-card">
           <caption class="sr-only">Users</caption>
           <thead><tr><th scope="col">Name</th><th scope="col">Email</th><th scope="col">Role</th><th scope="col">Status</th><th scope="col">Rates</th><th scope="col" class="actions-col">Actions</th></tr></thead>
           <tbody></tbody>
         </table></div>
         <p id="user-empty" hidden>No users found.</p>
+        </div>
       </section>
 
       <section id="settings-panel-security" class="settings-panel" role="tabpanel" aria-labelledby="settings-tab-security" tabindex="0">
@@ -682,20 +696,29 @@
         <p class="form-error" id="secret-error" role="alert" hidden></p>
         <div class="buttons"><button type="submit" id="secret-save">Save secret</button></div>
       </form>
-      <table id="secret-table">
+      <!-- #232 phase 2a (registers): the credential register is a Vanilla
+           p-card using the p-table--mobile-card row pattern. -->
+      <div class="p-card" id="secret-card">
+      <div class="table-scroll"><table id="secret-table" class="p-table--mobile-card">
         <caption class="sr-only">Configured secrets</caption>
         <thead><tr><th scope="col">Key</th><th scope="col">Value</th><th scope="col" class="actions-col">Actions</th></tr></thead>
         <tbody></tbody>
-      </table>
+      </table></div>
       <p id="secret-empty" hidden>No credentials stored yet.</p>
+      </div>
 
       <h2>Runtime configuration <span class="beta">Beta</span></h2>
       <p class="hint">Effective settings, resolved <strong>env &gt; config.json &gt; default</strong> and stored on the data volume — a restart or image update keeps them (#94).</p>
-      <table id="config-table">
+      <!-- #232 phase 2a (registers): the configuration summary is a plain
+           official table inside a Vanilla p-card (key/value/source, not a
+           mobile-card list). -->
+      <div class="p-card" id="config-card">
+      <div class="table-scroll"><table id="config-table">
         <caption class="sr-only">Effective runtime configuration</caption>
         <thead><tr><th scope="col">Setting</th><th scope="col">Value</th><th scope="col">Source</th></tr></thead>
         <tbody></tbody>
-      </table>
+      </table></div>
+      </div>
       <form id="config-form" class="card">
         <div class="field"><label for="config-key">Setting</label><select id="config-key"></select></div>
         <div class="field"><label for="config-value">New value</label><input id="config-value" maxlength="300"></div>
@@ -775,11 +798,16 @@
         <p class="form-error" id="template-error" role="alert" hidden></p>
         <div class="buttons"><button type="submit" id="template-save">Save template</button></div>
       </form>
-      <table id="template-vars">
+      <!-- #232 phase 2a (registers): the placeholder cheat-sheet is a plain
+           official table inside a Vanilla p-card (a reference list, not a
+           mobile-card register). -->
+      <div class="p-card">
+      <div class="table-scroll"><table id="template-vars">
         <caption class="sr-only">Available %variable% placeholders</caption>
         <thead><tr><th scope="col">Variable</th><th scope="col">Example</th></tr></thead>
         <tbody></tbody>
-      </table>
+      </table></div>
+      </div>
       <div id="template-preview" class="card" hidden>
         <h3>Preview - newest invoice</h3>
         <p id="template-preview-subject"></p>
@@ -800,12 +828,14 @@
         <p class="form-error" id="item-error" role="alert" hidden></p>
         <div class="buttons"><button type="submit" id="item-save">Save item</button><button type="button" class="secondary" id="item-cancel" hidden>Cancel</button></div>
       </form>
-      <div class="table-scroll"><table id="item-table">
+      <div class="p-card">
+      <div class="table-scroll"><table id="item-table" class="p-table--mobile-card">
         <caption class="sr-only">Catalog item types</caption>
         <thead><tr><th scope="col">Name</th><th scope="col">Type</th><th scope="col" class="num">Default price</th><th scope="col">Status</th><th scope="col" class="actions-col">Actions</th></tr></thead>
         <tbody></tbody>
       </table></div>
       <p id="item-empty" hidden>No catalog items yet.</p>
+      </div>
       </section>
     </section>
       </main>

@@ -41,11 +41,11 @@ export function renderUsers() {
   for (const user of users) {
     const row = el('tr', {}, [
       el('th', { attrs: { scope: 'row' }, text: user.name }),
-      el('td', { text: user.email }),
-      el('td', { text: user.role }),
-      el('td', { text: user.active ? 'active' : 'inactive' }),
-      el('td', { text: `${formatMoney(user.default_rate_minor)} / ${formatMoney(user.cost_rate_minor)}` }),
-      el('td', { cls: 'actions-col' }, [
+      el('td', { attrs: { 'data-heading': 'Email' }, text: user.email }),
+      el('td', { attrs: { 'data-heading': 'Role' }, text: user.role }),
+      el('td', { attrs: { 'data-heading': 'Status' }, text: user.active ? 'active' : 'inactive' }),
+      el('td', { attrs: { 'data-heading': 'Rates' }, text: `${formatMoney(user.default_rate_minor)} / ${formatMoney(user.cost_rate_minor)}` }),
+      el('td', { cls: 'actions-col', attrs: { 'data-heading': 'Actions' } }, [
         el('button', { cls: 'link', type: 'button', text: 'Edit', on: { click: () => editUser(user) } }),
         el('button', { cls: 'link', type: 'button', text: user.active ? 'Deactivate' : 'Activate', on: { click: () => toggleUserActive(user.id, !user.active) } }),
         el('button', { cls: 'link', type: 'button', text: 'Change password', on: { click: () => changeUserPassword(user) } }),
@@ -229,6 +229,7 @@ export async function refreshSecrets() {
     const data = await api.get('/admin/secrets');
     $('vault-status').textContent = 'Credential vault: enabled (encrypted at rest).';
     $('secret-form').hidden = false;
+    $('secret-card').hidden = false;
     const tbody = $('secret-table').querySelector('tbody');
     tbody.textContent = '';
     const secrets = data.secrets || [];
@@ -236,8 +237,8 @@ export async function refreshSecrets() {
       tbody.appendChild(
         el('tr', {}, [
           el('th', { attrs: { scope: 'row' }, text: s.key }),
-          el('td', { text: s.hint }),
-          el('td', { cls: 'actions-col' }, [
+          el('td', { attrs: { 'data-heading': 'Value' }, text: s.hint }),
+          el('td', { cls: 'actions-col', attrs: { 'data-heading': 'Actions' } }, [
             el('button', {
               cls: 'danger',
               type: 'button',
@@ -253,7 +254,7 @@ export async function refreshSecrets() {
     if (err.status === 503) {
       $('vault-status').textContent = 'Credential vault disabled — set TUCANO_SECRET_KEY to enable.';
       $('secret-form').hidden = true;
-      $('secret-table').hidden = true;
+      $('secret-card').hidden = true;
     } else {
       announce(err.message);
     }
@@ -285,7 +286,7 @@ export async function refreshConfig() {
         : 'Email delivery: NOT configured — messages are logged only. Set smtp.host in credentials above or TUCANO_SMTP_HOST.';
     }
   } catch {
-    $('config-table').hidden = true;
+    $('config-card').hidden = true;
     $('config-form').hidden = true;
     return;
   }
