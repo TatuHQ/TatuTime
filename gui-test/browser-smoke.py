@@ -805,6 +805,197 @@ class Gate:
             )
             self.drain_console(f"view {path}")
 
+    # ------------------------------------------------ forms (#232 phase 2b) --
+    def forms_audit(self):
+        """#232 phase 2b: the field/hint/error markup is the official Vanilla
+        form vocabulary (`p-form__group` / `p-form__label` / `p-form__control` /
+        `p-form-help-text` / `p-form-validation__message` in a
+        `p-form-validation is-error` group), and the retired bespoke CSS must
+        stop applying. Proved in a real browser: no bespoke class survives, every
+        group's label resolves to its own control with an accessible name on
+        several views, the app-owned row rhythm / tick-box size / help-text
+        override really compute, and a real validation error still surfaces its
+        message in the official styling."""
+        self.navigate("/settings/security")
+        self.wait_script(
+            "document.readyState === 'complete'"
+            " && document.getElementById('version').textContent === 'TucanoTime'",
+            "the app to boot at /settings/security",
+        )
+        counts = json.loads(self.marionette.script(
+            "function n(s) { return document.querySelectorAll(s).length; }"
+            "return JSON.stringify({"
+            " groups: n('.p-form__group'), labels: n('.p-form__label'),"
+            " controls: n('.p-form__control'), help: n('.p-form-help-text'),"
+            " messages: n('.p-form-validation__message'),"
+            " errorGroups: n('.p-form-validation.is-error'),"
+            " field: n('.field'), hint: n('.hint'), formError: n('.form-error')"
+            "});"
+        ))
+        self.check(
+            "the bespoke .field/.hint/.form-error markup is gone and the official "
+            "form vocabulary is in place (#232 phase 2b)",
+            counts["field"] == 0 and counts["hint"] == 0 and counts["formError"] == 0
+            and counts["groups"] == 113 and counts["labels"] == 109
+            and counts["controls"] == 109 and counts["help"] == 27
+            and counts["messages"] == counts["errorGroups"] == 22,
+            f"counts={counts}",
+            info=f"{counts['groups']} groups, {counts['help']} help texts, "
+                 f"{counts['messages']} validation messages",
+        )
+
+        pairing = json.loads(self.marionette.script(
+            "var bad = []; var groups = document.querySelectorAll('.p-form__group');"
+            "for (var i = 0; i < groups.length; i++) {"
+            "  var g = groups[i]; var label = null;"
+            "  for (var j = 0; j < g.children.length; j++) {"
+            "    if (g.children[j].tagName === 'LABEL') { label = g.children[j]; break; }"
+            "  }"
+            "  if (!label) continue;"  # the 3 grouped fieldsets + the Contacts row
+            "  var id = label.getAttribute('for');"
+            "  var ctl = id ? document.getElementById(id) : null;"
+            "  if (!ctl) { bad.push(String(id) + ': no control'); continue; }"
+            "  if (!g.contains(ctl)) bad.push(id + ': control outside its group');"
+            "  if (!label.classList.contains('p-form__label')) bad.push(id + ': label class');"
+            "  if (!ctl.classList.contains('p-form__control')) bad.push(id + ': control class');"
+            "  if (!ctl.labels || ctl.labels.length !== 1) bad.push(id + ': label association');"
+            "}"
+            "return JSON.stringify(bad);"
+        ))
+        self.check(
+            "every p-form__group pairs its official label with its own control",
+            not pairing,
+            "broken pairings: " + "; ".join(pairing),
+        )
+
+        # Sample labels that are really laid out: the two settings panels that
+        # render form rows on load, plus the Day-entry dialog opened for real
+        # (#settings-panel-security hides its form when the vault is disabled,
+        # so it is deliberately not sampled here).
+        problems = []
+        sampler = (
+            "var ids = %s; var bad = [];"
+            "for (var i = 0; i < ids.length; i++) {"
+            "  var ctl = document.getElementById(ids[i]);"
+            "  if (!ctl) { bad.push(ids[i] + ': missing'); continue; }"
+            "  var label = ctl.labels && ctl.labels[0];"
+            "  if (!label || !label.textContent.trim()) { bad.push(ids[i] + ': no accessible name'); continue; }"
+            "  if (!label.classList.contains('p-form__label')) bad.push(ids[i] + ': label class');"
+            "  if (!ctl.classList.contains('p-form__control')) bad.push(ids[i] + ': control class');"
+            "  var r = label.getBoundingClientRect();"
+            "  if (r.width <= 0 || r.height <= 0) bad.push(ids[i] + ': label not rendered');"
+            "}"
+            "return JSON.stringify(bad);"
+        )
+        for path, ids in (("/settings/invoices", ["org-name", "org-accent", "template-subject"]),
+                          ("/settings/catalog", ["item-name", "item-desc"])):
+            self.navigate(path)
+            self.wait_script(
+                "document.readyState === 'complete'"
+                " && document.getElementById('version').textContent === 'TucanoTime'",
+                f"the app to boot at {path}",
+            )
+            # The router applies the deep link after startApp() set #version, so
+            # wait for the sampled control to have a layout box.
+            self.wait_script(
+                "(function () {"
+                f" var n = document.getElementById('{ids[0]}');"
+                " return !!(n && n.getBoundingClientRect().height > 0); })()",
+                f"the form at {path} to be laid out",
+            )
+            problems += json.loads(self.marionette.script(sampler % json.dumps(ids)))
+
+        self.navigate("/timesheets/day")
+        self.wait_script(
+            "document.readyState === 'complete'"
+            " && document.getElementById('version').textContent === 'TucanoTime'",
+            "the app to boot at /timesheets/day",
+        )
+        self.marionette.script("document.getElementById('day-add').click(); return true;")
+        self.wait_script(
+            "(function () { var d = document.getElementById('entry-dialog');"
+            " return !!(d && (d.open === true || d.hasAttribute('open'))); })()",
+            "the Day-entry dialog to open",
+        )
+        # The project picker fills on the customer's `change` event (boot.js),
+        # so drive that real interaction before sampling the dialog's labels.
+        self.marionette.script(
+            "var c = document.getElementById('entry-customer');"
+            "if (c && c.options.length) { c.selectedIndex = 0;"
+            " c.dispatchEvent(new Event('change', { bubbles: true })); }"
+            "return true;"
+        )
+        self.wait_script(
+            "(function () { var s = document.getElementById('entry-project');"
+            " return !!(s && s.options.length > 0); })()",
+            "the entry dialog's project picker to fill",
+        )
+        problems += json.loads(
+            self.marionette.script(sampler % json.dumps(["entry-hours", "entry-note"]))
+        )
+        self.check(
+            "several views and the Day-entry dialog render visible labels that "
+            "resolve to their controls",
+            not problems,
+            "problems: " + "; ".join(problems),
+            info="3 views, 7 controls sampled",
+        )
+
+        computed = json.loads(self.marionette.script(
+            "function cs(node, prop) { return node ? getComputedStyle(node)[prop] : null; }"
+            "var row = document.querySelector('#entry-form .p-form__group');"
+            "var tick = document.getElementById('entry-billable');"
+            "var tickLabel = tick ? tick.closest('label') : null;"
+            "var help = document.getElementById('vault-status');"
+            "return JSON.stringify({"
+            " rowBottom: cs(row, 'marginBottom'),"
+            " tickRowBottom: tickLabel ? cs(tickLabel.closest('.p-form__group'), 'marginBottom') : null,"
+            " tickWidth: cs(tick, 'width'), tickWeight: cs(tickLabel, 'fontWeight'),"
+            " helpTop: cs(help, 'marginTop'), helpSize: cs(help, 'fontSize'),"
+            " tip: cs(row, 'display')"
+            "});"
+        ))
+        def px(value):
+            return float(str(value).replace("px", "")) if value else -999.0
+        self.check(
+            "the app-owned form rhythm, tick-box size and help-text margins still "
+            "compute as before (#232 phase 2b)",
+            abs(px(computed["rowBottom"]) - 10.4) < 0.6          # .65rem row rhythm
+            and abs(px(computed["tickRowBottom"]) - 10.4) < 0.6  # tick rows keep it
+            and abs(px(computed["tickWidth"]) - 16.0) < 0.6      # 1rem tick box
+            and computed["tickWeight"] == "400"                  # the retired no-op
+            and px(computed["helpTop"]) >= 0                      # margin: revert
+            and abs(px(computed["helpSize"]) - 14.0) < 0.6,      # Vanilla owns .875rem
+            f"computed={computed}",
+            info=f"row={computed['rowBottom']} tick={computed['tickWidth']} "
+                 f"help={computed['helpSize']}/{computed['helpTop']}",
+        )
+
+        error = json.loads(self.marionette.script(
+            "var proj = document.getElementById('entry-project');"
+            "proj.length = 0;"  # force the app's own "Select a project code." path
+            "var f = document.getElementById('entry-form');"
+            "f.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));"
+            "var e = document.getElementById('entry-error');"
+            "var cs = getComputedStyle(e);"
+            "var out = { hidden: e.hidden, text: e.textContent,"
+            "  role: e.getAttribute('role'), display: cs.display, color: cs.color,"
+            "  wrapper: !!e.closest('.p-form-validation.is-error'),"
+            "  height: e.getBoundingClientRect().height };"
+            "document.getElementById('entry-dialog').close();"
+            "return JSON.stringify(out);"
+        ))
+        self.check(
+            "a real save failure still surfaces its message in the official styling",
+            error["hidden"] is False and error["role"] == "alert"
+            and error["text"].strip() != "" and error["display"] != "none"
+            and error["height"] > 0 and error["wrapper"]
+            and error["color"] == "rgb(199, 22, 43)",   # Vanilla's negative token
+            f"{error}",
+            info=f"message={error['text']!r} colour={error['color']}",
+        )
+        self.drain_console("form migration (#232 phase 2b)")
+
     # ------------------------------------------------------------ lifecycle --
     def cleanup(self):
         for proc in (self.firefox_proc, self.server):
@@ -881,6 +1072,7 @@ class Gate:
         self.sign_in()
         self.drain_console("sign-in")
         self.walk_views()
+        self.forms_audit()
         if self.web_dir:
             self.dev_live_reload()
 

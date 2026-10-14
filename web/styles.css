@@ -191,9 +191,21 @@ button.danger { background: none; border: none; color: var(--danger); padding: .
 .bar input:not([type="checkbox"]):not([type="radio"]), .bar select, .bar textarea,
 .inv-filters input, .inv-filters select, .timerbar select, .copy-bar select,
 .accent-row input { width: auto; }
-.field { margin-bottom: .65rem; }
-.field.checkbox label { font-weight: 400; }
-.field.checkbox input, .theme-switch input { min-height: 0; width: 1rem; height: 1rem; }
+/* #232 phase 2b (forms): the bespoke `.field` wrapper retires for the official
+   `p-form__group`. The .65rem row rhythm the old rule really rendered stays on
+   the official class: Vanilla spaces stacked groups only inside
+   `.p-form--stacked`, and only at >= 1036px. `.field.checkbox label
+   { font-weight: 400 }` was a no-op — the base `label` rule sets no weight. */
+.p-form__group { margin-bottom: .65rem; }
+/* Vanilla's `.p-form-help-text` pulls up (margin-top: -.5rem) to hug the input
+   above it; the app also uses the class for panel/dialog copy that follows a
+   heading or a card edge (and a flex item in `.cal-nav`), so it keeps the
+   natural block rhythm. Vanilla still owns the class's size/colour. Flagged
+   for maintainer visual sign-off. */
+.p-form-help-text { margin: revert; }
+/* Tick boxes keep the pre-migration 1rem box (the base width:100% rule does not
+   cover checkboxes); `.theme-switch` keeps its own sizing too. */
+.p-form__group input[type="checkbox"], .theme-switch input { min-height: 0; width: 1rem; height: 1rem; }
 button [class*="p-icon--"] { flex: 0 0 1rem; vertical-align: -.15rem; margin-right: .5rem; }
 .day-nav button [class*="p-icon--"] { margin: 0; }
 button.p-button, button.p-button--positive { margin-bottom: 0; }
@@ -239,9 +251,10 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
    use p-table--mobile-card (data-heading) and summaries keep a plain table. */
 .p-card__header.customer-heading, .p-card__header.panel-heading-row, #report-form.bar, #submission-form.bar { margin-bottom: 0; }
 
-.form-error { color: var(--danger); font-weight: 600; margin: .25rem 0; }
-.hint, .foot { color: var(--muted); font-size: .9rem; }
-.foot { padding: 1rem 1.5rem; border-top: 1px solid var(--line); }
+/* #232 phase 2b: errors are the official `p-form-validation__message` (inside a
+   `p-form-validation is-error` wrapper) and hints are `p-form-help-text`, so the
+   `.form-error`/`.hint` skins retired. Only the footer keeps this app ink. */
+.foot { color: var(--muted); font-size: .9rem; padding: 1rem 1.5rem; border-top: 1px solid var(--line); }
 .button-link { display: inline-block; text-decoration: none; background: var(--brand); color: var(--brand-ink); padding: .5rem .9rem; border-radius: var(--radius); font-weight: 600; }
 .skip-link { position: absolute; left: -9999px; }
 .skip-link:focus { left: 1rem; top: .5rem; z-index: 60; background: var(--brand); color: var(--brand-ink); padding: .4rem .8rem; border-radius: var(--radius); }
@@ -407,7 +420,8 @@ dialog.p-modal::backdrop { background: transparent; }
 .scope-hint .scope-label { font-size: .85rem; }
 .customer-heading h2 { margin: 0; }
 #expense-dialog form, #expense-category-dialog form { margin: 0; }
-#expense-dialog .field, #expense-category-dialog .field { margin-bottom: .65rem; }
+/* #232 phase 2b: a byte-identical duplicate of the retired
+   `.field { margin-bottom: .65rem }`; the `.p-form__group` rhythm covers it. */
 #expense-dialog input, #expense-dialog select, #expense-dialog textarea,
 #expense-category-dialog input { width: 100%; }
 #dlg-message { margin: 0 0 .8rem; white-space: pre-line; }
@@ -473,8 +487,9 @@ dialog.p-modal::backdrop { background: transparent; }
 #wizard-dialog h2 { margin: 0; font-size: 1.3rem !important; font-weight: 400; color: var(--brand-deep); } /* #257: see .auth-title — same AA fix */
 #wizard-dialog .wz-step { min-width: 0; }
 #wizard-dialog .wz-step p:first-child { margin-top: 0; }
-#wizard-dialog .field { margin: 0 0 .65rem; }
-#wizard-dialog .field:last-child { margin-bottom: 0; }
+/* #232 phase 2b: that margin duplicated the retired base rule and its
+   `margin-top: 0` was a no-op; only the "no gap before the action row" stays. */
+#wizard-dialog .p-form__group:last-child { margin-bottom: 0; }
 #wz-status { min-height: 1.2em; margin: .2rem 0 .4rem; }
 /* Same action rhythm as the auth window: the full-width primary submit
    (button.primary is already 100%) sits below its secondary companions. */
@@ -505,7 +520,7 @@ dialog.p-modal::backdrop { background: transparent; }
 
 /* ---- focused Day-entry dialog (#145) ---- */
 #entry-dialog form.card { box-shadow: none; padding: 0; margin: 0; }
-#entry-dialog .field { margin: 0 0 .7rem; }
+/* #232 phase 2b: the .7rem Day-entry row rhythm folds into the unified .65rem one. */
 /* ---- grouped MVP rail (#142) ---- */
 .nav-group { display: flex; flex-direction: column; gap: .15rem; margin-bottom: .45rem; }
 .nav-label { font-size: .75rem; letter-spacing: 0; text-transform: uppercase;
@@ -545,12 +560,14 @@ dialog.p-modal::backdrop { background: transparent; }
 }
 
 /* ---- shared alignment pass (#131): reusable rhythm, no component changes ---- */
-fieldset.field {
+/* #232 phase 2b: these fieldsets are `p-form__group`s now; the frame stays
+   app-owned because the base `fieldset` rule (vf-b-forms) tints and clips. */
+fieldset.p-form__group {
   border: 1px solid var(--line); border-radius: var(--radius);
   padding: .6rem .75rem .15rem; margin: 0 0 .65rem;
   overflow: visible; /* Vanilla base `fieldset` (vf-b-forms) sets overflow:auto */
 }
-fieldset.field > legend { font-weight: 600; font-size: .85rem; padding: 0 .3rem; }
+fieldset.p-form__group > legend { font-weight: 600; font-size: .85rem; padding: 0 .3rem; }
 .buttons { flex-wrap: wrap; }
 .dlg-actions { gap: .6rem; }
 h3 { font-size: 1.02rem; margin: 1.1rem 0 .4rem; }
@@ -572,7 +589,7 @@ caption { padding-bottom: .35rem; }
   border: 1px dashed var(--line); border-radius: var(--radius); background: var(--surface); }
 .invoice-table-scroll { display: block; max-width: 100%; overflow-x: auto; }
 .customer-extra-details { margin: .25rem 0 .8rem; border-top: 1px solid var(--line); }
-.customer-extra-details fieldset.field { margin-top: .5rem; }
+.customer-extra-details fieldset.p-form__group { margin-top: .5rem; }
 .panel-heading-row { display: flex; align-items: center; justify-content: flex-start; gap: 1rem; margin-bottom: .65rem; }
 .panel-heading-row h2 { margin: 0; }
 .chip-edit { border: 0; background: transparent; color: var(--brand-deep); padding: .1rem .25rem; font-size: .8rem; }

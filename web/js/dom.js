@@ -87,11 +87,15 @@ export function decorateUbuntuButton(button) {
 // `{ value, text, selected }`. Selection happens by property, as before.
 // One action-cell button builder for every table row (#189: previously a
 // byte-identical local const existed twice, and five renderers re-inlined it).
-export function rowAction(cls, text, fn, title) {
+export function rowAction(cls, text, fn, title, icon) {
   return el('button', {
     cls,
     type: 'button',
     text,
+    // #232 phase 2b: the icon is stated at the creation site instead of being
+    // derived from the label by `decorateUbuntuButton`, so the decorator's
+    // label heuristic is redundant (deleted in phase 2e).
+    data: icon ? { icon } : undefined,
     attrs: title ? { title } : {},
     on: { click: fn },
   });

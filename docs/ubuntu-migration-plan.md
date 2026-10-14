@@ -81,12 +81,35 @@ component backlog.
   `npm run build:ubuntu` is a **no-op** and `cssSha256` stays
   `c6b404f72a9fb86c5a1425af9f26b27870edf2e9da74c640dbb149390d936e05`.
 
-**Umbrella status.** With increment 6 and phase 2a the planned PRs are all merged,
-but #232 stays **open** (*Part of*): the page map above is still ⬜ — every row
-needs its own PR and the manual light/dark + keyboard/AT review of ground rules
-4–5, including the Invoices `p-table--sortable` register — and the
-`decorateUbuntuButton` label-matching fallback is still to retire. Those are what
-a later ticket needs before it can `Closes #232`.
+- **Form fields, hints and errors (#232 phase 2b)** — every `.field` row moved onto
+  the official `p-form__group` + `p-form__label` + `p-form__control` vocabulary
+  (113 groups / 109 label-control pairs, in `web/index.html` and the builders in
+  `web/js`), the 27 panel/dialog hints became `p-form-help-text`, and all 22 error
+  paragraphs became a `p-form-validation__message` inside a
+  `p-form-validation is-error` group — so the bespoke `.field`, `.hint` and
+  `.form-error` rules leave the sheet. Three things stay app-owned and commented:
+  the constant `.65rem` row rhythm (Vanilla spaces stacked groups only inside
+  `.p-form--stacked`, and only at >= 1036px), the 1rem tick box (the base rule
+  that forces `width:100%` does not cover checkboxes) and the grouped-fieldset
+  frame (the base `fieldset` is a tinted, clipping card). One scoped override,
+  `.p-form-help-text { margin: revert }`, keeps that class's own pull-up
+  (`margin-top: -.5rem`) off this app's panel/dialog copy, which follows a
+  heading rather than an input, and the error ink moves from `--danger` to
+  Vanilla's negative token (AA in both themes) — **both flagged for the
+  maintainer's visual sign-off**. The increment also threaded
+  `data-icon`/`data-positive` through every button-creation path, so
+  `decorateUbuntuButton`'s label/type/id fallbacks are now redundant (deleted in
+  phase 2e). `styles.css` moves from 698 lines / 386 rules to 715 / 383 (the same
+  `grep -c '{'` method as the earlier counts); the component family is unchanged,
+  so `npm run build:ubuntu` is a **no-op** and `cssSha256` stays
+  `c6b404f72a9fb86c5a1425af9f26b27870edf2e9da74c640dbb149390d936e05`.
+
+**Umbrella status.** With increment 6, phase 2a and phase 2b the planned PRs are
+all merged, but #232 stays **open** (*Part of*): the page map above is still ⬜ —
+every row needs the manual light/dark + keyboard/AT review of ground rules 4–5,
+including the Invoices `p-table--sortable` register — and the now-redundant
+`decorateUbuntuButton` fallbacks are still to delete (phase 2e). Those are what a
+later ticket needs before it can `Closes #232`.
 
 ## Ground rules
 
@@ -141,6 +164,13 @@ shells, and the runtime-config (`/settings/security`) and template-variable
 (`/settings/invoices`) summaries are plain official tables in a `p-card`. The
 Day/Week/Calendar grids, the invoice line editor and the Invoices
 `p-table--sortable` register (row 7) are deliberately untouched.
+
+**#232 phase 2b progress (forms).** Every page's stacked form rows, hints and
+error messages are on the official vocabulary now (see the phase-2b bullet
+above), but the rows stay ⬜ for the same reason: the per-page light/dark +
+keyboard/AT review has not happened yet. Deliberately still app-owned: the
+horizontal filter/tool bars (`.bar`, `.filter-field`), the `#dlg-input` prompt
+skin, the `.theme-switch` fieldset and the `.cols-pop` column picker.
 
 ## Order and per-page scope
 

@@ -153,8 +153,8 @@ export async function refreshDay() {
         // text actions in tables, positive/negative reserved for primary
         // and destructive page-level actions).
         el('td', { cls: 'actions-col' }, [
-          rowAction('link', 'Edit', () => startEdit(e)),
-          rowAction('danger', 'Delete', () => removeEntry(e)),
+          rowAction('link', 'Edit', () => startEdit(e), undefined, 'edit'),
+          rowAction('danger', 'Delete', () => removeEntry(e), undefined, 'delete'),
         ]),
       ],
     );
