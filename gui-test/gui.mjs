@@ -5,13 +5,14 @@
 
 import { JSDOM, VirtualConsole } from 'jsdom';
 import fs from 'node:fs';
+import { loadAppSource } from './load-app.mjs';
 
 // CI serves on :8099; local runs can point elsewhere (TT_GUI_BASE) so a
 // dev's harness server can never shadow the runner's own container.
 const BASE = process.env.TT_GUI_BASE || 'http://localhost:8099';
 
 const html = fs.readFileSync('../web/index.html', 'utf8');
-const appJs = fs.readFileSync('../web/app.js', 'utf8');
+const appJs = loadAppSource();
 
 const vc = new VirtualConsole();
 vc.on('jsdomError', (e) => console.error('[jsdom error]', e.message));

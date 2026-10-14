@@ -83,7 +83,7 @@ The GUI is a presentation layer and nothing more — it never reads storage.
   `/approvals`, `/reports`, `/settings/security|users|invoices|catalog|
   expenses`). `spa_page` (lib.rs) is the case-insensitive allowlist serving
   `index.html`; unknown paths keep the JSON 404. `TAB_ROUTES`/`DEFAULT_ROUTE`
-  in `web/app.js` mirror that list — change both together.
+  in `web/js/route.js` mirror that list; `tests::route_parity` fails the build if the two drift (#264).
 - `web/` is dependency-free vanilla HTML/CSS/JS embedded via rust-embed (no
   build step). All DOM data is inserted with `textContent`, never `innerHTML`.
 - **Auth (#19):** users are file-based (`users/<id>.json`), passwords argon2id,
