@@ -26,3 +26,23 @@ Endpoints: GET/POST /users, PUT/DELETE /users/{id}, PUT /users/{id}/password.
 The checked-in OpenAPI contract documents their inputs, errors and public user
 responses. Negative, fractional or out-of-range rates and unknown fields are
 rejected before persistence.
+
+## Single sign-on (SSO)
+
+SSO (OIDC/signed-token, plus the SAML stub IdP, #32) is additive — local
+password login keeps working alongside it. Enable a provider with its vault
+secret (`oidc.client_secret` / `saml.signing_secret`, #77) and restrict the
+email domains it may assert with `sso_allowed_domains` (env
+`TUCANO_SSO_ALLOWED_DOMAINS`, `config.json`, or the vault key
+`sso.allowed_domains`; precedence env > file > vault).
+
+**Fail-closed allow-list (#260).** Only domains listed in
+`sso_allowed_domains` are trusted: a correctly-signed assertion for any other
+domain is rejected and no account is created. An **empty or unset** allow-list
+denies *every* domain. Because that is a misconfiguration, the server logs a
+loud boot error and registers **no** identity provider — nothing is
+just-in-time provisioned and `/auth/sso/providers` advertises nothing. The
+warning is not fatal (local login and the rest of the timesheet keep working),
+but SSO stays disabled until at least one domain is configured. This mirrors
+the vault (#77: an unset key disables the vault) and lock (#185) fail-closed
+conventions.

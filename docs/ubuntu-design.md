@@ -40,6 +40,16 @@ mobile-card), `p-card`, `p-chip`, `p-badge`, `p-notification`, `p-modal` and
 template uses them yet, so current screens render unchanged (verified — the
 contrast and jsdom suites pass on the rebuilt bundle).
 
+**#232 stage 2** migrates the app templates onto those official patterns, one
+view family per PR. **Increment 1 (auth + form controls)** extends the bundle
+with the official form family — `vf-b-forms` (the label/input/select/textarea
+rhythm plus the `p-form`/`p-form-validation`/`p-form-help-text` patterns) and
+`vf-p-links` (`p-link--soft`) — retires the hand-rolled control styles from
+`styles.css`, and switches the sign-in window, the setup wizard and the
+entry/user/customer/project/task forms onto the explicit `p-button--positive`
+and neutral `p-button` classes. Tables, chips/badges, dialogs and tablists
+follow in their own increments (tracked on #232).
+
 The rules the plan holds to: no global reset (the editable timesheet grid is
 app-owned and must keep its dense cell geometry), the rejected GOV.UK direction
 (#175) stays rejected, and automated contrast coverage is never presented as

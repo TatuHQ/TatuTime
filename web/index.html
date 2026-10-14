@@ -31,7 +31,7 @@
           <input id="auth-password" type="password" autocomplete="current-password" minlength="8" required>
         </div>
         <p class="form-error" id="auth-error" role="alert" hidden></p>
-        <button type="submit" id="auth-submit" class="primary">Sign in</button>
+        <button type="submit" id="auth-submit" class="p-button--positive">Sign in</button>
         <div id="sso-box" hidden>
           <p class="hint">Single sign-on <span class="beta">Beta</span></p>
           <div id="sso-buttons"></div>
@@ -194,8 +194,8 @@
         </div>
         <p class="form-error" id="entry-error" role="alert" hidden></p>
         <div class="buttons">
-          <button type="submit" id="entry-save">Save entry</button>
-          <button type="button" class="secondary" id="entry-cancel" hidden>Cancel edit</button>
+          <button type="submit" id="entry-save" class="p-button--positive">Save entry</button>
+          <button type="button" class="p-button" id="entry-cancel" hidden>Cancel edit</button>
         </div>
       </form>
       </dialog>
@@ -607,7 +607,7 @@
           <div class="field"><label for="user-cost-rate">Hourly cost rate</label><input id="user-cost-rate" type="number" min="0" max="1000000" step="0.01" inputmode="decimal" value="0"></div>
           </details>
           <p class="form-error" id="user-error" role="alert" hidden></p>
-          <div class="buttons"><button type="submit" id="user-save">Add user</button><button type="button" class="secondary" id="user-cancel">Cancel</button></div>
+          <div class="buttons"><button type="submit" id="user-save" class="p-button--positive">Add user</button><button type="button" class="p-button" id="user-cancel">Cancel</button></div>
         </form>
         </dialog>
         <dialog id="user-password-dialog" aria-labelledby="user-password-title">
@@ -616,7 +616,7 @@
             <input type="hidden" id="user-password-id">
             <div class="field"><label for="user-new-password">New password</label><input type="password" id="user-new-password" minlength="8" autocomplete="new-password" required></div>
             <p id="user-password-error" class="form-error" role="alert" hidden></p>
-            <div class="buttons"><button type="submit">Change password</button><button type="button" id="user-password-cancel" class="secondary">Cancel</button></div>
+            <div class="buttons"><button type="submit" class="p-button--positive">Change password</button><button type="button" id="user-password-cancel" class="p-button">Cancel</button></div>
           </form>
         </dialog>
         <div class="table-scroll"><table id="user-table">
@@ -825,15 +825,16 @@
         <p class="form-error" id="wz-error" role="alert" hidden></p>
         <p id="wz-status" role="status" aria-live="polite" class="hint"></p>
         <div class="dlg-actions">
-          <button id="wz-later" class="secondary" type="button">Skip</button>
-          <button id="wz-back" class="secondary" type="button">Back</button>
-          <button id="wz-next" class="primary" type="button">Next</button>
+          <button id="wz-later" class="p-button" type="button">Skip</button>
+          <button id="wz-back" class="p-button" type="button">Back</button>
+          <button id="wz-next" class="p-button--positive" type="button">Next</button>
         </div>
       </div>
     </div>
   </dialog>
 
-  <script src="/app.js"></script>
+  <!-- ES-module entry (#264): loads web/js via native imports, no build step. -->
+  <script type="module" src="/app.js"></script>
 
   <!-- #182: hierarchy dialogs live at body level so they can open
        from any of the three Setup sections (their panels hide otherwise). -->
@@ -862,7 +863,7 @@
           <div class="field"><label for="cust-discount">Default discount %</label><input id="cust-discount" type="number" min="0" max="100" step="0.01" value="0" inputmode="decimal"></div>
           <div class="field"><span id="contacts-label">Contacts (one may be the billing recipient)</span>
             <div id="contact-rows"></div>
-            <button type="button" id="contact-add" class="secondary">+ Add contact</button>
+            <button type="button" id="contact-add" class="p-button">+ Add contact</button>
           </div>
         </fieldset>
         <fieldset class="field"><legend>Invoice document (#116)</legend>
@@ -888,7 +889,7 @@
         </details>
         <div class="field checkbox"><label for="customer-active"><input type="checkbox" id="customer-active" checked> Active</label></div>
         <p class="form-error" id="customer-error" role="alert" hidden></p>
-        <div class="buttons"><button type="submit" id="customer-save">Add customer</button><button type="button" class="secondary" id="customer-cancel">Cancel</button></div>
+        <div class="buttons"><button type="submit" id="customer-save" class="p-button--positive">Add customer</button><button type="button" class="p-button" id="customer-cancel">Cancel</button></div>
       </form>
       </dialog>
 <dialog id="project-dialog" aria-labelledby="project-dialog-title" aria-describedby="project-dialog-parent">
@@ -903,7 +904,7 @@
         <div class="field"><label for="project-rate">Hourly rate (e.g. 95.00)</label><input id="project-rate" type="number" min="0" step="0.01" placeholder="0.00" required inputmode="decimal"></div>
         <div class="field checkbox"><label for="project-active"><input type="checkbox" id="project-active" checked> Active</label></div>
         <p class="form-error" id="project-error" role="alert" hidden></p>
-        <div class="buttons"><button type="submit" id="project-save">Add project</button><button type="button" class="secondary" id="project-cancel">Cancel</button></div>
+        <div class="buttons"><button type="submit" id="project-save" class="p-button--positive">Add project</button><button type="button" class="p-button" id="project-cancel">Cancel</button></div>
       </form>
       </dialog>
 <dialog id="task-dialog" aria-labelledby="task-dialog-title" aria-describedby="task-dialog-parent">
@@ -917,7 +918,7 @@
         <div class="field"><label for="task-name">Name</label><input id="task-name" maxlength="120"></div>
         <div class="field checkbox"><label for="task-active"><input type="checkbox" id="task-active" checked> Active</label></div>
         <p class="form-error" id="task-error" role="alert" hidden></p>
-        <div class="buttons"><button type="submit" id="task-save">Add task</button><button type="button" class="secondary" id="task-cancel">Cancel</button></div>
+        <div class="buttons"><button type="submit" id="task-save" class="p-button--positive">Add task</button><button type="button" class="p-button" id="task-cancel">Cancel</button></div>
       </form>
       </dialog>
 </body>

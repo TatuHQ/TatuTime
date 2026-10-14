@@ -5,9 +5,19 @@ on:
   push:
     branches: [main]
 
+# Least privilege (#263 item 1): the workflow-scoped token is read-only. The
+# only job that needs to write anything (publishing to GHCR) grants itself
+# `packages: write` at the job level, so every other job's token cannot push.
 permissions:
   contents: read
-  packages: write   # needed to push to ghcr.io
+
+# Cancel superseded runs (#263 item 6): a rapid re-push to the same ref (or a
+# new commit on a PR head) makes the previous run moot. Self-hosted runner
+# capacity is finite and the queue incident (run 37980161645) showed a stale
+# run must not keep holding a runner for hours. One group per ref.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 # Fork-PR guard (review A1): these jobs run on SELF-HOSTED runners, where an
 # untrusted fork PR means arbitrary code executing on org infra with a live
@@ -18,15 +28,22 @@ permissions:
 # runners are billing-gated on this account. The lint/test job runs inside the
 # same pinned Rust image the Dockerfile builds with, so CI, image and local
 # `cargo test` share one toolchain.
+#
+# Container pins (#263 item 5): `rust:1.98.0-slim-trixie` below and in the
+# Dockerfile builder stage mirrors rust-toolchain.toml (channel = "1.98.0");
+# bump the three together. Images referenced inside `run:` strings are invisible
+# to Dependabot's docker ecosystem (it only sees `image:`/`FROM` fields), so
+# they are bumped by hand — see the note in .github/dependabot.yml.
 jobs:
   lint-test:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
     runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 45
     container:
       image: rust:1.98.0-slim-trixie
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Format
         run: cargo fmt --all -- --check
@@ -40,31 +57,45 @@ jobs:
         run: cargo test --locked --all-targets
 
   build-image:
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
+    # Fork-PR guard (review A1) plus a main-only guard (#263 item 6, #246
+    # decision): the image is only ever published from main, so a non-main push
+    # must not spend a self-hosted runner on a full release build. PRs still
+    # build (build-only, never pushed) so the Dockerfile stays exercised; this
+    # guard is what would stop a `develop` push trigger from doubling load.
+    if: >-
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false) &&
+      (github.event_name != 'push' || github.ref == 'refs/heads/main')
     runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write   # needed to push to ghcr.io (main pushes only, per step `if`)
     env:
       REGISTRY: ghcr.io
       IMAGE_NAME: ${{ github.repository }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       # Log in to GHCR on main pushes; skip on PRs (no token needed for build-only).
       - name: Log in to GitHub Container Registry
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: docker/login-action@v4
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Derive tags:
-      #   • ghcr.io/<owner>/<repo>:latest      (main pushes only)
-      #   • ghcr.io/<owner>/<repo>:<short-sha> (main pushes only)
-      #   • tucanotime:<sha>                   (PRs — local build check, never pushed)
+      # Derive tags. The metadata action only ever emits
+      # `ghcr.io/<owner>/<repo>:<tag>`; on PRs nothing is pushed (push is
+      # main-gated below) so the build is a local check only.
+      #   • :latest      (main pushes only)
+      #   • :<short-sha> (computed everywhere, pushed on main pushes only)
+      # (#263 item 7: the previous comment claimed PRs get a `tucanotime:<sha>`
+      # local tag, which the metadata config never produced.)
       - name: Extract Docker metadata
         id: meta
-        uses: docker/metadata-action@v6
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
@@ -72,7 +103,7 @@ jobs:
             type=sha,format=short
 
       - name: Build and push image
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
           context: .
           pull: true
@@ -83,9 +114,10 @@ jobs:
   actionlint:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
     runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 15
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Lint workflows
         run: docker run --rm -v "$PWD:/repo:ro" --workdir /repo rhysd/actionlint:1.7.12 -color
@@ -96,9 +128,10 @@ jobs:
   gui-test:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
     runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 45
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Build server binary
         run: docker run --rm -v "$PWD:/repo" -w /repo rust:1.98.0-slim-trixie cargo build --locked --release
@@ -148,9 +181,10 @@ jobs:
   secret-scan:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
     runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 30
     steps:
       - name: Checkout full history
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
 
@@ -162,31 +196,39 @@ jobs:
   supply-chain:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
     runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 45
     container:
       image: rust:1.98.0-slim-trixie
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
+      # Versions are pinned (#263 item 4) so the gate is reproducible: an
+      # unpinned `cargo install` silently picks up whatever is newest at run
+      # time and can flip a green build red (or vice versa) between runs.
       - name: Install git (advisory-db clone) and cargo-deny
         run: |
           apt-get update -qq
           apt-get install -y --no-install-recommends git
-          cargo install --locked cargo-deny
+          cargo install --locked cargo-deny --version 0.20.2
 
       - name: cargo deny check
         run: cargo deny check advisories licenses sources bans
 
+      # (#263 item 4) SBOM generation stays best-effort and must not fail the
+      # gate, but a missing artifact must not be silent either: the steps log
+      # what they produce and the listing below fails loudly if the directory
+      # is empty, while `continue-on-error` keeps the job itself green.
       - name: Generate SBOM (CycloneDX)
         continue-on-error: true
         run: |
-          cargo install --locked cargo-cyclonedx
+          cargo install --locked cargo-cyclonedx --version 0.5.9
           cargo cyclonedx --format json
           ls -l target/cyclonedx
 
       - name: Upload SBOM
         continue-on-error: true
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: sbom
           path: target/cyclonedx/*.cdx.json

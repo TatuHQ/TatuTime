@@ -23,7 +23,7 @@ suite — file-based (no database), one container, browser GUI.
 - **API-level integrations** — hosted checkout links (#34) and accounting sync (#33) remain available on the API and background retry job, but are no longer surfaced as per-row invoice buttons (#129).
 - **Expenses** — record costs per project with categories, billable flags, and optional attached receipts; billable expenses roll into invoices (#25).
 - **Timesheet submissions** — submit a week for approval; submitted/approved weeks **lock** their entries (shared lock seam); rejecting releases them.
-- **Also shipped** — running **timer** and month calendar of logged time (#14/#140); imported **calendar events** with Google OAuth (#15/#36); **SSO sign-in** (OIDC/signed-token, JIT provisioning — Beta adapters, #32); per-user **notifications** (#22/#52); **recurring invoice schedules** (weekly/monthly/quarterly, drafts still need an explicit issue, #26); **expense reimbursement claims** (#24); **budgets** burn alerts + per-project budget vs actual (#30) and **profitability** reporting (revenue vs labour cost, admin-only, #29); **email delivery** of invoices with the archived PDF attached (#35/#130); role-based access — members see only their own time (#51); an **audit log** (#52) and an operator **backup/restore CLI** on the same image (#94).
+- **Also shipped** — running **timer** and month calendar of logged time (#14/#140); imported **calendar events** with Google OAuth (#15/#36); **SSO sign-in** (OIDC/signed-token, JIT provisioning — Beta adapters, #32) with a **fail-closed allowed-domains list** (#260); per-user **notifications** (#22/#52); **recurring invoice schedules** (weekly/monthly/quarterly, drafts still need an explicit issue, #26); **expense reimbursement claims** (#24); **budgets** burn alerts + per-project budget vs actual (#30) and **profitability** reporting (revenue vs labour cost, admin-only, #29); **email delivery** of invoices with the archived PDF attached (#35/#130); role-based access — members see only their own time (#51); an **audit log** (#52) and an operator **backup/restore CLI** on the same image (#94).
 
 ## Quick start (Docker)
 
@@ -123,6 +123,12 @@ docker run -d -p 8080:8080 \
 ```
 
 Roles: `admin` (user management) and `member` (timesheet work).
+
+**SSO (Beta, #32)** is additive to local password login. Only email domains
+listed in `TUCANO_SSO_ALLOWED_DOMAINS` / `config.json:sso_allowed_domains` /
+vault `sso.allowed_domains` are trusted. An **empty allow-list is fail-closed**
+(#260): the server logs a loud boot error, registers no identity provider and
+just-in-time provisions nobody until a domain is configured.
 
 **Integration credentials (#77):** admins store provider secrets (Stripe, OAuth,
 SMTP, ICS feed URLs) in the **Settings** tab; they are encrypted at rest with

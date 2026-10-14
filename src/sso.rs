@@ -56,10 +56,15 @@ pub trait IdentityProvider: Send + Sync {
     fn verify(&self, payload: &str, signature: &str) -> Result<Identity, SsoError>;
 }
 
-/// Allowed-email domains (case-insensitive). Empty = allow all.
+/// Allowed-email domains (case-insensitive). An empty allow-list **denies
+/// every domain** — fail-closed (#260, review A2 residual). An SSO deployment
+/// that forgot to set `allowed_domains` must never JIT-provision an arbitrary
+/// email domain; `registry_from_vault` refuses to register a provider in that
+/// state and warns loudly at boot, and this guard keeps the guarantee even for
+/// a directly-constructed adapter. Configured domains behave exactly as before.
 fn domain_ok(allow: &[String], email: &str) -> bool {
-    allow.is_empty()
-        || email
+    !allow.is_empty()
+        && email
             .split('@')
             .nth(1)
             .is_some_and(|d| allow.iter().any(|a| a.eq_ignore_ascii_case(d)))
@@ -316,24 +321,53 @@ pub fn registry_from_vault(
         }
     };
     let mut providers: Vec<std::sync::Arc<dyn IdentityProvider>> = Vec::new();
-    if let Some(secret) = get("oidc.client_secret", "TUCANO_OIDC_CLIENT_SECRET") {
+    let allowed = domains();
+
+    // #260 (review A2 residual): SSO must fail closed. An empty allow-list
+    // means "trust no email domain", so **no** provider is registered and
+    // nothing is ever JIT-provisioned — the omission is loud, not permissive.
+    // Decision: deny-with-warning, not hard-fail startup. An unset vault key
+    // (#77) disables the vault rather than refusing to boot, and SSO is
+    // additive (local password login keeps working); aborting the whole server
+    // for a partial SSO misconfiguration would take the timesheet offline.
+    // Registering nothing also keeps `/auth/sso/providers` honest — the login
+    // screen never advertises a provider that can only reject.
+    let oidc_secret = get("oidc.client_secret", "TUCANO_OIDC_CLIENT_SECRET");
+    let saml_fingerprint = get("saml.cert_fingerprint", "TUCANO_SAML_CERT_FINGERPRINT");
+    let saml_secret = get("saml.signing_secret", "TUCANO_SAML_SIGNING_SECRET");
+    if allowed.is_empty() {
+        if oidc_secret.is_some() || saml_fingerprint.is_some() {
+            tracing::error!(
+                "SSO is configured (OIDC client secret and/or SAML fingerprint) but \
+                 sso_allowed_domains is empty — ALL identity providers are DISABLED \
+                 (fail-closed, #260): no email domain is trusted, so no account will be \
+                 just-in-time provisioned. Set at least one allowed domain via \
+                 TUCANO_SSO_ALLOWED_DOMAINS, config.json 'sso_allowed_domains', or the \
+                 vault key 'sso.allowed_domains'."
+            );
+        }
+        return SsoRegistry::new(providers);
+    }
+
+    if let Some(secret) = oidc_secret {
         let issuer = get("oidc.issuer", "TUCANO_OIDC_ISSUER").unwrap_or_else(|| "oidc".to_string());
         providers.push(std::sync::Arc::new(SignedTokenIdp::new(
             issuer,
             secret,
-            domains(),
+            allowed.clone(),
         )));
     }
-    if get("saml.cert_fingerprint", "TUCANO_SAML_CERT_FINGERPRINT").is_some() {
+    if saml_fingerprint.is_some() {
         // A2 fail-closed: a public fingerprint alone does NOT enable SAML.
-        match get("saml.signing_secret", "TUCANO_SAML_SIGNING_SECRET") {
+        match saml_secret {
             Some(secret) => {
                 let issuer =
                     get("saml.issuer", "TUCANO_SAML_ISSUER").unwrap_or_else(|| "saml".to_string());
-                providers.push(std::sync::Arc::new(SamlIdp::new(issuer, secret, domains())));
+                providers.push(std::sync::Arc::new(SamlIdp::new(issuer, secret, allowed)));
             }
             None => tracing::error!(
-                "SAML fingerprint configured but no saml.signing_secret — SAML login                  disabled (fingerprint-derived keys are forgeable, review A2)"
+                "SAML fingerprint configured but no saml.signing_secret — SAML login \
+                 disabled (fingerprint-derived keys are forgeable, review A2)"
             ),
         }
     }
@@ -460,5 +494,52 @@ mod tests {
             crate::auth::Role::Member
         );
         assert_eq!(map_role(&[], ""), crate::auth::Role::Member); // no implicit admin
+    }
+
+    #[test]
+    fn empty_allowed_domains_fail_closed_and_configured_domain_succeeds() {
+        // #260: an empty allow-list denies every domain. `verify` rejects
+        // before the handler can JIT-provision, so no account is ever created.
+        let deny_all = SignedTokenIdp::new("okta", "test-secret", vec![]);
+        let claims = TokenClaims {
+            sub: "u1".into(),
+            email: "alice@acme.test".into(),
+            name: "Alice".into(),
+            groups: vec![],
+            exp: chrono::Utc::now().timestamp() + 300,
+        };
+        assert!(matches!(
+            deny_all.verify(&deny_all.issue(&claims), ""),
+            Err(SsoError::DomainNotAllowed)
+        ));
+
+        // A configured matching domain still succeeds (behaviour preserved).
+        let allow = SignedTokenIdp::new("okta", "test-secret", vec!["acme.test".into()]);
+        let id = allow.verify(&allow.issue(&claims), "").unwrap();
+        assert_eq!(id.email, "alice@acme.test");
+    }
+
+    #[test]
+    fn registry_refuses_providers_without_allowed_domains() {
+        // #260 boot path: even with SSO credentials present, no provider is
+        // registered while the allow-list is empty — the omission fails closed
+        // instead of trusting every email domain.
+        let dir = tempfile::tempdir().unwrap();
+        let vault =
+            crate::vault::SecretVault::open(dir.path(), Some("0123456789abcdef0123456789abcdef"))
+                .unwrap()
+                .unwrap();
+        vault.put("oidc.client_secret", "stub-secret").unwrap();
+        let cfg = crate::appconfig::AppConfig::empty();
+        assert!(
+            !registry_from_vault(Some(&vault), &cfg).enabled(),
+            "no allowed domains configured => no SSO provider is registered"
+        );
+
+        // Once a domain is configured the provider is enabled as before.
+        vault.put("sso.allowed_domains", "acme.test").unwrap();
+        let registry = registry_from_vault(Some(&vault), &cfg);
+        assert!(registry.enabled());
+        assert_eq!(registry.names(), vec!["oidc".to_string()]);
     }
 }

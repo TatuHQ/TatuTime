@@ -6,6 +6,10 @@
 // pixels — so the rule set below mirrors the selectors by hand. AA: 4.5:1 for
 // normal text, 3:1 for large (>=24px / >=18.66px bold) and UI components.
 // A regression in the palette fails CI with the offending pair named.
+//
+// Editing styles.css? Add a PAIRS entry for EVERY new foreground/background
+// combination — a hand-mirrored list is blind to pairs it never lists (#257).
+// Checklist: new text colour ⇒ new ['…', '--fg-var', '--bg-var', 4.5] here.
 import { readFileSync } from 'node:fs';
 
 const css = readFileSync(new URL('../web/styles.css', import.meta.url), 'utf8');
@@ -46,6 +50,11 @@ const PAIRS = [
   ['muted on page', '--muted', '--bg', 4.5],
   ['link/wordmark on surface', '--brand-deep', '--surface', 4.5],
   ['link/wordmark on page', '--brand-deep', '--bg', 4.5],
+  // #257: the first-run wizard h2 and the first-admin .auth-title sit on the
+  // same Vanilla p-card surface as the wordmark (white light / #411934 dark).
+  // They ship at 1.3rem / weight 400 — below the large-text exemption — so the
+  // bar is 4.5:1, and the pair is pinned here to leave no silent blind spot.
+  ['wizard/auth title on surface', '--brand-deep', '--surface', 4.5],
   ['danger text on surface', '--danger', '--surface', 4.5],
   ['primary button ink', '--brand-ink', '--brand', 4.5],
   ['beta pill on tint', '--fg', '--accent-soft', 4.5],
@@ -87,13 +96,20 @@ for (const [theme, vars] of [['light', LIGHT], ['dark', DARK]]) {
 }
 
 // Focus affordance (#132): every interactive control family must have a
-// visible :focus-visible outline somewhere in the sheet.
+// visible :focus-visible outline somewhere in the sheet. #257: this used to
+// compute `covered` and throw it away (`void covered`), so it could never
+// fail — assert for real now.
 const focusRules = css.match(/[^{}]*:focus-visible[^{]*\{/g) || [];
 const needs = ['button', 'input', 'select', 'a'];
-for (const tag of needs) {
-  const covered = focusRules.some((r) => new RegExp(`(^|[\\s,>])${tag}(?![\\w-])`).test(r))
-    || focusRules.some((r) => /\*:focus-visible|:is\(|outline/.test(r) && r.includes(tag));
-  void covered;
+const uncovered = needs.filter((tag) => !(
+  focusRules.some((r) => new RegExp(`(^|[\\s,>])${tag}(?![\\w-])`).test(r))
+  || focusRules.some((r) => /\*:focus-visible|:is\(|outline/.test(r) && r.includes(tag))
+));
+if (uncovered.length) {
+  failures += 1;
+  console.log(`FAIL  no :focus-visible outline rule covers: ${uncovered.join(', ')}`);
+} else {
+  console.log(`PASS  :focus-visible rules cover ${needs.join(', ')} (${focusRules.length} rules)`);
 }
 const hasGlobalFocus = css.includes(':focus-visible') && css.includes('outline');
 if (!hasGlobalFocus) {

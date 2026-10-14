@@ -184,11 +184,7 @@ impl crate::providers::NamedProvider for dyn PaymentProvider {
 pub fn sign(secret: &str, body: &str) -> String {
     let mut m = Hmac::<Sha256>::new_from_slice(secret.as_bytes()).expect("hmac any key");
     m.update(body.as_bytes());
-    m.finalize()
-        .into_bytes()
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect()
+    crate::hex_lower(&m.finalize().into_bytes())
 }
 
 fn verify(secret: Option<&String>, signature: &str, body: &str) -> Result<(), PaymentError> {
