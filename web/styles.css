@@ -174,7 +174,7 @@ button.note-flag [class*="p-icon--"] { margin-right: 0; }
 .lock [class*="p-icon--"] { vertical-align: -.15rem; }
 .bar > * { min-width: 0; }
 .table-scroll { max-width: 100%; }
-#expense-table, #config-table, #report-table { display: block; max-width: 100%; overflow-x: auto; }
+#config-table { display: block; max-width: 100%; overflow-x: auto; }
 button.link, button.danger { min-height: 2rem; }
 input[type="checkbox"], input[type="radio"] { min-height: 0; accent-color: var(--brand-deep); }
 @media (prefers-reduced-motion: reduce) {
@@ -199,6 +199,13 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 #week-table td.cell { min-width: 5.5rem; }
 #week-table td.cell.has { background: var(--cell-active); font-weight: 600; }
 #week-table td.cell button { white-space: normal; background: none; border: none; color: var(--brand-deep); text-decoration: underline; font-weight: 600; padding: 0; }
+
+/* #232 increment 2 (reference tables): the customer/project/task/expense/report
+   registers are Vanilla p-card shells — the card owns the frame and the header
+   rule, so the #230 heading slot inside it drops its own bottom margin. The
+   dense registers use p-table--mobile-card for narrow screens (the renderers
+   supply the matching data-heading labels). */
+.p-card__header.customer-heading, .p-card__header.panel-heading-row, #report-form.bar { margin-bottom: 0; }
 
 .form-error { color: var(--danger); font-weight: 600; margin: .25rem 0; }
 .hint, .foot { color: var(--muted); font-size: .9rem; }

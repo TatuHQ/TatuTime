@@ -20,6 +20,11 @@ component backlog.
   styles are retired and the auth/wizard/entry/user/customer forms use the
   explicit `p-button--positive`/`p-button` classes. Tables, chips, dialogs and
   tablists follow in their own #232 increments.
+- **Reference tables (#232 increment 2)** — the customer/project/task/expense/report
+  registers are `p-card` shells (their `p-card__header` is the #230 heading slot), and
+  the dense registers use `p-table--mobile-card` with renderer-supplied `data-heading`
+  labels. The vendor bundle is unchanged (tables/cards shipped in stage 1), so the
+  `manifest.json` `cssSha256` stays `c6b404f72a9fb86c5a1425af9f26b27870edf2e9da74c640dbb149390d936e05`.
 
 ## Ground rules
 

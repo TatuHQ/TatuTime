@@ -50,6 +50,15 @@ entry/user/customer/project/task forms onto the explicit `p-button--positive`
 and neutral `p-button` classes. Tables, chips/badges, dialogs and tablists
 follow in their own increments (tracked on #232).
 
+**Increment 2 (reference tables)** wraps the customer/project/task/expense/report
+registers in the official `p-card` shell — the `p-card__header` is the #230 heading
+slot (creation action/filters), so its layout is unchanged — and the dense registers
+adopt the `p-table--mobile-card` pattern, whose `data-heading` labels the renderers
+now emit. The report register keeps the plain official table because its totals
+footer is not a mobile-card shape. No new component family was needed (tables and
+cards shipped in stage 1), so `npm run build:ubuntu` is a **no-op** and the
+`manifest.json` `cssSha256` is unchanged.
+
 The rules the plan holds to: no global reset (the editable timesheet grid is
 app-owned and must keep its dense cell geometry), the rejected GOV.UK direction
 (#175) stays rejected, and automated contrast coverage is never presented as
