@@ -910,8 +910,9 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
   check('day cell shows the day total, not the entries (#140)',
     !!xmas && xmas.querySelector('.cal-hours')?.textContent.trim() === '3:30'
     && xmas.querySelectorAll('.cal-chip, .cal-entry').length === 0);
-  check('month total announced live (#140)',
-    /Dec 2026: .+ logged/.test(window.document.getElementById('cal-total').textContent));
+  check('the month readout is a labelled "Total hours" value (#140)',
+    /^\d+:\d{2}$/.test(window.document.getElementById('cal-total').textContent)
+    && window.document.querySelector('.cal-total-label')?.textContent.trim() === 'Total hours');
   if (xmas) {
     xmas.dispatchEvent(new window.Event('click', { bubbles: true }));
     await waitFor(() => byId('ts-day').getAttribute('aria-selected') === 'true'

@@ -199,7 +199,7 @@ button.danger { background: none; border: none; color: var(--danger); padding: .
 .p-form__group { margin-bottom: .65rem; }
 /* Vanilla's `.p-form-help-text` pulls up (margin-top: -.5rem) to hug the input
    above it; the app also uses the class for panel/dialog copy that follows a
-   heading or a card edge (and a flex item in the calendar bar), so it keeps the
+   heading or a card edge (and panel copy such as the calendar footer note), so it keeps the
    natural block rhythm. Vanilla still owns the class's size/colour. Flagged
    for maintainer visual sign-off. */
 .p-form-help-text { margin: revert; }
@@ -572,6 +572,8 @@ dialog.p-modal::backdrop { background: transparent; }
 /* The month bar IS the Day/Week `.day-bar` (card, centred label, quiet trailing
    action), so the month arrows need no rules of their own: they are ordinary
    `.day-nav button`s once the markup mirrors the day and week bars. */
+.cal-total-label { color: var(--muted); font-size: .85rem; }
+.cal-total-value { font-weight: 600; font-variant-numeric: tabular-nums; }
 #cal-grid { width: 100%; table-layout: fixed; border-collapse: collapse; }
 #cal-grid th { font-size: .75rem; color: var(--muted); padding: .3rem 0; text-align: left; }
 #cal-grid td.cal-cell { border: 1px solid var(--line); vertical-align: top; height: 5.2rem;

@@ -240,14 +240,14 @@ test('rapid calendar navigation renders the newest month response (#188)', async
   context.calState.month = '2026-07';
   const newer = context.refreshTimeCal(); // July, resolves immediately
   await newer;
-  await waitFor(() => /5:00 logged/.test(document.getElementById('cal-total').textContent), {
+  await waitFor(() => document.getElementById('cal-total').textContent === '5:00', {
     message: 'the newest month response to render its 5:00 total',
   });
   releaseJune(); // the stale June response arrives late ...
   await older;   // ... and its (guarded) render attempt runs to completion
   await yieldToEventLoop();
   assert.equal(document.getElementById('cal-label').textContent, 'Jul 2026');
-  assert.match(document.getElementById('cal-total').textContent, /5:00 logged/);
+  assert.equal(document.getElementById('cal-total').textContent, '5:00');
   assert.equal(document.querySelector('#cal-grid .cal-hours')?.textContent, '5:00');
   dom.window.close();
 });
@@ -399,9 +399,10 @@ api.post = async () => ({});
   assert.equal(document.getElementById('panel-calendar').hidden, false, 'the month panel is shown');
   const cells = document.querySelectorAll('#cal-grid tbody td.cal-cell');
   assert.ok(cells.length >= 28, `the month grid painted its day cells (got ${cells.length})`);
-  assert.ok(
-    /logged|nothing logged yet/.test(document.getElementById('cal-total').textContent),
-    'refreshTimeCal ran on boot (the month total is announced)',
+  assert.match(
+    document.getElementById('cal-total').textContent,
+    /^\d+:\d{2}$/,
+    'refreshTimeCal ran on boot (the Total hours readout is painted)',
   );
   dom.window.close();
 });

@@ -50,9 +50,9 @@ export async function refreshTimeCal() {
     if (!byDate.has(e.date)) byDate.set(e.date, []);
     byDate.get(e.date).push({ ...e, hundredths: h });
   }
-  $('cal-total').textContent = totalHundredths
-    ? `${monthName(month)}: ${fmtHM(totalHundredths)} logged`
-    : `${monthName(month)}: nothing logged yet`;
+  // The displayed month already names itself in the bar's centre label, so the
+  // readout is just the labelled number ("Total hours 26:01").
+  $('cal-total').textContent = fmtHM(totalHundredths);
   const tbody = $('cal-grid').querySelector('tbody');
   tbody.textContent = '';
   const lead = (new Date(`${monthStart}T00:00:00Z`).getUTCDay() + 6) % 7;
