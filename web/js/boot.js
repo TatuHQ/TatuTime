@@ -504,6 +504,11 @@ export async function startApp() {
   await Promise.all([
   firstPaint,
   refreshWeek(),
+  // #140: a deep link (or a plain reload) straight to the Calendar is selected
+  // by applyRoute() with the panel refresh suppressed — the router trusts this
+  // boot sequence to paint — and it only painted Day and Week, so the month
+  // grid stayed empty until the segment was clicked. Paint the linked segment.
+  segActiveId === 'ts-cal' ? refreshTimeCal() : null,
   refreshCustomerTable(),
   refreshInvoices(),
   refreshTimer(),
