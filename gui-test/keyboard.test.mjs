@@ -115,3 +115,75 @@ test('nextTabIndex maps the arrow axis to the declared orientation (#258)', () =
     assert.equal(kb.nextTabIndex('End', 0, 3, 'horizontal'), 2);
     dom.window.close();
 });
+
+// ------------------------------------------------ dialogs (#232 increment 4) --
+//
+// The popups adopt the official p-modal classes; their behaviour must not
+// regress. The native <dialog> traps focus and returns it to the invoker on
+// close in browsers — jsdom needs the explicit focus-return wiring, so these
+// drive the real index.html + app.js (wireSetupPanels wires the dialog handlers,
+// initDialog wires the shared confirm/prompt dialog).
+
+function dialogSetup() {
+    const dom = new JSDOM(html, { runScripts: 'outside-only', url: 'http://localhost/' });
+    dom.window.HTMLDialogElement.prototype.showModal = function () { this.open = true; };
+    dom.window.HTMLDialogElement.prototype.close = function () { this.open = false; };
+    const stub = `
+api.get = async () => ({});
+api.post = async () => ({});
+initDialogFocusReturn(); // #232 inc 4: focus returns to the opener
+initDialog();            // shared confirm/prompt/alert dialog
+wireWeekGrid();          // customer/dialog open + cancel handlers (#189)
+window.d = { showDialog };`;
+    dom.window.eval(`${app}\n${stub}`);
+    return { dom, d: dom.window.d, document: dom.window.document };
+}
+
+// The always-registered DOMContentLoaded handler calls showAuth() on a fresh
+// harness (no session), which focuses the sign-in field. Let it settle before
+// asserting anything about focus.
+const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+const dialogOpen = (dlg) => dlg.open === true || dlg.hasAttribute('open');
+const escape = (dom, dlg) => dlg.dispatchEvent(
+    new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+);
+
+test('confirm dialog focuses in on open, ESC closes and returns focus (#232 inc 4)', async () => {
+    const { dom, d, document } = dialogSetup();
+    await settle();
+    const invoker = document.getElementById('day-add');
+    invoker.focus();
+    const pending = d.showDialog({ title: 'Please confirm', message: 'Delete this?', okLabel: 'Delete', cancelLabel: 'Cancel' });
+    const dlg = document.getElementById('app-dialog');
+    assert.ok(dialogOpen(dlg), 'the shared dialog opens');
+    assert.equal(document.activeElement.id, 'dlg-ok', 'focus moves into the dialog on open');
+    assert.equal(document.getElementById('dlg-title').textContent, 'Please confirm', 'accessible name resolves from the title');
+    escape(dom, dlg);
+    assert.equal(await pending, 'cancel', 'Escape resolves as cancel');
+    assert.equal(dialogOpen(dlg), false, 'ESC closes the dialog');
+    assert.equal(document.activeElement.id, 'day-add', 'focus returns to the invoking control');
+    dom.window.close();
+});
+
+test('customer dialog focuses in, ESC closes, focus and name resolve (#232 inc 4)', async () => {
+    const { dom, document } = dialogSetup();
+    await settle();
+    document.getElementById('panel-customers').hidden = false; // the invoker must be focusable
+    const invoker = document.getElementById('customer-new');
+    invoker.focus();
+    invoker.dispatchEvent(new dom.window.Event('click', { bubbles: true }));
+    const dlg = document.getElementById('customer-dialog');
+    assert.ok(dlg.classList.contains('p-modal'), 'dialog carries the p-modal overlay');
+    assert.ok(dialogOpen(dlg), 'the customer dialog opens');
+    assert.equal(document.activeElement.id, 'customer-name', 'focus moves into the dialog on open');
+    assert.equal(
+        document.getElementById(dlg.getAttribute('aria-labelledby')).textContent,
+        'Add customer',
+        'the dialog is named by its p-modal__title',
+    );
+    escape(dom, dlg);
+    assert.equal(dialogOpen(dlg), false, 'ESC closes the dialog');
+    assert.equal(document.activeElement.id, 'customer-new', 'focus returns to the invoking control');
+    dom.window.close();
+});

@@ -77,6 +77,29 @@ unchanged. No new component family was needed (chips, badges and notifications
 shipped in stage 1), so `npm run build:ubuntu` is a **no-op** and the
 `manifest.json` `cssSha256` is unchanged.
 
+**Increment 4 (dialogs)** puts every popup on the official Vanilla `p-modal`
+pattern. The native `<dialog>` element is **kept** and carries `p-modal` — it
+still owns the top layer, `::backdrop`, inert background, focus trap and Escape,
+so the #102 security behaviour is unchanged — while the box inside it is the
+official `p-modal__dialog` with a `p-modal__header`/`p-modal__title` and a
+`p-modal__footer`. Only the UA box the native element adds (border, max sizes) is
+neutralised, so the chrome, colours and internal scrolling come from the vendored
+classes (`--vf-color-background-overlay` dim, `…-background-default` box,
+`…-text-default` ink). The nine bespoke `#…-dialog { … }` skins, their aubergine
+`::backdrop` rules and the generic `dialog` / `dialog h2` overrides are retired;
+only per-dialog `max-width`s (26–38 rem) stay app-owned, on the `p-modal__dialog`
+box. The first-run wizard keeps its #229 `p-card` frame (a twin of the sign-in
+overlay) and only its outer dialog adopts `p-modal`. A shared
+`initDialogFocusReturn()` in `web/js/dom.js` makes the native dialog's
+focus-return contract explicit for **every** popup (a browser restores focus to
+the invoker on close; jsdom does not), and each dialog now declares
+`aria-modal="true"` beside its `aria-labelledby` title. Vanilla 4.59.0 shipped
+`p-modal` in stage 1 and has **no `p-modal__body`** rule — the pattern's body is
+the plain content between header and footer, so the vocabulary earlier in this
+backlog was corrected — and no new component family was needed, so
+`npm run build:ubuntu` is a **no-op** and the `manifest.json` `cssSha256` is
+unchanged.
+
 The rules the plan holds to: no global reset (the editable timesheet grid is
 app-owned and must keep its dense cell geometry), the rejected GOV.UK direction
 (#175) stays rejected, and automated contrast coverage is never presented as
@@ -106,10 +129,12 @@ moved under `/api` and every view gained a stable path (`spa_page` in
    old backlog named `p-badge`, but the shipped `p-badge` is a **numeric counter**
    (4ch-wide, overflow hidden), so text statuses are the chip (see the
    increment-3 note); the count badge has no caller in this GUI.
-3. **Stage 2c** — notifications and modal dialogs: notifications ✅ (#232 inc 3,
-   the `.notif` list is now canonical `p-notification`); the nine bespoke
-   `<dialog>` skins onto `p-modal` still pending, keeping the native dialog
-   element (#102 security behaviour unchanged).
+3. **Stage 2c** — notifications and modal dialogs: ✅ both (#232 inc 3
+   notifications, inc 4 dialogs). The `.notif` list is canonical
+   `p-notification`; every popup is the official `p-modal` overlay +
+   `p-modal__dialog`/`__header`/`__title`/`__footer` internals, keeping the
+   native `<dialog>` element (#102 security behaviour unchanged) and its p-card
+   twin frame for the wizard.
 4. **Stage 3** — sidebar tabs and segment controls onto `p-tabs`; retire the
    label-matching fallback in `decorateUbuntuButton` once every creation site
    passes `data-icon`/`data-positive` (attribute support shipped with #191).
