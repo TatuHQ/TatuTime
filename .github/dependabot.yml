@@ -18,6 +18,14 @@ updates:
         patterns:
           - "*"
 
+  # Known blind spot (#263 item 5): this ecosystem only reads image references
+  # in `image:` fields and Dockerfile `FROM` lines. Images pulled inside `run:`
+  # strings in .github/workflows/ci.yml — `node:22-slim` (gui-test harness) and
+  # `rhysd/actionlint:1.7.12` (workflow lint) — are invisible here and get NO
+  # update PRs; bump them by hand when the upstream tags move. The
+  # `rust:1.98.0-slim-trixie` images (workflow `container:`/`run:` steps) track
+  # rust-toolchain.toml and are covered by the `rust` ignore below; the gitleaks
+  # scanner is already digest-pinned in the workflow.
   - package-ecosystem: docker
     directories:
       - "/"
