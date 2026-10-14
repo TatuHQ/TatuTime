@@ -123,7 +123,8 @@ vertical axis, the strips' heading-slot width, and the #145 uniform segment
 widths. Recorded correction to earlier backlog prose: the plan listed the
 Invoices Open|All control as a tablist to move onto `p-tabs`, but it is a
 `role="group"` of `aria-pressed` toggle buttons, so it keeps the `.seg` /
-`.seg-btn` segmented-control skin. `vf-p-tabs` shipped in stage 1, so
+`.seg-btn` segmented-control skin. `vf-p-tabs` shipped in stage 1, so the component family is unchanged and
+`npm run build:ubuntu` is a **no-op**.
 
 **Increment 6 (cleanup)** — the last planned increment audits `styles.css` for
 the rules the earlier increments left dead and shrinks it to the layout shell
@@ -226,20 +227,42 @@ container. Guards: `gui-test/sortable.test.mjs` (static contract + `dashFilter`
 semantics), the `gui.mjs` live sort assertions and the real-browser gate's
 sortable audit.
 
-**Umbrella #232 status.** Increments 1–6 and the phase-2a/2b/2c sweeps are all
-landed and green, so the component-substitution
-scope and the shared form vocabulary are complete; the umbrella stays **open**
-(*Part of #232*) only for the page-by-page rollout tracked in
-[`ubuntu-migration-plan.md`](ubuntu-migration-plan.md) — rows 1–15 are still ⬜
-(the per-page manual light/dark + assistive-technology sign-off in ground rules
-4–5, the Invoices sortable register having landed in phase 2d) — and
-for deleting the now-redundant `decorateUbuntuButton` fallbacks (phase 2e).
-`npm run build:ubuntu` is a **no-op** and `cssSha256` is unchanged.
+**Umbrella #232 status.** Increments 1–6 and the phase-2a–2f sweeps are all
+landed and green, so the component-substitution scope, the shared form
+vocabulary and the attribute-only button decorator are complete; the umbrella
+stays **open** (*Part of #232*) for exactly one remaining item — the
+page-by-page maintainer sign-off tracked in
+[`ubuntu-migration-plan.md`](ubuntu-migration-plan.md), where rows 1–15 are still
+⬜ (the manual light/dark + keyboard/assistive-technology review of ground rules
+4–5, the Invoices sortable register having landed in phase 2d). This note is also
+where phase 2f resolves the base-element contradiction (below) and records the
+deliberate non-migrations. `npm run build:ubuntu` is a **no-op** and `cssSha256`
+is unchanged.
 
-The rules the plan holds to: no global reset (the editable timesheet grid is
-app-owned and must keep its dense cell geometry), the rejected GOV.UK direction
-(#175) stays rejected, and automated contrast coverage is never presented as
-blanket WCAG conformance.
+### Base-element policy (resolves the issue's ground-rule 1 contradiction)
+
+The issue's ground rule 1 forbids a "global reset / base-element styles", yet the
+vendored bundle **does** emit global element rules: the `vf-b-*` base layers
+compile to `table` (from `vf-b-tables`), `label`/`input`/`select`/`textarea`
+(from the forms base) and a tinted, clipping `fieldset`. Those are not an app
+mistake — they are the design system's own base, and the app *builds on* the
+bundle; re-implementing fieldsets/labels/tables by hand is exactly the bespoke
+churn #232 removes. The rule is therefore **reworded** to what it always meant:
+the app must add **no new global reset of its own** — `web/styles.css` may not
+introduce bare element selectors (`table`, `label`, `input`, `fieldset`, …)
+except (a) tightly scoped to app-owned components (e.g.
+`fieldset.p-form__group`, `.p-form__group input[type="checkbox"]`) or (b) an
+explicit, commented app decision (e.g. the shell-level `*` / `body` / `button` /
+`table` rules). How to tell a legitimate base rule from an app mistake: a base
+rule lives in the vendored bundle and applies globally on purpose, while an app
+mistake is a bare element selector in `web/styles.css` with no scope and no
+comment. The editable week grid and calendar month grid stay app-owned either
+way.
+
+The rules the plan holds to: no **app** global reset (the vendored base layers
+own theirs; the editable timesheet grid is app-owned and must keep its dense cell
+geometry), the rejected GOV.UK direction (#175) stays rejected, and automated
+contrast coverage is never presented as blanket WCAG conformance.
 
 Backlog — one component family per reviewed PR, behind existing element ids,
 each gated by the jsdom + contrast suites and a manual keyboard/AT pass on the
@@ -278,10 +301,11 @@ moved under `/api` and every view gained a stable path (`spa_page` in
    twin frame for the wizard.
 4. **Stage 3** — ✅ sidebar tabs and segment controls onto the official
    `p-tabs` vocabulary (#232 inc 5; the `.p-tabs` container is intentionally not
-   used — see the increment note above). Still open: delete the label/type/id
-   fallbacks in `decorateUbuntuButton` (phase 2e) — every shell and builder
-   creation site now states `data-icon`/`data-positive`, so the fallbacks are
-   redundant (attribute support shipped with #191).
+   used — see the increment note above). Done in **phase 2e**: the label/type/id
+   fallbacks and the label-mutating "+"-strip in `decorateUbuntuButton` are
+   deleted — every shell and builder creation site states `data-icon` /
+   `data-positive`, so decoration is attribute-only (attribute support shipped
+   with #191).
 5. **Stage 2d — forms**: ✅ fields, hints and error messages (#232 phase 2b) —
    `p-form__group`/`p-form__label`/`p-form__control` rows, `p-form-help-text`
    hints and `p-form-validation__message` errors replace `.field`, `.hint` and
@@ -309,6 +333,39 @@ moved under `/api` and every view gained a stable path (`spa_page` in
   affordances lifted to `opacity .7`; icon/positive styling now honours
   `data-icon`/`data-positive` at creation sites, with the old label/id matching
   kept only as a fallback.
+
+## Deliberate non-migrations (decisions, not omissions)
+
+These are **decided** app-owned surfaces, not leftovers of an unfinished sweep.
+Each keeps its bespoke CSS on purpose, with the reason recorded so it is not
+mistaken for debt:
+
+- **Horizontal filter / tool rows (`.bar`, `.filter-field`).** These are compact,
+  always-horizontal tool rows (a picker plus buttons on one line), not stacked
+  form rows. Vanilla's `p-form--inline` only lays out at `>= 1036px` and turns
+  each `.p-form__group` into an inline row; below that width it does nothing, so
+  the app owns the row's wrap behaviour and intrinsic control widths (the sheet
+  scopes the width reset to `.bar …` / `.inv-filters …`).
+- **The segmented control (`.seg` / `.seg-btn`).** The Invoices Open|All control
+  is a `role="group"` of `aria-pressed` toggle buttons, **not** a tablist, so it
+  keeps the app's segmented skin rather than moving onto `p-tabs` (the plan's
+  earlier "tablist" naming was corrected in increment 5).
+- **The tab / list rails' geometry.** The sidebar rail is a *vertical* tablist
+  and the two in-view strips keep their heading-slot widths and #145 uniform
+  segment widths; Vanilla's `.p-tabs` container is deliberately unused (it boxes
+  list + panels with `overflow: hidden` and would clip the focus rings).
+- **The dense grids (`#day-table`, `#week-table`, `#cal-grid`, `#ed-lines`).**
+  The editable timesheet week grid and the calendar month grid hold app-owned
+  cell geometry (border-spacing, `table-layout`, per-cell accents) that the
+  issue's ground rule 1 explicitly keeps out of any Vanilla table pattern.
+- **Overflow containers (`.table-scroll`, `.invoice-table-scroll`).** Where a
+  register genuinely overflows (`table-layout: fixed` with a `38rem` min-width
+  under 720px) the wrapper keeps `overflow-x: auto`; Vanilla's table pattern
+  ships no scroll container for these shells.
+
+Rationale for recording them here: the DoD bullet "`styles.css` contains no
+remaining rules duplicating official component patterns" is about *duplication*,
+and these rules duplicate nothing — they express layout Vanilla does not.
 
 ## Accessibility Verification Scope
 

@@ -123,15 +123,48 @@ component backlog.
   family is unchanged, so `npm run build:ubuntu` is a **no-op** and `cssSha256`
   stays `c6b404f72a9fb86c5a1425af9f26b27870edf2e9da74c640dbb149390d936e05`.
 
-**Umbrella status.** With increment 6 and phases 2a–2c the planned PRs are
-all merged, but #232 stays **open** (*Part of*): the page map above is still ⬜ —
-every row needs the manual light/dark + keyboard/AT review of ground rules 4–5,
-including the Invoices sortable register — and the now-redundant
-`decorateUbuntuButton` fallbacks are still to delete (phase 2e). Those are what a
-later ticket needs before it can `Closes #232`.
+- **Attribute-only button decoration (#232 phase 2e)** — `decorateUbuntuButton`
+  no longer infers a button's icon or colour from its label, type or id, and no
+  longer strips a leading `+` from a label: decoration is a pure function of the
+  explicit `data-icon` / `data-positive` attributes that every creation site
+  (the 12 builders and the shared `rowAction`) already states. The deleted
+  fallback only ever affected dynamic labels built from user data (a customer
+  named "Copy Center" used to acquire a copy glyph), so nothing lost a glyph it
+  should keep. `gui-test/forms.test.mjs` asserts the attribute contract directly
+  and the real-browser gate asserts it on every routed view (107 embedded / 113
+  dev checks).
+
+- **Documentation truth + final CSS dedupe (#232 phase 2f)** — the
+  bundle-as-authority ground rule above was added as the phantom-class family
+  (`p-field` x3, plus the already-corrected `p-table--sortable` /
+  `p-modal__body` / `p-card__footer`) was swept out; the base-element
+  contradiction with the issue's ground rule 1 was resolved in
+  [`ubuntu-design.md`](ubuntu-design.md) (the vendored `vf-b-*` base layers
+  legitimately emit global element rules; the app adds none of its own); the
+  deliberate non-migrations were recorded as decisions; and two provably
+  redundant `table` declarations plus the verbatim `#week-table.grid` duplicate
+  were deleted. `styles.css` moves from 726 lines / 377 rules (373
+  comment-stripped) to 725 / 376 (372).
+
+**Umbrella status.** Increments 1–6 and phases 2a–2e are all merged, so the
+component-substitution scope, the shared form vocabulary and the attribute-only
+button decorator are complete. #232 stays **open** (*Part of*) for exactly one
+remaining item: the page map above is still ⬜ — every row needs the maintainer's
+manual light/dark + keyboard/AT review of ground rules 4–5, including the
+Invoices sortable register — and that sign-off is what a later ticket needs
+before #232 can be closed.
 
 ## Ground rules
 
+0. **The vendored bundle's compiled CSS is the authority for class names.**
+   `web/vendor/ubuntu/components.css` (the pinned Vanilla 4.59 build) settles
+   whether a `p-*` class exists; this plan's prose is a guide and **must be
+   verified against that bundle before implementing**. Earlier revisions named
+   four classes that never existed in 4.59 — `p-table--sortable`,
+   `p-modal__body`, `p-card__footer` and `p-field` — and each cost wasted
+   effort; the bundle settles the question, not the prose. (The `vf-b-*` /
+   `vf-p-*` names below are **Sass layer/mixin** names, not emitted class
+   selectors — the compiled bundle carries their output, not their names.)
 1. **One PR per page view**, merged into `main`; review happens at the
    page's URL before the next page starts.
 2. **Layout stays**: component substitution and styling only — no rearranging
@@ -224,10 +257,11 @@ The sequence deliberately front-loads the shared adapters (Day carries the
 first `p-table` register and the entry form; Invoices carries the most
 patterns). Each page lists what "migrated" means — nothing layout-level.
 
-1. **Timesheets — Day.** `.day-bar` already uses `p-card`; migrate the entry
-   form to `p-field`-style rhythm, the register to `p-table`, badges to
-   `p-badge`, copy-forward bar to the shared card adapter. Deliver: the
-   `p-table` adapter used by every later register.
+1. **Timesheets — Day.** `.day-bar` already uses `p-card`; the entry form is on
+   the official `p-form__group` rhythm (phase 2b), the register is `p-table`,
+   statuses are `p-chip` (the shipped `p-badge` is a numeric counter, not a text
+   status — see `ubuntu-design.md`), and the copy-forward bar is the shared card
+   adapter. Deliver: the `p-table` adapter used by every later register.
 2. **Timesheets — Week.** Grid keeps its app-owned geometry (explicitly out of
    scope per `ubuntu-design.md`); the surrounding controls remain
    (the Day|Week|Calendar strip is already the official `p-tabs__list` since
@@ -236,7 +270,9 @@ patterns). Each page lists what "migrated" means — nothing layout-level.
    button/card adapters; grid cells stay app-owned.
 4. **Customers.** Register onto the Day `p-table` adapter; create/edit popup
    onto the `p-modal` skin; contact rows onto form rhythm.
-5. **Projects.** Same adapters; scope-label + filter row onto `p-field`.
+5. **Projects.** Same adapters; the scope label + filter row stay the app-owned
+   horizontal `.bar` / `.filter-field` rows (a decided non-migration: Vanilla's
+   `p-form--inline` only lays out at >= 1036px and is not this compact tool row).
 6. **Tasks.** Same; hierarchy filters onto the shared filter-field pattern.
 7. **Invoices.** Biggest page: register onto the real sortable pattern
    (`aria-sort` + `.p-table__sort-button`; there is **no** `p-table--sortable`
@@ -247,19 +283,20 @@ patterns). Each page lists what "migrated" means — nothing layout-level.
    `.seg-btn` skin rather than moving onto `p-tabs`.
 8. **Expenses.** Register + quick-add category popup reuse earlier adapters.
 9. **Approvals.** Submission table + decision dialogs reuse earlier adapters.
-10. **Reports.** Query bar onto `p-field`, result table onto `p-table`,
-    CSV link as `p-button--link` pattern.
+10. **Reports.** Query bar stays the app-owned horizontal `.bar` row (decided
+    non-migration; see item 5), result table onto `p-table`, CSV link as
+    `p-button--link` pattern.
 11. **Settings — Security & runtime.** Config table + theme switch onto
     form/button adapters.
 12. **Settings — Users.** User register + create/reset-password dialogs.
 13. **Settings — Invoice documents.** Template editor + preview onto card
     adapters.
 14. **Settings — Products & services.** Item catalog table + dialog.
-15. **Settings — Expense categories.** Table + dialog; final cleanup PR: retire
-    the bespoke `.bar` skin that has no remaining users and shrink
-    `web/styles.css` (split into its own PR when it exceeds a page's worth of
-    churn). The `.card` skin this item used to name was retired early in
-    **phase 2c**.
+15. **Settings — Expense categories.** Table + dialog; any further
+    `web/styles.css` shrink ships as its own PR when it exceeds a page's worth
+    of churn. The `.card` skin this item used to name was retired early in
+    **phase 2c**; the `.bar` skin is **not** retired — it is a decided
+    non-migration (see `ubuntu-design.md`).
 
 ## Per-page review workflow
 

@@ -22,6 +22,11 @@ keep passing.
   `overflow:auto` does **not** clip them.
 - **No** `.p-form` / `.p-field` / `.p-form-validation` classes exist in this
   build → form fields stay on the existing bespoke `.field` pattern.
+  _(Superseded: #232 increment 1 later extended the bundle with the `vf-b-forms`
+  family, so `p-form__group` / `p-form__label` / `p-form__control` /
+  `p-form-help-text` / `p-form-validation__message` exist now — see
+  [`../ubuntu-design.md`](../ubuntu-design.md). The `.p-field` name never existed
+  in any 4.59 build.)_
 - Utility classes that exist: `.p-heading--1..4`, `.u-no-margin--bottom`.
 
 ## Scope decision
