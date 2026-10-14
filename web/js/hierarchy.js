@@ -5,7 +5,7 @@
 import { API_BASE, api } from './api.js';
 import { iw } from './billing.js';
 import { refreshPanel, switchTab } from './boot.js';
-import { $, announce, askAlert, askConfirm, clearFormError, el, fillSelect, formatMoney, showFormError } from './dom.js';
+import { $, announce, askAlert, askConfirm, clearFormError, el, fillSelect, formatMoney, showFormError, statusChip } from './dom.js';
 import { ed } from './invoices.js';
 import { createSeqGuard } from './seq.js';
 import { customerName, fillCustomerSelect, fillProjectSelect, loadCustomers, loadProjects, state } from './state.js';
@@ -30,10 +30,7 @@ export async function refreshCustomerTable() {
         ]),
         el('td', { cls: 'num', attrs: { 'data-heading': 'Default rate' }, text: `${c.currency} ${formatMoney(c.default_rate_minor)}` }),
         el('td', { attrs: { 'data-heading': 'Status' } }, [
-          el('span', {
-            cls: c.active ? 'badge on' : 'badge',
-            text: c.active ? 'Active' : 'Inactive',
-          }),
+          statusChip(c.active ? 'Active' : 'Inactive', c.active),
         ]),
         el('td', { cls: 'actions-col', attrs: { 'data-heading': 'Actions' } }, [
           el('button', {
@@ -277,10 +274,7 @@ export async function refreshProjectTable() {
         el('td', { attrs: { 'data-heading': 'Currency' }, text: p.currency || 'customer' }),
         el('td', { cls: 'num', attrs: { 'data-heading': 'Rate' }, text: p.rate_minor != null ? formatMoney(p.rate_minor) : 'customer' }),
         el('td', { attrs: { 'data-heading': 'Status' } }, [
-          el('span', {
-            cls: p.active ? 'badge on' : 'badge',
-            text: p.active ? 'Active' : 'Inactive',
-          }),
+          statusChip(p.active ? 'Active' : 'Inactive', p.active),
         ]),
         el('td', { cls: 'actions-col', attrs: { 'data-heading': 'Actions' } }, [
           el('button', {
@@ -492,10 +486,7 @@ export async function refreshTaskTable() {
         el('th', { attrs: { scope: 'row' }, text: t.code }),
         el('td', { attrs: { 'data-heading': 'Name' }, text: t.name }),
         el('td', { attrs: { 'data-heading': 'Status' } }, [
-          el('span', {
-            cls: t.active ? 'badge on' : 'badge',
-            text: t.active ? 'Active' : 'Inactive',
-          }),
+          statusChip(t.active ? 'Active' : 'Inactive', t.active),
         ]),
         el('td', { cls: 'actions-col', attrs: { 'data-heading': 'Actions' } }, [
           el('button', {

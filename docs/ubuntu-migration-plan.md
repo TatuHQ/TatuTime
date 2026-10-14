@@ -25,6 +25,14 @@ component backlog.
   the dense registers use `p-table--mobile-card` with renderer-supplied `data-heading`
   labels. The vendor bundle is unchanged (tables/cards shipped in stage 1), so the
   `manifest.json` `cssSha256` stays `c6b404f72a9fb86c5a1425af9f26b27870edf2e9da74c640dbb149390d936e05`.
+- **Chips, badges + notifications (#232 increment 3)** — every status pill is the
+  official `p-chip` / `p-chip__value` (one shared `statusChip` builder in
+  `web/js/dom.js`; `p-status-label` is deprecated upstream and folded into the
+  chip), the editable expense-category chips use `p-chip__dismiss`, and the
+  notification list is canonical `p-notification` markup. The bespoke `.badge` /
+  `.chip` / `.notif` skins are retired. Chips, badges and notifications shipped in
+  stage 1, so the vendor bundle is unchanged again and `cssSha256` is still
+  `c6b404f72a9fb86c5a1425af9f26b27870edf2e9da74c640dbb149390d936e05`.
 
 ## Ground rules
 

@@ -192,8 +192,10 @@ tbody tr:nth-child(odd) { background: var(--row-alt); }
 tfoot th, tfoot td { font-weight: 700; border-top: 2px solid var(--line); border-bottom: none; }
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .actions-col { width: 9.5rem; }
-.badge { font-size: .78rem; padding: .12rem .5rem; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); text-transform: capitalize; }
-.badge.on { color: var(--brand-deep); border-color: var(--brand-deep); }
+/* #232 increment 3: status/rate pills are the official Vanilla chip
+   (`p-chip` + `p-chip__value`, built by `statusChip` in web/js/dom.js). The
+   bespoke `.badge` skin is retired — `p-status-label` is deprecated upstream
+   ("merged into the Chip component"), so `p-chip` is the official successor. */
 
 .table-scroll { overflow-x: auto; }
 #week-table td.cell { min-width: 5.5rem; }
@@ -217,9 +219,10 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 [hidden] { display: none !important; }
 
 /* ---- chips ---- */
+/* #232 increment 3: editable category chips are official Vanilla `p-chip`s
+   (`p-chip__value` + `p-chip__dismiss`). Only the list layout and the
+   app-owned "Edit" affordance (Vanilla ships no in-chip edit) stay app-local. */
 .chips { list-style: none; display: flex; flex-wrap: wrap; gap: .4rem; padding: 0; margin: .25rem 0 1rem; }
-.chip { display: inline-flex; align-items: center; gap: .35rem; border: 1px solid var(--line); border-radius: 999px; padding: .2rem .65rem; background: var(--surface); }
-.chip-x { border: none; background: none; color: var(--danger); font-size: 1rem; line-height: 1; padding: 0 .1rem; cursor: pointer; }
 
 /* ---- auth ---- */
 /* First-admin sign-in is the twin of the first-run setup wizard (#229): a
@@ -245,10 +248,10 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .cal-events { list-style: none; padding: 0; margin: 0 0 1rem; }
 .cal-event { display: flex; align-items: center; justify-content: space-between; gap: .75rem; padding: .4rem .6rem; border: 1px solid var(--line); border-radius: var(--radius); margin-bottom: .35rem; background: var(--surface); }
 
+/* #232 increment 3: notifications are official `p-notification` markup (see
+   web/js/notifications.js); what remains here is the list/header layout only. */
 .notif-head { display: flex; align-items: center; justify-content: space-between; font-weight: 700; margin: .5rem 0 .25rem; }
 .notifs { list-style: none; padding: 0; margin: 0 0 1rem; }
-.notif { margin-bottom: .4rem; }
-.notif:last-child { margin-bottom: 0; }
 
 /* Day view redesign (#12) */
 .day-bar.p-card { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: .7rem 1rem; margin: 0 0 .75rem; padding: .65rem .8rem; }
@@ -280,7 +283,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 #day-table td.entry-note { padding: .65rem .75rem; color: var(--fg); font-size: .875rem;
   min-width: 0; max-width: 46ch; }
 .entry-note { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-#day-table td.entry-note span.badge { margin-left: .35rem; }
+#day-table td.entry-note .p-chip { margin-left: .35rem; }
 .entry-hours { font-variant-numeric: tabular-nums; font-weight: 600; }
 /* Aligned with the day table: same vertical rhythm as the row gaps
    (.45rem border-spacing) and the same content inset as .entry-main
@@ -421,7 +424,7 @@ td.cell.locked .cell-input { opacity: .6; }
 .day-notifications { margin: .35rem 0 .65rem; }
 .day-notifications .notif-head { margin: 0 0 .4rem; }
 .day-notifications .notifs { display: grid; gap: .4rem; margin: 0; }
-.day-notifications .notif { margin: 0; }
+.day-notifications .p-notification { margin-bottom: 0; }
 .copy-bar select { padding: .45rem .6rem; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); color: var(--fg); font: inherit; cursor: pointer; }
 
 /* ------------------------------------------- week view refresh (#109) ---- */
@@ -526,7 +529,6 @@ fieldset.field > legend { font-weight: 600; font-size: .85rem; padding: 0 .3rem;
 .dlg-actions { gap: .6rem; }
 h3 { font-size: 1.02rem; margin: 1.1rem 0 .4rem; }
 caption { padding-bottom: .35rem; }
-.badge { display: inline-block; line-height: 1.4; vertical-align: middle; }
 .contact-row {
   display: grid; grid-template-columns: 1.2fr 1fr 1.4fr auto auto;
   gap: .4rem; align-items: center; margin-bottom: .35rem;
@@ -547,10 +549,8 @@ caption { padding-bottom: .35rem; }
 .customer-extra-details fieldset.field { margin-top: .5rem; }
 .panel-heading-row { display: flex; align-items: center; justify-content: flex-start; gap: 1rem; margin-bottom: .65rem; }
 .panel-heading-row h2 { margin: 0; }
-.chip { min-height: 2rem; }
 .chip-edit { border: 0; background: transparent; color: var(--brand-deep); padding: .1rem .25rem; font-size: .8rem; }
 .chip-edit:hover { text-decoration: underline; }
-.chip-x { margin-left: .1rem; }
 
 .invoice-workspace {
   display: grid;
