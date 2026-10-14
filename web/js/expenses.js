@@ -138,12 +138,12 @@ export async function refreshExpenses() {
     tbody.appendChild(
       el('tr', {}, [
         el('th', { attrs: { scope: 'row' }, text: x.date }),
-        el('td', { text: customerName(x.customer_id) }),
-        el('td', { text: x.project_code || '' }),
-        el('td', { text: c ? c.name : '' }),
-        el('td', { cls: 'num', text: `${x.currency} ${formatMoney(x.amount_minor)}` }),
-        el('td', { text: x.billable ? 'yes' : 'no' }),
-        el('td', { cls: 'actions-col' }, [
+        el('td', { attrs: { 'data-heading': 'Customer' }, text: customerName(x.customer_id) }),
+        el('td', { attrs: { 'data-heading': 'Project' }, text: x.project_code || '' }),
+        el('td', { attrs: { 'data-heading': 'Category' }, text: c ? c.name : '' }),
+        el('td', { cls: 'num', attrs: { 'data-heading': 'Amount' }, text: `${x.currency} ${formatMoney(x.amount_minor)}` }),
+        el('td', { attrs: { 'data-heading': 'Billable' }, text: x.billable ? 'yes' : 'no' }),
+        el('td', { cls: 'actions-col', attrs: { 'data-heading': 'Actions' } }, [
           el('button', {
             cls: 'danger',
             type: 'button',

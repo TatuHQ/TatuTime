@@ -249,77 +249,87 @@
     <!-- CUSTOMERS (#182: the combined workspace split into three Setup
          sections; row "Projects" actions cross-navigate with filters). -->
     <section id="panel-customers" role="tabpanel" aria-labelledby="tab-customers" tabindex="0" hidden>
-      <!-- Heading slot = the creation action (the masthead H1 names the
-           page; the duplicate section H2 went in #191-style cleanup). -->
-      <div class="customer-heading">
-        <div class="hierarchy-actions" role="group" aria-label="Customer actions">
-          <button type="button" id="customer-new" data-icon="plus" data-positive="1">Customer</button>
+      <!-- #232 increment 2: the reference register is a Vanilla p-card; the
+           heading slot (creation action, #230) becomes its p-card__header. -->
+      <div class="p-card">
+        <div class="p-card__header customer-heading">
+          <div class="hierarchy-actions" role="group" aria-label="Customer actions">
+            <button type="button" id="customer-new" data-icon="plus" data-positive="1">Customer</button>
+          </div>
         </div>
+        <p class="hint">Projects and tasks have their own Setup sections; the <strong>Projects</strong> action on a row opens that customer&#39;s projects.</p>
+        <div class="table-scroll"><table id="customer-table" class="p-table--mobile-card">
+          <caption class="sr-only">All customers</caption>
+          <thead><tr><th scope="col">Name</th><th scope="col">Default rate</th><th scope="col">Status</th><th scope="col" class="actions-col">Actions</th></tr></thead>
+          <tbody></tbody>
+        </table></div>
       </div>
-      <p class="hint">Projects and tasks have their own Setup sections; the <strong>Projects</strong> action on a row opens that customer&#39;s projects.</p>
-      <div class="table-scroll"><table id="customer-table">
-        <caption class="sr-only">All customers</caption>
-        <thead><tr><th scope="col">Name</th><th scope="col">Default rate</th><th scope="col">Status</th><th scope="col" class="actions-col">Actions</th></tr></thead>
-        <tbody></tbody>
-      </table></div>
     </section>
 
     <!-- PROJECTS -->
     <section id="panel-projects" role="tabpanel" aria-labelledby="tab-projects" tabindex="0" hidden>
-      <div class="customer-heading">
-        <div class="hierarchy-actions" role="group" aria-label="Project actions">
-          <div class="filter-field"><label for="proj-filter-customer">Customer</label>
-            <select id="proj-filter-customer"><option value="">All customers</option></select></div>
-          <button type="button" id="project-new" data-icon="plus" data-positive="1">Project</button>
+      <div class="p-card">
+        <div class="p-card__header customer-heading">
+          <div class="hierarchy-actions" role="group" aria-label="Project actions">
+            <div class="filter-field"><label for="proj-filter-customer">Customer</label>
+              <select id="proj-filter-customer"><option value="">All customers</option></select></div>
+            <button type="button" id="project-new" data-icon="plus" data-positive="1">Project</button>
+          </div>
         </div>
+        <p class="hint scope-hint">Projects <span id="project-scope-label" class="scope-label"></span></p>
+        <p id="projects-empty-state" class="workspace-empty">No projects yet. Use <strong>+ Project</strong> to add one.</p>
+        <div class="table-scroll"><table id="project-table" class="p-table--mobile-card" hidden>
+          <caption class="sr-only">Projects</caption>
+          <thead><tr><th scope="col">Code</th><th scope="col">Customer</th><th scope="col">Name</th><th scope="col">Currency</th><th scope="col">Rate</th><th scope="col">Status</th><th scope="col" class="actions-col">Actions</th></tr></thead>
+          <tbody></tbody>
+        </table></div>
       </div>
-      <p class="hint scope-hint">Projects <span id="project-scope-label" class="scope-label"></span></p>
-      <p id="projects-empty-state" class="workspace-empty">No projects yet. Use <strong>+ Project</strong> to add one.</p>
-      <div class="table-scroll"><table id="project-table" hidden>
-        <caption class="sr-only">Projects</caption>
-        <thead><tr><th scope="col">Code</th><th scope="col">Customer</th><th scope="col">Name</th><th scope="col">Currency</th><th scope="col">Rate</th><th scope="col">Status</th><th scope="col" class="actions-col">Actions</th></tr></thead>
-        <tbody></tbody>
-      </table></div>
     </section>
 
     <!-- TASKS -->
     <section id="panel-tasks" role="tabpanel" aria-labelledby="tab-tasks" tabindex="0" hidden>
-      <div class="customer-heading">
-        <div class="hierarchy-actions" role="group" aria-label="Task actions">
-          <div class="filter-field"><label for="task-filter-customer">Customer</label>
-            <select id="task-filter-customer"><option value="">Choose a customer&#8230;</option></select></div>
-          <div class="filter-field"><label for="task-filter-project">Project</label>
-            <select id="task-filter-project" disabled><option value="">Choose a customer first&#8230;</option></select></div>
-          <button type="button" id="task-new" data-icon="plus" data-positive="1">Task</button>
+      <div class="p-card">
+        <div class="p-card__header customer-heading">
+          <div class="hierarchy-actions" role="group" aria-label="Task actions">
+            <div class="filter-field"><label for="task-filter-customer">Customer</label>
+              <select id="task-filter-customer"><option value="">Choose a customer&#8230;</option></select></div>
+            <div class="filter-field"><label for="task-filter-project">Project</label>
+              <select id="task-filter-project" disabled><option value="">Choose a customer first&#8230;</option></select></div>
+            <button type="button" id="task-new" data-icon="plus" data-positive="1">Task</button>
+          </div>
         </div>
+        <p class="hint scope-hint">Tasks <span id="task-scope-label" class="scope-label"></span></p>
+        <p id="tasks-empty-state" class="workspace-empty">Choose a customer and a project to list their tasks.</p>
+        <div class="table-scroll"><table id="task-table" class="p-table--mobile-card" hidden>
+          <caption class="sr-only">Tasks</caption>
+          <thead><tr><th scope="col">Code</th><th scope="col">Name</th><th scope="col">Status</th><th scope="col" class="actions-col">Actions</th></tr></thead>
+          <tbody></tbody>
+        </table></div>
       </div>
-      <p class="hint scope-hint">Tasks <span id="task-scope-label" class="scope-label"></span></p>
-      <p id="tasks-empty-state" class="workspace-empty">Choose a customer and a project to list their tasks.</p>
-      <div class="table-scroll"><table id="task-table" hidden>
-        <caption class="sr-only">Tasks</caption>
-        <thead><tr><th scope="col">Code</th><th scope="col">Name</th><th scope="col">Status</th><th scope="col" class="actions-col">Actions</th></tr></thead>
-        <tbody></tbody>
-      </table></div>
     </section>
 
     <!-- REPORTS -->
     <section id="panel-reports" role="tabpanel" aria-labelledby="tab-reports" tabindex="0" hidden>
-      <form id="report-form" class="bar">
-        <label for="report-from">From</label><input type="date" id="report-from" required>
-        <label for="report-to">To</label><input type="date" id="report-to" required>
-        <label for="report-group">Group by</label>
-        <select id="report-group"><option value="customer">Customer</option><option value="project">Project</option><option value="person">Person</option><option value="week">ISO week</option></select>
-        <label for="report-billable">Work</label>
-        <select id="report-billable"><option value="">All</option><option value="true">Billable</option><option value="false">Non-billable</option></select>
-        <button type="submit" class="secondary">Run</button>
-        <a id="csv-link" class="button-link" href="#" download="timesheet.csv" hidden>Download CSV</a>
-      </form>
-      <table id="report-table">
-        <caption class="sr-only">Report results</caption>
-        <thead><tr><th scope="col">Group</th><th scope="col">Currency</th><th scope="col">Hours</th><th scope="col">Amount</th><th scope="col">Entries</th></tr></thead>
-        <tbody></tbody>
-        <tfoot><tr><th scope="row" colspan="2">Total hours</th><td id="report-total"></td><td colspan="2"></td></tr></tfoot>
-      </table>
+      <div class="p-card">
+        <div class="p-card__header">
+          <form id="report-form" class="bar">
+            <label for="report-from">From</label><input type="date" id="report-from" required>
+            <label for="report-to">To</label><input type="date" id="report-to" required>
+            <label for="report-group">Group by</label>
+            <select id="report-group"><option value="customer">Customer</option><option value="project">Project</option><option value="person">Person</option><option value="week">ISO week</option></select>
+            <label for="report-billable">Work</label>
+            <select id="report-billable"><option value="">All</option><option value="true">Billable</option><option value="false">Non-billable</option></select>
+            <button type="submit" class="secondary">Run</button>
+            <a id="csv-link" class="button-link" href="#" download="timesheet.csv" hidden>Download CSV</a>
+          </form>
+        </div>
+        <div class="table-scroll"><table id="report-table">
+          <caption class="sr-only">Report results</caption>
+          <thead><tr><th scope="col">Group</th><th scope="col">Currency</th><th scope="col">Hours</th><th scope="col">Amount</th><th scope="col">Entries</th></tr></thead>
+          <tbody></tbody>
+          <tfoot><tr><th scope="row" colspan="2">Total hours</th><td id="report-total"></td><td colspan="2"></td></tr></tfoot>
+        </table></div>
+      </div>
     </section>
 
     <!-- INVOICES -->
@@ -517,15 +527,17 @@
 
     <!-- EXPENSES -->
     <section id="panel-expenses" role="tabpanel" aria-labelledby="tab-expenses" tabindex="0" hidden>
-      <div class="panel-heading-row">
-        <button type="button" id="expense-new" class="primary" data-icon="plus" data-positive="1">Expense</button>
+      <div class="p-card">
+        <div class="p-card__header panel-heading-row">
+          <button type="button" id="expense-new" class="primary" data-icon="plus" data-positive="1">Expense</button>
+        </div>
+        <div class="table-scroll"><table id="expense-table" class="p-table--mobile-card">
+          <caption class="sr-only">Expenses</caption>
+          <thead><tr><th scope="col">Date</th><th scope="col">Customer</th><th scope="col">Project</th><th scope="col">Category</th><th scope="col">Amount</th><th scope="col">Billable</th><th scope="col" class="actions-col">Actions</th></tr></thead>
+          <tbody></tbody>
+        </table></div>
+        <p id="expense-empty" hidden>No expenses recorded yet. Use “+ Expense” to add one.</p>
       </div>
-      <table id="expense-table">
-        <caption class="sr-only">Expenses</caption>
-        <thead><tr><th scope="col">Date</th><th scope="col">Customer</th><th scope="col">Project</th><th scope="col">Category</th><th scope="col">Amount</th><th scope="col">Billable</th><th scope="col" class="actions-col">Actions</th></tr></thead>
-        <tbody></tbody>
-      </table>
-      <p id="expense-empty" hidden>No expenses recorded yet. Use “+ Expense” to add one.</p>
       <dialog id="expense-dialog" aria-labelledby="expense-dialog-title">
       <h2 id="expense-dialog-title">Record an expense</h2>
       <form id="expense-form">
