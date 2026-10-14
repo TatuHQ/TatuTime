@@ -7,3 +7,7 @@
 
 # jsdom harness dependencies (gui-test/)
 gui-test/node_modules
+
+# Python bytecode from the real-browser gate (gui-test/browser-smoke.py)
+__pycache__/
+*.pyc

@@ -137,6 +137,30 @@ jobs:
       - name: Build server binary
         run: docker run --rm -v "$PWD:/repo" -w /repo rust:1.98.0-slim-trixie cargo build --locked --release
 
+      # Real-browser gate: drives the release binary in a real Firefox through
+      # the Marionette wire protocol (gui-test/browser-smoke.py, standard
+      # library only — no geckodriver, Playwright or npm package). The pinned
+      # containers carry no browser, so this runs as a HOST step: the
+      # self-hosted runners execute steps on this host (as root), where
+      # /usr/bin/firefox is installed. The preflight FAILS, never skips, when
+      # Firefox or python3 is missing, so the gate can never silently no-op.
+      - name: Preflight the real-browser gate
+        run: |
+          missing=""
+          command -v firefox >/dev/null 2>&1 || missing="firefox"
+          command -v python3 >/dev/null 2>&1 || missing="$missing python3"
+          if [ -n "$missing" ]; then
+            echo "::error title=Real-browser gate cannot run::missing:$missing — gui-test/browser-smoke.py needs a host Firefox (Marionette) and python3. Install them on the self-hosted runner (apt-get install -y firefox python3) or point TUCANO_FIREFOX at the browser. This gate must not be skipped."
+            exit 1
+          fi
+          echo "TUCANO_FIREFOX=$(command -v firefox)" >> "$GITHUB_ENV"
+          python3 --version
+          firefox --version
+
+      - name: Run real-browser smoke gate
+        timeout-minutes: 10
+        run: python3 gui-test/browser-smoke.py
+
       # Self-hosted runners can overlap PR jobs: a fixed :8099 plus a shared
       # container name let one job's `docker rm -f` kill another's server.
       # One random port + per-run container name per job instead (#143 CI).
