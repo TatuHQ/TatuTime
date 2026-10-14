@@ -159,7 +159,12 @@ jobs:
 
       - name: Run real-browser smoke gate
         timeout-minutes: 10
-        run: python3 gui-test/browser-smoke.py
+        run: |
+          # Embedded assets first, then the dev-mode path: the second run proves
+          # `/_dev/reload.js` is served as a CSP-legal asset and that an edit
+          # under web/ reloads the browser by itself.
+          python3 gui-test/browser-smoke.py
+          python3 gui-test/browser-smoke.py --dev-web-dir
 
       # Self-hosted runners can overlap PR jobs: a fixed :8099 plus a shared
       # container name let one job's `docker rm -f` kill another's server.

@@ -136,7 +136,8 @@ is an external `/_dev/reload.js` asset (never an inline script the app's own
 
 It is wired into the `gui-test` job in [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)
 as a host step (the pinned containers carry no browser). A preflight step fails —
-never skips — when Firefox or `python3` is missing.
+never skips — when Firefox or `python3` is missing, and the job runs the gate
+twice: embedded/production assets, then the `--dev-web-dir` dev-mode probe.
 
 ## Visual evidence (screenshots) — #140/#142/#133/#141
 
