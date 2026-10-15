@@ -17,17 +17,22 @@ function setup({ dark = false, saved, blocked = false } = {}) {
   return { dom, changeSystem: (matches) => listener({ matches }) };
 }
 
-test('switch is below wizard and outside navigation tablist', () => {
+test('switch is below the rail and outside its tablist', () => {
   const { dom } = setup();
   const control = dom.window.document.getElementById('theme-switch');
-  // #191: the wizard button is a nav sibling of the tablist (a non-tab
-  // button inside role="tablist" violates ARIA required-owned-children and
-  // gets announced as a tab candidate).
-  assert.equal(control.previousElementSibling.id, 'wizard-open');
-  assert.equal(dom.window.document.getElementById('wizard-open').closest('[role="tablist"]'), null,
-    'wizard must not live inside the tablist');
-  assert.equal(dom.window.document.querySelector('#tabs button:not([role="tab"])'), null,
-    'every button inside the tablist is a tab');
+  // #191: nothing inside role="tablist" may be announced as a tab candidate.
+  // The rail now groups its tools in a disclosure, so the utility action and the
+  // summary live inside `details` — disclosure content, not tab candidates — and
+  // every other control in the tablist is a tab.
+  assert.ok(
+    dom.window.document.getElementById('wizard-open').compareDocumentPosition(control)
+      & dom.window.Node.DOCUMENT_POSITION_FOLLOWING,
+    'the colour switch comes after the rail, wizard included',
+  );
+  assert.equal(dom.window.document.getElementById('wizard-open').closest('details').id, 'more-tools',
+    'the wizard groups with the tools');
+  assert.equal(dom.window.document.querySelector('#tabs button:not([role="tab"]):not(#more-tools button)'), null,
+    'every button in the tablist outside the disclosure is a tab');
   assert.equal(control.closest('[role="tablist"]'), null);
   dom.window.close();
 });

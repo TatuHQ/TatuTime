@@ -77,7 +77,9 @@ test('announcement surfaces stay the polite live region and alert errors (#232 i
   assert.equal(live.classList.contains('p-notification'), false, 'live region is not a notification node');
   // #232 phase 2b: the error paragraphs are the official validation messages now.
   assert.ok(document.querySelectorAll('.p-form-validation__message[role="alert"]').length > 0, 'field errors stay role=alert');
-  assert.ok(document.getElementById('day-empty').classList.contains('p-notification'), 'day-empty keeps the official class');
+  // The Day view's empty state is the notification chip alone: the duplicate
+  // `#day-empty` paragraph it used to show beside it is gone.
+  assert.equal(document.getElementById('day-empty'), null, 'no duplicated day empty-state notice');
   dom.window.close();
 });
 

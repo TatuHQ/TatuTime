@@ -134,10 +134,10 @@ check('"Cancel" dismisses the wizard cleanly', !wzOpen());
 // #191 moved the utility action out of the tablist (ARIA required-owned-
 // children); #125's invariant is that the wizard stays the LAST sidebar
 // action, sitting between the tablist and the colour-mode switch.
-const navButtons = [...window.document.querySelectorAll('nav[aria-label="Sections"] button')].map((b) => b.id);
-const tablistButtons = [...window.document.querySelectorAll('#tabs button')].map((b) => b.id);
-check('wizard entry is the last sidebar action, outside the tablist (#125/#191)',
-  navButtons[navButtons.length - 1] === 'wizard-open' && !tablistButtons.includes('wizard-open'));
+const moreTools = window.document.getElementById('more-tools');
+check('the rail folds its tools into a disclosure, collapsed by default',
+  moreTools.open === false && moreTools.contains(window.document.getElementById('wizard-open'))
+  && moreTools.querySelector('summary').textContent.trim() === 'More tools');
 
 // #142: grouped rail + shortcuts.
 check('core MVP navigation comes first, Setup split into three (#142/#182)',
@@ -155,6 +155,22 @@ check('implemented secondary tools are grouped after the MVP destinations',
 check('the Approvals rail entry is hidden until its process exists (#16)',
   window.document.getElementById('tab-submissions').hidden === true
   && !railTabs.includes('tab-submissions'));
+check('Expenses is a Billing destination, not a separate tool',
+  window.document.getElementById('tab-expenses').closest('.nav-group')
+    ?.querySelector('.nav-label')?.textContent.trim() === 'Billing'
+  && window.document.getElementById('tab-expenses').closest('details') === null);
+check('Settings is pinned last, at the rail bottom, above the account block',
+  window.document.getElementById('tab-settings').closest('.nav-group')
+    ?.classList.contains('nav-bottom')
+  && railTabs[railTabs.length - 1] === 'tab-settings'
+  && window.document.getElementById('tab-settings').closest('details') === null);
+// Activating a destination inside the disclosure opens it: the rail always shows
+// where you are, whatever route brought you there.
+window.document.getElementById('tab-reports').dispatchEvent(new window.Event('click', { bubbles: true }));
+check('activating a tool opens its disclosure',
+  byId('more-tools').open === true
+  && window.document.getElementById('tab-reports').getAttribute('aria-selected') === 'true');
+window.document.getElementById('tab-timesheet').dispatchEvent(new window.Event('click', { bubbles: true }));
 check('redundant Invoice and Timer shortcut buttons are absent',
   !window.document.getElementById('shortcut-invoices') && !window.document.getElementById('shortcut-timer'));
 const timerOpen = window.document.getElementById('timer-open');

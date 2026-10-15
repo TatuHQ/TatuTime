@@ -862,6 +862,37 @@ class Gate:
         )
         self.check("the shell was loaded as one ES module", len(info["modules"]) == 1
                    and info["modules"][0].endswith("/app.js"), f"modules={info['modules']}")
+        # `checkVisibility()` is the painted truth for a collapsed disclosure:
+        # Firefox renders the content in a `::details-content` box whose
+        # `content-visibility` is hidden, so a child keeps a layout box while
+        # nothing of it is drawn.
+        collapsed = json.loads(self.marionette.script(
+            "var group = document.getElementById('more-tools');"
+            "var summary = group.querySelector('summary');"
+            "return JSON.stringify({"
+            " open: group.open,"
+            " summary: summary.textContent.trim(),"
+            " tabVisible: document.getElementById('tab-reports').checkVisibility(),"
+            " wizardVisible: document.getElementById('wizard-open').checkVisibility(),"
+            " summaryVisible: summary.checkVisibility(),"
+            " settingsVisible: document.getElementById('tab-settings').checkVisibility(),"
+            " height: Math.round(group.getBoundingClientRect().height),"
+            " summaryHeight: Math.round(summary.getBoundingClientRect().height)"
+            "});"
+        ))
+        self.check(
+            "the rail folds its tools into a collapsed disclosure",
+            collapsed["open"] is False and collapsed["summary"] == "More tools"
+            and collapsed["tabVisible"] is False and collapsed["wizardVisible"] is False
+            and collapsed["summaryVisible"] is True
+            and collapsed["height"] - collapsed["summaryHeight"] <= 12,
+            f"more-tools={collapsed}",
+        )
+        self.check(
+            "Settings stays on the rail while the tools are folded away",
+            collapsed["settingsVisible"] is True,
+            f"more-tools={collapsed}",
+        )
 
     def stylesheets(self):
         sheets = self.marionette.script(
@@ -981,6 +1012,21 @@ class Gate:
             " dayRows: document.querySelectorAll('#day-table tbody tr').length,"
             "});"
         ))
+        rail = json.loads(self.marionette.script(
+            "function box(id) { var r = document.getElementById(id).getBoundingClientRect();"
+            " return { top: r.top, bottom: r.bottom }; }"
+            "var settings = box('tab-settings');"
+            "var account = box('account');"
+            "var invoices = box('tab-invoices');"
+            "return JSON.stringify({ settingsTop: settings.top, settingsBottom: settings.bottom,"
+            " accountTop: account.top, invoicesTop: invoices.top });"
+        ))
+        self.check(
+            "Settings is pinned to the bottom of the rail, above the account block",
+            rail["settingsBottom"] <= rail["accountTop"] + 1
+            and rail["settingsTop"] > rail["invoicesTop"],
+            f"rail={rail}",
+        )
         self.check(
             "signing in through the real UI boots the app",
             info["overlayHidden"] and not info["accountHidden"]
@@ -1056,6 +1102,11 @@ class Gate:
                 structured,
                 f"structural probe failed for {panel}: {probe}",
             )
+            if path == "/reports":
+                self.check(
+                    "/reports opens the More tools disclosure, so the rail shows the active destination",
+                    self.marionette.script("return document.getElementById('more-tools').open === true;"),
+                )
             if path == "/timesheets/week":
                 align = self.marionette.script(WEEK_COLUMN_ALIGNMENT)
                 self.check(

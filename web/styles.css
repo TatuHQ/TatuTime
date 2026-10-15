@@ -506,8 +506,6 @@ dialog.p-modal::backdrop { background: transparent; }
 #day-table .entry-hours { white-space: nowrap; }
 .lock { margin-left: .45rem; font-size: .95rem; opacity: .75; }
 .day-total-cell { text-align: right; font-weight: 700; }
-.day-empty.p-notification { margin: .5rem 0 .75rem; }
-.day-empty[hidden] { display: none; }
 .day-notifications { margin: .35rem 0 .65rem; }
 .day-notifications .notif-head { margin: 0 0 .4rem; }
 .day-notifications .notifs { display: grid; gap: .4rem; margin: 0; }
@@ -578,6 +576,21 @@ dialog.p-modal::backdrop { background: transparent; }
    the `p-modal__dialog` is the frame, so no reset is needed. */
 /* ---- grouped MVP rail (#142) ---- */
 .nav-group { display: flex; flex-direction: column; gap: .15rem; margin-bottom: .45rem; }
+/* The rail's tablist grows so its last group (Settings) sits at the bottom, just
+   above the separator, the colour switch and the account block. */
+.sidebar #tabs { flex: 1 1 auto; }
+.nav-bottom { margin-top: auto; }
+/* More tools is a native disclosure, so its open/closed state is announced and
+   keyboard-operable for free. It must not inherit `.nav-group`'s flex column (a
+   flex display boxes a details' summary and content side by side), and the app
+   paints its own chevron because the group label is a summary, not a tab. */
+.more-tools-group { display: block; }
+.more-tools-group > summary { display: flex; align-items: center; cursor: pointer; list-style: none; }
+.more-tools-group > summary::-webkit-details-marker { display: none; }
+.more-tools-group > summary::after { content: '\25B8'; margin-left: .35rem; font-size: .8rem; line-height: 1; }
+.more-tools-group[open] > summary::after { content: '\25BE'; }
+.more-tools-group > summary:focus-visible { outline: 3px solid var(--focus); outline-offset: 1px; }
+.more-tools-group .nav-action { width: 100%; margin-top: .3rem; }
 .nav-label { font-size: .75rem; letter-spacing: 0; text-transform: uppercase;
   color: var(--muted); padding: .1rem .7rem 0; font-weight: 700; }
 @media (max-width: 720px) {

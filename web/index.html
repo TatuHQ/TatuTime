@@ -67,24 +67,31 @@
             <div class="nav-group" role="presentation">
               <span class="nav-label">Billing</span>
               <div class="p-tabs__item"><button class="p-tabs__link" role="tab" id="tab-invoices" aria-controls="panel-invoices" aria-selected="false" tabindex="-1"><i class="p-icon--copy" aria-hidden="true"></i>Invoices</button></div>
+              <div class="p-tabs__item"><button class="p-tabs__link" role="tab" id="tab-expenses" aria-controls="panel-expenses" aria-selected="false" tabindex="-1"><i class="p-icon--file" aria-hidden="true"></i>Expenses</button></div>
             </div>
-            <div class="nav-group more-tools-group" role="presentation">
-              <span class="nav-label">More tools</span>
-              <div class="p-tabs__item"><button class="p-tabs__link" role="tab" id="tab-expenses" aria-controls="panel-expenses" aria-selected="false" tabindex="-1"><i class="p-icon--copy" aria-hidden="true"></i>Expenses</button></div>
+            <!-- More tools is a disclosure, collapsed by default: the secondary
+                 destinations stay one click away without holding rail space.
+                 The tabs inside stay `#tabs` tabs — the ARIA tab pattern needs
+                 the one tablist, and `initTabs` opens the disclosure whenever
+                 one of them is activated, so the rail always shows where you are. -->
+            <details class="more-tools-group" id="more-tools">
+              <summary class="nav-label">More tools</summary>
+              <div class="p-tabs__item"><button class="p-tabs__link" role="tab" id="tab-reports" aria-controls="panel-reports" aria-selected="false" tabindex="-1"><i class="p-icon--history" aria-hidden="true"></i>Reports</button></div>
               <!-- Approvals (#16) is hidden for now: the approval process is not
                  implemented. The rail entry keeps its markup so the tab and its
                  panel return with one attribute, and `applyRoute` refuses the
                  hidden tab — /approvals falls back to the default view. -->
               <div class="p-tabs__item" hidden><button class="p-tabs__link" role="tab" id="tab-submissions" aria-controls="panel-submissions" aria-selected="false" tabindex="-1" hidden><i class="p-icon--success" aria-hidden="true"></i>Approvals</button></div>
-              <div class="p-tabs__item"><button class="p-tabs__link" role="tab" id="tab-reports" aria-controls="panel-reports" aria-selected="false" tabindex="-1"><i class="p-icon--history" aria-hidden="true"></i>Reports</button></div>
-              <div class="p-tabs__item"><button class="p-tabs__link" role="tab" id="tab-settings" aria-controls="panel-settings" aria-selected="false" tabindex="-1"><i class="p-icon--settings" aria-hidden="true"></i>Settings <span class="beta" title="Integration credentials — providers not yet wired">Beta</span></button></div>
+              <button type="button" id="wizard-open" class="nav-action" title="Setup wizard — add your first customer and project" aria-haspopup="dialog"><i class="p-icon--settings" aria-hidden="true"></i>Setup wizard</button>
+            </details>
+            <!-- Settings is a destination like the others, so it stays in the
+                 tablist — pinned to the bottom of the rail, above the account
+                 block, rather than sitting among the tools. -->
+            <div class="nav-group nav-bottom" role="presentation">
+              <div class="p-tabs__item"><button class="p-tabs__link" role="tab" id="tab-settings" aria-controls="panel-settings" aria-selected="false" tabindex="-1"><i class="p-icon--settings" aria-hidden="true"></i>Settings</button></div>
             </div>
         </div>
-        <!-- Utility action — #191: moved OUT of the tablist (its permitted
-             children are tabs only; a stray button is announced as a tab
-             candidate by screen readers despite the separator). -->
         <div class="tab-sep" role="separator" aria-hidden="true"></div>
-        <button type="button" id="wizard-open" class="nav-action" title="Setup wizard — add your first customer and project" aria-haspopup="dialog"><i class="p-icon--settings" aria-hidden="true"></i>Setup wizard</button>
         <fieldset class="theme-switch" id="theme-switch">
           <legend>Colour mode</legend>
           <label><input type="radio" name="colour-mode" value="light"> Light</label>
@@ -166,7 +173,6 @@
           <td colspan="3" class="day-total-cell">Total: <span id="day-total" class="num"></span></td>
         </tr></tfoot>
       </table>
-      <p id="day-empty" class="day-empty p-notification p-notification--information" hidden>Nothing logged on this day yet. Use <strong>Track time</strong> to add an entry, or copy projects from an earlier day below.</p>
       <div class="copy-bar p-card p-card--muted">
         <button type="button" id="copy-previous" class="secondary" data-icon="copy">Copy from previous day</button>
         <ul id="copy-rows" class="copy-rows" aria-label="Projects copied from an earlier day"></ul>
