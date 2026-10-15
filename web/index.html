@@ -222,7 +222,7 @@
     <!-- WEEK -->
     <section id="panel-week" role="tabpanel" aria-labelledby="ts-week" tabindex="0" hidden>
       <input type="date" id="week-date" hidden>
-      <div class="day-bar">
+      <div class="day-bar p-card">
         <nav class="day-nav" aria-label="Change week">
           <button type="button" id="week-prev" aria-label="Previous week" title="Previous week"><i class="p-icon--chevron-left" aria-hidden="true"></i></button>
           <span id="week-label" class="day-label"></span>
@@ -232,13 +232,49 @@
           <button type="button" id="week-today" class="link">Return to this week</button>
         </div>
       </div>
-      <p class="p-form-help-text">Type hours into a cell and press Enter or click away to save. Clearing a cell deletes that entry.</p>
+      <p class="p-form-help-text">Add row starts a project line for this week; type hours into its cells and press Enter or click away to save. Clearing a cell deletes that entry.</p>
       <div class="table-scroll">
         <table id="week-table" class="grid"></table>
       </div>
-      <div class="week-controls">
+      <div class="week-controls p-card p-card--muted">
+        <button type="button" id="week-add-row" class="secondary" data-icon="plus">Add row</button>
         <button type="button" id="week-copy-previous" class="secondary" data-icon="copy">Copy from previous week</button>
       </div>
+
+      <!-- #172 follow-up: adding a project ROW to the week grid. The dialog
+           picks only customer/project/task — no hours: the row's day cells take
+           the whole week\u2019s time, which is the point of the Week view. Kept
+           separate from the Day entry dialog (#145), which still captures one
+           day\u2019s hours. -->
+      <dialog id="week-row-dialog" class="p-modal" aria-modal="true" aria-labelledby="week-row-title">
+      <div class="p-modal__dialog">
+      <header class="p-modal__header">
+        <h2 class="p-modal__title" id="week-row-title">Add a project row</h2>
+      </header>
+      <p class="p-form-help-text" id="week-row-week"></p>
+      <form id="week-row-form">
+        <div class="p-form__group">
+          <label class="p-form__label" for="week-row-customer">Customer</label>
+          <select class="p-form__control" id="week-row-customer" name="customer_id" required></select>
+        </div>
+        <div class="p-form__group">
+          <label class="p-form__label" for="week-row-project">Project code</label>
+          <select class="p-form__control" id="week-row-project" name="project_code" required></select>
+        </div>
+        <div class="p-form__group">
+          <label class="p-form__label" for="week-row-task">Task (optional)</label>
+          <select class="p-form__control" id="week-row-task" name="task_code"></select>
+        </div>
+        <div class="p-form-validation is-error">
+          <p class="p-form-validation__message" id="week-row-error" role="alert" hidden></p>
+        </div>
+        <footer class="buttons p-modal__footer">
+          <button data-positive="1" type="submit" id="week-row-save" class="p-button--positive">Add row</button>
+          <button type="button" class="p-button" id="week-row-cancel">Cancel</button>
+        </footer>
+      </form>
+      </div>
+      </dialog>
     </section>
 
     <!-- CALENDAR VIEW (#140): month overview of LOGGED time; distinct from
@@ -247,19 +283,30 @@
          #tabs aria-controls, so a sibling here would remain visible on every
          section once the Calendar segment is selected. -->
     <section id="panel-calendar" role="tabpanel" aria-labelledby="ts-cal" tabindex="0" hidden>
-      <div class="cal-nav">
-        <button type="button" id="cal-prev" aria-label="Previous month" title="Previous month"><i class="p-icon--chevron-left" aria-hidden="true"></i></button>
-        <h2 id="cal-label">Calendar</h2>
-        <button type="button" id="cal-next" aria-label="Next month" title="Next month"><i class="p-icon--chevron-right" aria-hidden="true"></i></button>
-        <button type="button" id="cal-today" class="secondary">Today</button>
-        <span id="cal-total" class="p-form-help-text" role="status" aria-live="polite"></span>
+      <!-- #140: the month bar mirrors the Day and Week date bars — the same
+           card, a centred month label, a "Total hours" readout in the left slot
+           and a quiet "Return to this month" link on the right. The old
+           secondary "Today" button is gone; this link replaces it. -->
+      <div class="day-bar p-card">
+        <div class="day-actions">
+          <span class="cal-total-label">Total hours</span>
+          <span id="cal-total" class="cal-total-value" role="status" aria-live="polite"></span>
+        </div>
+        <nav class="day-nav" aria-label="Change month">
+          <button type="button" id="cal-prev" aria-label="Previous month" title="Previous month"><i class="p-icon--chevron-left" aria-hidden="true"></i></button>
+          <span id="cal-label" class="day-label"></span>
+          <button type="button" id="cal-next" aria-label="Next month" title="Next month"><i class="p-icon--chevron-right" aria-hidden="true"></i></button>
+        </nav>
+        <div class="day-end">
+          <button type="button" id="cal-month" class="link">Return to this month</button>
+        </div>
       </div>
       <table id="cal-grid">
         <caption class="sr-only">Logged hours by day</caption>
         <thead><tr><th scope="col">Mon</th><th scope="col">Tue</th><th scope="col">Wed</th><th scope="col">Thu</th><th scope="col">Fri</th><th scope="col">Sat</th><th scope="col">Sun</th></tr></thead>
         <tbody></tbody>
       </table>
-      <p class="p-form-help-text">Click a day with entries to open it in the Day view. This calendar shows your logged time; the Calendar events section below lists imported calendar items (#36).</p>
+      <p class="p-form-help-text">Click a day with entries to open it in the Day view.</p>
     </section>
 
     </section><!-- /panel-timesheet -->

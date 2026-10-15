@@ -13,7 +13,7 @@ import { initRouter, initSegTabs, initSettingsTabs, initTabs, refreshTimesheetVi
 import { addSecret, closeUserForm, closeUserPassword, newUserForm, paintAccent, refreshSettings, renderUsers, saveConfig, saveInvoiceTemplate, saveOrgProfile, saveUser, saveUserPassword } from './settings.js';
 import { customerName, fillProjectSelect, fillTaskSelect, loadCustomers, state } from './state.js';
 import { discardTimer, refreshTimer, startTimer, stopTimer } from './timer.js';
-import { commitCell, copyLastWeek, copyPreviousDay, entrySaving, navigateDay, navigateWeek, refreshDay, refreshWeek, resetEntryForm, saveEntry, selectDay, showEntryForm, weekState } from './timesheet.js';
+import { commitCell, copyLastWeek, copyPreviousDay, entrySaving, navigateDay, navigateWeek, openWeekRowForm, refreshDay, refreshWeek, resetEntryForm, resetWeekRowForm, saveEntry, saveWeekRow, selectDay, showEntryForm, showWeekRowForm, weekState } from './timesheet.js';
 import { initWizard, openWizard } from './wizard.js';
 
 // ---------------------------------------------------------------- boot ---
@@ -97,7 +97,7 @@ export function wireDayAndCalendar() {
     calState.month = shiftMonth(calState.month || $('day-date').value.slice(0, 7), 1);
     refreshTimeCal().catch?.(() => {});
   });
-  $('cal-today').addEventListener('click', () => {
+  $('cal-month').addEventListener('click', () => {
     calState.month = isoDate(new Date()).slice(0, 7);
     refreshTimeCal().catch?.(() => {});
   });
@@ -227,6 +227,38 @@ export function wireWeekGrid() {
     refreshWeek();
   });
   $('week-copy-previous').addEventListener('click', () => copyLastWeek());
+  // Add-row dialog (#172 follow-up): pick customer/project/task, then fill the
+  // row's day cells. Wired here so the week grid owns every week control.
+  $('week-add-row').addEventListener('click', () => openWeekRowForm());
+  $('week-row-form').addEventListener('submit', saveWeekRow);
+  $('week-row-cancel').addEventListener('click', () => {
+    resetWeekRowForm();
+    showWeekRowForm(false);
+    announce('Row not added.');
+  });
+  $('week-row-dialog').addEventListener('cancel', (e) => {
+    // native Escape: never leave a half-typed row behind.
+    e.preventDefault();
+    resetWeekRowForm();
+    showWeekRowForm(false);
+    announce('Row not added.');
+  });
+  $('week-row-dialog').addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      // jsdom never fires 'cancel'; emulate it here (browsers do both).
+      resetWeekRowForm();
+      showWeekRowForm(false);
+      announce('Row not added.');
+    }
+  });
+  $('week-row-customer').addEventListener('change', async (e) => {
+    await fillProjectSelect($('week-row-project'), e.target.value, null);
+    fillTaskSelect($('week-row-task'), '', null, null);
+    $('week-row-project').focus();
+  });
+  $('week-row-project').addEventListener('change', async (e) => {
+    await fillTaskSelect($('week-row-task'), $('week-row-customer').value, e.target.value, null);
+  });
   $('ip-close').addEventListener('click', closeInvoicePreview);
   $('ip-download').addEventListener('click', () => {
     if (invoicePreview) downloadInvoicePdf(invoicePreview.inv.id, invoicePreview.inv.number);
@@ -472,6 +504,11 @@ export async function startApp() {
   await Promise.all([
   firstPaint,
   refreshWeek(),
+  // #140: a deep link (or a plain reload) straight to the Calendar is selected
+  // by applyRoute() with the panel refresh suppressed — the router trusts this
+  // boot sequence to paint — and it only painted Day and Week, so the month
+  // grid stayed empty until the segment was clicked. Paint the linked segment.
+  segActiveId === 'ts-cal' ? refreshTimeCal() : null,
   refreshCustomerTable(),
   refreshInvoices(),
   refreshTimer(),

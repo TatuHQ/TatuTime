@@ -12,8 +12,8 @@ import { waitFor, yieldToEventLoop } from './wait-for.mjs';
 const html = readFileSync(new URL('../web/index.html', import.meta.url), 'utf8');
 const app = loadAppSource();
 
-function makeDom(prelude = '') {
-  const dom = new JSDOM(html, { runScripts: 'outside-only', url: 'http://localhost/' });
+function makeDom(prelude = '', url = 'http://localhost/') {
+  const dom = new JSDOM(html, { runScripts: 'outside-only', url });
   dom.window.HTMLDialogElement.prototype.showModal = function () { this.open = true; };
   dom.window.HTMLDialogElement.prototype.close = function () { this.open = false; };
   const exports = `${app}
@@ -21,7 +21,7 @@ ${prelude}
 window.bootTest = {
   dashRenderOverview, refreshInvoices, refreshCustomerPickers,
   writeOffInvoice, navigateDay, weekLockIds, state,
-  refreshTimeCal, calState,
+  refreshWeek, openWeekRowForm, saveWeekRow, fillProjectSelect, refreshTimeCal, calState,
   peekLockCache: () => weekLockCache,
   liveText: () => document.getElementById('live-region').textContent,
   api,
@@ -144,13 +144,15 @@ test('partly-paid invoices lock entries in the preview, paid ones do not (#217)'
   context.api.get = async (path) => {
     if (path === '/submissions') return { submissions: [] };
     if (path === '/invoices') {
-      return { invoices: [
-        { id: 'a', status: 'issued', lines: [{ entry_id: 'e-issued' }] },
-        { id: 'b', status: 'partly_paid', lines: [{ entry_id: 'e-partly' }] },
-        { id: 'c', status: 'paid', lines: [{ entry_id: 'e-paid' }] },
-        { id: 'd', status: 'written_off', lines: [{ entry_id: 'e-off' }] },
-        { id: 'e', status: 'draft', lines: [{ entry_id: 'e-draft' }] },
-      ] };
+      return {
+        invoices: [
+          { id: 'a', status: 'issued', lines: [{ entry_id: 'e-issued' }] },
+          { id: 'b', status: 'partly_paid', lines: [{ entry_id: 'e-partly' }] },
+          { id: 'c', status: 'paid', lines: [{ entry_id: 'e-paid' }] },
+          { id: 'd', status: 'written_off', lines: [{ entry_id: 'e-off' }] },
+          { id: 'e', status: 'draft', lines: [{ entry_id: 'e-draft' }] },
+        ]
+      };
     }
     return {};
   };
@@ -220,28 +222,187 @@ test('rapid calendar navigation renders the newest month response (#188)', async
       // Held open so the older month resolves LAST, deterministically (#265):
       // the newest render must already be on screen when it arrives.
       return new Promise((done) => {
-        releaseJune = () => done({ entries: [{
-          id: 'june', date: '2026-06-03', hours: 1, project_code: 'OLD',
-        }] });
+        releaseJune = () => done({
+          entries: [{
+            id: 'june', date: '2026-06-03', hours: 1, project_code: 'OLD',
+          }]
+        });
       });
     }
-    return Promise.resolve({ entries: [{
-      id: 'july', date: '2026-07-04', hours: 5, project_code: 'NEW',
-    }] });
+    return Promise.resolve({
+      entries: [{
+        id: 'july', date: '2026-07-04', hours: 5, project_code: 'NEW',
+      }]
+    });
   };
   context.calState.month = '2026-06';
   const older = context.refreshTimeCal(); // June, held open
   context.calState.month = '2026-07';
   const newer = context.refreshTimeCal(); // July, resolves immediately
   await newer;
-  await waitFor(() => /5:00 logged/.test(document.getElementById('cal-total').textContent), {
+  await waitFor(() => document.getElementById('cal-total').textContent === '5:00', {
     message: 'the newest month response to render its 5:00 total',
   });
   releaseJune(); // the stale June response arrives late ...
   await older;   // ... and its (guarded) render attempt runs to completion
   await yieldToEventLoop();
   assert.equal(document.getElementById('cal-label').textContent, 'Jul 2026');
-  assert.match(document.getElementById('cal-total').textContent, /5:00 logged/);
-  assert.equal(document.querySelector('#cal-grid .cal-chip')?.textContent, 'NEW');
+  assert.equal(document.getElementById('cal-total').textContent, '5:00');
+  assert.equal(document.querySelector('#cal-grid .cal-hours')?.textContent, '5:00');
+  dom.window.close();
+});
+
+test('calendar day cells show a per-day status icon and the day total only (#140)', async () => {
+  const { dom, context, document } = makeDom();
+  context.calState.month = '2026-06';
+  context.api.get = () => Promise.resolve({
+    entries: [
+      { id: 'a', date: '2026-06-03', hours: 1.5, project_code: 'ALPHA' },
+      { id: 'b', date: '2026-06-03', hours: 2, project_code: 'BETA' },
+      { id: 'c', date: '2026-06-03', hours: 0.5, project_code: 'GAMMA' },
+      { id: 'd', date: '2026-06-03', hours: 0.25, project_code: 'DELTA' },
+    ]
+  });
+  await context.refreshTimeCal();
+  const has = document.querySelector('#cal-grid td.cal-cell.has');
+  assert.ok(has, 'a day with entries renders as an active cell');
+  assert.ok(has.querySelector('.cal-status .p-icon--success'),
+    'a logged day shows the success status icon');
+  assert.equal(has.querySelector('.cal-hours').textContent, '4:15',
+    'the cell shows the day total, never a per-entry list');
+  assert.equal(has.querySelectorAll('.cal-entry, .cal-chip').length, 0,
+    'no per-project rows or chips are rendered');
+  const plain = document.querySelector('#cal-grid td.cal-cell:not(.has) .cal-plain');
+  assert.ok(plain.querySelector('.cal-status .p-icon--history'),
+    'an empty day shows the history status icon');
+  assert.equal(plain.querySelector('.cal-hours'), null, 'an empty day shows no total');
+  dom.window.close();
+});
+
+test('week column headers mirror the day box and drop the "This week" prefix (#12)', async () => {
+  const { dom, context, document } = makeDom();
+  context.api.get = async (path) => {
+    if (path.startsWith('/submissions')) return { submissions: [] };
+    if (path.startsWith('/invoices')) return { invoices: [] };
+    if (path.startsWith('/entries')) return {
+      entries: [
+        { id: 'e1', date: '2026-06-03', hours: 2, customer_id: 'c1', project_code: 'ALPHA' },
+      ]
+    };
+    return {};
+  };
+  document.getElementById('week-date').value = '2026-06-01'; // a Monday
+  await context.refreshWeek();
+  const hdr = (date) => document.querySelector(`#week-table thead th[data-date="${date}"]`);
+  const wed = hdr('2026-06-03');
+  assert.ok(wed.querySelector('.wk-clock .p-icon--success'),
+    'a logged day column shows the success status icon');
+  assert.ok(hdr('2026-06-01').querySelector('.wk-clock .p-icon--history'),
+    'an empty day column shows the history status icon');
+  assert.equal(wed.querySelector('.wk-date').textContent, '3 Jun',
+    'the date leads the header cell like the Day view');
+  assert.equal(document.getElementById('week-label').textContent, '01 Jun \u2013 07 Jun 2026',
+    'the week label no longer prefixes "This week"');
+  dom.window.close();
+});
+
+test('week "+ Add row" appends an empty project row and focuses its first cell (#172 follow-up)', async () => {
+  const { dom, context, document } = makeDom();
+  // jsdom only focuses an element that is actually rendered, and the Week panel
+  // ships hidden — reveal it so the focus-lands-on-the-cell assertion is honest.
+  document.getElementById('panel-week').hidden = false;
+  context.state.customers = [{ id: 'c1', name: 'ACME', active: true }];
+  context.api.get = async (path) => {
+    if (path.startsWith('/submissions')) return { submissions: [] };
+    if (path.startsWith('/invoices')) return { invoices: [] };
+    if (path.startsWith('/entries')) return { entries: [] };
+    if (path.endsWith('/tasks')) return { tasks: [] };
+    if (path.startsWith('/customers/c1/projects')) {
+      return { projects: [{ code: 'P-9', name: 'Site', active: true }] };
+    }
+    return {};
+  };
+  document.getElementById('week-date').value = '2026-06-01'; // a Monday
+  context.openWeekRowForm();
+  const dlg = document.getElementById('week-row-dialog');
+  assert.ok(dlg.open === true || dlg.hasAttribute('open'), 'the add-row dialog opens');
+  const customer = document.getElementById('week-row-customer');
+  assert.equal(customer.value, '', 'the customer starts on the placeholder');
+  assert.ok([...customer.options].some((o) => o.value === 'c1'), 'customers are offered');
+  assert.ok(!document.getElementById('week-row-hours'), 'the dialog carries no hours field');
+
+  // The customer change handler loads the projects; drive that fill directly.
+  customer.value = 'c1';
+  await context.fillProjectSelect(document.getElementById('week-row-project'), 'c1', null);
+  const project = document.getElementById('week-row-project');
+  assert.ok([...project.options].some((o) => o.value === 'P-9'), 'the project list is loaded');
+  project.value = 'P-9';
+
+  await context.saveWeekRow({ preventDefault() { } });
+  assert.equal(dlg.open === true || dlg.hasAttribute('open'), false, 'the dialog closes on add');
+  const row = [...document.querySelectorAll('#week-table tbody th')]
+    .find((th) => th.textContent.includes('P-9'));
+  assert.ok(row, 'an empty P-9 row is added to the grid');
+  const first = row.closest('tr').querySelector('input.cell-input');
+  assert.equal(first.value, '', 'the new row starts empty \u2014 hours are typed per cell');
+  assert.equal(first.dataset.date, '2026-06-01', 'the first cell is Monday of the displayed week');
+  assert.equal(document.activeElement, first, 'focus lands on the first day cell');
+
+  // Re-adding the same line is refused without touching the grid.
+  context.openWeekRowForm();
+  document.getElementById('week-row-customer').value = 'c1';
+  await context.fillProjectSelect(document.getElementById('week-row-project'), 'c1', null);
+  document.getElementById('week-row-project').value = 'P-9';
+  await context.saveWeekRow({ preventDefault() { } });
+  const err = document.getElementById('week-row-error');
+  assert.equal(err.hidden, false, 'a duplicate row reports a validation error');
+  assert.match(err.textContent, /already in this week/);
+  assert.equal(
+    [...document.querySelectorAll('#week-table tbody th')]
+      .filter((th) => th.textContent.includes('P-9')).length,
+    1,
+    'the duplicate is not added twice',
+  );
+  dom.window.close();
+});
+
+test('a deep link straight to the Calendar paints the month grid (#140)', async () => {
+  // Regression: startApp() painted Day and Week only, and applyRoute() selects
+  // the segment with the panel refresh suppressed, so reloading
+  // /timesheets/calendar left the month grid empty until the segment was
+  // clicked. The static shell's empty <tbody> hid this from structural probes.
+  const stub = `
+api.get = async (path) => {
+  if (path === '/auth/status') return { initialised: true };
+  if (path === '/auth/me') return { id: 'm1', name: 'Mem', email: 'm@x.test', role: 'member' };
+  if (path === '/auth/sso/providers') return { providers: [] };
+  if (path.startsWith('/entries?')) return { entries: [
+    { id: 'e1', date: '2026-10-07', hours: 2, customer_id: 'c1', project_code: 'P-9' },
+  ] };
+  if (path === '/invoices' || path === '/invoices/summary' || path === '/users'
+      || path === '/schedules' || path === '/retainers' || path.startsWith('/admin/')) {
+    const err = new Error('administrator role required');
+    err.status = 403;
+    throw err;
+  }
+  return { entries: [], customers: [], projects: [], submissions: [], expenses: [],
+           claims: [], notifications: [], categories: [], item_types: [], timer: null };
+};
+api.post = async () => ({});
+`;
+  const { dom, document } = makeDom(stub, 'http://localhost/timesheets/calendar');
+  await waitFor(() => document.getElementById('version').textContent === 'TucanoTime', {
+    message: 'the boot to complete on the Calendar deep link',
+  });
+  assert.equal(document.getElementById('ts-cal').getAttribute('aria-selected'), 'true',
+    'the deep link selects the Calendar segment');
+  assert.equal(document.getElementById('panel-calendar').hidden, false, 'the month panel is shown');
+  const cells = document.querySelectorAll('#cal-grid tbody td.cal-cell');
+  assert.ok(cells.length >= 28, `the month grid painted its day cells (got ${cells.length})`);
+  assert.match(
+    document.getElementById('cal-total').textContent,
+    /^\d+:\d{2}$/,
+    'refreshTimeCal ran on boot (the Total hours readout is painted)',
+  );
   dom.window.close();
 });

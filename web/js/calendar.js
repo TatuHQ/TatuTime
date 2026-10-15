@@ -3,7 +3,7 @@
 
 
 import { api } from './api.js';
-import { $, announce, el, isoDate } from './dom.js';
+import { $, announce, el, isoDate, ubuntuIcon } from './dom.js';
 import { activateSeg } from './route.js';
 import { createSeqGuard } from './seq.js';
 import { MONTH_NAMES, fmtHM, refreshDay, showEntryForm } from './timesheet.js';
@@ -50,9 +50,9 @@ export async function refreshTimeCal() {
     if (!byDate.has(e.date)) byDate.set(e.date, []);
     byDate.get(e.date).push({ ...e, hundredths: h });
   }
-  $('cal-total').textContent = totalHundredths
-    ? `${monthName(month)}: ${fmtHM(totalHundredths)} logged`
-    : `${monthName(month)}: nothing logged yet`;
+  // The displayed month already names itself in the bar's centre label, so the
+  // readout is just the labelled number ("Total hours 26:01").
+  $('cal-total').textContent = fmtHM(totalHundredths);
   const tbody = $('cal-grid').querySelector('tbody');
   tbody.textContent = '';
   const lead = (new Date(`${monthStart}T00:00:00Z`).getUTCDay() + 6) % 7;
@@ -61,14 +61,22 @@ export async function refreshTimeCal() {
   for (let d = 1; d <= last; d += 1) {
     const date = `${month}-${String(d).padStart(2, '0')}`;
     const dayEntries = byDate.get(date) || [];
-    const kids = [el('span', { cls: 'cal-num', text: String(d) })];
+    const daySum = dayEntries.reduce((a, e) => a + e.hundredths, 0);
+    // The cell carries the DAY TOTAL only — never a per-entry list (#140), so a
+    // busy day stays legible at a glance and the detail stays in the Day view.
+    // The top row mirrors the Day view's day box (#12/#108): the date number
+    // top-left and a per-day status icon top-right — success when the day has
+    // an entry, history when it is empty.
+    const kids = [
+      el('span', { cls: 'cal-head' }, [
+        el('span', { cls: 'cal-num', text: String(d) }),
+        el('span', { cls: 'cal-status', attrs: { 'aria-hidden': 'true' } }, [
+          ubuntuIcon(dayEntries.length ? 'success' : 'history'),
+        ]),
+      ]),
+    ];
     if (dayEntries.length) {
-      const sum = dayEntries.reduce((a, e) => a + e.hundredths, 0);
-      kids.push(el('span', { cls: 'cal-hours', text: fmtHM(sum) }));
-      const names = dayEntries.map((e) => e.project_code);
-      const uniq = [...new Set(names)];
-      for (const code of uniq.slice(0, 3)) kids.push(el('span', { cls: 'cal-chip', text: code }));
-      if (uniq.length > 3) kids.push(el('span', { cls: 'cal-chip', text: `+${uniq.length - 3}` }));
+      kids.push(el('span', { cls: 'cal-hours', text: fmtHM(daySum) }));
     }
     const cell = el(
       'td',
@@ -87,9 +95,9 @@ export async function refreshTimeCal() {
                 },
               },
               attrs: {
-                'aria-label': `${d} ${monthName(month)}: ${fmtHM(
-                  dayEntries.reduce((a, e) => a + e.hundredths, 0),
-                )} across ${dayEntries.length} entr${dayEntries.length === 1 ? 'y' : 'ies'} — open Day view`,
+                'aria-label': `${d} ${monthName(month)}: ${fmtHM(daySum)} across ${
+                  dayEntries.length
+                } entr${dayEntries.length === 1 ? 'y' : 'ies'} — open Day view`,
               },
             }, kids)
           : el('div', { cls: 'cal-day cal-plain' }, kids),

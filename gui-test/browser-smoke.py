@@ -82,9 +82,14 @@ VIEWS = [
     ("/timesheets/week", "tab-timesheet", "panel-week",
      "(() => { const t = document.getElementById('week-table');"
      " return !!t && !!t.tHead && t.tHead.rows.length > 0; })()"),
+    # The static shell ships an empty <tbody>, so `querySelector('tbody')` alone
+    # passed while the month grid was never painted on a fresh navigation (the
+    # boot sequence painted Day and Week only). Require REAL rendered day cells.
     ("/timesheets/calendar", "tab-timesheet", "panel-calendar",
      "(() => { const t = document.getElementById('cal-grid');"
-     " return !!t && !!t.querySelector('tbody'); })()"),
+     " const b = t && t.tBodies[0];"
+     " return !!b && b.rows.length > 0"
+     " && b.querySelectorAll('td.cal-cell').length >= 28; })()"),
     ("/customers", "tab-customers", "panel-customers",
      "(() => { const t = document.getElementById('customer-table');"
      " return !!t && !!t.tHead && t.tBodies[0].rows.length >= 1; })()"),
@@ -179,6 +184,52 @@ BUTTON_DECORATION = (
     " badIcon: badIcon, plus: plus,"
     " posBg: pos ? getComputedStyle(pos).backgroundColor : null,"
     " neuBg: neu ? getComputedStyle(neu).backgroundColor : null });"
+)
+
+# #12/#108 follow-up: the Week view's 2x2 day-column headers must sit IN their
+# column. A `display` other than `table-cell` on the `<th>` drops its table-cell
+# role, Firefox wraps it in an anonymous cell, and all seven day headers collapse
+# into one column — the titles stop lining up with the days below them. jsdom
+# computes no layout, so only a real browser can see this: compare each header
+# cell's box against the matching footer cell (the footer row always has all
+# nine columns, even when the week is empty).
+WEEK_COLUMN_ALIGNMENT = (
+    "var t = document.getElementById('week-table');"
+    "if (!t) return 'no week table';"
+    "var head = t.tHead && t.tHead.rows[0];"
+    "var foot = t.tFoot && t.tFoot.rows[0];"
+    "if (!head || !foot) return 'no header/footer row';"
+    "var ths = head.cells, tds = foot.cells;"
+    "if (ths.length !== 9 || tds.length !== 9) {"
+    "  return 'unexpected cell count ' + ths.length + '/' + tds.length;"
+    "}"
+    "var bad = [];"
+    "for (var i = 0; i < ths.length; i++) {"
+    "  var a = ths[i].getBoundingClientRect(), b = tds[i].getBoundingClientRect();"
+    "  if (Math.abs(a.left - b.left) > 1 || Math.abs(a.width - b.width) > 1) {"
+    "    bad.push(i + ': header x=' + Math.round(a.left) + ' w=' + Math.round(a.width)"
+    "             + ' vs column x=' + Math.round(b.left) + ' w=' + Math.round(b.width));"
+    "  }"
+    "}"
+    "return bad.length ? bad.join('; ') : 'ok';"
+)
+
+# #140: every calendar day cell must top-align its content. A logged day is a
+# <button> and an empty day a <div>, and Vanilla's base button rule centres
+# button content (`justify-content: center`) — so the date number and the status
+# icon dropped below the empty days' line. Acceptable values are `flex-start` on
+# the button and the default `normal` (flex-start) on the div; anything centred
+# fails. Works whether or not the displayed month has entries.
+CALENDAR_DAY_ALIGNMENT = (
+    "var days = document.querySelectorAll('#cal-grid .cal-day');"
+    "if (!days.length) return 'no day cells';"
+    "for (var i = 0; i < days.length; i++) {"
+    "  var jc = getComputedStyle(days[i]).justifyContent;"
+    "  if (jc !== 'flex-start' && jc !== 'normal') {"
+    "    return days[i].tagName + ' day cell is not top-aligned: justify-content=' + jc;"
+    "  }"
+    "}"
+    "return 'ok';"
 )
 
 
@@ -839,6 +890,20 @@ class Gate:
                 structured,
                 f"structural probe failed for {panel}: {probe}",
             )
+            if path == "/timesheets/week":
+                align = self.marionette.script(WEEK_COLUMN_ALIGNMENT)
+                self.check(
+                    "/timesheets/week day headers share their column box (#12)",
+                    align == "ok",
+                    f"header cells no longer align with the days below them: {align}",
+                )
+            if path == "/timesheets/calendar":
+                align = self.marionette.script(CALENDAR_DAY_ALIGNMENT)
+                self.check(
+                    "/timesheets/calendar day cells top-align their content (#140)",
+                    align == "ok",
+                    f"a calendar day cell is not top-aligned: {align}",
+                )
             deco = json.loads(self.marionette.script(BUTTON_DECORATION))
             issues = (deco["badSubmit"] + deco["badPrimary"] + deco["badSkin"]
                       + deco["badIcon"] + deco["plus"])
@@ -884,9 +949,9 @@ class Gate:
             "the bespoke .field/.hint/.form-error markup is gone and the official "
             "form vocabulary is in place (#232 phase 2b)",
             counts["field"] == 0 and counts["hint"] == 0 and counts["formError"] == 0
-            and counts["groups"] == 113 and counts["labels"] == 109
-            and counts["controls"] == 109 and counts["help"] == 27
-            and counts["messages"] == counts["errorGroups"] == 22,
+            and counts["groups"] == 116 and counts["labels"] == 112
+            and counts["controls"] == 112 and counts["help"] == 27
+            and counts["messages"] == counts["errorGroups"] == 23,
             f"counts={counts}",
             info=f"{counts['groups']} groups, {counts['help']} help texts, "
                  f"{counts['messages']} validation messages",
