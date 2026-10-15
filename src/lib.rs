@@ -23,6 +23,7 @@ pub mod domain;
 pub mod email;
 pub mod email_reminders;
 pub mod error;
+pub mod fx;
 pub mod lock;
 pub mod payments;
 pub mod pdf;
@@ -154,6 +155,7 @@ pub const API_ROUTES: &[(&str, &str, Tier)] = &[
     ("POST", "/api/expenses", Tier::Member),
     ("GET", "/api/expenses/{id}", Tier::Member),
     ("DELETE", "/api/expenses/{id}", Tier::Member),
+    ("GET", "/api/fx", Tier::Member),
     ("GET", "/api/submissions", Tier::Member),
     ("POST", "/api/submissions", Tier::Member),
     ("POST", "/api/submissions/{id}/decision", Tier::Member),
@@ -333,6 +335,9 @@ pub fn build_router(state: AppState) -> Router {
             "/expenses/{id}",
             get(api::get_expense_handler).delete(api::delete_expense),
         )
+        // Exchange rates for the expense currency conversion (#…): read-only,
+        // fail-closed when no reference table can be loaded.
+        .route("/fx", get(api::fx_rate))
         .route(
             "/submissions",
             get(api::list_submissions).post(api::create_submission),

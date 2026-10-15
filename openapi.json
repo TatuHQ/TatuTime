@@ -61,6 +61,9 @@
     },
     {
       "name": "schedules"
+    },
+    {
+      "name": "reference"
     }
   ],
   "components": {
@@ -96,6 +99,7 @@
                   "internal",
                   "write_lock_busy",
                   "lock_unavailable",
+                  "fx_unavailable",
                   "csrf",
                   "unauthenticated",
                   "forbidden",
@@ -2639,7 +2643,17 @@
           }
         }
       },
-      "InternalError": {
+      "FxUnavailable": {
+      "description": "No exchange-rate reference table could be loaded - offline, an unreadable TUCANO_FX_RATES_FILE, or a document that does not parse. Fail-closed: the rate is never guessed (code fx_unavailable), so the caller can enter one by hand.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "$ref": "#/components/schemas/Error"
+          }
+        }
+      }
+    },
+    "InternalError": {
         "description": "Server-side failure (code internal). The body stays generic and never carries paths, stack traces or raw filesystem errors.",
         "content": {
           "application/json": {
@@ -5086,6 +5100,93 @@
           },
           "422": {
             "$ref": "#/components/responses/ValidationError"
+          }
+        }
+      }
+    },
+    "/api/fx": {
+      "get": {
+        "operationId": "fxRate",
+        "tags": [
+          "reference"
+        ],
+        "summary": "Exchange rate for one currency pair",
+        "description": "The rate to convert `from` into `to`, taken from the ECB's published daily reference rates (EUR-based, no key). Both codes are ISO-4217 and matched case-insensitively. The rate is always served with the reference date it was published for, so a caller can judge its freshness; a currency converted with itself is the identity, needs no table and therefore also works offline. Fail-closed: when no reference table can be loaded the endpoint answers 503 fx_unavailable instead of inventing a rate, and the GUI falls back to a hand-entered rate.",
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "required": true,
+            "description": "Currency to convert from.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z]{3}$"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": true,
+            "description": "Currency to convert to.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z]{3}$"
+            }
+          }
+        ],
+        "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "200": {
+            "description": "The requested conversion. `date` is the reference date the rate was published for, or null when both codes name the same currency (the identity needs no published table).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "from",
+                    "to",
+                    "rate",
+                    "date",
+                    "source"
+                  ],
+                  "properties": {
+                    "from": {
+                      "type": "string"
+                    },
+                    "to": {
+                      "type": "string"
+                    },
+                    "rate": {
+                      "type": "number",
+                      "description": "Units of `to` per one unit of `from`."
+                    },
+                    "date": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "format": "date"
+                    },
+                    "source": {
+                      "type": "string",
+                      "enum": [
+                        "ecb",
+                        "identity"
+                      ]
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "503": {
+            "$ref": "#/components/responses/FxUnavailable"
           }
         }
       }

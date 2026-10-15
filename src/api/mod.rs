@@ -37,6 +37,7 @@ use crate::store::{Store, StoreError};
 pub mod auth;
 pub mod entries_reports;
 pub mod expenses;
+pub mod fx;
 pub mod invoicing;
 pub mod people;
 pub mod retainers;
@@ -534,6 +535,7 @@ pub use self::expenses::{
     get_expense_handler, list_categories, list_claims, list_expenses, list_submissions,
     submit_claim, update_category,
 };
+pub use self::fx::{FxQuery, fx_rate};
 pub use self::invoicing::{
     CheckoutInput, InvoiceEditInput, InvoiceInput, ManualInvoiceInput, PayInput, SyncInput,
     create_checkout, create_invoice, create_item_type, create_manual_invoice, delete_invoice,
