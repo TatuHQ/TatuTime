@@ -28,7 +28,9 @@ export async function refreshCustomerTable() {
           el('button', { type: 'button', cls: 'link', text: c.name,
             on: { click: () => openProjectsFor(c.id) } }),
         ]),
-        el('td', { cls: 'num', attrs: { 'data-heading': 'Default rate' }, text: `${c.currency} ${formatMoney(c.default_rate_minor)}` }),
+        // No `num` here: the rate column reads left-aligned with its header
+        // (the `num` utility right-aligns, which left the values stranded).
+        el('td', { attrs: { 'data-heading': 'Default rate' }, text: `${c.currency} ${formatMoney(c.default_rate_minor)}` }),
         el('td', { attrs: { 'data-heading': 'Status' } }, [
           statusChip(c.active ? 'Active' : 'Inactive', c.active),
         ]),
@@ -272,7 +274,7 @@ export async function refreshProjectTable() {
         el('td', { attrs: { 'data-heading': 'Customer' }, text: customerName(cid) }),
         el('td', { attrs: { 'data-heading': 'Name' }, text: p.name }),
         el('td', { attrs: { 'data-heading': 'Currency' }, text: p.currency || 'customer' }),
-        el('td', { cls: 'num', attrs: { 'data-heading': 'Rate' }, text: p.rate_minor != null ? formatMoney(p.rate_minor) : 'customer' }),
+        el('td', { attrs: { 'data-heading': 'Rate' }, text: p.rate_minor != null ? formatMoney(p.rate_minor) : 'customer' }),
         el('td', { attrs: { 'data-heading': 'Status' } }, [
           statusChip(p.active ? 'Active' : 'Inactive', p.active),
         ]),
