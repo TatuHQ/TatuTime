@@ -65,16 +65,22 @@ test('Setup exposes three sibling sections with tab/panel wiring (#182)', () => 
   assert.ok(tabs.every((t) => t && t.getAttribute('role') === 'tab'), 'three tab buttons');
   const panels = tabs.map((t) => document.getElementById(t.getAttribute('aria-controls')));
   assert.ok(panels.every((p) => p && p.getAttribute('role') === 'tabpanel'), 'matching panels');
+  // The rail's visible order: Customers/Projects/Tasks sit together in the Setup
+  // group, expenses belongs to Billing, and the tools (Reports) are grouped in
+  // the collapsed disclosure while Settings is pinned last, at the rail's bottom.
   // #16 (Approvals) is hidden for now — the approval process is not implemented —
-  // so it keeps its tablist slot and its panel while dropping out of the rail's
-  // visible order.
+  // so it keeps its slot and panel while dropping out of that order.
   assert.deepEqual(
-    [...document.querySelectorAll('#tabs .nav-group')].flatMap((g) =>
-      [...g.querySelectorAll('[role="tab"]')].filter((t) => !t.hidden).map((t) => t.id)),
+    [...document.querySelectorAll('#tabs [role="tab"]')]
+      .filter((t) => !t.hidden).map((t) => t.id),
     ['tab-timesheet', 'tab-customers', 'tab-projects', 'tab-tasks',
       'tab-invoices', 'tab-expenses', 'tab-reports', 'tab-settings'],
     'Customers/Projects/Tasks sit together in the Setup group',
   );
+  assert.ok(document.getElementById('tab-reports').closest('details'),
+    'Reports groups with the tools in the disclosure');
+  assert.equal(document.getElementById('tab-settings').closest('details'), null,
+    'Settings is a destination, not a tool');
   assert.equal(document.getElementById('tab-submissions').hidden, true,
     'Approvals stays on the rail, hidden, until its process exists (#16)');
   dom.window.close();

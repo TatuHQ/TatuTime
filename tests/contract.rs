@@ -2982,6 +2982,211 @@ async fn expense_conversion_is_all_or_nothing_and_never_a_float() {
     }
 }
 
+/// An edit replaces the record: new values land, the identity and history stay,
+/// and a field the payload omits is cleared — the same PUT semantics the entries
+/// endpoint documents.
+#[tokio::test]
+async fn expense_update_replaces_the_record_and_keeps_its_identity() {
+    let (app, _d) = app().await;
+    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap().to_string();
+    new_project(&app, &cid, "P1", json!({})).await;
+    new_project(&app, &cid, "P2", json!({})).await;
+    let (s, created) = json_req(
+        &app,
+        "POST",
+        "/api/expenses",
+        Some(json!({
+            "date":"2026-10-02","customer_id":cid,"project_code":"P1","amount_minor":9206,
+            "currency":"EUR","original_amount_minor":10000,"original_currency":"USD",
+            "exchange_rate":"0.9206","exchange_rate_date":"2026-10-01","note":"conference fee"
+        })),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{created}");
+    let id = created["id"].as_str().unwrap().to_string();
+
+    let (su, updated) = json_req(
+        &app,
+        "PUT",
+        &format!("/api/expenses/{id}"),
+        Some(json!({
+            "date":"2026-10-09","customer_id":cid,"project_code":"P2","amount_minor":4200,
+            "currency":"EUR","billable":false,"note":"taxi"
+        })),
+    )
+    .await;
+    assert_eq!(su, StatusCode::OK, "{updated}");
+    assert_eq!(updated["id"], created["id"], "the id survives the edit");
+    assert_eq!(
+        updated["created_at"], created["created_at"],
+        "creation history is kept"
+    );
+    assert_eq!(
+        updated["user_id"], created["user_id"],
+        "an edit never rewrites the author (#51)"
+    );
+    assert_eq!(updated["date"], "2026-10-09");
+    assert_eq!(updated["project_code"], "P2");
+    assert_eq!(updated["amount_minor"], 4200);
+    assert_eq!(updated["billable"], false);
+    assert_eq!(updated["note"], "taxi");
+    assert!(
+        updated["original_currency"].is_null() && updated["exchange_rate"].is_null(),
+        "a conversion the payload omits is cleared by a full replacement: {updated}"
+    );
+
+    // The stored document agrees, on both read paths.
+    let (_, got) = json_req(&app, "GET", &format!("/api/expenses/{id}"), None).await;
+    assert_eq!(got["note"], "taxi");
+    assert_eq!(got["project_code"], "P2");
+    assert!(got["original_amount_minor"].is_null());
+    let (_, list) = json_req(&app, "GET", "/api/expenses", None).await;
+    assert_eq!(list["expenses"][0]["note"], "taxi");
+
+    // The receipt is part of the record too: an edit replaces or clears it like
+    // any other field (#23).
+    let (sr, with_receipt) = json_req(
+        &app,
+        "PUT",
+        &format!("/api/expenses/{id}"),
+        Some(json!({
+            "date":"2026-10-09","customer_id":cid,"amount_minor":4200,"currency":"EUR",
+            "receipt_name":"taxi.png","receipt_b64":"aGVsbG8="
+        })),
+    )
+    .await;
+    assert_eq!(sr, StatusCode::OK, "{with_receipt}");
+    assert_eq!(with_receipt["receipt_name"], "taxi.png");
+    assert_eq!(with_receipt["receipt_b64"], "aGVsbG8=");
+    let (sc, cleared) = json_req(
+        &app,
+        "PUT",
+        &format!("/api/expenses/{id}"),
+        Some(json!({
+            "date":"2026-10-09","customer_id":cid,"amount_minor":4200,"currency":"EUR"
+        })),
+    )
+    .await;
+    assert_eq!(sc, StatusCode::OK, "{cleared}");
+    assert!(
+        cleared.get("receipt_name").is_none() && cleared.get("receipt_b64").is_none(),
+        "an omitted receipt is cleared by a full replacement: {cleared}"
+    );
+
+    // A later edit can put a conversion back, normalised exactly as on create.
+    let (s2, reconverted) = json_req(
+        &app,
+        "PUT",
+        &format!("/api/expenses/{id}"),
+        Some(json!({
+            "date":"2026-10-09","customer_id":cid,"amount_minor":4200,"currency":"EUR",
+            "original_amount_minor":4500,"original_currency":"USD","exchange_rate":"1.080000"
+        })),
+    )
+    .await;
+    assert_eq!(s2, StatusCode::OK, "{reconverted}");
+    assert_eq!(reconverted["original_amount_minor"], 4500);
+    assert_eq!(reconverted["exchange_rate"], "1.08");
+    assert!(
+        reconverted["exchange_rate_date"].is_null(),
+        "the rate's date is optional: {reconverted}"
+    );
+}
+
+/// The update path answers like the create and the delete: an unowned record is
+/// a 404 (never a 403 — that would leak its existence, #51), a bad shape is a
+/// 422 that changes nothing, and an expense frozen by an open invoice is a 409.
+#[tokio::test]
+async fn expense_update_refuses_unowned_bad_and_locked_expenses() {
+    let (app, _d) = app().await;
+    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap().to_string();
+    new_project(&app, &cid, "P1", json!({})).await;
+    let (_, x) = json_req(
+        &app,
+        "POST",
+        "/api/expenses",
+        Some(json!({
+            "date":"2026-10-02","customer_id":cid,"project_code":"P1","amount_minor":5000,
+            "currency":"EUR","note":"parts"
+        })),
+    )
+    .await;
+    let xid = x["id"].as_str().unwrap().to_string();
+    let path = format!("/api/expenses/{xid}");
+    let body = json!({
+        "date":"2026-10-02","customer_id":cid,"project_code":"P1","amount_minor":5000,
+        "currency":"EUR","note":"tampered"
+    });
+
+    // No session at all.
+    let (s_anon, _, _) = raw(&app.router, "PUT", &path, Some(body.clone()), None).await;
+    assert_eq!(s_anon, StatusCode::UNAUTHORIZED, "member-tier route");
+
+    // A member editing someone else's expense: 404, and the note is untouched.
+    let member = member_cookie(&app, "eve@test.local", "evepass123").await;
+    let (s_other, _, _) = raw(&app.router, "PUT", &path, Some(body.clone()), Some(&member)).await;
+    assert_eq!(
+        s_other,
+        StatusCode::NOT_FOUND,
+        "an unowned expense must not leak its existence"
+    );
+    let (_, still) = json_req(&app, "GET", &path, None).await;
+    assert_eq!(still["note"], "parts");
+
+    // A shape the create would refuse: unknown project → 422, nothing persisted.
+    let (s_bad, bad) = json_req(
+        &app,
+        "PUT",
+        &path,
+        Some(json!({
+            "date":"2026-10-02","customer_id":cid,"project_code":"NOPE","amount_minor":5000,
+            "currency":"EUR","note":"tampered"
+        })),
+    )
+    .await;
+    assert_eq!(s_bad, StatusCode::UNPROCESSABLE_ENTITY, "{bad}");
+    let (_, unchanged) = json_req(&app, "GET", &path, None).await;
+    assert_eq!(unchanged["note"], "parts");
+    assert_eq!(unchanged["project_code"], "P1");
+
+    // Issued invoice → the expense is frozen against edits, exactly as it is
+    // against deletes (#18/#218), and settling it releases the record again.
+    let (_, inv) = json_req(
+        &app,
+        "POST",
+        "/api/invoices",
+        Some(json!({"customer_id":cid,"from":"2026-10-01","to":"2026-10-07"})),
+    )
+    .await;
+    let iid = inv["id"].as_str().unwrap().to_string();
+    json_req(&app, "POST", &format!("/api/invoices/{iid}/issue"), None).await;
+    let (s_locked, locked) = json_req(&app, "PUT", &path, Some(body.clone())).await;
+    assert_eq!(s_locked, StatusCode::CONFLICT, "{locked}");
+    assert!(
+        locked["error"]["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("open invoice"),
+        "{locked}"
+    );
+    json_req(
+        &app,
+        "POST",
+        &format!("/api/invoices/{iid}/pay"),
+        Some(json!({"amount_minor": 5000, "reference": "wire-1"})),
+    )
+    .await;
+    let (s_free, freed) = json_req(&app, "PUT", &path, Some(body)).await;
+    assert_eq!(
+        s_free,
+        StatusCode::OK,
+        "a settled invoice releases its expense for correction: {freed}"
+    );
+    assert_eq!(freed["note"], "tampered");
+}
+
 // ------------------------------------------------------------ submissions --
 
 async fn seed_week(app: &Client, cid: &str) -> String {

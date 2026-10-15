@@ -234,9 +234,18 @@ export function nextTabIndex(key, index, count, orientation) {
 
 export function initTabs() {
   const tabs = Array.from(document.querySelectorAll('#tabs [role="tab"]'));
+  // A tab inside a collapsed disclosure is neither visible nor focusable, so the
+  // roving focus must skip it: otherwise arrow keys move the user's focus onto
+  // something they cannot see (#258). Every tab still keeps its ARIA state.
+  const reachable = (tablist) => Array.from(tablist.querySelectorAll('[role="tab"]'))
+    .filter((t) => !t.hidden && !t.closest('details:not([open])'));
   function activate(tab) {
     const tablist = tab.closest('[role="tablist"]');
     const siblings = Array.from(tablist.querySelectorAll('[role="tab"]'));
+    // The rail shows where you are even when the tab is behind the disclosure
+    // (a deep link, or a keyboard jump onto it).
+    const group = tab.closest('details');
+    if (group) group.open = true;
     siblings.forEach((t) => {
       const on = t === tab;
       t.setAttribute('aria-selected', String(on));
@@ -258,7 +267,7 @@ export function initTabs() {
     t.addEventListener('click', () => activate(t));
     t.addEventListener('keydown', (e) => {
       const tablist = t.closest('[role="tablist"]');
-      const siblings = Array.from(tablist.querySelectorAll('[role="tab"]'));
+      const siblings = reachable(tablist);
       const i = siblings.indexOf(t);
       // #258: the sidebar is a *vertical* tablist (aria-orientation="vertical"),
       // so navigate along its declared axis (Up/Down) — not Left/Right.

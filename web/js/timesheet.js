@@ -162,7 +162,6 @@ export async function refreshDay() {
   }
   $('day-total').textContent = fmtHM(total);
   $('day-table').hidden = rows.length === 0;
-  $('day-empty').hidden = rows.length !== 0;
   $('entry-date').value = date;
   $('entry-form-date').textContent = date ? `For ${date}` : '';
   // D2: the strip and calendar pulls are independent — fetch them at once.

@@ -2,6 +2,9 @@
 //! approval workflows built on them.
 
 use super::*;
+use chrono::{DateTime, Utc};
+
+use crate::domain::ExpenseDraft;
 
 pub async fn list_categories(State(app): State<AppState>) -> ApiResult {
     app.store.ensure_default_categories()?;
@@ -76,12 +79,9 @@ pub async fn list_expenses(
     Ok(Json(serde_json::json!({ "expenses": expenses })).into_response())
 }
 
-pub async fn create_expense(
-    State(app): State<AppState>,
-    actor: AuthUser,
-    ValidJson(input): ValidJson<ExpenseInput>,
-) -> ApiResult {
-    let draft = validate_expense_input(&input).map_err(ApiError::validation)?;
+/// The customer/project/category an expense points at must exist. Shared by the
+/// create and update paths so an edit rejects exactly the shapes a create does.
+fn reference_errors(app: &AppState, draft: &ExpenseDraft) -> Result<Vec<FieldError>, ApiError> {
     let mut errors = Vec::new();
     if app.store.get_customer(draft.customer_id)?.is_none() {
         errors.push(FieldError::new("customer_id", "customer does not exist"));
@@ -99,15 +99,23 @@ pub async fn create_expense(
     {
         errors.push(FieldError::new("category_id", "category does not exist"));
     }
-    if !errors.is_empty() {
-        return Err(ApiError::validation(errors));
-    }
-    let now = app.clock.now();
-    let expense = Expense {
-        id: Uuid::new_v4(),
+    Ok(errors)
+}
+
+/// The stored document a validated payload describes, keeping the identity and
+/// history a re-payload must never rewrite: `id`, `user_id` (#51) and
+/// `created_at` come from the record being written, `updated_at` from the clock.
+fn expense_from_draft(
+    existing: Option<&Expense>,
+    draft: ExpenseDraft,
+    id: Uuid,
+    now: DateTime<Utc>,
+) -> Expense {
+    Expense {
+        id,
         date: draft.date,
         customer_id: draft.customer_id,
-        user_id: Some(actor.0.id),
+        user_id: existing.and_then(|e| e.user_id),
         project_code: draft.project_code.map(ProjectCode),
         category_id: draft.category_id,
         amount_minor: draft.amount_minor,
@@ -120,11 +128,62 @@ pub async fn create_expense(
         note: draft.note,
         receipt_name: draft.receipt_name,
         receipt_b64: draft.receipt_b64,
-        created_at: now,
+        created_at: existing.map_or(now, |e| e.created_at),
         updated_at: now,
-    };
+    }
+}
+
+pub async fn create_expense(
+    State(app): State<AppState>,
+    actor: AuthUser,
+    ValidJson(input): ValidJson<ExpenseInput>,
+) -> ApiResult {
+    let draft = validate_expense_input(&input).map_err(ApiError::validation)?;
+    let errors = reference_errors(&app, &draft)?;
+    if !errors.is_empty() {
+        return Err(ApiError::validation(errors));
+    }
+    let now = app.clock.now();
+    let mut expense = expense_from_draft(None, draft, Uuid::new_v4(), now);
+    expense.user_id = Some(actor.0.id); // the author is the acting user (#51)
     app.store.put_expense(&expense)?;
     Ok((StatusCode::CREATED, Json(expense)).into_response())
+}
+
+/// Full replacement of an expense (#…): the same validation as a create, the
+/// same ownership rule as a read (someone else's record is a 404, #51) and the
+/// same lock seam as a delete, so an expense frozen by an open invoice or a
+/// submitted claim cannot be edited — and an unverifiable lock state refuses the
+/// write instead of allowing it (#185).
+pub async fn update_expense(
+    State(app): State<AppState>,
+    actor: AuthUser,
+    Path(id): Path<Uuid>,
+    ValidJson(input): ValidJson<ExpenseInput>,
+) -> ApiResult {
+    let draft = validate_expense_input(&input).map_err(ApiError::validation)?;
+    let existing = app
+        .store
+        .get_expense(id)?
+        .filter(|e| visible_to(&actor.0, e.user_id))
+        .ok_or_else(|| ApiError::not_found("expense"))?;
+    let errors = reference_errors(&app, &draft)?;
+    if !errors.is_empty() {
+        return Err(ApiError::validation(errors));
+    }
+    let verify = || -> Result<(), ApiError> {
+        match app.locks.expense_lock(id) {
+            Ok(Some(reason)) => Err(ApiError::conflict(reason.message())),
+            Ok(None) => Ok(()),
+            Err(e) => {
+                tracing::warn!(error = ?e.0, expense = %id, "lock state unavailable; refusing expense update");
+                Err(ApiError::lock_unavailable())
+            }
+        }
+    };
+    let updated = expense_from_draft(Some(&existing), draft, existing.id, app.clock.now());
+    app.store.update_expense_guarded(&updated, verify)?;
+    Ok(Json(updated).into_response())
 }
 
 pub async fn get_expense_handler(

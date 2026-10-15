@@ -6674,6 +6674,59 @@
           }
         }
       },
+      "put": {
+        "operationId": "updateExpense",
+        "tags": [
+          "expenses"
+        ],
+        "summary": "Full replacement of an expense",
+        "description": "An edit replaces the record the way the entries PUT does: a field the payload omits is cleared. The record keeps its id, its author and its creation time, and `updated_at` moves. An expense frozen by an open invoice (issued or partly paid) or by a submitted/approved claim is refused with 409, and an unverifiable lock state with 503.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExpenseInput"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
+        "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/CsrfForbidden"
+          },
+          "200": {
+            "description": "Updated.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Expense"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/Locked"
+          }
+        }
+      },
       "delete": {
         "operationId": "deleteExpense",
         "tags": [

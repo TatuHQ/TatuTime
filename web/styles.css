@@ -164,28 +164,8 @@ body {
 .content { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 .masthead { padding: 1.1rem 1.5rem; border-bottom: 1px solid var(--line); background: var(--surface); }
 .masthead h1 { margin: 0; font-size: 2rem; line-height: 1.25; font-weight: 550; }
-/* The currency finder sits in the Expenses heading slot, to the right of the
-   creation action — the position the Day | Week | Calendar segments take in
-   Timesheets, so every section head lines up the same way. It is a toolbar, not
-   a form row: its controls keep intrinsic widths (Vanilla's base forms stretch
-   every input to 100%) and its labels are sr-only, because the visible pair of
-   codes is the point of the widget. */
-.fx-finder { display: block; margin: 0; }
-/* One row, so the arrow shares the fields' and the button's centre line (and
-   therefore the `+ Expense` action's, since a control and that button are the
-   same height). The readout goes on its own line beneath, right-aligned, so a
-   long conversion never pushes the controls around.
-   The controls drop Vanilla's stacked-form `margin-bottom: 1.18rem` (18.88px):
-   in a centred row that margin is part of each item's margin box, so it made the
-   row 55px tall and centred the arrow and the button against the fields'
-   margins instead of their text — 9.4px low. */
-.fx-finder__row { display: flex; align-items: center; justify-content: flex-end; gap: .4rem; }
-.fx-finder input, .fx-finder button { margin-bottom: 0; }
-.fx-finder input { width: 5.5rem; }
-.fx-finder .fx-code { width: 4.25rem; text-transform: uppercase; }
-.fx-finder .fx-arrow { color: var(--muted); font-size: .95rem; line-height: 1; }
-.fx-result { display: block; margin: .2rem 0 0; text-align: right; font-size: .875rem; color: var(--muted); }
-.fx-result:empty { display: none; } /* no result yet: the finder keeps the action's height exactly */
+/* The amount an expense was entered in, beside the value it is billed as: only
+   the provenance line of a converted expense, so it stays quiet. */
 .fx-original { color: var(--muted); }
 #expense-converted { min-height: 1.25rem; }
 main { padding: 1.5rem; flex: 1; max-width: 1440px; width: 100%; }
@@ -526,8 +506,6 @@ dialog.p-modal::backdrop { background: transparent; }
 #day-table .entry-hours { white-space: nowrap; }
 .lock { margin-left: .45rem; font-size: .95rem; opacity: .75; }
 .day-total-cell { text-align: right; font-weight: 700; }
-.day-empty.p-notification { margin: .5rem 0 .75rem; }
-.day-empty[hidden] { display: none; }
 .day-notifications { margin: .35rem 0 .65rem; }
 .day-notifications .notif-head { margin: 0 0 .4rem; }
 .day-notifications .notifs { display: grid; gap: .4rem; margin: 0; }
@@ -598,6 +576,21 @@ dialog.p-modal::backdrop { background: transparent; }
    the `p-modal__dialog` is the frame, so no reset is needed. */
 /* ---- grouped MVP rail (#142) ---- */
 .nav-group { display: flex; flex-direction: column; gap: .15rem; margin-bottom: .45rem; }
+/* The rail's tablist grows so its last group (Settings) sits at the bottom, just
+   above the separator, the colour switch and the account block. */
+.sidebar #tabs { flex: 1 1 auto; }
+.nav-bottom { margin-top: auto; }
+/* More tools is a native disclosure, so its open/closed state is announced and
+   keyboard-operable for free. It must not inherit `.nav-group`'s flex column (a
+   flex display boxes a details' summary and content side by side), and the app
+   paints its own chevron because the group label is a summary, not a tab. */
+.more-tools-group { display: block; }
+.more-tools-group > summary { display: flex; align-items: center; cursor: pointer; list-style: none; }
+.more-tools-group > summary::-webkit-details-marker { display: none; }
+.more-tools-group > summary::after { content: '\25B8'; margin-left: .35rem; font-size: .8rem; line-height: 1; }
+.more-tools-group[open] > summary::after { content: '\25BE'; }
+.more-tools-group > summary:focus-visible { outline: 3px solid var(--focus); outline-offset: 1px; }
+.more-tools-group .nav-action { width: 100%; margin-top: .3rem; }
 .nav-label { font-size: .75rem; letter-spacing: 0; text-transform: uppercase;
   color: var(--muted); padding: .1rem .7rem 0; font-weight: 700; }
 @media (max-width: 720px) {

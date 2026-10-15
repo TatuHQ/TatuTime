@@ -134,10 +134,10 @@ check('"Cancel" dismisses the wizard cleanly', !wzOpen());
 // #191 moved the utility action out of the tablist (ARIA required-owned-
 // children); #125's invariant is that the wizard stays the LAST sidebar
 // action, sitting between the tablist and the colour-mode switch.
-const navButtons = [...window.document.querySelectorAll('nav[aria-label="Sections"] button')].map((b) => b.id);
-const tablistButtons = [...window.document.querySelectorAll('#tabs button')].map((b) => b.id);
-check('wizard entry is the last sidebar action, outside the tablist (#125/#191)',
-  navButtons[navButtons.length - 1] === 'wizard-open' && !tablistButtons.includes('wizard-open'));
+const moreTools = window.document.getElementById('more-tools');
+check('the rail folds its tools into a disclosure, collapsed by default',
+  moreTools.open === false && moreTools.contains(window.document.getElementById('wizard-open'))
+  && moreTools.querySelector('summary').textContent.trim() === 'More tools');
 
 // #142: grouped rail + shortcuts.
 check('core MVP navigation comes first, Setup split into three (#142/#182)',
@@ -155,6 +155,22 @@ check('implemented secondary tools are grouped after the MVP destinations',
 check('the Approvals rail entry is hidden until its process exists (#16)',
   window.document.getElementById('tab-submissions').hidden === true
   && !railTabs.includes('tab-submissions'));
+check('Expenses is a Billing destination, not a separate tool',
+  window.document.getElementById('tab-expenses').closest('.nav-group')
+    ?.querySelector('.nav-label')?.textContent.trim() === 'Billing'
+  && window.document.getElementById('tab-expenses').closest('details') === null);
+check('Settings is pinned last, at the rail bottom, above the account block',
+  window.document.getElementById('tab-settings').closest('.nav-group')
+    ?.classList.contains('nav-bottom')
+  && railTabs[railTabs.length - 1] === 'tab-settings'
+  && window.document.getElementById('tab-settings').closest('details') === null);
+// Activating a destination inside the disclosure opens it: the rail always shows
+// where you are, whatever route brought you there.
+window.document.getElementById('tab-reports').dispatchEvent(new window.Event('click', { bubbles: true }));
+check('activating a tool opens its disclosure',
+  byId('more-tools').open === true
+  && window.document.getElementById('tab-reports').getAttribute('aria-selected') === 'true');
+window.document.getElementById('tab-timesheet').dispatchEvent(new window.Event('click', { bubbles: true }));
 check('redundant Invoice and Timer shortcut buttons are absent',
   !window.document.getElementById('shortcut-invoices') && !window.document.getElementById('shortcut-timer'));
 const timerOpen = window.document.getElementById('timer-open');
@@ -1714,23 +1730,54 @@ const convRow = [...window.document.querySelectorAll('#expense-table tbody tr')]
 check('the register shows the billed value and the amount as entered',
   convRow.textContent.includes('EUR 92.06') && convRow.textContent.includes('(USD 100.00 @ 0.9206)'));
 
-// The finder in the Expenses heading slot uses the same endpoint. A currency
-// with itself needs no rate table at all, so this holds whatever the host's
-// network does.
-window.document.getElementById('fx-from').value = 'EUR';
-window.document.getElementById('fx-to').value = 'EUR';
-window.document.getElementById('fx-amount').value = '1';
-window.document.getElementById('fx-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
-await waitFor(() => byId('fx-result').textContent === 'EUR 1.00 = EUR 1.00.', {
-  message: 'the finder identity conversion',
+// ---- RECEIPT (#23): attach a file in the dialog, then edit the record ----
+window.document.getElementById('expense-new').dispatchEvent(new window.Event('click', { bubbles: true }));
+window.document.getElementById('expense-date').value = '2026-10-07';
+window.document.getElementById('expense-customer').value = acmeOpt.value;
+window.document.getElementById('expense-customer').dispatchEvent(new window.Event('change', { bubbles: true }));
+await settle('the expense dialog to follow the customer change');
+window.document.getElementById('expense-amount').value = '40.00';
+window.document.getElementById('expense-note').value = 'taxi with receipt';
+const receiptFile = new window.File([new window.Blob(['hello'])], 'taxi.png', { type: 'image/png' });
+const receiptInput = window.document.getElementById('expense-receipt');
+Object.defineProperty(receiptInput, 'files', { value: [receiptFile], configurable: true });
+receiptInput.dispatchEvent(new window.Event('change', { bubbles: true }));
+check('picking a receipt names it in the dialog', /taxi\.png/.test(byId('expense-receipt-note').textContent));
+window.document.getElementById('expense-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+await settle('the expense with its receipt to save');
+const withReceipt = (await (await fetch(BASE + '/api/expenses')).json()).expenses.find((e) => e.note === 'taxi with receipt');
+check('the receipt is stored inline with the expense',
+  !!withReceipt && withReceipt.receipt_name === 'taxi.png' && !!withReceipt.receipt_b64);
+// The register has no Note column, so the row is identified by the mark itself
+// plus the amount it bills.
+await waitFor(() => [...window.document.querySelectorAll('#expense-table tbody tr')]
+  .some((r) => r.querySelector('button[data-icon="file"]') && r.textContent.includes('EUR 40.00')), {
+  message: 'the receipt mark to appear in the register row',
 });
-check('the top-bar finder converts a currency with itself', true);
-window.document.getElementById('fx-from').value = 'US';
-window.document.getElementById('fx-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
-await waitFor(() => /three-letter/.test(byId('fx-result').textContent), {
-  message: 'the finder to refuse a code that is not a currency',
+check('the register marks the row that carries a receipt', true);
+// Edit that row: the dialog loads it, and an untouched receipt survives the save.
+const receiptRow = [...window.document.querySelectorAll('#expense-table tbody tr')]
+  .find((r) => r.querySelector('button[data-icon="file"]') && r.textContent.includes('EUR 40.00'));
+receiptRow.querySelectorAll('button').forEach((b) => {
+  if (b.textContent.trim() === 'Edit') b.dispatchEvent(new window.Event('click', { bubbles: true }));
 });
-check('the top-bar finder asks for a real currency code instead of calling the API', true);
+await settle('the edit dialog to load the record');
+check('Edit loads the record: id, wording and the attached receipt',
+  byId('expense-id').value === withReceipt.id
+  && byId('expense-dialog-title').textContent.startsWith('Edit expense')
+  && byId('expense-save').textContent === 'Save changes'
+  && byId('expense-receipt-clear-field').hidden === false
+  && /taxi\.png/.test(byId('expense-receipt-note').textContent));
+byId('expense-amount').value = '44.00';
+window.document.getElementById('expense-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+await settle('the edited expense to save');
+const editedExpense = (await (await fetch(BASE + '/api/expenses')).json()).expenses.find((e) => e.id === withReceipt.id);
+check('an edit replaces the record and keeps its untouched receipt',
+  !!editedExpense && editedExpense.amount_minor === 4400 && editedExpense.receipt_name === 'taxi.png'
+  && editedExpense.receipt_b64 === withReceipt.receipt_b64);
+check('the dialog returns to its create wording once the edit is saved',
+  byId('expense-id').value === '' && byId('expense-dialog-title').textContent === 'Record an expense');
+
 // #182 pattern: the expense register filters by customer and project, both
 // defaulting to "all".
 const expRows = () => [...window.document.querySelectorAll('#expense-table tbody tr')];

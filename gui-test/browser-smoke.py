@@ -326,11 +326,14 @@ VANILLA_INPUT_SKIN = (
     "  return a === b;"
     "};"
     "var list = document.querySelectorAll('input.p-form__control, textarea.p-form__control,"
-    " #dlg-input, .fx-finder input');"
+    " #dlg-input');"
     "var bad = [], checked = 0;"
     "for (var i = 0; i < list.length; i++) {"
     "  var el = list[i];"
-    "  if (el.type === 'checkbox' || el.type === 'radio' || el.type === 'hidden') continue;"
+    # A file input renders the browser's own picker button, so its skin is not
+    # comparable field-for-field; the text controls are the point of this probe.
+    "  if (el.type === 'checkbox' || el.type === 'radio' || el.type === 'hidden'"
+    "      || el.type === 'file') continue;"
     "  checked++;"
     "  var cs = getComputedStyle(el), diff = [];"
     "  for (var j = 0; j < props.length; j++) {"
@@ -362,45 +365,6 @@ FILLED_CONVERSION = (
     " note: document.getElementById('expense-rate-note').textContent,"
     " converted: document.getElementById('expense-converted').textContent"
     "});"
-)
-
-# The currency finder belongs to the Expenses page and to the heading slot: to
-# the right of the section's creation action and top-aligned with it — the
-# position the Day | Week | Calendar segments take in Timesheets. A finder that
-# drifted back into the global masthead, or below the action, fails here.
-FINDER_SLOT = (
-    "var form = document.getElementById('fx-form');"
-    "if (!form) return 'no finder';"
-    "var head = form.closest('.ts-head');"
-    "var panel = form.closest('#panel-expenses');"
-    "var action = document.getElementById('expense-new');"
-    "if (!head || !panel || !action) return 'missing markup';"
-    "var problems = [];"
-    "if (document.querySelector('.masthead #fx-form')) problems.push('still in the masthead');"
-    "if (head.parentElement !== panel) problems.push('not in the Expenses heading slot');"
-    "var f = form.getBoundingClientRect(), a = action.getBoundingClientRect();"
-    "var h = head.getBoundingClientRect();"
-    "if (f.left < a.right) problems.push('left of the section action');"
-    "if (Math.abs(f.top - h.top) > 1) {"
-    "  problems.push('not top-aligned in its slot (' + Math.round(f.top - h.top) + 'px)');"
-    "}"
-    # One centre line: the action's label, the fields' text, the arrow and the
-    # Convert button must all sit on it. A stacked-form `margin-bottom` on a
-    # control is inside its margin box, so it silently drops the arrow and the
-    # button by half that margin.
-    "function mid(n) { var r = n.getBoundingClientRect(); return (r.top + r.bottom) / 2; }"
-    "var line = [action, document.getElementById('fx-amount'), document.querySelector('.fx-arrow'),"
-    " document.getElementById('fx-from'), document.getElementById('fx-to'),"
-    " document.getElementById('fx-convert')];"
-    "var base = mid(action);"
-    "for (var i = 1; i < line.length; i++) {"
-    "  var off = mid(line[i]) - base;"
-    "  if (Math.abs(off) > 1) {"
-    "    problems.push((line[i].id || line[i].className) + ' sits ' + off.toFixed(1)"
-    "                  + 'px off the section action centre line');"
-    "  }"
-    "}"
-    "return problems.length ? problems.join('; ') : 'ok';"
 )
 
 FILTER_MATCHES_ACTION = (
@@ -898,6 +862,37 @@ class Gate:
         )
         self.check("the shell was loaded as one ES module", len(info["modules"]) == 1
                    and info["modules"][0].endswith("/app.js"), f"modules={info['modules']}")
+        # `checkVisibility()` is the painted truth for a collapsed disclosure:
+        # Firefox renders the content in a `::details-content` box whose
+        # `content-visibility` is hidden, so a child keeps a layout box while
+        # nothing of it is drawn.
+        collapsed = json.loads(self.marionette.script(
+            "var group = document.getElementById('more-tools');"
+            "var summary = group.querySelector('summary');"
+            "return JSON.stringify({"
+            " open: group.open,"
+            " summary: summary.textContent.trim(),"
+            " tabVisible: document.getElementById('tab-reports').checkVisibility(),"
+            " wizardVisible: document.getElementById('wizard-open').checkVisibility(),"
+            " summaryVisible: summary.checkVisibility(),"
+            " settingsVisible: document.getElementById('tab-settings').checkVisibility(),"
+            " height: Math.round(group.getBoundingClientRect().height),"
+            " summaryHeight: Math.round(summary.getBoundingClientRect().height)"
+            "});"
+        ))
+        self.check(
+            "the rail folds its tools into a collapsed disclosure",
+            collapsed["open"] is False and collapsed["summary"] == "More tools"
+            and collapsed["tabVisible"] is False and collapsed["wizardVisible"] is False
+            and collapsed["summaryVisible"] is True
+            and collapsed["height"] - collapsed["summaryHeight"] <= 12,
+            f"more-tools={collapsed}",
+        )
+        self.check(
+            "Settings stays on the rail while the tools are folded away",
+            collapsed["settingsVisible"] is True,
+            f"more-tools={collapsed}",
+        )
 
     def stylesheets(self):
         sheets = self.marionette.script(
@@ -1017,6 +1012,21 @@ class Gate:
             " dayRows: document.querySelectorAll('#day-table tbody tr').length,"
             "});"
         ))
+        rail = json.loads(self.marionette.script(
+            "function box(id) { var r = document.getElementById(id).getBoundingClientRect();"
+            " return { top: r.top, bottom: r.bottom }; }"
+            "var settings = box('tab-settings');"
+            "var account = box('account');"
+            "var invoices = box('tab-invoices');"
+            "return JSON.stringify({ settingsTop: settings.top, settingsBottom: settings.bottom,"
+            " accountTop: account.top, invoicesTop: invoices.top });"
+        ))
+        self.check(
+            "Settings is pinned to the bottom of the rail, above the account block",
+            rail["settingsBottom"] <= rail["accountTop"] + 1
+            and rail["settingsTop"] > rail["invoicesTop"],
+            f"rail={rail}",
+        )
         self.check(
             "signing in through the real UI boots the app",
             info["overlayHidden"] and not info["accountHidden"]
@@ -1056,7 +1066,8 @@ class Gate:
         status, _, raw = self.http(
             "POST", "/api/expenses",
             {"date": "2026-01-31", "customer_id": cid, "amount_minor": 12500,
-             "currency": "EUR", "billable": True, "note": "seeded for the register walk"},
+             "currency": "EUR", "billable": True, "note": "seeded for the register walk",
+             "receipt_name": "hotel.png", "receipt_b64": "aGVsbG8="},
             cookie=cookie, extra_headers=csrf,
         )
         if status != 201:
@@ -1091,6 +1102,11 @@ class Gate:
                 structured,
                 f"structural probe failed for {panel}: {probe}",
             )
+            if path == "/reports":
+                self.check(
+                    "/reports opens the More tools disclosure, so the rail shows the active destination",
+                    self.marionette.script("return document.getElementById('more-tools').open === true;"),
+                )
             if path == "/timesheets/week":
                 align = self.marionette.script(WEEK_COLUMN_ALIGNMENT)
                 self.check(
@@ -1222,8 +1238,8 @@ class Gate:
             "the bespoke .field/.hint/.form-error markup is gone and the official "
             "form vocabulary is in place (#232 phase 2b)",
             counts["field"] == 0 and counts["hint"] == 0 and counts["formError"] == 0
-            and counts["groups"] == 118 and counts["labels"] == 114
-            and counts["controls"] == 114 and counts["help"] == 27
+            and counts["groups"] == 120 and counts["labels"] == 116
+            and counts["controls"] == 116 and counts["help"] == 28
             and counts["messages"] == counts["errorGroups"] == 23,
             f"counts={counts}",
             info=f"{counts['groups']} groups, {counts['help']} help texts, "
@@ -1438,48 +1454,11 @@ class Gate:
         what is billed, and the register shows both. The rate table is served
         from disk (see `start_server`), so the arithmetic is exact and the check
         needs no network."""
-        # The finder belongs to the Expenses page alone: on any other section the
-        # panel is hidden, so it takes no room and its fields cannot be focused.
-        self.navigate("/customers")
-        self.wait_script(
-            "document.readyState === 'complete'"
-            " && document.getElementById('version').textContent === 'TucanoTime'",
-            "the app to boot at /customers",
-        )
-        outside = self.marionette.script(
-            "var f = document.getElementById('fx-form');"
-            "if (!f) return 'missing';"
-            "var r = f.getBoundingClientRect();"
-            "return r.width === 0 && r.height === 0"
-            "  ? 'ok' : 'laid out ' + Math.round(r.width) + 'x' + Math.round(r.height);"
-        )
-        self.check(
-            "the currency finder belongs to the Expenses page alone",
-            outside == "ok",
-            f"on the Customers section the finder is {outside}",
-        )
         self.navigate("/expenses")
         self.wait_script(
             "document.readyState === 'complete'"
             " && document.getElementById('version').textContent === 'TucanoTime'",
             "the app to boot at /expenses",
-        )
-        empty = self.marionette.script(
-            "var f = document.getElementById('fx-form').getBoundingClientRect();"
-            "var a = document.getElementById('expense-new').getBoundingClientRect();"
-            "return Math.abs(f.height - a.height) <= 1"
-            "  ? 'ok' : 'the finder is ' + (f.height - a.height).toFixed(1) + 'px taller than the action';"
-        )
-        self.check(
-            "with nothing to read out, the finder is exactly as tall as + Expense",
-            empty == "ok",
-            f"empty finder: {empty}",
-        )
-        slot = self.marionette.script(FINDER_SLOT)
-        self.check(
-            "the action, the fields, the arrow and Convert share one line in the Expenses heading slot",
-            slot == "ok",
-            f"finder slot: {slot}",
         )
         self.marionette.script(
             "document.getElementById('expense-new').click();"
@@ -1562,48 +1541,87 @@ class Gate:
             f"stored={stored}",
         )
 
-        # The finder in the Expenses heading slot converts with the same endpoint.
-        # A currency with itself needs no table at all, and a code that is not a
-        # currency is explained instead of requested.
-        finder = int(round(10000 * (1.0 / 1.0831)))
-        for frm, to, amount, expected, why in (
-            ("USD", "EUR", "100",
-             f"USD 100.00 = EUR {finder / 100:.2f} at the 2026-10-14 reference rate.",
-             "converts an amount at the published rate and names its date"),
-            ("EUR", "EUR", "1", "EUR 1.00 = EUR 1.00.",
-             "converts a currency with itself without a table"),
-            ("US", "EUR", "1", "Enter two three-letter currency codes (e.g. USD and EUR).",
-             "explains a code that is not a currency instead of calling the API"),
-        ):
-            self.marionette.script(
-                "document.getElementById('fx-from').value = %r;"
-                "document.getElementById('fx-to').value = %r;"
-                "document.getElementById('fx-amount').value = %r;"
-                "document.getElementById('fx-form')"
-                ".dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));"
-                "return true;" % (frm, to, amount)
-            )
-            try:
-                self.wait_script(
-                    "document.getElementById('fx-result').textContent === %r" % expected,
-                    f"the finder to answer {expected!r}",
-                )
-                answered = True
-            except RuntimeError:
-                answered = False
-            result = self.marionette.script(
-                "return document.getElementById('fx-result').textContent;"
-            )
-            self.check(
-                f"the currency finder {why}",
-                answered and result == expected,
-                f"showed {result!r}, expected {expected!r}",
-            )
-        slot = self.marionette.script(FINDER_SLOT)
+        # The register marks a receipt with a file icon that downloads it, and
+        # the dialog loads an existing record — receipt included — for editing.
+        marked = json.loads(self.marionette.script(
+            "var t = document.getElementById('expense-table');"
+            "var heads = Array.prototype.map.call(t.tHead.rows[0].cells,"
+            " function (c) { return c.textContent.trim().toLowerCase(); });"
+            "var icons = t.querySelectorAll('tbody button[data-icon=file]');"
+            "return JSON.stringify({"
+            " heads: heads, icons: icons.length, rows: t.tBodies[0].rows.length,"
+            " label: icons.length ? icons[0].getAttribute('aria-label') : ''"
+            "});"
+        ))
         self.check(
-            "showing a conversion leaves the finder's row on the action's line",
-            slot == "ok",
-            f"finder slot with a result: {slot}",
+            "the register marks the expense that carries a receipt, and only it",
+            "receipt" in marked["heads"] and marked["icons"] == 1
+            and marked["rows"] >= 2 and "hotel.png" in marked["label"],
+            f"register={marked}",
+        )
+        self.marionette.script(
+            "var t = document.getElementById('expense-table');"
+            "var row = t.querySelector('tbody button[data-icon=file]').closest('tr');"
+            "Array.prototype.forEach.call(row.querySelectorAll('button'),"
+            " function (b) { if (b.textContent.trim() === 'Edit') b.click(); });"
+            "return true;"
+        )
+        self.wait_script(
+            "(function () { var d = document.getElementById('expense-dialog');"
+            " return !!(d && (d.open === true || d.hasAttribute('open'))); })()",
+            "the edit dialog to open",
+        )
+        editing = json.loads(self.marionette.script(
+            "return JSON.stringify({"
+            " id: document.getElementById('expense-id').value,"
+            " title: document.getElementById('expense-dialog-title').textContent,"
+            " save: document.getElementById('expense-save').textContent,"
+            " date: document.getElementById('expense-date').value,"
+            " amount: document.getElementById('expense-amount').value,"
+            " clearHidden: document.getElementById('expense-receipt-clear-field').hidden,"
+            " note: document.getElementById('expense-receipt-note').textContent"
+            "});"
+        ))
+        self.check(
+            "Edit loads the record into the same dialog, receipt and all",
+            editing["id"] != "" and editing["title"].startswith("Edit expense")
+            and editing["save"] == "Save changes" and editing["date"] == "2026-01-31"
+            and editing["amount"] == "125.00" and editing["clearHidden"] is False
+            and "hotel.png" in editing["note"],
+            f"edit state={editing}",
+        )
+        # Change the amount and save: a full replacement must carry the receipt
+        # back, not drop it.
+        self.marionette.script(
+            "var a = document.getElementById('expense-amount');"
+            "a.value = '131.00';"
+            "a.dispatchEvent(new Event('input', { bubbles: true }));"
+            "document.getElementById('expense-form')"
+            ".dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));"
+            "return true;"
+        )
+        self.wait_script(
+            "document.getElementById('expense-dialog').open !== true",
+            "the edited expense to save",
+        )
+        status, _, raw = self.http("GET", "/api/expenses", cookie=self.cookie)
+        edited = [e for e in json.loads(raw)["expenses"] if e["date"] == "2026-01-31"]
+        self.check(
+            "saving an edit replaces the record and keeps its untouched receipt",
+            status == 200
+            and len(edited) == 1
+            and edited[0]["amount_minor"] == 13100
+            and edited[0]["receipt_name"] == "hotel.png"
+            and edited[0]["receipt_b64"] == "aGVsbG8=",
+            f"edited={edited}",
+        )
+        self.check(
+            "the dialog is back to its create wording after an edit",
+            self.marionette.script(
+                "return document.getElementById('expense-id').value === ''"
+                " && document.getElementById('expense-dialog-title').textContent"
+                " === 'Record an expense';"
+            ),
         )
         self.drain_console("currency conversion")
 
