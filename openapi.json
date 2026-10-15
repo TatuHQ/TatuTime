@@ -1302,6 +1302,42 @@
             "type": "string",
             "maxLength": 500
           },
+          "original_amount_minor": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 100000000,
+            "description": "The amount as entered, in `original_currency`, when the expense was recorded in a currency other than the billed one. `amount_minor`/`currency` stay the billed pair an invoice snapshots."
+          },
+          "original_currency": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Currency"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The currency the amount was entered in. Never equal to `currency`: an expense already billed in its own currency carries no conversion at all."
+          },
+          "exchange_rate": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9]+(\\.[0-9]{1,6})?$",
+            "description": "The applied `original_currency` to `currency` rate as a decimal string (greater than zero, at most 1000000, at most 6 decimals) - money never rides on a float."
+          },
+          "exchange_rate_date": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date",
+            "description": "The reference date the rate was published for (for example the ECB table's date), never the expense date."
+          },
           "receipt_name": {
             "type": [
               "string",
@@ -1379,6 +1415,42 @@
             "type": "string",
             "maxLength": 500,
             "default": ""
+          },
+          "original_amount_minor": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 100000000,
+            "description": "The amount as entered, in `original_currency`. Set together with `original_currency` and `exchange_rate`; `amount_minor` is the billed amount and stays authoritative."
+          },
+          "original_currency": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Currency"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The currency the amount was entered in (ISO-4217). Must differ from `currency`, and must be accompanied by `original_amount_minor` and `exchange_rate`."
+          },
+          "exchange_rate": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9]+(\\.[0-9]{1,6})?$",
+            "description": "The `original_currency` to `currency` rate as a decimal string (greater than zero, at most 1000000, at most 6 decimals). Trailing zeros are insignificant and dropped; money never rides on a float."
+          },
+          "exchange_rate_date": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date",
+            "description": "The reference date the rate applies to (for example the ECB table's date), as YYYY-MM-DD, never the expense date."
           },
           "receipt_name": {
             "type": [

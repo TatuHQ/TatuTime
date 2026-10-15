@@ -5,6 +5,7 @@
 import { api } from './api.js';
 import { $, announce, askConfirm, clearFormError, el, fillSelect, formatMoney, showFormError, statusChip } from './dom.js';
 import { customerName, loadProjects, state } from './state.js';
+import { billedCurrency, currencyCode, resetExpenseConversion, toMinor } from './fx.js';
 import { invalidateLockCache, refreshDay } from './timesheet.js';
 
 // ---------------------------------------------------------------- expenses --
@@ -170,7 +171,17 @@ export async function refreshExpenses() {
         el('td', { attrs: { 'data-heading': 'Category' }, text: c ? c.name : '' }),
         // No `num`: the amount reads left-aligned with its column header, like
         // every other register (the utility right-aligns).
-        el('td', { attrs: { 'data-heading': 'Amount' }, text: `${x.currency} ${formatMoney(x.amount_minor)}` }),
+        el('td', { attrs: { 'data-heading': 'Amount' } }, [
+          el('span', { text: `${x.currency} ${formatMoney(x.amount_minor)}` }),
+          // A converted expense keeps the amount as entered: the register shows
+          // the billed value the invoice will use and, beside it, what was paid.
+          x.original_currency
+            ? el('span', {
+              cls: 'fx-original',
+              text: ` (${x.original_currency} ${formatMoney(x.original_amount_minor)} @ ${x.exchange_rate})`,
+            })
+            : null,
+        ]),
         el('td', { attrs: { 'data-heading': 'Billable' }, text: x.billable ? 'yes' : 'no' }),
         el('td', { cls: 'actions-col', attrs: { 'data-heading': 'Actions' } }, [
           el('button', {
@@ -203,20 +214,45 @@ export async function refreshExpenses() {
 export async function addExpense(evt) {
   evt.preventDefault();
   clearFormError($('expense-error'));
+  const enteredMinor = toMinor($('expense-amount').value) || 0;
+  const entered = currencyCode($('expense-currency').value);
+  // The currency the picked customer/project bills in. The amount is already in
+  // it unless the user said otherwise; then the dialog's rate converts it and
+  // the payload carries the provenance the API records.
+  const billed = billedCurrency();
+  const rate = $('expense-rate').value.trim();
+  const converting = Boolean(entered && billed && entered !== billed);
+  if (converting && !(Number.parseFloat(rate) > 0)) {
+    showFormError(
+      $('expense-error'),
+      new Error(`Enter the ${entered}/${billed} exchange rate, or clear the amount's currency.`),
+    );
+    $('expense-rate').focus();
+    return;
+  }
   const body = {
     date: $('expense-date').value,
     customer_id: $('expense-customer').value,
-    amount_minor: Math.round(Number($('expense-amount').value) * 100),
-    currency: $('expense-currency').value.trim().toUpperCase(),
+    // Billed in the customer/project currency: the entered amount converted at
+    // the rate, in whole minor units, rounded exactly once (#11).
+    amount_minor: converting ? Math.round(enteredMinor * Number.parseFloat(rate)) : enteredMinor,
+    currency: converting || !entered ? billed : entered,
     billable: $('expense-billable').checked,
     note: $('expense-note').value,
   };
+  if (converting) {
+    body.original_amount_minor = enteredMinor;
+    body.original_currency = entered;
+    body.exchange_rate = rate;
+    if ($('expense-rate-date').value) body.exchange_rate_date = $('expense-rate-date').value;
+  }
   if ($('expense-project').value) body.project_code = $('expense-project').value;
   if ($('expense-category').value) body.category_id = $('expense-category').value;
   try {
     await api.post('/expenses', body);
     $('expense-amount').value = '';
     $('expense-note').value = '';
+    resetExpenseConversion();
     $('expense-dialog').close();
     announce('Expense added.');
     await refreshExpenses();

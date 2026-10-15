@@ -6,6 +6,7 @@ import { addRecurring, createRetainer, iwInit, refreshCatalog, refreshRetainers,
 import { calState, refreshTimeCal, shiftMonth } from './calendar.js';
 import { $, addDays, announce, clearFormError, decorateUbuntuButton, isoDate, mondayOf } from './dom.js';
 import { ADD_CATEGORY_VALUE, addCategory, addExpense, addExpenseCategory, fillCategorySelect, refreshCategories, refreshExpenses, refreshSubmissions, resetCategoryForm, submitWeek } from './expenses.js';
+import { convertFx, refreshExpenseConversion, resetExpenseConversion, showConverted } from './fx.js';
 import { cancelCustomerEdit, cancelProjectEdit, cancelTaskEdit, contactRow, fillParentCustomers, fillTaskParents, prefillProjectParent, refreshCustomerPickers, refreshCustomerTable, refreshProjectTable, refreshTaskTable, runReport, saveCustomer, saveProject, saveTask } from './hierarchy.js';
 import { closeInvoicePreview, dash, dashApplyColumns, downloadInvoicePdf, ed, edClose, edLineRow, edOpen, edRecalc, edSave, generateInvoice, invoicePreview, refreshInvoiceSummary, refreshInvoices } from './invoices.js';
 import { markNotificationsRead, refreshNotifications } from './notifications.js';
@@ -393,14 +394,33 @@ export function wireSetupPanels(today) {
 
   $('category-form').addEventListener('submit', addCategory);
   $('category-cancel').addEventListener('click', resetCategoryForm);
-  $('expense-new').addEventListener('click', () => {
+  $('expense-new').addEventListener('click', async () => {
     $('expense-form').reset();
     $('expense-date').value = isoDate(new Date());
     $('expense-billable').checked = true;
+    resetExpenseConversion();
     fillCategorySelect();
     $('expense-dialog').showModal();
     $('expense-customer').focus();
+    // Derive the billed currency (and clear the conversion fields) for the
+    // draft, then again on every pick that can change it.
+    await refreshExpenseConversion();
   });
+  // Currency conversion: the rate the dialog carries comes from GET /api/fx and
+  // is re-derived whenever a pick can change the billed currency. Every failure
+  // is announced — a lookup that quietly did nothing would leave a field that
+  // looks filled but bills the wrong amount.
+  const reconvert = () => {
+    refreshExpenseConversion().catch((err) => announce(`Rate lookup failed: ${err.message}`));
+  };
+  for (const id of ['expense-customer', 'expense-project', 'expense-currency']) {
+    $(id).addEventListener('change', reconvert);
+  }
+  $('expense-amount').addEventListener('input', showConverted);
+  $('expense-rate').addEventListener('input', showConverted);
+  // The masthead finder converts on submit and whenever a code changes.
+  $('fx-form').addEventListener('submit', convertFx);
+  for (const id of ['fx-from', 'fx-to']) $(id).addEventListener('change', convertFx);
   $('expense-cancel').addEventListener('click', () => $('expense-dialog').close());
   let expenseCategoryBeforeQuickAdd = '';
   $('expense-category').addEventListener('change', () => {
@@ -478,8 +498,11 @@ export function wireSetupPanels(today) {
   $('submission-week').value = mondayOf(today);
   $('expense-customer').addEventListener('change', async (e) => {
     await fillProjectSelect($('expense-project'), e.target.value, null);
-    const c = state.customers.find((x) => x.id === e.target.value);
-    if (c) $('expense-currency').value = c.currency;
+    // The amount's currency is deliberately NOT forced to the customer's here:
+    // it is the currency the amount was paid in, and `refreshExpenseConversion`
+    // (fx.js) prefills it while it still holds a value we derived — otherwise
+    // switching customer would silently reinterpret an amount already entered in
+    // another currency, and blank the conversion readout under the user.
   });
 
 }
