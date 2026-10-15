@@ -7,6 +7,23 @@
 // all callers unchanged and stops the API shadowing page paths like /customers.
 export const API_BASE = '/api';
 
+/// The `Error` a failed request throws. The method, the path and what the
+/// endpoint does accept are all worth naming: "HTTP 405" alone leaves a developer
+/// guessing between a wrong verb, a stale server and a proxy in the middle. The
+/// server's own message wins when it sent one (the app's one error shape).
+export function requestFailure(method, url, res, data) {
+  const allow = res.headers.get('allow');
+  const detail = allow
+    ? ` (this endpoint accepts ${allow.split(',').map((verb) => verb.trim()).join(', ')})`
+    : '';
+  const err = new Error(
+    data?.error?.message || `${method} ${API_BASE}${url} failed: HTTP ${res.status}${detail}`,
+  );
+  err.status = res.status;
+  err.payload = data;
+  return err;
+}
+
 export const api = {
   async request(method, url, body) {
     const opts = { method, headers: {}, credentials: 'same-origin' };
@@ -29,12 +46,7 @@ export const api = {
         data = null;
       }
     }
-    if (!res.ok) {
-      const err = new Error(data?.error?.message || `HTTP ${res.status}`);
-      err.status = res.status;
-      err.payload = data;
-      throw err;
-    }
+    if (!res.ok) throw requestFailure(method, url, res, data);
     return data;
   },
   // Fetch a binary body with the session cookie intact (#113). A bare
@@ -44,15 +56,13 @@ export const api = {
     const res = await fetch(API_BASE + url, { method: 'GET', headers: {}, credentials: 'same-origin' });
     if (!res.ok) {
       const text = await res.text().catch(() => '');
-      let msg = `HTTP ${res.status}`;
+      let data = null;
       try {
-        msg = JSON.parse(text)?.error?.message || msg;
+        data = JSON.parse(text);
       } catch {
         /* body was not the JSON error shape */
       }
-      const err = new Error(msg);
-      err.status = res.status;
-      throw err;
+      throw requestFailure('GET', url, res, data);
     }
     return res.blob();
   },

@@ -1730,6 +1730,21 @@ const convRow = [...window.document.querySelectorAll('#expense-table tbody tr')]
 check('the register shows the billed value and the amount as entered',
   convRow.textContent.includes('EUR 92.06') && convRow.textContent.includes('(USD 100.00 @ 0.9206)'));
 
+// A verb the endpoint refuses answers the app's own error shape — the request
+// and the verbs the path does take, named — instead of axum's bare 405. This is
+// the live half of the pair: how the app words whatever failure it is handed is
+// pinned offline in api.test.mjs. (The app's `api` object is a binding of the
+// window the app was evaluated in, so the harness asks the wire, as its other
+// direct API checks do, rather than reaching for a name it cannot see.)
+const refused = await fetch(`${BASE}/api/expenses`, { method: 'DELETE' });
+const refusedBody = await refused.json();
+check('a verb the endpoint refuses names the request and the allowed verbs',
+  refused.status === 405
+  && refusedBody.error.code === 'method_not_allowed'
+  && /DELETE/.test(refusedBody.error.message)
+  && /GET, POST/.test(refusedBody.error.message)
+  && refused.headers.get('allow') === 'GET, POST');
+
 // ---- RECEIPT (#23): attach a file in the dialog, then edit the record ----
 window.document.getElementById('expense-new').dispatchEvent(new window.Event('click', { bubbles: true }));
 window.document.getElementById('expense-date').value = '2026-10-07';
