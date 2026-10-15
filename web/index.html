@@ -336,12 +336,16 @@
       <div class="p-card">
         <div class="p-card__header customer-heading">
           <div class="hierarchy-actions" role="group" aria-label="Project actions">
-            <div class="filter-field"><label for="proj-filter-customer">Customer</label>
-              <select id="proj-filter-customer"><option value="">All customers</option></select></div>
             <button type="button" id="project-new" data-icon="plus" data-positive="1">Project</button>
           </div>
         </div>
-        <p class="p-form-help-text scope-hint">Projects <span id="project-scope-label" class="scope-label"></span></p>
+        <!-- #182: the customer filter takes the place of the old
+             "Projects — all customers" scope line. The select's own value IS
+             the scope, so the section needs no separate scope caption; the label
+             is screen-reader-only, which keeps the picker named without the
+             "Customer" caption above it. -->
+        <div class="filter-field"><label class="sr-only" for="proj-filter-customer">Customer</label>
+          <select id="proj-filter-customer"><option value="">All customers</option></select></div>
         <p id="projects-empty-state" class="workspace-empty">No projects yet. Use <strong>+ Project</strong> to add one.</p>
         <div class="table-scroll"><table id="project-table" class="p-table--mobile-card" hidden>
           <caption class="sr-only">Projects</caption>

@@ -590,6 +590,15 @@ check('each section carries its own creation toolbar',
   window.document.querySelectorAll('#panel-customers .hierarchy-actions button').length === 1
   && window.document.querySelectorAll('#panel-projects .hierarchy-actions button').length === 1
   && window.document.querySelectorAll('#panel-tasks .hierarchy-actions button').length === 1);
+// #182 follow-up: the create action leads the section (top-left, alone in the
+// header) and the customer filter sits below the header where the old
+// "Projects - all customers" caption was, still naming the select.
+check('Projects leads with + Project and puts the customer filter under the header',
+  window.document.querySelector('#panel-projects .p-card__header button')?.id === 'project-new'
+  && !window.document.querySelector('#panel-projects .hierarchy-actions .filter-field')
+  && window.document.querySelector('#panel-projects .filter-field')?.nextElementSibling?.id === 'projects-empty-state'
+  && /customer/i.test(window.document.querySelector('#panel-projects label[for="proj-filter-customer"]')?.textContent || '')
+  && window.document.getElementById('project-scope-label') === null);
 // Heading-slot cleanup: no duplicate section H2 under the masthead H1, and
 // the create action is the panel's first interactive element.
 check('panels lead with their action, not a duplicate H2',
@@ -606,9 +615,11 @@ projBtn.dispatchEvent(new window.Event('click', { bubbles: true }));
 // click starts — the recurring gui-test flake (#265), green only when the runner
 // happened to be fast. Await the post-condition the checks actually read.
 const scopedProjectRows = () => [...window.document.querySelectorAll('#project-table tbody tr')];
+// #182: the filter select's value IS the scope - the old scope caption is gone,
+// so its reappearance would be a regression.
 const projectsScopedToAcme = () => !byId('panel-projects').hidden
   && byId('proj-filter-customer').value === acmeOpt.value
-  && /ACME/.test(byId('project-scope-label').textContent)
+  && byId('project-scope-label') === null
   && byId('projects-empty-state').hidden
   && scopedProjectRows().length >= 1
   && scopedProjectRows().every((r) => r.cells[1].textContent === 'ACME');
@@ -618,7 +629,7 @@ await waitFor(projectsScopedToAcme, {
 check('row action opens the Projects section scoped to that customer',
   !window.document.getElementById('panel-projects').hidden
   && window.document.getElementById('proj-filter-customer').value === acmeOpt.value
-  && /ACME/.test(window.document.getElementById('project-scope-label').textContent));
+  && window.document.getElementById('project-scope-label') === null);
 check('scoped list renders that customer only (empty state replaced by rows)',
   window.document.getElementById('projects-empty-state').hidden
   && [...window.document.querySelectorAll('#project-table tbody tr')].every((r) => r.cells[1].textContent === 'ACME'));
