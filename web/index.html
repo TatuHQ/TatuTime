@@ -628,6 +628,14 @@
         <div class="p-card__header panel-heading-row">
           <button type="button" id="expense-new" class="primary" data-icon="plus" data-positive="1">Expense</button>
         </div>
+        <!-- #182 pattern: customer + project filters, both defaulting to "all",
+             so the register opens on everything and narrows from there. -->
+        <div class="hierarchy-filters">
+          <div class="filter-field"><label class="sr-only" for="expense-filter-customer">Customer</label>
+            <select id="expense-filter-customer"><option value="">All customers</option></select></div>
+          <div class="filter-field"><label class="sr-only" for="expense-filter-project">Project</label>
+            <select id="expense-filter-project"><option value="">All projects</option></select></div>
+        </div>
         <div class="table-scroll"><table id="expense-table" class="p-table--mobile-card">
           <caption class="sr-only">Expenses</caption>
           <thead><tr><th scope="col">Date</th><th scope="col">Customer</th><th scope="col">Project</th><th scope="col">Category</th><th scope="col">Amount</th><th scope="col">Billable</th><th scope="col" class="actions-col">Actions</th></tr></thead>

@@ -241,7 +241,7 @@ CALENDAR_DAY_ALIGNMENT = (
 # left-aligned headers). jsdom computes no cascade, so only a browser sees it.
 TABLE_CELL_ALIGNMENT = (
     "var bad = [];"
-    "['customer-table', 'project-table'].forEach(function (id) {{"
+    "['customer-table', 'project-table', 'expense-table'].forEach(function (id) {{"
     "  var t = document.getElementById(id);"
     "  if (!t || !t.tHead || !t.tBodies[0]) return;"
     "  var ths = t.tHead.rows[0].cells, rows = t.tBodies[0].rows;"
@@ -901,6 +901,16 @@ class Gate:
         )
         if status != 201:
             raise RuntimeError(f"seeding a project failed: HTTP {status} {raw[:200]!r}")
+        # An expense too: the register walk compares column alignment against
+        # rendered rows, so an empty table would be a vacuous check.
+        status, _, raw = self.http(
+            "POST", "/api/expenses",
+            {"date": "2026-01-31", "customer_id": cid, "amount_minor": 12500,
+             "currency": "EUR", "billable": True, "note": "seeded for the register walk"},
+            cookie=cookie, extra_headers=csrf,
+        )
+        if status != 201:
+            raise RuntimeError(f"seeding an expense failed: HTTP {status} {raw[:200]!r}")
 
     def walk_views(self):
         for path, tab, panel, probe in VIEWS:

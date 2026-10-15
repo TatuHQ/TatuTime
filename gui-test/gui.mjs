@@ -1644,6 +1644,34 @@ const exps = (await (await fetch(BASE + '/api/expenses')).json()).expenses;
 const ex = exps.find((e) => e.note === 'client visit flight');
 check('expense created via popup with category + amount', ex && ex.amount_minor === 12500 && ex.category_id === clientVisit.id);
 check('successful expense save closes popup', window.document.getElementById('expense-dialog').open === false);
+// #182 pattern: the expense register filters by customer and project, both
+// defaulting to "all".
+const expRows = () => [...window.document.querySelectorAll('#expense-table tbody tr')];
+const expCustSel = window.document.getElementById('expense-filter-customer');
+const expProjSel = window.document.getElementById('expense-filter-project');
+check('expense filters default to all customers and all projects',
+  expCustSel.options[0].textContent === 'All customers'
+  && expProjSel.options[0].textContent === 'All projects'
+  && expCustSel.value === '' && expProjSel.value === '');
+const expBefore = expRows().length;
+check('every expense is listed without a filter', expBefore >= 1);
+expCustSel.value = ex.customer_id;
+expCustSel.dispatchEvent(new window.Event('change', { bubbles: true }));
+await waitFor(() => expCustSel.value === ex.customer_id
+  && /all projects/i.test(byId('live-region').textContent), {
+  message: 'the expense customer filter to re-render',
+});
+check('the expense customer filter narrows the register to one customer',
+  expRows().length >= 1 && expRows().length <= expBefore
+  && expRows().every((r) => r.cells[1].textContent === expRows()[0].cells[1].textContent));
+expCustSel.value = '';
+expCustSel.dispatchEvent(new window.Event('change', { bubbles: true }));
+await waitFor(() => expRows().length === expBefore
+  && /all customers and projects/i.test(byId('live-region').textContent), {
+  message: 'clearing the expense customer filter to restore every expense',
+});
+check('clearing the expense customer filter restores every expense',
+  expRows().length === expBefore && expProjSel.options[0].textContent === 'All projects');
 window.document.getElementById('tab-settings').dispatchEvent(new window.Event('click', { bubbles: true }));
 await waitFor(() => !byId('panel-settings').hidden, { message: 'the Settings section to show' });
 window.document.getElementById('settings-tab-expenses').dispatchEvent(new window.Event('click', { bubbles: true }));
