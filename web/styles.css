@@ -436,19 +436,19 @@ dialog.p-modal::backdrop { background: transparent; }
 /* #182: hierarchy-section filter controls + scope label */
 .filter-field { display: flex; flex-direction: column; gap: .15rem; font-size: .8rem; }
 .filter-field select { min-width: 11rem; }
-/* #182 follow-up: the Projects filter sits directly under the + Project action
-   and shares its width. Vanilla's base `select { width: 100% }` stretched the
-   filter across the whole card, so both controls are pinned to one width (the
-   action's natural width, 184px at the 16px root). */
+/* #182 follow-up: a section's filter row lines up with its creation action, and
+   the filters agree with each other. Vanilla's base `select { width: 100% }`
+   stretched them (the actions are 184px = 11.5rem at the 16px root; the filters
+   ran past 1000px on Projects and were uneven on Tasks), so every control in the
+   row is pinned to the action's width. Long values clip with an ellipsis. */
+.hierarchy-filters { display: flex; flex-wrap: wrap; align-items: flex-end; gap: .5rem; }
 #panel-projects #project-new,
-#panel-projects .filter-field select { width: 11.5rem; }
-#panel-projects .filter-field select { text-overflow: ellipsis; }
-.scope-label { font-weight: 400; color: var(--muted); font-size: .95rem; }
+#panel-tasks #task-new,
+.hierarchy-filters select { width: 11.5rem; }
+.hierarchy-filters select { text-overflow: ellipsis; }
 /* Section H2s duplicate the masthead H1, so panels now lead with their
    creation action / filters in the heading slot, top-left. */
 .customer-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-start; gap: .5rem 1rem; margin-bottom: .35rem; }
-.scope-hint { margin: 0 0 .65rem; }
-.scope-hint .scope-label { font-size: .85rem; }
 .customer-heading h2 { margin: 0; }
 #expense-dialog form, #expense-category-dialog form { margin: 0; }
 /* #232 phase 2b: a byte-identical duplicate of the retired

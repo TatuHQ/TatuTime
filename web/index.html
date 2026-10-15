@@ -344,8 +344,10 @@
              the scope, so the section needs no separate scope caption; the label
              is screen-reader-only, which keeps the picker named without the
              "Customer" caption above it. -->
-        <div class="filter-field"><label class="sr-only" for="proj-filter-customer">Customer</label>
-          <select id="proj-filter-customer"><option value="">All customers</option></select></div>
+        <div class="hierarchy-filters">
+          <div class="filter-field"><label class="sr-only" for="proj-filter-customer">Customer</label>
+            <select id="proj-filter-customer"><option value="">All customers</option></select></div>
+        </div>
         <p id="projects-empty-state" class="workspace-empty">No projects yet. Use <strong>+ Project</strong> to add one.</p>
         <div class="table-scroll"><table id="project-table" class="p-table--mobile-card" hidden>
           <caption class="sr-only">Projects</caption>
@@ -360,14 +362,20 @@
       <div class="p-card">
         <div class="p-card__header customer-heading">
           <div class="hierarchy-actions" role="group" aria-label="Task actions">
-            <div class="filter-field"><label for="task-filter-customer">Customer</label>
-              <select id="task-filter-customer"><option value="">Choose a customer&#8230;</option></select></div>
-            <div class="filter-field"><label for="task-filter-project">Project</label>
-              <select id="task-filter-project" disabled><option value="">Choose a customer first&#8230;</option></select></div>
             <button type="button" id="task-new" data-icon="plus" data-positive="1">Task</button>
           </div>
         </div>
-        <p class="p-form-help-text scope-hint">Tasks <span id="task-scope-label" class="scope-label"></span></p>
+        <!-- #182: same treatment as Projects — the creation action leads the
+             header (top-left) and the dependent filters take the place of the old
+             "Tasks — ..." scope caption. The selects' own values are the scope,
+             so their labels are screen-reader-only: the pickers stay named
+             without a visible caption. -->
+        <div class="hierarchy-filters">
+          <div class="filter-field"><label class="sr-only" for="task-filter-customer">Customer</label>
+            <select id="task-filter-customer"><option value="">Choose a customer&#8230;</option></select></div>
+          <div class="filter-field"><label class="sr-only" for="task-filter-project">Project</label>
+            <select id="task-filter-project" disabled><option value="">Choose a customer first&#8230;</option></select></div>
+        </div>
         <p id="tasks-empty-state" class="workspace-empty">Choose a customer and a project to list their tasks.</p>
         <div class="table-scroll"><table id="task-table" class="p-table--mobile-card" hidden>
           <caption class="sr-only">Tasks</caption>

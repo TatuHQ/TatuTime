@@ -236,14 +236,17 @@ CALENDAR_DAY_ALIGNMENT = (
 # "+ Project" action above it. The filter is a Vanilla form control, whose base
 # `select { width: 100% }` otherwise stretched it across the whole card — so a
 # stylesheet regression here is only visible in a real browser.
-PROJECTS_CONTROL_WIDTH = (
-    "var b = document.getElementById('project-new');"
-    "var s = document.getElementById('proj-filter-customer');"
-    "if (!b || !s) return 'missing controls';"
+FILTER_MATCHES_ACTION = (
+    "var b = document.getElementById({button!r});"
+    "var sels = document.querySelectorAll({filters!r} + ' select');"
+    "if (!b || !sels.length) return 'missing controls';"
     "var bw = b.getBoundingClientRect().width;"
-    "var sw = s.getBoundingClientRect().width;"
-    "return Math.abs(bw - sw) <= 1 ? 'ok'"
-    "  : 'action ' + Math.round(bw) + 'px vs filter ' + Math.round(sw) + 'px';"
+    "var bad = [];"
+    "for (var i = 0; i < sels.length; i++) {{"
+    "  var sw = sels[i].getBoundingClientRect().width;"
+    "  if (Math.abs(bw - sw) > 1) bad.push(sels[i].id + '=' + Math.round(sw) + 'px');"
+    "}}"
+    "return bad.length ? 'action ' + Math.round(bw) + 'px vs ' + bad.join(', ') : 'ok';"
 )
 
 
@@ -918,12 +921,23 @@ class Gate:
                     align == "ok",
                     f"a calendar day cell is not top-aligned: {align}",
                 )
+            # #182 follow-up: each section's filter row must line up with its
+            # creation action (and with its sibling filters).
             if path == "/projects":
-                widths = self.marionette.script(PROJECTS_CONTROL_WIDTH)
+                widths = self.marionette.script(FILTER_MATCHES_ACTION.format(
+                    button="project-new", filters="#panel-projects .hierarchy-filters"))
                 self.check(
                     "/projects filter matches the + Project control width (#182)",
                     widths == "ok",
                     f"the filter and the action control differ in width: {widths}",
+                )
+            if path == "/tasks":
+                widths = self.marionette.script(FILTER_MATCHES_ACTION.format(
+                    button="task-new", filters="#panel-tasks .hierarchy-filters"))
+                self.check(
+                    "/tasks filters match the + Task control width (#182)",
+                    widths == "ok",
+                    f"a filter and the action control differ in width: {widths}",
                 )
             deco = json.loads(self.marionette.script(BUTTON_DECORATION))
             issues = (deco["badSubmit"] + deco["badPrimary"] + deco["badSkin"]
@@ -971,7 +985,7 @@ class Gate:
             "form vocabulary is in place (#232 phase 2b)",
             counts["field"] == 0 and counts["hint"] == 0 and counts["formError"] == 0
             and counts["groups"] == 116 and counts["labels"] == 112
-            and counts["controls"] == 112 and counts["help"] == 26
+            and counts["controls"] == 112 and counts["help"] == 25
             and counts["messages"] == counts["errorGroups"] == 23,
             f"counts={counts}",
             info=f"{counts['groups']} groups, {counts['help']} help texts, "
