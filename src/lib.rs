@@ -41,6 +41,7 @@ pub mod template;
 pub mod vault;
 
 use api::AppState;
+use error::ApiError;
 
 #[derive(RustEmbed)]
 #[folder = "web/"]
@@ -501,7 +502,16 @@ pub fn build_router(state: AppState) -> Router {
             api::require_admin,
         ));
 
-    meta.nest("/api", public.merge(protected).merge(admin))
+    // The API nest answers a wrong verb with the app's own error shape (plus the
+    // `Allow` header) instead of axum's bare, empty 405. The layer sits OUTSIDE
+    // the per-route layers, so a guarded path still answers 401 first: the verb
+    // is only rewritten for a caller the route would have accepted.
+    let api_router = public
+        .merge(protected)
+        .merge(admin)
+        .layer(axum::middleware::from_fn(json_method_not_allowed));
+
+    meta.nest("/api", api_router)
         // Dev-mode live reload (SSE): active only when TUCANO_WEB_DIR is set.
         // In production the watcher is None and the endpoint returns 404.
         .route(
@@ -522,6 +532,68 @@ pub fn build_router(state: AppState) -> Router {
         .layer(axum::middleware::from_fn(security_headers))
         .layer(RequestBodyLimitLayer::new(256 * 1024))
         .with_state(state)
+}
+
+/// The methods `API_ROUTES` mounts on `path` (the full path, `/api/...`), in
+/// registry order. An entry whose template is the path itself always wins — a
+/// literal segment beats a `{param}`, exactly as the router prefers it — and only
+/// then does a templated entry match segment by segment.
+fn allowed_methods(path: &str) -> Vec<&'static str> {
+    let collect = |pick: &dyn Fn(&str) -> bool| {
+        API_ROUTES
+            .iter()
+            .filter(|(_, template, _)| pick(template))
+            .map(|(method, _, _)| *method)
+            .collect::<Vec<_>>()
+    };
+    let exact = collect(&|template| template == path);
+    if !exact.is_empty() {
+        return exact;
+    }
+    let wanted: Vec<&str> = path.trim_matches('/').split('/').collect();
+    let matches_template = |template: &str| {
+        let parts: Vec<&str> = template.trim_matches('/').split('/').collect();
+        parts.len() == wanted.len()
+            && parts.iter().zip(&wanted).all(|(part, segment)| {
+                part.strip_prefix('{')
+                    .is_some_and(|_| part.ends_with('}') && !segment.is_empty())
+                    || part == segment
+            })
+    };
+    collect(&matches_template)
+}
+
+/// Give axum's bare 405 the app's one error shape, naming the verbs the path
+/// does accept. The layer sits OUTSIDE the per-route layers, so a guarded path
+/// still answers 401 first — the verb is only rewritten for a caller the route
+/// would have accepted — and it reads the registry rather than the response's
+/// `Allow` header, which the outer router only adds afterwards.
+async fn json_method_not_allowed(
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Response {
+    use axum::http::header::{ALLOW, HeaderValue};
+    let method = req.method().clone();
+    // Inside the nest a request carries the stripped path (`/expenses`); the
+    // registry is keyed by the full one.
+    let path = req
+        .extensions()
+        .get::<axum::extract::OriginalUri>()
+        .map(|original| original.0.path().to_string())
+        .unwrap_or_else(|| req.uri().path().to_string());
+    let mut response = next.run(req).await;
+    if response.status() != StatusCode::METHOD_NOT_ALLOWED {
+        return response;
+    }
+    let allowed = allowed_methods(&path);
+    let mut replacement = ApiError::method_not_allowed(method.as_str(), &allowed).into_response();
+    if !allowed.is_empty()
+        && let Ok(value) = HeaderValue::from_str(&allowed.join(", "))
+    {
+        replacement.headers_mut().insert(ALLOW, value);
+    }
+    response = replacement;
+    response
 }
 
 /// Baseline security response headers (#48). Swagger UI is vendored under

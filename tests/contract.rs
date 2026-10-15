@@ -2119,6 +2119,52 @@ async fn me_returns_current_user() {
     );
 }
 
+/// A wrong verb on a real path answers the app's one error shape and says which
+/// verbs it does take — axum's default is a bare 405 with an empty body, which
+/// tells a client nothing (and hides a client talking to a stale server that
+/// does not serve a route yet).
+#[tokio::test]
+async fn a_wrong_method_answers_the_error_shape_and_the_allow_header() {
+    let (app, _d) = app().await;
+    // The path exists (GET, POST); PATCH is not mounted on it.
+    let (status, headers, body) = raw_req(&app, "PATCH", "/api/expenses").await;
+    assert_eq!(status, StatusCode::METHOD_NOT_ALLOWED, "{body:?}");
+    let json: Value = serde_json::from_slice(&body).expect("the app's error shape");
+    assert_eq!(json["error"]["code"], "method_not_allowed", "{json}");
+    let message = json["error"]["message"].as_str().unwrap_or_default();
+    assert!(
+        message.contains("PATCH") && message.contains("GET") && message.contains("POST"),
+        "the message names the verb and the accepted ones: {json}"
+    );
+    let allow = headers
+        .get(header::ALLOW)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
+    assert!(
+        allow.contains("GET") && allow.contains("POST"),
+        "Allow lists what the path takes: {allow:?}"
+    );
+
+    // A templated path resolves to its own methods.
+    let id = uuid::Uuid::new_v4();
+    let (status, _, body) = raw_req(&app, "POST", &format!("/api/expenses/{id}")).await;
+    assert_eq!(status, StatusCode::METHOD_NOT_ALLOWED, "{body:?}");
+    let json: Value = serde_json::from_slice(&body).expect("the app's error shape");
+    assert!(
+        json["error"]["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("PUT"),
+        "an edit path offers PUT: {json}"
+    );
+
+    // An unknown path stays a 404 in the API namespace: the fallback answers
+    // method mismatches only, never invents paths.
+    let (status, _, _) = raw_req(&app, "PATCH", "/api/not-a-route").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
 #[tokio::test]
 async fn member_cannot_manage_users() {
     let (app, _d) = app().await;
