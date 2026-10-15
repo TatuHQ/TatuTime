@@ -232,6 +232,20 @@ CALENDAR_DAY_ALIGNMENT = (
     "return 'ok';"
 )
 
+# #182 follow-up: the Projects customer filter must match the width of the
+# "+ Project" action above it. The filter is a Vanilla form control, whose base
+# `select { width: 100% }` otherwise stretched it across the whole card — so a
+# stylesheet regression here is only visible in a real browser.
+PROJECTS_CONTROL_WIDTH = (
+    "var b = document.getElementById('project-new');"
+    "var s = document.getElementById('proj-filter-customer');"
+    "if (!b || !s) return 'missing controls';"
+    "var bw = b.getBoundingClientRect().width;"
+    "var sw = s.getBoundingClientRect().width;"
+    "return Math.abs(bw - sw) <= 1 ? 'ok'"
+    "  : 'action ' + Math.round(bw) + 'px vs filter ' + Math.round(sw) + 'px';"
+)
+
 
 # ---------------------------------------------------------------------------
 # Marionette client (protocol 2 and 3): a length-prefixed JSON wire protocol.
@@ -903,6 +917,13 @@ class Gate:
                     "/timesheets/calendar day cells top-align their content (#140)",
                     align == "ok",
                     f"a calendar day cell is not top-aligned: {align}",
+                )
+            if path == "/projects":
+                widths = self.marionette.script(PROJECTS_CONTROL_WIDTH)
+                self.check(
+                    "/projects filter matches the + Project control width (#182)",
+                    widths == "ok",
+                    f"the filter and the action control differ in width: {widths}",
                 )
             deco = json.loads(self.marionette.script(BUTTON_DECORATION))
             issues = (deco["badSubmit"] + deco["badPrimary"] + deco["badSkin"]
