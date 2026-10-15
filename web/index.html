@@ -314,14 +314,14 @@
     <!-- CUSTOMERS (#182: the combined workspace split into three Setup
          sections; row "Projects" actions cross-navigate with filters). -->
     <section id="panel-customers" role="tabpanel" aria-labelledby="tab-customers" tabindex="0" hidden>
-      <!-- #232 increment 2: the reference register is a Vanilla p-card; the
-           heading slot (creation action, #230) becomes its p-card__header. -->
-      <div class="p-card">
-        <div class="p-card__header customer-heading">
-          <div class="hierarchy-actions" role="group" aria-label="Customer actions">
-            <button type="button" id="customer-new" data-icon="plus" data-positive="1">Customer</button>
-          </div>
+      <!-- The creation action leads the section ABOVE the register card, the
+           same heading slot Timesheets gives Track time (#230). -->
+      <div class="ts-head">
+        <div class="hierarchy-actions" role="group" aria-label="Customer actions">
+          <button type="button" id="customer-new" data-icon="plus" data-positive="1">Customer</button>
         </div>
+      </div>
+      <div class="p-card">
         <p class="p-form-help-text">Projects and tasks have their own Setup sections; the <strong>Projects</strong> action on a row opens that customer&#39;s projects.</p>
         <div class="table-scroll"><table id="customer-table" class="p-table--mobile-card">
           <caption class="sr-only">All customers</caption>
@@ -333,12 +333,12 @@
 
     <!-- PROJECTS -->
     <section id="panel-projects" role="tabpanel" aria-labelledby="tab-projects" tabindex="0" hidden>
-      <div class="p-card">
-        <div class="p-card__header customer-heading">
-          <div class="hierarchy-actions" role="group" aria-label="Project actions">
-            <button type="button" id="project-new" data-icon="plus" data-positive="1">Project</button>
-          </div>
+      <div class="ts-head">
+        <div class="hierarchy-actions" role="group" aria-label="Project actions">
+          <button type="button" id="project-new" data-icon="plus" data-positive="1">Project</button>
         </div>
+      </div>
+      <div class="p-card">
         <!-- #182: the customer filter takes the place of the old
              "Projects — all customers" scope line. The select's own value IS
              the scope, so the section needs no separate scope caption; the label
@@ -359,12 +359,12 @@
 
     <!-- TASKS -->
     <section id="panel-tasks" role="tabpanel" aria-labelledby="tab-tasks" tabindex="0" hidden>
-      <div class="p-card">
-        <div class="p-card__header customer-heading">
-          <div class="hierarchy-actions" role="group" aria-label="Task actions">
-            <button type="button" id="task-new" data-icon="plus" data-positive="1">Task</button>
-          </div>
+      <div class="ts-head">
+        <div class="hierarchy-actions" role="group" aria-label="Task actions">
+          <button type="button" id="task-new" data-icon="plus" data-positive="1">Task</button>
         </div>
+      </div>
+      <div class="p-card">
         <!-- #182: same treatment as Projects — the creation action leads the
              header (top-left) and the dependent filters take the place of the old
              "Tasks — ..." scope caption. The selects' own values are the scope,
@@ -624,10 +624,12 @@
 
     <!-- EXPENSES -->
     <section id="panel-expenses" role="tabpanel" aria-labelledby="tab-expenses" tabindex="0" hidden>
-      <div class="p-card">
-        <div class="p-card__header panel-heading-row">
+      <div class="ts-head">
+        <div class="hierarchy-actions" role="group" aria-label="Expense actions">
           <button type="button" id="expense-new" class="primary" data-icon="plus" data-positive="1">Expense</button>
         </div>
+      </div>
+      <div class="p-card">
         <!-- #182 pattern: customer + project filters, both defaulting to "all",
              so the register opens on everything and narrows from there. -->
         <div class="hierarchy-filters">
