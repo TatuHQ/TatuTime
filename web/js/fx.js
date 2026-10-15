@@ -82,6 +82,13 @@ let expensePair = '';
 /// customer must not silently reinterpret the amount they entered.
 let expensePrefilled = '';
 
+/// Marks the pair the dialog is already showing, so opening an existing record
+/// for an edit keeps the rate and the date that record was saved with instead of
+/// quietly re-quoting them at today's published rate.
+export function adoptExpenseRate(from, to) {
+  expensePair = from && to ? `${from}>${to}` : '';
+}
+
 /// Called when the dialog opens or is dismissed, so the next draft starts from
 /// a clean rate instead of the previous expense's.
 export function resetExpenseConversion() {

@@ -154,6 +154,7 @@ pub const API_ROUTES: &[(&str, &str, Tier)] = &[
     ("GET", "/api/expenses", Tier::Member),
     ("POST", "/api/expenses", Tier::Member),
     ("GET", "/api/expenses/{id}", Tier::Member),
+    ("PUT", "/api/expenses/{id}", Tier::Member),
     ("DELETE", "/api/expenses/{id}", Tier::Member),
     ("GET", "/api/fx", Tier::Member),
     ("GET", "/api/submissions", Tier::Member),
@@ -333,7 +334,9 @@ pub fn build_router(state: AppState) -> Router {
         )
         .route(
             "/expenses/{id}",
-            get(api::get_expense_handler).delete(api::delete_expense),
+            get(api::get_expense_handler)
+                .put(api::update_expense)
+                .delete(api::delete_expense),
         )
         // Exchange rates for the expense currency conversion (#…): read-only,
         // fail-closed when no reference table can be loaded.

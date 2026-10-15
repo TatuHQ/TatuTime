@@ -5,7 +5,7 @@
 import { addRecurring, createRetainer, iwInit, refreshCatalog, refreshRetainers, refreshSchedules, saveCatalogItem } from './billing.js';
 import { calState, refreshTimeCal, shiftMonth } from './calendar.js';
 import { $, addDays, announce, clearFormError, decorateUbuntuButton, isoDate, mondayOf } from './dom.js';
-import { ADD_CATEGORY_VALUE, addCategory, addExpense, addExpenseCategory, fillCategorySelect, refreshCategories, refreshExpenses, refreshSubmissions, resetCategoryForm, submitWeek } from './expenses.js';
+import { ADD_CATEGORY_VALUE, addCategory, addExpenseCategory, fillCategorySelect, refreshCategories, refreshExpenses, refreshSubmissions, resetCategoryForm, resetExpenseForm, saveExpense, submitWeek } from './expenses.js';
 import { refreshExpenseConversion, resetExpenseConversion, showConverted } from './fx.js';
 import { cancelCustomerEdit, cancelProjectEdit, cancelTaskEdit, contactRow, fillParentCustomers, fillTaskParents, prefillProjectParent, refreshCustomerPickers, refreshCustomerTable, refreshProjectTable, refreshTaskTable, runReport, saveCustomer, saveProject, saveTask } from './hierarchy.js';
 import { closeInvoicePreview, dash, dashApplyColumns, downloadInvoicePdf, ed, edClose, edLineRow, edOpen, edRecalc, edSave, generateInvoice, invoicePreview, refreshInvoiceSummary, refreshInvoices } from './invoices.js';
@@ -396,15 +396,21 @@ export function wireSetupPanels(today) {
   $('category-cancel').addEventListener('click', resetCategoryForm);
   $('expense-new').addEventListener('click', async () => {
     $('expense-form').reset();
+    resetExpenseForm(); // no id, no receipt, the create wording
     $('expense-date').value = isoDate(new Date());
     $('expense-billable').checked = true;
-    resetExpenseConversion();
     fillCategorySelect();
     $('expense-dialog').showModal();
     $('expense-customer').focus();
     // Derive the billed currency (and clear the conversion fields) for the
     // draft, then again on every pick that can change it.
     await refreshExpenseConversion();
+  });
+  $('expense-receipt').addEventListener('change', () => {
+    const file = $('expense-receipt').files && $('expense-receipt').files[0];
+    $('expense-receipt-note').textContent = file
+      ? `${file.name} (${Math.max(1, Math.round(file.size / 1024))} KB) — saved with the expense.`
+      : 'Images and PDFs up to 3 MB, stored with the expense.';
   });
   // Currency conversion: the rate the dialog carries comes from GET /api/fx and
   // is re-derived whenever a pick can change the billed currency. Every failure
@@ -452,7 +458,7 @@ export function wireSetupPanels(today) {
         : 'Expenses for all customers and projects.');
   });
   $('expense-category-cancel').addEventListener('click', () => $('expense-category-dialog').close());
-  $('expense-form').addEventListener('submit', addExpense);
+  $('expense-form').addEventListener('submit', saveExpense);
   $('submission-form').addEventListener('submit', submitWeek);
   $('user-form').addEventListener('submit', saveUser);
   $('user-new').addEventListener('click', () => {

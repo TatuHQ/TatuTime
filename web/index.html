@@ -644,7 +644,7 @@
         </div>
         <div class="table-scroll"><table id="expense-table" class="p-table--mobile-card">
           <caption class="sr-only">Expenses</caption>
-          <thead><tr><th scope="col">Date</th><th scope="col">Customer</th><th scope="col">Project</th><th scope="col">Category</th><th scope="col">Amount</th><th scope="col">Billable</th><th scope="col" class="actions-col">Actions</th></tr></thead>
+          <thead><tr><th scope="col">Date</th><th scope="col">Customer</th><th scope="col">Project</th><th scope="col">Category</th><th scope="col">Amount</th><th scope="col">Billable</th><th scope="col">Receipt</th><th scope="col" class="actions-col">Actions</th></tr></thead>
           <tbody></tbody>
         </table></div>
         <p id="expense-empty" hidden>No expenses recorded yet. Use “+ Expense” to add one.</p>
@@ -655,6 +655,7 @@
         <h2 class="p-modal__title" id="expense-dialog-title">Record an expense</h2>
       </header>
       <form id="expense-form">
+        <input type="hidden" id="expense-id">
         <div class="p-form__group"><label class="p-form__label" for="expense-date">Date</label><input class="p-form__control" type="date" id="expense-date" required></div>
         <div class="p-form__group"><label class="p-form__label" for="expense-customer">Customer</label><select class="p-form__control" id="expense-customer" required></select></div>
         <div class="p-form__group"><label class="p-form__label" for="expense-project">Project (optional)</label><select class="p-form__control" id="expense-project"></select></div>
@@ -679,10 +680,21 @@
         <p class="p-form-help-text" id="expense-converted" role="status" aria-live="polite"></p>
         <div class="p-form__group"><label class="p-form__label" for="expense-billable"><input class="p-form__control" type="checkbox" id="expense-billable" checked> Billable</label></div>
         <div class="p-form__group"><label class="p-form__label" for="expense-note">Note</label><input type="text" class="p-form__control" id="expense-note" maxlength="500"></div>
+        <!-- Receipt (#23): stored inline with the expense, so the register can
+             show that one is attached and an edit can keep, replace or remove
+             it. The API caps the payload at ~3 MB of base64. -->
+        <div class="p-form__group">
+          <label class="p-form__label" for="expense-receipt">Receipt</label>
+          <input type="file" class="p-form__control" id="expense-receipt" accept="image/*,application/pdf">
+          <p class="p-form-help-text" id="expense-receipt-note">Images and PDFs up to 3 MB, stored with the expense.</p>
+        </div>
+        <div class="p-form__group" id="expense-receipt-clear-field" hidden>
+          <label class="p-form__label" for="expense-receipt-clear"><input class="p-form__control" type="checkbox" id="expense-receipt-clear"> Remove the attached receipt</label>
+        </div>
         <div class="p-form-validation is-error">
           <p class="p-form-validation__message" id="expense-error" role="alert" hidden></p>
         </div>
-        <footer class="buttons p-modal__footer"><button data-positive="1" type="submit">Save expense</button><button type="button" id="expense-cancel" class="secondary">Cancel</button></footer>
+        <footer class="buttons p-modal__footer"><button data-positive="1" type="submit" id="expense-save">Save expense</button><button type="button" id="expense-cancel" class="secondary">Cancel</button></footer>
       </form>
       </div>
       </dialog>

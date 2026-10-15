@@ -4,8 +4,8 @@
 
 import { api } from './api.js';
 import { $, announce, askConfirm, clearFormError, el, fillSelect, formatMoney, showFormError, statusChip } from './dom.js';
-import { customerName, loadProjects, state } from './state.js';
-import { billedCurrency, currencyCode, resetExpenseConversion, toMinor } from './fx.js';
+import { customerName, fillCustomerSelect, fillProjectSelect, loadProjects, state } from './state.js';
+import { adoptExpenseRate, billedCurrency, currencyCode, refreshExpenseConversion, resetExpenseConversion, toMinor } from './fx.js';
 import { invalidateLockCache, refreshDay } from './timesheet.js';
 
 // ---------------------------------------------------------------- expenses --
@@ -131,6 +131,87 @@ export async function addExpenseCategory(evt) {
   }
 }
 
+// ---------------------------------------------------------------- receipt ---
+//
+// The API keeps a receipt inline with its expense (#23): the file's name and its
+// bytes as base64. The dialog owns one draft receipt — the file just picked, or
+// the one the record being edited already carries, because a PUT replaces the
+// whole record and an untouched receipt has to travel back with the payload.
+
+let draftReceipt = null;
+
+const RECEIPT_NOTE = 'Images and PDFs up to 3 MB, stored with the expense.';
+
+/// A picked file, shaped the way the API stores it.
+async function readReceipt(file) {
+  const data = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('That file could not be read.'));
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.readAsDataURL(file);
+  });
+  const comma = data.indexOf(',');
+  return { name: file.name, b64: comma >= 0 ? data.slice(comma + 1) : '' };
+}
+
+/// Hand a stored receipt to the browser as a download under its own name.
+export function downloadReceipt(x) {
+  if (!x || !x.receipt_b64) return;
+  const link = document.createElement('a');
+  link.href = `data:application/octet-stream;base64,${x.receipt_b64}`;
+  link.download = x.receipt_name || `receipt-${x.date}`;
+  link.rel = 'noopener';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}
+
+/// A fresh draft: no id, no receipt, and the dialog back to its create wording.
+export function resetExpenseForm() {
+  $('expense-id').value = '';
+  $('expense-receipt').value = '';
+  $('expense-receipt-clear').checked = false;
+  $('expense-receipt-clear-field').hidden = true;
+  $('expense-receipt-note').textContent = RECEIPT_NOTE;
+  $('expense-dialog-title').textContent = 'Record an expense';
+  $('expense-save').textContent = 'Save expense';
+  draftReceipt = null;
+  resetExpenseConversion();
+}
+
+/// Load an existing expense into the dialog. The record's own rate and rate date
+/// are adopted rather than re-quoted, so saving an untouched conversion cannot
+/// silently restate it at today's published rate.
+export async function startExpenseEdit(x) {
+  resetExpenseForm();
+  $('expense-id').value = x.id;
+  $('expense-dialog-title').textContent = `Edit expense ${x.id.slice(0, 8)}`;
+  $('expense-save').textContent = 'Save changes';
+  $('expense-date').value = x.date;
+  fillCustomerSelect($('expense-customer'), x.customer_id, true);
+  await fillProjectSelect($('expense-project'), x.customer_id, x.project_code || '');
+  await fillCategorySelect(x.category_id || '');
+  $('expense-amount').value = formatMoney(x.amount_minor);
+  $('expense-currency').value = x.original_currency || x.currency;
+  $('expense-rate').value = x.exchange_rate || '';
+  $('expense-rate-date').value = x.exchange_rate_date || '';
+  $('expense-billable').checked = x.billable;
+  $('expense-note').value = x.note || '';
+  if (x.receipt_b64) {
+    draftReceipt = { name: x.receipt_name || 'receipt', b64: x.receipt_b64 };
+    $('expense-receipt-clear-field').hidden = false;
+    $('expense-receipt-note').textContent =
+      `Attached: ${draftReceipt.name}. Choose a file to replace it, or tick Remove.`;
+  }
+  adoptExpenseRate(
+    currencyCode($('expense-currency').value),
+    billedCurrency(),
+  );
+  $('expense-dialog').showModal();
+  $('expense-date').focus();
+  await refreshExpenseConversion();
+}
+
 export async function refreshExpenses() {
   const data = await api.get('/expenses');
   const all = data.expenses || [];
@@ -183,7 +264,30 @@ export async function refreshExpenses() {
             : null,
         ]),
         el('td', { attrs: { 'data-heading': 'Billable' }, text: x.billable ? 'yes' : 'no' }),
+        // A file icon marks an expense that carries a receipt; the icon is the
+        // download, named by the file it stores.
+        el('td', { attrs: { 'data-heading': 'Receipt' } }, [
+          x.receipt_b64
+            ? el('button', {
+              cls: 'link',
+              type: 'button',
+              data: { icon: 'file' },
+              attrs: {
+                'aria-label': `Download the receipt for ${x.date} (${x.receipt_name || 'attachment'})`,
+                title: x.receipt_name || 'Download receipt',
+              },
+              on: { click: () => downloadReceipt(x) },
+            })
+            : null,
+        ]),
         el('td', { cls: 'actions-col', attrs: { 'data-heading': 'Actions' } }, [
+          el('button', {
+            cls: 'link',
+            type: 'button',
+            text: 'Edit',
+            data: { icon: 'edit' },
+            on: { click: () => startExpenseEdit(x) },
+          }),
           el('button', {
             cls: 'danger',
             type: 'button',
@@ -211,9 +315,10 @@ export async function refreshExpenses() {
   $('expense-empty').hidden = expenses.length !== 0;
 }
 
-export async function addExpense(evt) {
+export async function saveExpense(evt) {
   evt.preventDefault();
   clearFormError($('expense-error'));
+  const id = $('expense-id').value;
   const enteredMinor = toMinor($('expense-amount').value) || 0;
   const entered = currencyCode($('expense-currency').value);
   // The currency the picked customer/project bills in. The amount is already in
@@ -247,14 +352,26 @@ export async function addExpense(evt) {
     if ($('expense-rate-date').value) body.exchange_rate_date = $('expense-rate-date').value;
   }
   if ($('expense-project').value) body.project_code = $('expense-project').value;
-  if ($('expense-category').value) body.category_id = $('expense-category').value;
+  if ($('expense-category').value && $('expense-category').value !== ADD_CATEGORY_VALUE) {
+    body.category_id = $('expense-category').value;
+  }
+  // The receipt: a file picked now replaces whatever was stored, an untouched
+  // field sends the record's own receipt back (a PUT replaces the whole record),
+  // and the Remove box clears it.
+  const picked = $('expense-receipt').files && $('expense-receipt').files[0];
+  const receipt = picked
+    ? await readReceipt(picked)
+    : $('expense-receipt-clear').checked ? null : draftReceipt;
+  if (receipt) {
+    body.receipt_name = receipt.name;
+    body.receipt_b64 = receipt.b64;
+  }
   try {
-    await api.post('/expenses', body);
-    $('expense-amount').value = '';
-    $('expense-note').value = '';
-    resetExpenseConversion();
+    if (id) await api.put(`/expenses/${id}`, body);
+    else await api.post('/expenses', body);
+    resetExpenseForm();
     $('expense-dialog').close();
-    announce('Expense added.');
+    announce(id ? 'Expense updated.' : 'Expense added.');
     await refreshExpenses();
   } catch (err) {
     showFormError($('expense-error'), err);

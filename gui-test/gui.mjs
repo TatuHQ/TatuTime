@@ -1714,6 +1714,54 @@ const convRow = [...window.document.querySelectorAll('#expense-table tbody tr')]
 check('the register shows the billed value and the amount as entered',
   convRow.textContent.includes('EUR 92.06') && convRow.textContent.includes('(USD 100.00 @ 0.9206)'));
 
+// ---- RECEIPT (#23): attach a file in the dialog, then edit the record ----
+window.document.getElementById('expense-new').dispatchEvent(new window.Event('click', { bubbles: true }));
+window.document.getElementById('expense-date').value = '2026-10-07';
+window.document.getElementById('expense-customer').value = acmeOpt.value;
+window.document.getElementById('expense-customer').dispatchEvent(new window.Event('change', { bubbles: true }));
+await settle('the expense dialog to follow the customer change');
+window.document.getElementById('expense-amount').value = '40.00';
+window.document.getElementById('expense-note').value = 'taxi with receipt';
+const receiptFile = new window.File([new window.Blob(['hello'])], 'taxi.png', { type: 'image/png' });
+const receiptInput = window.document.getElementById('expense-receipt');
+Object.defineProperty(receiptInput, 'files', { value: [receiptFile], configurable: true });
+receiptInput.dispatchEvent(new window.Event('change', { bubbles: true }));
+check('picking a receipt names it in the dialog', /taxi\.png/.test(byId('expense-receipt-note').textContent));
+window.document.getElementById('expense-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+await settle('the expense with its receipt to save');
+const withReceipt = (await (await fetch(BASE + '/api/expenses')).json()).expenses.find((e) => e.note === 'taxi with receipt');
+check('the receipt is stored inline with the expense',
+  !!withReceipt && withReceipt.receipt_name === 'taxi.png' && !!withReceipt.receipt_b64);
+// The register has no Note column, so the row is identified by the mark itself
+// plus the amount it bills.
+await waitFor(() => [...window.document.querySelectorAll('#expense-table tbody tr')]
+  .some((r) => r.querySelector('button[data-icon="file"]') && r.textContent.includes('EUR 40.00')), {
+  message: 'the receipt mark to appear in the register row',
+});
+check('the register marks the row that carries a receipt', true);
+// Edit that row: the dialog loads it, and an untouched receipt survives the save.
+const receiptRow = [...window.document.querySelectorAll('#expense-table tbody tr')]
+  .find((r) => r.querySelector('button[data-icon="file"]') && r.textContent.includes('EUR 40.00'));
+receiptRow.querySelectorAll('button').forEach((b) => {
+  if (b.textContent.trim() === 'Edit') b.dispatchEvent(new window.Event('click', { bubbles: true }));
+});
+await settle('the edit dialog to load the record');
+check('Edit loads the record: id, wording and the attached receipt',
+  byId('expense-id').value === withReceipt.id
+  && byId('expense-dialog-title').textContent.startsWith('Edit expense')
+  && byId('expense-save').textContent === 'Save changes'
+  && byId('expense-receipt-clear-field').hidden === false
+  && /taxi\.png/.test(byId('expense-receipt-note').textContent));
+byId('expense-amount').value = '44.00';
+window.document.getElementById('expense-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+await settle('the edited expense to save');
+const editedExpense = (await (await fetch(BASE + '/api/expenses')).json()).expenses.find((e) => e.id === withReceipt.id);
+check('an edit replaces the record and keeps its untouched receipt',
+  !!editedExpense && editedExpense.amount_minor === 4400 && editedExpense.receipt_name === 'taxi.png'
+  && editedExpense.receipt_b64 === withReceipt.receipt_b64);
+check('the dialog returns to its create wording once the edit is saved',
+  byId('expense-id').value === '' && byId('expense-dialog-title').textContent === 'Record an expense');
+
 // #182 pattern: the expense register filters by customer and project, both
 // defaulting to "all".
 const expRows = () => [...window.document.querySelectorAll('#expense-table tbody tr')];

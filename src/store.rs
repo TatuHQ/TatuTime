@@ -1810,6 +1810,29 @@ impl Store {
         })
     }
 
+    /// `put_expense` with the invoice/claim lock check executed in the same
+    /// transaction (#18/#218): an expense referenced by an open invoice or a
+    /// submitted/approved claim is frozen against edits exactly as it is against
+    /// deletes, and an unverifiable lock state refuses the write (#185).
+    pub fn update_expense_guarded<F, E>(
+        &self,
+        expense: &Expense,
+        verify_unlocked: F,
+    ) -> Result<(), E>
+    where
+        F: FnOnce() -> Result<(), E>,
+        E: From<StoreError>,
+    {
+        self.guarded_write(verify_unlocked, |s| {
+            let path = s.doc_path::<Expense>(&expense.id.to_string());
+            if !path.exists() {
+                return Err(StoreError::NotFound);
+            }
+            std::fs::create_dir_all(s.doc_dir::<Expense>())?;
+            write_json(&path, expense)
+        })
+    }
+
     fn save_entry_inner(
         &self,
         existing_date: Option<NaiveDate>,

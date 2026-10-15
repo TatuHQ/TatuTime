@@ -330,7 +330,10 @@ VANILLA_INPUT_SKIN = (
     "var bad = [], checked = 0;"
     "for (var i = 0; i < list.length; i++) {"
     "  var el = list[i];"
-    "  if (el.type === 'checkbox' || el.type === 'radio' || el.type === 'hidden') continue;"
+    # A file input renders the browser's own picker button, so its skin is not
+    # comparable field-for-field; the text controls are the point of this probe.
+    "  if (el.type === 'checkbox' || el.type === 'radio' || el.type === 'hidden'"
+    "      || el.type === 'file') continue;"
     "  checked++;"
     "  var cs = getComputedStyle(el), diff = [];"
     "  for (var j = 0; j < props.length; j++) {"
@@ -1017,7 +1020,8 @@ class Gate:
         status, _, raw = self.http(
             "POST", "/api/expenses",
             {"date": "2026-01-31", "customer_id": cid, "amount_minor": 12500,
-             "currency": "EUR", "billable": True, "note": "seeded for the register walk"},
+             "currency": "EUR", "billable": True, "note": "seeded for the register walk",
+             "receipt_name": "hotel.png", "receipt_b64": "aGVsbG8="},
             cookie=cookie, extra_headers=csrf,
         )
         if status != 201:
@@ -1183,8 +1187,8 @@ class Gate:
             "the bespoke .field/.hint/.form-error markup is gone and the official "
             "form vocabulary is in place (#232 phase 2b)",
             counts["field"] == 0 and counts["hint"] == 0 and counts["formError"] == 0
-            and counts["groups"] == 118 and counts["labels"] == 114
-            and counts["controls"] == 114 and counts["help"] == 27
+            and counts["groups"] == 120 and counts["labels"] == 116
+            and counts["controls"] == 116 and counts["help"] == 28
             and counts["messages"] == counts["errorGroups"] == 23,
             f"counts={counts}",
             info=f"{counts['groups']} groups, {counts['help']} help texts, "
@@ -1486,6 +1490,88 @@ class Gate:
             f"stored={stored}",
         )
 
+        # The register marks a receipt with a file icon that downloads it, and
+        # the dialog loads an existing record — receipt included — for editing.
+        marked = json.loads(self.marionette.script(
+            "var t = document.getElementById('expense-table');"
+            "var heads = Array.prototype.map.call(t.tHead.rows[0].cells,"
+            " function (c) { return c.textContent.trim().toLowerCase(); });"
+            "var icons = t.querySelectorAll('tbody button[data-icon=file]');"
+            "return JSON.stringify({"
+            " heads: heads, icons: icons.length, rows: t.tBodies[0].rows.length,"
+            " label: icons.length ? icons[0].getAttribute('aria-label') : ''"
+            "});"
+        ))
+        self.check(
+            "the register marks the expense that carries a receipt, and only it",
+            "receipt" in marked["heads"] and marked["icons"] == 1
+            and marked["rows"] >= 2 and "hotel.png" in marked["label"],
+            f"register={marked}",
+        )
+        self.marionette.script(
+            "var t = document.getElementById('expense-table');"
+            "var row = t.querySelector('tbody button[data-icon=file]').closest('tr');"
+            "Array.prototype.forEach.call(row.querySelectorAll('button'),"
+            " function (b) { if (b.textContent.trim() === 'Edit') b.click(); });"
+            "return true;"
+        )
+        self.wait_script(
+            "(function () { var d = document.getElementById('expense-dialog');"
+            " return !!(d && (d.open === true || d.hasAttribute('open'))); })()",
+            "the edit dialog to open",
+        )
+        editing = json.loads(self.marionette.script(
+            "return JSON.stringify({"
+            " id: document.getElementById('expense-id').value,"
+            " title: document.getElementById('expense-dialog-title').textContent,"
+            " save: document.getElementById('expense-save').textContent,"
+            " date: document.getElementById('expense-date').value,"
+            " amount: document.getElementById('expense-amount').value,"
+            " clearHidden: document.getElementById('expense-receipt-clear-field').hidden,"
+            " note: document.getElementById('expense-receipt-note').textContent"
+            "});"
+        ))
+        self.check(
+            "Edit loads the record into the same dialog, receipt and all",
+            editing["id"] != "" and editing["title"].startswith("Edit expense")
+            and editing["save"] == "Save changes" and editing["date"] == "2026-01-31"
+            and editing["amount"] == "125.00" and editing["clearHidden"] is False
+            and "hotel.png" in editing["note"],
+            f"edit state={editing}",
+        )
+        # Change the amount and save: a full replacement must carry the receipt
+        # back, not drop it.
+        self.marionette.script(
+            "var a = document.getElementById('expense-amount');"
+            "a.value = '131.00';"
+            "a.dispatchEvent(new Event('input', { bubbles: true }));"
+            "document.getElementById('expense-form')"
+            ".dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));"
+            "return true;"
+        )
+        self.wait_script(
+            "document.getElementById('expense-dialog').open !== true",
+            "the edited expense to save",
+        )
+        status, _, raw = self.http("GET", "/api/expenses", cookie=self.cookie)
+        edited = [e for e in json.loads(raw)["expenses"] if e["date"] == "2026-01-31"]
+        self.check(
+            "saving an edit replaces the record and keeps its untouched receipt",
+            status == 200
+            and len(edited) == 1
+            and edited[0]["amount_minor"] == 13100
+            and edited[0]["receipt_name"] == "hotel.png"
+            and edited[0]["receipt_b64"] == "aGVsbG8=",
+            f"edited={edited}",
+        )
+        self.check(
+            "the dialog is back to its create wording after an edit",
+            self.marionette.script(
+                "return document.getElementById('expense-id').value === ''"
+                " && document.getElementById('expense-dialog-title').textContent"
+                " === 'Record an expense';"
+            ),
+        )
         self.drain_console("currency conversion")
 
     # ------------------------------------------- sortable register (#232 2d) --

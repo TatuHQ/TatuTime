@@ -53,10 +53,10 @@ window.f = { api, state, refreshCatalog, iwLoadProjects, fillSelect, $, decorate
 test('the shell ships the official form vocabulary and no bespoke class (#232 phase 2b)', () => {
     const { dom, document } = shell();
     const groups = document.querySelectorAll('.p-form__group');
-    assert.equal(groups.length, 118, 'every former .field wrapper is a p-form__group');
-    assert.equal(document.querySelectorAll('.p-form__label').length, 114, 'one official label per field row');
-    assert.equal(document.querySelectorAll('.p-form__control').length, 114, 'one official control per field row');
-    assert.equal(document.querySelectorAll('.p-form-help-text').length, 27, 'the hints became p-form-help-text');
+    assert.equal(groups.length, 120, 'every former .field wrapper is a p-form__group');
+    assert.equal(document.querySelectorAll('.p-form__label').length, 116, 'one official label per field row');
+    assert.equal(document.querySelectorAll('.p-form__control').length, 116, 'one official control per field row');
+    assert.equal(document.querySelectorAll('.p-form-help-text').length, 28, 'the hints became p-form-help-text');
     assert.equal(document.querySelectorAll('.p-form-validation__message').length, ERROR_IDS.length,
         'every error message is the official validation message');
     assert.equal(document.querySelectorAll('.p-form-validation.is-error').length, ERROR_IDS.length,
@@ -94,7 +94,7 @@ test('every p-form__group pairs its label with its own control (#232 phase 2b)',
         assert.ok(label.textContent.trim().length > 0, `${control.id} keeps an accessible name`);
         paired += 1;
     }
-    assert.equal(paired, 114, 'all 114 label/control pairs were verified');
+    assert.equal(paired, 116, 'all 116 label/control pairs were verified');
     assert.equal(composed.length, 4, 'four composed rows have no label of their own');
     assert.equal(composed.filter((tag) => tag === 'FIELDSET').length, 3, 'three grouped fieldsets');
     assert.equal(composed.filter((tag) => tag.startsWith('DIV')).length, 1, 'the Contacts row');
