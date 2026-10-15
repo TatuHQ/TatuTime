@@ -1714,8 +1714,9 @@ const convRow = [...window.document.querySelectorAll('#expense-table tbody tr')]
 check('the register shows the billed value and the amount as entered',
   convRow.textContent.includes('EUR 92.06') && convRow.textContent.includes('(USD 100.00 @ 0.9206)'));
 
-// The masthead finder uses the same endpoint. A currency with itself needs no
-// rate table at all, so this holds whatever the host's network does.
+// The finder in the Expenses heading slot uses the same endpoint. A currency
+// with itself needs no rate table at all, so this holds whatever the host's
+// network does.
 window.document.getElementById('fx-from').value = 'EUR';
 window.document.getElementById('fx-to').value = 'EUR';
 window.document.getElementById('fx-amount').value = '1';

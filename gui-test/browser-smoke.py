@@ -364,6 +364,29 @@ FILLED_CONVERSION = (
     "});"
 )
 
+# The currency finder belongs to the Expenses page and to the heading slot: to
+# the right of the section's creation action and top-aligned with it — the
+# position the Day | Week | Calendar segments take in Timesheets. A finder that
+# drifted back into the global masthead, or below the action, fails here.
+FINDER_SLOT = (
+    "var form = document.getElementById('fx-form');"
+    "if (!form) return 'no finder';"
+    "var head = form.closest('.ts-head');"
+    "var panel = form.closest('#panel-expenses');"
+    "var action = document.getElementById('expense-new');"
+    "if (!head || !panel || !action) return 'missing markup';"
+    "var problems = [];"
+    "if (document.querySelector('.masthead #fx-form')) problems.push('still in the masthead');"
+    "if (head.parentElement !== panel) problems.push('not in the Expenses heading slot');"
+    "var f = form.getBoundingClientRect(), a = action.getBoundingClientRect();"
+    "var h = head.getBoundingClientRect();"
+    "if (f.left < a.right) problems.push('left of the section action');"
+    "if (Math.abs(f.top - h.top) > 1) {"
+    "  problems.push('not top-aligned in its slot (' + Math.round(f.top - h.top) + 'px)');"
+    "}"
+    "return problems.length ? problems.join('; ') : 'ok';"
+)
+
 FILTER_MATCHES_ACTION = (
     "var b = document.getElementById({button!r});"
     "var sels = document.querySelectorAll({filters!r} + ' select');"
@@ -1399,11 +1422,37 @@ class Gate:
         what is billed, and the register shows both. The rate table is served
         from disk (see `start_server`), so the arithmetic is exact and the check
         needs no network."""
+        # The finder belongs to the Expenses page alone: on any other section the
+        # panel is hidden, so it takes no room and its fields cannot be focused.
+        self.navigate("/customers")
+        self.wait_script(
+            "document.readyState === 'complete'"
+            " && document.getElementById('version').textContent === 'TucanoTime'",
+            "the app to boot at /customers",
+        )
+        outside = self.marionette.script(
+            "var f = document.getElementById('fx-form');"
+            "if (!f) return 'missing';"
+            "var r = f.getBoundingClientRect();"
+            "return r.width === 0 && r.height === 0"
+            "  ? 'ok' : 'laid out ' + Math.round(r.width) + 'x' + Math.round(r.height);"
+        )
+        self.check(
+            "the currency finder belongs to the Expenses page alone",
+            outside == "ok",
+            f"on the Customers section the finder is {outside}",
+        )
         self.navigate("/expenses")
         self.wait_script(
             "document.readyState === 'complete'"
             " && document.getElementById('version').textContent === 'TucanoTime'",
             "the app to boot at /expenses",
+        )
+        slot = self.marionette.script(FINDER_SLOT)
+        self.check(
+            "the finder sits top-right in the Expenses heading slot, like the Timesheets segments",
+            slot == "ok",
+            f"finder slot: {slot}",
         )
         self.marionette.script(
             "document.getElementById('expense-new').click();"
@@ -1486,9 +1535,9 @@ class Gate:
             f"stored={stored}",
         )
 
-        # The masthead finder converts with the same endpoint. A currency with
-        # itself needs no table at all, and a code that is not a currency is
-        # explained instead of requested.
+        # The finder in the Expenses heading slot converts with the same endpoint.
+        # A currency with itself needs no table at all, and a code that is not a
+        # currency is explained instead of requested.
         finder = int(round(10000 * (1.0 / 1.0831)))
         for frm, to, amount, expected, why in (
             ("USD", "EUR", "100",
@@ -1519,7 +1568,7 @@ class Gate:
                 "return document.getElementById('fx-result').textContent;"
             )
             self.check(
-                f"the masthead currency finder {why}",
+                f"the currency finder {why}",
                 answered and result == expected,
                 f"showed {result!r}, expected {expected!r}",
             )
