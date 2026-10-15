@@ -129,7 +129,7 @@ const wzOpen = () => wzDlg.open === true || wzDlg.hasAttribute('open');
 check('wizard auto-opens as a modal on first login with no customers', wzOpen());
 check('wizard starts on the welcome step', !window.document.getElementById('wz-step-0').hidden);
 window.document.getElementById('wz-later').dispatchEvent(new window.Event('click', { bubbles: true }));
-check('"Skip" dismisses the wizard cleanly', !wzOpen());
+check('"Cancel" dismisses the wizard cleanly', !wzOpen());
 // The setup wizard is a utility action after core and secondary navigation.
 // #191 moved the utility action out of the tablist (ARIA required-owned-
 // children); #125's invariant is that the wizard stays the LAST sidebar
@@ -219,6 +219,12 @@ check('wizard created customer + project through the real routes',
 check('done step names what was set up',
   !window.document.getElementById('wz-step-3').hidden
   && window.document.getElementById('wz-done-text').textContent.includes('ACME'));
+// #141: the last step used to hide the wizard's only dismiss button.
+check('the wizard keeps a visible Cancel on its last step (#141)',
+  (() => {
+    const b = window.document.getElementById('wz-later');
+    return !b.hidden && /^cancel$/i.test(b.textContent.trim());
+  })());
 // Finish: dialog closes, Day view with the pair preselected.
 window.document.getElementById('wz-next').dispatchEvent(new window.Event('click', { bubbles: true }));
 await waitFor(() => !wzOpen() && byId('entry-project').value === 'P-9', {
@@ -1983,6 +1989,11 @@ if (recBtn) {
   await waitFor(() => dialogOpen(byId('entry-dialog')), { message: 'the Track time entry dialog to open' });
   const wfDlg = window.document.getElementById('entry-dialog');
   check('Track time opens the entry dialog (#141/#145)', wfDlg.open === true || wfDlg.hasAttribute('open'));
+  check('the Track time popup offers a visible Cancel (#141)',
+    (() => {
+      const b = window.document.getElementById('entry-cancel');
+      return !b.hidden && /^cancel$/i.test(b.textContent.trim());
+    })());
   const wfCustSel = window.document.getElementById('entry-customer');
   wfCustSel.value = wfCust.id;
   ev(wfCustSel, 'change');

@@ -52,7 +52,6 @@ export function wizRender() {
     ? 'Setup complete.'
     : `Step ${WIZ.step + 1} of 4: ${WIZ_TITLES[WIZ.step]}`;
   $('wz-back').hidden = WIZ.step === 0 || WIZ.step === 3;
-  $('wz-later').hidden = WIZ.step === 3;
   $('wz-next').textContent =
     WIZ.step === 1 ? 'Create customer'
       : WIZ.step === 2 ? 'Create project'

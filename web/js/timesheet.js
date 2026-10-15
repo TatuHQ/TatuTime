@@ -283,7 +283,6 @@ export function startEdit(e) {
   $('entry-billable').checked = e.billable !== false;
   $('entry-form-title').textContent = `Edit entry ${e.id.slice(0, 8)}`;
   $('entry-save').textContent = 'Update entry';
-  $('entry-cancel').hidden = false;
   clearFormError($('entry-error'));
   $('entry-customer').focus(); // #189: the earlier entry-hours focus was immediately stolen
   $('entry-form').scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -299,7 +298,6 @@ export function resetEntryForm() {
   fillTaskSelect($('entry-task'), '', null, null);
   $('entry-form-title').textContent = 'Add an entry';
   $('entry-save').textContent = 'Save entry';
-  $('entry-cancel').hidden = true;
   clearFormError($('entry-error'));
 }
 
