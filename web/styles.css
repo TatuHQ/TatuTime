@@ -162,8 +162,19 @@ body {
 .customer-extra-details[open] > summary { margin-bottom: .45rem; }
 
 .content { flex: 1; display: flex; flex-direction: column; min-width: 0; }
-.masthead { padding: 1.1rem 1.5rem; border-bottom: 1px solid var(--line); background: var(--surface); }
+.masthead { padding: 1.1rem 1.5rem; border-bottom: 1px solid var(--line); background: var(--surface); display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
 .masthead h1 { margin: 0; font-size: 2rem; line-height: 1.25; font-weight: 550; }
+/* Masthead currency finder + the expense dialog's conversion readout. The finder
+   is a toolbar, not a form row: its controls keep intrinsic widths (Vanilla's
+   base forms stretch every input to 100%) and its labels are sr-only, because
+   the visible pair of codes is the point of the widget. */
+.fx-finder { display: flex; align-items: center; gap: .4rem; margin: 0; flex-wrap: wrap; }
+.fx-finder input { width: 6.5rem; }
+.fx-finder .fx-code { width: 4.5rem; text-transform: uppercase; }
+.fx-finder .fx-arrow { color: var(--muted); font-size: .95rem; }
+.fx-result { font-size: .875rem; color: var(--muted); }
+.fx-original { color: var(--muted); }
+#expense-converted { min-height: 1.25rem; }
 main { padding: 1.5rem; flex: 1; max-width: 1440px; width: 100%; }
 section[role="tabpanel"]:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 h2 { font-size: 1.5rem; margin: 1.5rem 0 .75rem; font-weight: 400; }

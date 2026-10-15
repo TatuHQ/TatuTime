@@ -89,11 +89,12 @@ test('#264: the GUI module graph resolves and evaluates in browser order', () =>
     build(entry);
     assert.deepEqual(missing, [], `module specifiers must resolve to served files:\n  ${missing.join('\n  ')}`);
 
-    // The published split (#264) is 17 modules plus the entry: a guard that stops
-    // following imports (or an entry that imports nothing) must not pass.
+    // The published split (#264) is 18 modules plus the entry (fx joined for the
+    // expense currency conversion): a guard that stops following imports (or an
+    // entry that imports nothing) must not pass.
     assert.ok(
-        graph.size >= 18,
-        `expected the entry + its 17 modules, walked ${graph.size}: ${[...graph.keys()].join(', ')}`,
+        graph.size >= 19,
+        `expected the entry + its 18 modules, walked ${graph.size}: ${[...graph.keys()].join(', ')}`,
     );
 
     // 2. Depth-first, post-order — the evaluation order the HTML spec defines.

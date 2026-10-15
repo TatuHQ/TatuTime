@@ -1660,6 +1660,76 @@ const exps = (await (await fetch(BASE + '/api/expenses')).json()).expenses;
 const ex = exps.find((e) => e.note === 'client visit flight');
 check('expense created via popup with category + amount', ex && ex.amount_minor === 12500 && ex.category_id === clientVisit.id);
 check('successful expense save closes popup', window.document.getElementById('expense-dialog').open === false);
+
+// ---- CURRENCY CONVERSION: what was paid beside what is billed ----
+// The dialog derives the billed currency from the picked customer/project and
+// the rate from GET /api/fx, which fails closed with 503 when no rate table is
+// reachable — so a rate typed by hand must work on its own, and that is what
+// this block exercises end to end (no network required).
+window.document.getElementById('expense-new').dispatchEvent(new window.Event('click', { bubbles: true }));
+window.document.getElementById('expense-date').value = '2026-10-06';
+window.document.getElementById('expense-customer').value = acmeOpt.value;
+window.document.getElementById('expense-customer').dispatchEvent(new window.Event('change', { bubbles: true }));
+await settle('the expense dialog to derive the billed currency');
+check('the dialog prefills the amount currency from the customer, so no conversion happens',
+  byId('expense-currency').value === 'EUR'
+  && byId('expense-rate').disabled === true
+  && /already in the customer\/project currency/.test(byId('expense-rate-note').textContent));
+window.document.getElementById('expense-amount').value = '100.00';
+window.document.getElementById('expense-currency').value = 'USD';
+window.document.getElementById('expense-currency').dispatchEvent(new window.Event('change', { bubbles: true }));
+await settle('the conversion fields to follow the currency change');
+check('a foreign amount asks for a rate and names the pair',
+  byId('expense-rate').disabled === false
+  && byId('expense-rate-label').textContent === 'Exchange rate (USD \u2192 EUR)');
+byId('expense-rate').value = '0.9206';
+byId('expense-rate').dispatchEvent(new window.Event('input', { bubbles: true }));
+byId('expense-rate-date').value = '2026-10-01';
+check('the dialog shows the value billed in the customer/project currency',
+  byId('expense-converted').textContent === 'USD 100.00 = EUR 92.06');
+// Without a rate the billed value is unknown: the dialog refuses rather than
+// billing the entered number as if it were already in the customer currency.
+byId('expense-rate').value = '';
+byId('expense-rate').dispatchEvent(new window.Event('input', { bubbles: true }));
+window.document.getElementById('expense-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+await settle('the refused conversion to settle');
+check('a converted amount without a rate is refused before the API is called',
+  byId('expense-dialog').open === true && /exchange rate/i.test(byId('expense-error').textContent));
+byId('expense-rate').value = '0.9206';
+byId('expense-rate').dispatchEvent(new window.Event('input', { bubbles: true }));
+window.document.getElementById('expense-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+await settle('the converted expense to save');
+const converted = (await (await fetch(BASE + '/api/expenses')).json()).expenses
+  .find((e) => e.original_currency === 'USD');
+check('the saved expense keeps the entered amount, its rate and the billed value',
+  converted && converted.currency === 'EUR' && converted.amount_minor === 9206
+  && converted.original_amount_minor === 10000 && converted.exchange_rate === '0.9206'
+  && converted.exchange_rate_date === '2026-10-01');
+await waitFor(() => [...window.document.querySelectorAll('#expense-table tbody tr')]
+  .some((r) => r.textContent.includes('USD 100.00 @')), {
+  message: 'the converted expense to appear in the register',
+});
+const convRow = [...window.document.querySelectorAll('#expense-table tbody tr')]
+  .find((r) => r.textContent.includes('USD 100.00 @'));
+check('the register shows the billed value and the amount as entered',
+  convRow.textContent.includes('EUR 92.06') && convRow.textContent.includes('(USD 100.00 @ 0.9206)'));
+
+// The masthead finder uses the same endpoint. A currency with itself needs no
+// rate table at all, so this holds whatever the host's network does.
+window.document.getElementById('fx-from').value = 'EUR';
+window.document.getElementById('fx-to').value = 'EUR';
+window.document.getElementById('fx-amount').value = '1';
+window.document.getElementById('fx-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+await waitFor(() => byId('fx-result').textContent === 'EUR 1.00 = EUR 1.00.', {
+  message: 'the finder identity conversion',
+});
+check('the top-bar finder converts a currency with itself', true);
+window.document.getElementById('fx-from').value = 'US';
+window.document.getElementById('fx-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+await waitFor(() => /three-letter/.test(byId('fx-result').textContent), {
+  message: 'the finder to refuse a code that is not a currency',
+});
+check('the top-bar finder asks for a real currency code instead of calling the API', true);
 // #182 pattern: the expense register filters by customer and project, both
 // defaulting to "all".
 const expRows = () => [...window.document.querySelectorAll('#expense-table tbody tr')];

@@ -65,6 +65,15 @@ ADMIN_EMAIL = "smoke-admin@example.test"
 # a secret scanner cannot read the line as a literal credential.
 ADMIN_PASSWORD = "smoke" + "-pass" + "-123456"
 
+# The published-reference-rates document the gate serves through
+# `TUCANO_FX_RATES_FILE`: the same EUR-based, dated, key-less shape the contract
+# tests pin. Serving it keeps the GUI's conversion arithmetic deterministic — and
+# the gate offline — while still exercising the real fetch path end to end.
+ECB_SAMPLE = """<Cube time='2026-10-14'>
+      <Cube currency='USD' rate='1.0831'/>
+      <Cube currency='GBP' rate='0.85210'/>
+    </Cube>"""
+
 EXPECTED_TITLE = "TucanoTime — Timesheets"
 # Both stylesheets the shell declares; a 404 in either must fail the run.
 EXPECTED_STYLESHEETS = ("/styles.css", "/vendor/ubuntu/components.css")
@@ -316,7 +325,8 @@ VANILLA_INPUT_SKIN = (
     "  if (!isNaN(na) && !isNaN(nb)) return Math.abs(na - nb) <= 0.05;"
     "  return a === b;"
     "};"
-    "var list = document.querySelectorAll('input.p-form__control, textarea.p-form__control, #dlg-input');"
+    "var list = document.querySelectorAll('input.p-form__control, textarea.p-form__control,"
+    " #dlg-input, .fx-finder input');"
     "var bad = [], checked = 0;"
     "for (var i = 0; i < list.length; i++) {"
     "  var el = list[i];"
@@ -334,6 +344,24 @@ VANILLA_INPUT_SKIN = (
     "  }"
     "}"
     "return JSON.stringify({ reference: '#customer-email', checked: checked, bad: bad });"
+)
+
+# The expense dialog's conversion fields after a converted amount has been
+# entered: the rate the reference table published, the day it published it, the
+# label naming the pair and the value billed in the customer/project currency.
+# Read straight off the DOM (never recomputed here), so a dialog that silently
+# showed nothing fails this probe.
+FILLED_CONVERSION = (
+    "var rate = document.getElementById('expense-rate');"
+    "return JSON.stringify({"
+    " rate: parseFloat(rate.value),"
+    " raw: rate.value,"
+    " disabled: rate.disabled,"
+    " date: document.getElementById('expense-rate-date').value,"
+    " label: document.getElementById('expense-rate-label').textContent,"
+    " note: document.getElementById('expense-rate-note').textContent,"
+    " converted: document.getElementById('expense-converted').textContent"
+    "});"
 )
 
 FILTER_MATCHES_ACTION = (
@@ -502,6 +530,9 @@ class Gate:
         self.tmp = tempfile.mkdtemp(prefix="tt-browser-smoke-")
         self.data_dir = os.path.join(self.tmp, "data")
         os.makedirs(self.data_dir)
+        # The published-rate document this gate serves, so the conversion it
+        # probes is exactly the one the fixture describes.
+        self.fx_file = os.path.join(self.tmp, "ecb-daily.xml")
         self.profile = os.path.join(self.tmp, "firefox-profile")
         self.server = None
         self.firefox_proc = None
@@ -571,11 +602,15 @@ class Gate:
         env["TUCANO_DATA_DIR"] = self.data_dir
         env["TUCANO_PORT"] = str(self.port)
         env["TUCANO_STRIPE_FAKE"] = "1"
+        # Offline, deterministic reference rates for the GUI conversion.
+        env["TUCANO_FX_RATES_FILE"] = self.fx_file
         env.pop("TUCANO_ENV", None)  # plain HTTP on the loopback: no Secure cookie
         if self.web_dir:
             env["TUCANO_WEB_DIR"] = self.web_dir  # dev mode: disk assets + live reload
         else:
             env.pop("TUCANO_WEB_DIR", None)
+        with open(self.fx_file, "w", encoding="utf-8") as handle:
+            handle.write(ECB_SAMPLE)
         log = open(os.path.join(self.tmp, "server.log"), "wb")
         self.server = subprocess.Popen(
             [self.binary], env=env, stdout=log, stderr=subprocess.STDOUT,
@@ -1148,8 +1183,8 @@ class Gate:
             "the bespoke .field/.hint/.form-error markup is gone and the official "
             "form vocabulary is in place (#232 phase 2b)",
             counts["field"] == 0 and counts["hint"] == 0 and counts["formError"] == 0
-            and counts["groups"] == 116 and counts["labels"] == 112
-            and counts["controls"] == 112 and counts["help"] == 25
+            and counts["groups"] == 118 and counts["labels"] == 114
+            and counts["controls"] == 114 and counts["help"] == 27
             and counts["messages"] == counts["errorGroups"] == 23,
             f"counts={counts}",
             info=f"{counts['groups']} groups, {counts['help']} help texts, "
@@ -1356,6 +1391,140 @@ class Gate:
         )
         self.drain_console("form migration (#232 phase 2b/2c)")
 
+    # ------------------------------------------ currency conversion (#…) -----
+    def expense_conversion_audit(self):
+        """An expense entered in another currency, end to end: the dialog fills
+        the published rate and the day it was published for, shows the value
+        billed in the customer/project currency, records what was paid beside
+        what is billed, and the register shows both. The rate table is served
+        from disk (see `start_server`), so the arithmetic is exact and the check
+        needs no network."""
+        self.navigate("/expenses")
+        self.wait_script(
+            "document.readyState === 'complete'"
+            " && document.getElementById('version').textContent === 'TucanoTime'",
+            "the app to boot at /expenses",
+        )
+        self.marionette.script(
+            "document.getElementById('expense-new').click();"
+            "var picker = document.getElementById('expense-customer');"
+            "var option = Array.prototype.filter.call(picker.options,"
+            " function (o) { return o.value; })[0];"
+            "picker.value = option ? option.value : '';"
+            "picker.dispatchEvent(new Event('change', { bubbles: true }));"
+            "var currency = document.getElementById('expense-currency');"
+            "currency.value = 'USD';"
+            "currency.dispatchEvent(new Event('change', { bubbles: true }));"
+            "var amount = document.getElementById('expense-amount');"
+            "amount.value = '100.00';"
+            "amount.dispatchEvent(new Event('input', { bubbles: true }));"
+            "return true;"
+        )
+        self.wait_script(
+            "document.getElementById('expense-rate').value !== ''",
+            "the published rate to reach the dialog",
+        )
+        filled = json.loads(self.marionette.script(FILLED_CONVERSION))
+        # The fixture quotes USD at 1.0831 per EUR, so EUR per USD is its
+        # reciprocal: the dialog must show the rate the table published, for the
+        # day it published it, and never an invented one.
+        usd_eur = filled["rate"]
+        self.check(
+            "the expense dialog fills the published rate and the day it was published for",
+            abs(usd_eur - 1.0 / 1.0831) < 1e-6
+            and filled["date"] == "2026-10-14"
+            and "2026-10-14" in filled["note"]
+            and filled["label"] == "Exchange rate (USD \u2192 EUR)"
+            and filled["disabled"] is False,
+            f"fields={filled}",
+        )
+        billed = int(round(10000 * usd_eur))
+        self.check(
+            "the dialog shows the value billed in the customer/project currency",
+            filled["converted"] == f"USD 100.00 = EUR {billed / 100:.2f}",
+            f"showed {filled['converted']!r}, expected USD 100.00 = EUR {billed / 100:.2f}",
+        )
+
+        # Saving keeps what was paid beside what is billed.
+        self.marionette.script(
+            "document.getElementById('expense-form')"
+            ".dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));"
+            "return true;"
+        )
+        self.wait_script(
+            "Array.prototype.some.call(document.querySelectorAll('#expense-table tbody tr'),"
+            " function (row) { return row.textContent.indexOf('USD 100.00 @') >= 0; })",
+            "the converted expense to appear in the register",
+        )
+        register = self.marionette.script(
+            "var rows = document.querySelectorAll('#expense-table tbody tr');"
+            "for (var i = 0; i < rows.length; i++) {"
+            "  if (rows[i].textContent.indexOf('USD 100.00 @') >= 0) {"
+            "    return rows[i].textContent.replace(/\\s+/g, ' ').trim();"
+            "  }"
+            "}"
+            "return '';"
+        )
+        self.check(
+            "the register shows the billed value and, beside it, the amount as entered",
+            f"EUR {billed / 100:.2f}" in register and "(USD 100.00 @" in register,
+            f"row={register!r}",
+        )
+        status, _, raw = self.http("GET", "/api/expenses", cookie=self.cookie)
+        stored = [
+            e for e in json.loads(raw)["expenses"] if e.get("original_currency") == "USD"
+        ]
+        self.check(
+            "the stored expense keeps the entered amount, its currency, the rate and its date",
+            status == 200
+            and len(stored) == 1
+            and stored[0]["amount_minor"] == billed
+            and stored[0]["currency"] == "EUR"
+            and stored[0]["original_amount_minor"] == 10000
+            and abs(float(stored[0]["exchange_rate"]) - usd_eur) < 1e-6
+            and stored[0]["exchange_rate_date"] == "2026-10-14",
+            f"stored={stored}",
+        )
+
+        # The masthead finder converts with the same endpoint. A currency with
+        # itself needs no table at all, and a code that is not a currency is
+        # explained instead of requested.
+        finder = int(round(10000 * (1.0 / 1.0831)))
+        for frm, to, amount, expected, why in (
+            ("USD", "EUR", "100",
+             f"USD 100.00 = EUR {finder / 100:.2f} at the 2026-10-14 reference rate.",
+             "converts an amount at the published rate and names its date"),
+            ("EUR", "EUR", "1", "EUR 1.00 = EUR 1.00.",
+             "converts a currency with itself without a table"),
+            ("US", "EUR", "1", "Enter two three-letter currency codes (e.g. USD and EUR).",
+             "explains a code that is not a currency instead of calling the API"),
+        ):
+            self.marionette.script(
+                "document.getElementById('fx-from').value = %r;"
+                "document.getElementById('fx-to').value = %r;"
+                "document.getElementById('fx-amount').value = %r;"
+                "document.getElementById('fx-form')"
+                ".dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));"
+                "return true;" % (frm, to, amount)
+            )
+            try:
+                self.wait_script(
+                    "document.getElementById('fx-result').textContent === %r" % expected,
+                    f"the finder to answer {expected!r}",
+                )
+                answered = True
+            except RuntimeError:
+                answered = False
+            result = self.marionette.script(
+                "return document.getElementById('fx-result').textContent;"
+            )
+            self.check(
+                f"the masthead currency finder {why}",
+                answered and result == expected,
+                f"showed {result!r}, expected {expected!r}",
+            )
+        self.drain_console("currency conversion")
+
     # ------------------------------------------- sortable register (#232 2d) --
     def invoice_sort_audit(self):
         """#232 phase 2d: the Invoices register is Vanilla 4.59's real sortable
@@ -1549,6 +1718,7 @@ class Gate:
             info=f"positive bg {self._positive_bg}, neutral bg {self._neutral_bg}",
         )
         self.forms_audit()
+        self.expense_conversion_audit()
         self.invoice_sort_audit()
         if self.web_dir:
             self.dev_live_reload()
