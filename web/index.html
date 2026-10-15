@@ -20,7 +20,7 @@
       <div class="p-card__content">
         <div class="p-form__group" id="auth-name-field" hidden>
           <label class="p-form__label" for="auth-name">Your name</label>
-          <input class="p-form__control" id="auth-name" maxlength="120" autocomplete="name">
+          <input type="text" class="p-form__control" id="auth-name" maxlength="120" autocomplete="name">
         </div>
         <div class="p-form__group">
           <label class="p-form__label" for="auth-email">Email</label>
@@ -71,7 +71,11 @@
             <div class="nav-group more-tools-group" role="presentation">
               <span class="nav-label">More tools</span>
               <div class="p-tabs__item"><button class="p-tabs__link" role="tab" id="tab-expenses" aria-controls="panel-expenses" aria-selected="false" tabindex="-1"><i class="p-icon--copy" aria-hidden="true"></i>Expenses</button></div>
-              <div class="p-tabs__item"><button class="p-tabs__link" role="tab" id="tab-submissions" aria-controls="panel-submissions" aria-selected="false" tabindex="-1"><i class="p-icon--success" aria-hidden="true"></i>Approvals</button></div>
+              <!-- Approvals (#16) is hidden for now: the approval process is not
+                 implemented. The rail entry keeps its markup so the tab and its
+                 panel return with one attribute, and `applyRoute` refuses the
+                 hidden tab — /approvals falls back to the default view. -->
+              <div class="p-tabs__item" hidden><button class="p-tabs__link" role="tab" id="tab-submissions" aria-controls="panel-submissions" aria-selected="false" tabindex="-1" hidden><i class="p-icon--success" aria-hidden="true"></i>Approvals</button></div>
               <div class="p-tabs__item"><button class="p-tabs__link" role="tab" id="tab-reports" aria-controls="panel-reports" aria-selected="false" tabindex="-1"><i class="p-icon--history" aria-hidden="true"></i>Reports</button></div>
               <div class="p-tabs__item"><button class="p-tabs__link" role="tab" id="tab-settings" aria-controls="panel-settings" aria-selected="false" tabindex="-1"><i class="p-icon--settings" aria-hidden="true"></i>Settings <span class="beta" title="Integration credentials — providers not yet wired">Beta</span></button></div>
             </div>
@@ -656,9 +660,9 @@
         <div class="p-form__group"><label class="p-form__label" for="expense-project">Project (optional)</label><select class="p-form__control" id="expense-project"></select></div>
         <div class="p-form__group"><label class="p-form__label" for="expense-category">Category</label><select class="p-form__control" id="expense-category"></select></div>
         <div class="p-form__group"><label class="p-form__label" for="expense-amount">Amount (e.g. 125.00)</label><input class="p-form__control" id="expense-amount" type="number" min="0" step="0.01" required inputmode="decimal"></div>
-        <div class="p-form__group"><label class="p-form__label" for="expense-currency">Currency</label><input class="p-form__control" id="expense-currency" maxlength="3" placeholder="EUR" required></div>
+        <div class="p-form__group"><label class="p-form__label" for="expense-currency">Currency</label><input type="text" class="p-form__control" id="expense-currency" maxlength="3" placeholder="EUR" required></div>
         <div class="p-form__group"><label class="p-form__label" for="expense-billable"><input class="p-form__control" type="checkbox" id="expense-billable" checked> Billable</label></div>
-        <div class="p-form__group"><label class="p-form__label" for="expense-note">Note</label><input class="p-form__control" id="expense-note" maxlength="500"></div>
+        <div class="p-form__group"><label class="p-form__label" for="expense-note">Note</label><input type="text" class="p-form__control" id="expense-note" maxlength="500"></div>
         <div class="p-form-validation is-error">
           <p class="p-form-validation__message" id="expense-error" role="alert" hidden></p>
         </div>
@@ -672,7 +676,7 @@
           <h2 class="p-modal__title" id="expense-category-title">Add expense category</h2>
         </header>
         <form id="expense-category-form">
-          <div class="p-form__group"><label class="p-form__label" for="expense-category-name">Category name</label><input class="p-form__control" id="expense-category-name" maxlength="120" required autocomplete="off"></div>
+          <div class="p-form__group"><label class="p-form__label" for="expense-category-name">Category name</label><input type="text" class="p-form__control" id="expense-category-name" maxlength="120" required autocomplete="off"></div>
           <p class="p-form-help-text">Categories can be managed later in Settings → Expense categories.</p>
           <div class="p-form-validation is-error">
             <p class="p-form-validation__message" id="expense-category-error" role="alert" hidden></p>
@@ -744,7 +748,7 @@
         </header>
         <form id="user-form">
           <input type="hidden" id="user-id">
-          <div class="p-form__group"><label class="p-form__label" for="user-name">Name</label><input class="p-form__control" id="user-name" maxlength="120" required autocomplete="name"></div>
+          <div class="p-form__group"><label class="p-form__label" for="user-name">Name</label><input type="text" class="p-form__control" id="user-name" maxlength="120" required autocomplete="name"></div>
           <div class="p-form__group"><label class="p-form__label" for="user-email">Email</label><input class="p-form__control" id="user-email" type="email" maxlength="254" required autocomplete="email"></div>
           <div class="p-form__group" id="user-password-field"><label class="p-form__label" for="user-password">Initial password</label><input class="p-form__control" id="user-password" type="password" minlength="8" autocomplete="new-password" required></div>
           <div class="p-form__group"><label class="p-form__label" for="user-role">Role</label><select class="p-form__control" id="user-role"><option value="member">Member</option><option value="admin">Administrator</option></select></div>
@@ -790,7 +794,7 @@
       <p id="vault-status" class="p-form-help-text"></p>
       <p id="email-status" class="p-form-help-text" role="status" aria-live="polite"></p>
       <form id="secret-form" class="p-card">
-        <div class="p-form__group"><label class="p-form__label" for="secret-key">Key (e.g. stripe.secret_key)</label><input class="p-form__control" id="secret-key" maxlength="100" required></div>
+        <div class="p-form__group"><label class="p-form__label" for="secret-key">Key (e.g. stripe.secret_key)</label><input type="text" class="p-form__control" id="secret-key" maxlength="100" required></div>
         <div class="p-form__group"><label class="p-form__label" for="secret-value">Value</label><input class="p-form__control" id="secret-value" type="password" autocomplete="off" required></div>
         <div class="p-form-validation is-error">
           <p class="p-form-validation__message" id="secret-error" role="alert" hidden></p>
@@ -822,7 +826,7 @@
       </div>
       <form id="config-form" class="p-card">
         <div class="p-form__group"><label class="p-form__label" for="config-key">Setting</label><select class="p-form__control" id="config-key"></select></div>
-        <div class="p-form__group"><label class="p-form__label" for="config-value">New value</label><input class="p-form__control" id="config-value" maxlength="300"></div>
+        <div class="p-form__group"><label class="p-form__label" for="config-value">New value</label><input type="text" class="p-form__control" id="config-value" maxlength="300"></div>
         <div class="p-form-validation is-error">
           <p class="p-form-validation__message" id="config-error" role="alert" hidden></p>
         </div>
@@ -836,7 +840,7 @@
         <form id="category-form" class="bar">
           <input type="hidden" id="category-id">
           <label for="category-name">Category name</label>
-          <input id="category-name" maxlength="120" required autocomplete="off">
+          <input type="text" id="category-name" maxlength="120" required autocomplete="off">
           <button data-positive="1" type="submit" id="category-save" class="primary">Add category</button>
           <button type="button" id="category-cancel" class="secondary" hidden>Cancel edit</button>
         </form>
@@ -850,16 +854,16 @@
       <h2>Invoice settings: company, appearance, messages</h2>
       <p class="p-form-help-text">Printed on invoice documents and emails (#138). Leave the name empty to keep the boot-time <code>org_name</code> setting; due terms and message wording live in the invoice template below (one store, no parallel defaults).</p>
       <form id="org-form" class="p-card">
-        <div class="p-form__group"><label class="p-form__label" for="org-name">Company name</label><input class="p-form__control" id="org-name" maxlength="120" autocomplete="off"></div>
-        <div class="p-form__group"><label class="p-form__label" for="org-legal">VAT / company id</label><input class="p-form__control" id="org-legal" maxlength="60" autocomplete="off" placeholder="BE0123456789"></div>
-        <div class="p-form__group"><label class="p-form__label" for="org-street">Street</label><input class="p-form__control" id="org-street" maxlength="120" autocomplete="off"></div>
-        <div class="p-form__group"><label class="p-form__label" for="org-city">City</label><input class="p-form__control" id="org-city" maxlength="80" autocomplete="off"></div>
-        <div class="p-form__group"><label class="p-form__label" for="org-postal">Postal code</label><input class="p-form__control" id="org-postal" maxlength="16" autocomplete="off"></div>
-        <div class="p-form__group"><label class="p-form__label" for="org-country">Country</label><input class="p-form__control" id="org-country" maxlength="56" autocomplete="off"></div>
-                <div class="p-form__group"><label class="p-form__label" for="org-from">Email sender display name</label><input class="p-form__control" id="org-from" maxlength="120" autocomplete="off" placeholder="TucanoTime (#146)"></div>
+        <div class="p-form__group"><label class="p-form__label" for="org-name">Company name</label><input type="text" class="p-form__control" id="org-name" maxlength="120" autocomplete="off"></div>
+        <div class="p-form__group"><label class="p-form__label" for="org-legal">VAT / company id</label><input type="text" class="p-form__control" id="org-legal" maxlength="60" autocomplete="off" placeholder="BE0123456789"></div>
+        <div class="p-form__group"><label class="p-form__label" for="org-street">Street</label><input type="text" class="p-form__control" id="org-street" maxlength="120" autocomplete="off"></div>
+        <div class="p-form__group"><label class="p-form__label" for="org-city">City</label><input type="text" class="p-form__control" id="org-city" maxlength="80" autocomplete="off"></div>
+        <div class="p-form__group"><label class="p-form__label" for="org-postal">Postal code</label><input type="text" class="p-form__control" id="org-postal" maxlength="16" autocomplete="off"></div>
+        <div class="p-form__group"><label class="p-form__label" for="org-country">Country</label><input type="text" class="p-form__control" id="org-country" maxlength="56" autocomplete="off"></div>
+                <div class="p-form__group"><label class="p-form__label" for="org-from">Email sender display name</label><input type="text" class="p-form__control" id="org-from" maxlength="120" autocomplete="off" placeholder="TucanoTime (#146)"></div>
         <div class="p-form__group"><label class="p-form__label" for="org-reply">Reply-To address</label><input class="p-form__control" id="org-reply" type="email" maxlength="200" autocomplete="off" placeholder="billing@yourcompany.test"></div>
         <div class="p-form__group"><label class="p-form__label" for="org-accent">Invoice accent color (#rrggbb)</label>
-          <span class="accent-row"><input class="p-form__control" id="org-accent" maxlength="7" pattern="^#[0-9a-fA-F]{6}$" placeholder="#E95420" autocomplete="off"><span id="accent-swatch" class="accent-swatch" aria-hidden="true"></span></span></div>
+          <span class="accent-row"><input type="text" class="p-form__control" id="org-accent" maxlength="7" pattern="^#[0-9a-fA-F]{6}$" placeholder="#E95420" autocomplete="off"><span id="accent-swatch" class="accent-swatch" aria-hidden="true"></span></span></div>
         <div class="p-form-validation is-error">
           <p class="p-form-validation__message" id="org-error" role="alert" hidden></p>
         </div>
@@ -871,19 +875,19 @@
       <h3>Field labels</h3>
       <p class="p-form-help-text">Rename what the invoice <em>document</em> shows (#147). The API and stored field names never change; blank keeps the built-in word.</p>
       <div id="labels-form" class="p-card">
-        <div class="p-form__group"><label class="p-form__label" for="lb-description">Line column label</label><input class="p-form__control" id="lb-description" maxlength="40" autocomplete="off" placeholder="Description"></div>
-        <div class="p-form__group"><label class="p-form__label" for="lb-quantity">Quantity column label</label><input class="p-form__control" id="lb-quantity" maxlength="40" autocomplete="off" placeholder="Hours"></div>
-        <div class="p-form__group"><label class="p-form__label" for="lb-unit-price">Unit price column label</label><input class="p-form__control" id="lb-unit-price" maxlength="40" autocomplete="off" placeholder="Rate"></div>
-        <div class="p-form__group"><label class="p-form__label" for="lb-subtotal">Subtotal label</label><input class="p-form__control" id="lb-subtotal" maxlength="40" autocomplete="off" placeholder="Subtotal"></div>
-        <div class="p-form__group"><label class="p-form__label" for="lb-discount">Discount label</label><input class="p-form__control" id="lb-discount" maxlength="40" autocomplete="off" placeholder="Discount"></div>
-        <div class="p-form__group"><label class="p-form__label" for="lb-tax">VAT label</label><input class="p-form__control" id="lb-tax" maxlength="40" autocomplete="off" placeholder="VAT"></div>
-        <div class="p-form__group"><label class="p-form__label" for="lb-total">Total label</label><input class="p-form__control" id="lb-total" maxlength="40" autocomplete="off" placeholder="Total"></div>
+        <div class="p-form__group"><label class="p-form__label" for="lb-description">Line column label</label><input type="text" class="p-form__control" id="lb-description" maxlength="40" autocomplete="off" placeholder="Description"></div>
+        <div class="p-form__group"><label class="p-form__label" for="lb-quantity">Quantity column label</label><input type="text" class="p-form__control" id="lb-quantity" maxlength="40" autocomplete="off" placeholder="Hours"></div>
+        <div class="p-form__group"><label class="p-form__label" for="lb-unit-price">Unit price column label</label><input type="text" class="p-form__control" id="lb-unit-price" maxlength="40" autocomplete="off" placeholder="Rate"></div>
+        <div class="p-form__group"><label class="p-form__label" for="lb-subtotal">Subtotal label</label><input type="text" class="p-form__control" id="lb-subtotal" maxlength="40" autocomplete="off" placeholder="Subtotal"></div>
+        <div class="p-form__group"><label class="p-form__label" for="lb-discount">Discount label</label><input type="text" class="p-form__control" id="lb-discount" maxlength="40" autocomplete="off" placeholder="Discount"></div>
+        <div class="p-form__group"><label class="p-form__label" for="lb-tax">VAT label</label><input type="text" class="p-form__control" id="lb-tax" maxlength="40" autocomplete="off" placeholder="VAT"></div>
+        <div class="p-form__group"><label class="p-form__label" for="lb-total">Total label</label><input type="text" class="p-form__control" id="lb-total" maxlength="40" autocomplete="off" placeholder="Total"></div>
         <div class="buttons"><button type="button" id="lb-reset" class="secondary">Use built-in labels</button></div>
       </div>
 
       <form id="template-form" class="p-card">
         <div class="p-form__group"><label class="p-form__label" for="template-subject">Subject (max 120)</label>
-          <input class="p-form__control" id="template-subject" maxlength="120" autocomplete="off" placeholder="Invoice %invoice_number% for %customer_name%"></div>
+          <input type="text" class="p-form__control" id="template-subject" maxlength="120" autocomplete="off" placeholder="Invoice %invoice_number% for %customer_name%"></div>
         <div class="p-form__group"><label class="p-form__label" for="template-body">Body (markdown: #, ##, ###, **bold**, *italic*, - bullets, 1. lists)</label>
           <textarea class="p-form__control" id="template-body" maxlength="8000" rows="5" placeholder="Dear %customer_name%,&#10;&#10;Here is the work for %invoice_issue_month% %invoice_issue_year%."></textarea></div>
         <div class="p-form__group"><label class="p-form__label" for="template-footer">Footer (markdown, e.g. bank details)</label>
@@ -931,11 +935,11 @@
       <p class="p-form-help-text">Reusable manual-invoice line types (#147): name, type, default unit price. Archiving hides an item from new picks without touching history.</p>
       <form id="item-form" class="p-card">
         <input type="hidden" id="item-id">
-        <div class="p-form__group"><label class="p-form__label" for="item-name">Name</label><input class="p-form__control" id="item-name" maxlength="120" required autocomplete="off"></div>
+        <div class="p-form__group"><label class="p-form__label" for="item-name">Name</label><input type="text" class="p-form__control" id="item-name" maxlength="120" required autocomplete="off"></div>
         <div class="p-form__group"><label class="p-form__label" for="item-kind">Type</label><select class="p-form__control" id="item-kind"><option value="service">Service</option><option value="product">Product</option></select></div>
         <div class="p-form__group"><label class="p-form__label" for="item-desc">Description</label><textarea class="p-form__control" id="item-desc" maxlength="500" rows="2"></textarea></div>
         <div class="p-form__group"><label class="p-form__label" for="item-price">Default unit price</label><input class="p-form__control" id="item-price" type="number" min="0" step="0.01" value="0" inputmode="decimal"></div>
-        <div class="p-form__group"><label class="p-form__label" for="item-currency">Currency</label><input class="p-form__control" id="item-currency" maxlength="3" value="EUR"></div>
+        <div class="p-form__group"><label class="p-form__label" for="item-currency">Currency</label><input type="text" class="p-form__control" id="item-currency" maxlength="3" value="EUR"></div>
         <div class="p-form-validation is-error">
           <p class="p-form-validation__message" id="item-error" role="alert" hidden></p>
         </div>
@@ -990,9 +994,9 @@
           </div>
           <div id="wz-step-1" class="wz-step" hidden>
             <div class="p-form__group"><label class="p-form__label" for="wz-cust-name">Customer name</label>
-              <input class="p-form__control" id="wz-cust-name" maxlength="120" autocomplete="off" value="Tucano Time" placeholder="Acme Ltd."></div>
+              <input type="text" class="p-form__control" id="wz-cust-name" maxlength="120" autocomplete="off" value="Tucano Time" placeholder="Acme Ltd."></div>
             <div class="p-form__group"><label class="p-form__label" for="wz-cust-currency">Currency (ISO-4217)</label>
-              <input class="p-form__control" id="wz-cust-currency" maxlength="3" value="EUR"></div>
+              <input type="text" class="p-form__control" id="wz-cust-currency" maxlength="3" value="EUR"></div>
             <div class="p-form__group"><label class="p-form__label" for="wz-cust-rate">Default hourly rate (e.g. 60.00)</label>
               <input class="p-form__control" id="wz-cust-rate" type="number" min="0" step="0.01" value="60.00" inputmode="decimal"></div>
           </div>
@@ -1000,11 +1004,11 @@
             <div class="p-form__group" id="wz-pick-customer-field"><label class="p-form__label" for="wz-project-customer">Add a project to</label>
               <select class="p-form__control" id="wz-project-customer"></select></div>
             <div class="p-form__group"><label class="p-form__label" for="wz-project-code">Project code</label>
-              <input class="p-form__control" id="wz-project-code" maxlength="24" autocomplete="off" placeholder="WEB-1"></div>
+              <input type="text" class="p-form__control" id="wz-project-code" maxlength="24" autocomplete="off" placeholder="WEB-1"></div>
             <div class="p-form__group"><label class="p-form__label" for="wz-project-name">Project name (optional)</label>
-              <input class="p-form__control" id="wz-project-name" maxlength="120" autocomplete="off"></div>
+              <input type="text" class="p-form__control" id="wz-project-name" maxlength="120" autocomplete="off"></div>
             <div class="p-form__group"><label class="p-form__label" for="wz-project-currency">Currency (from customer default)</label>
-              <input class="p-form__control" id="wz-project-currency" maxlength="3"></div>
+              <input type="text" class="p-form__control" id="wz-project-currency" maxlength="3"></div>
             <div class="p-form__group"><label class="p-form__label" for="wz-project-rate">Hourly rate (from customer default)</label>
               <input class="p-form__control" id="wz-project-rate" type="number" min="0" step="0.01" inputmode="decimal"></div>
           </div>
@@ -1044,17 +1048,17 @@
       </header>
       <form id="customer-form">
         <input type="hidden" id="customer-id">
-        <div class="p-form__group"><label class="p-form__label" for="customer-name">Name</label><input class="p-form__control" id="customer-name" maxlength="120" required></div>
-        <div class="p-form__group"><label class="p-form__label" for="customer-currency">Default currency (ISO-4217)</label><input class="p-form__control" id="customer-currency" maxlength="3" placeholder="EUR" required></div>
+        <div class="p-form__group"><label class="p-form__label" for="customer-name">Name</label><input type="text" class="p-form__control" id="customer-name" maxlength="120" required></div>
+        <div class="p-form__group"><label class="p-form__label" for="customer-currency">Default currency (ISO-4217)</label><input type="text" class="p-form__control" id="customer-currency" maxlength="3" placeholder="EUR" required></div>
         <div class="p-form__group"><label class="p-form__label" for="customer-rate">Default hourly rate (e.g. 60.00)</label><input class="p-form__control" id="customer-rate" type="number" min="0" step="0.01" required inputmode="decimal"></div>
         <div class="p-form__group"><label class="p-form__label" for="customer-email">Billing email (optional, for invoice delivery)</label><input class="p-form__control" id="customer-email" type="email" maxlength="200" autocomplete="off"></div>
         <details class="customer-extra-details">
           <summary>Billing and invoice defaults</summary>
         <fieldset class="p-form__group"><legend>Billing details (#139)</legend>
-          <div class="p-form__group"><label class="p-form__label" for="cust-street">Street</label><input class="p-form__control" id="cust-street" maxlength="120" autocomplete="off"></div>
-          <div class="p-form__group"><label class="p-form__label" for="cust-city">City</label><input class="p-form__control" id="cust-city" maxlength="80" autocomplete="off"></div>
-          <div class="p-form__group"><label class="p-form__label" for="cust-postal">Postal code</label><input class="p-form__control" id="cust-postal" maxlength="16" autocomplete="off"></div>
-          <div class="p-form__group"><label class="p-form__label" for="cust-country">Country</label><input class="p-form__control" id="cust-country" maxlength="56" autocomplete="off"></div>
+          <div class="p-form__group"><label class="p-form__label" for="cust-street">Street</label><input type="text" class="p-form__control" id="cust-street" maxlength="120" autocomplete="off"></div>
+          <div class="p-form__group"><label class="p-form__label" for="cust-city">City</label><input type="text" class="p-form__control" id="cust-city" maxlength="80" autocomplete="off"></div>
+          <div class="p-form__group"><label class="p-form__label" for="cust-postal">Postal code</label><input type="text" class="p-form__control" id="cust-postal" maxlength="16" autocomplete="off"></div>
+          <div class="p-form__group"><label class="p-form__label" for="cust-country">Country</label><input type="text" class="p-form__control" id="cust-country" maxlength="56" autocomplete="off"></div>
           <div class="p-form__group"><label class="p-form__label" for="cust-tax">Default VAT % (e.g. 21 or 20.5)</label><input class="p-form__control" id="cust-tax" type="number" min="0" max="100" step="0.01" value="0" inputmode="decimal"></div>
           <div class="p-form__group"><label class="p-form__label" for="cust-discount">Default discount %</label><input class="p-form__control" id="cust-discount" type="number" min="0" max="100" step="0.01" value="0" inputmode="decimal"></div>
           <div class="p-form__group"><span id="contacts-label">Contacts (one may be the billing recipient)</span>
@@ -1078,7 +1082,7 @@
             <input class="p-form__control" id="customer-terms-days" type="number" min="1" max="365" step="1" inputmode="numeric">
           </div>
           <div class="p-form__group"><label class="p-form__label" for="customer-subject">Invoice subject override (%variables% allowed)</label>
-            <input class="p-form__control" id="customer-subject" maxlength="120" autocomplete="off"></div>
+            <input type="text" class="p-form__control" id="customer-subject" maxlength="120" autocomplete="off"></div>
           <div class="p-form__group"><label class="p-form__label" for="customer-notes">Invoice notes (markdown subset, appended after the footer)</label>
             <textarea class="p-form__control" id="customer-notes" maxlength="4000" rows="3"></textarea></div>
         </fieldset>
@@ -1100,9 +1104,9 @@
       <form id="project-form">
         <input type="hidden" id="project-original-code">
         <div class="p-form__group"><label class="p-form__label" for="project-parent-customer">Customer</label><select class="p-form__control" id="project-parent-customer" required></select></div>
-        <div class="p-form__group"><label class="p-form__label" for="project-code">Project code</label><input class="p-form__control" id="project-code" maxlength="24" required></div>
-        <div class="p-form__group"><label class="p-form__label" for="project-name">Name</label><input class="p-form__control" id="project-name" maxlength="120"></div>
-        <div class="p-form__group"><label class="p-form__label" for="project-currency">Currency (ISO-4217)</label><input class="p-form__control" id="project-currency" maxlength="3" placeholder="EUR" required></div>
+        <div class="p-form__group"><label class="p-form__label" for="project-code">Project code</label><input type="text" class="p-form__control" id="project-code" maxlength="24" required></div>
+        <div class="p-form__group"><label class="p-form__label" for="project-name">Name</label><input type="text" class="p-form__control" id="project-name" maxlength="120"></div>
+        <div class="p-form__group"><label class="p-form__label" for="project-currency">Currency (ISO-4217)</label><input type="text" class="p-form__control" id="project-currency" maxlength="3" placeholder="EUR" required></div>
         <div class="p-form__group"><label class="p-form__label" for="project-rate">Hourly rate (e.g. 95.00)</label><input class="p-form__control" id="project-rate" type="number" min="0" step="0.01" placeholder="0.00" required inputmode="decimal"></div>
         <div class="p-form__group"><label class="p-form__label" for="project-active"><input class="p-form__control" type="checkbox" id="project-active" checked> Active</label></div>
         <div class="p-form-validation is-error">
@@ -1122,8 +1126,8 @@
         <input type="hidden" id="task-original-code">
         <div class="p-form__group"><label class="p-form__label" for="task-parent-customer">Customer</label><select class="p-form__control" id="task-parent-customer" required></select></div>
         <div class="p-form__group"><label class="p-form__label" for="task-parent-project">Project</label><select class="p-form__control" id="task-parent-project" required></select></div>
-        <div class="p-form__group"><label class="p-form__label" for="task-code">Task code</label><input class="p-form__control" id="task-code" maxlength="24" required></div>
-        <div class="p-form__group"><label class="p-form__label" for="task-name">Name</label><input class="p-form__control" id="task-name" maxlength="120"></div>
+        <div class="p-form__group"><label class="p-form__label" for="task-code">Task code</label><input type="text" class="p-form__control" id="task-code" maxlength="24" required></div>
+        <div class="p-form__group"><label class="p-form__label" for="task-name">Name</label><input type="text" class="p-form__control" id="task-name" maxlength="120"></div>
         <div class="p-form__group"><label class="p-form__label" for="task-active"><input class="p-form__control" type="checkbox" id="task-active" checked> Active</label></div>
         <div class="p-form-validation is-error">
           <p class="p-form-validation__message" id="task-error" role="alert" hidden></p>

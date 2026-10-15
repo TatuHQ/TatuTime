@@ -143,11 +143,18 @@ check('wizard entry is the last sidebar action, outside the tablist (#125/#191)'
 check('core MVP navigation comes first, Setup split into three (#142/#182)',
   [...window.document.querySelectorAll('#tabs [role="tab"]')].slice(0, 5).map((t) => t.id).join(',') ===
     'tab-timesheet,tab-customers,tab-projects,tab-tasks,tab-invoices');
+// #16 is hidden for now (the approval process is not implemented), so the rail
+// lists only the tools that are really available: hidden entries drop out of the
+// visible order and must not be offering themselves to the user.
+const railTabs = [...window.document.querySelectorAll('#tabs [role="tab"]')]
+  .filter((t) => !t.hidden).map((t) => t.id);
 check('implemented secondary tools are grouped after the MVP destinations',
-  [...window.document.querySelectorAll('#tabs [role="tab"]')].slice(5).map((t) => t.id).join(',') === // after MVP + Setup tabs (#182)
-    'tab-expenses,tab-submissions,tab-reports,tab-settings'
+  railTabs.slice(5).join(',') === 'tab-expenses,tab-reports,tab-settings' // after MVP + Setup tabs (#182)
   && [...window.document.querySelectorAll('#tabs .nav-label')].map((n) => n.textContent).join(',') ===
     'Track time,Setup,Billing,More tools');
+check('the Approvals rail entry is hidden until its process exists (#16)',
+  window.document.getElementById('tab-submissions').hidden === true
+  && !railTabs.includes('tab-submissions'));
 check('redundant Invoice and Timer shortcut buttons are absent',
   !window.document.getElementById('shortcut-invoices') && !window.document.getElementById('shortcut-timer'));
 const timerOpen = window.document.getElementById('timer-open');
@@ -1698,8 +1705,15 @@ check('Settings category form updates existing category via PUT',
 
 // ---- SUBMISSIONS (#16): submit a fresh week via the GUI ----
 const fresh = await (await fetch(BASE + '/api/entries', { method: 'POST', headers: { 'content-type': 'application/json', Cookie: SESSION_COOKIE }, body: JSON.stringify({ date: '2027-01-05', customer_id: acmeOpt.value, project_code: 'P-9', hours: 2 }) })).json();
+// #16 (Approvals) is hidden for now, so its rail entry is unhidden just for this
+// flow: the tab, its panel and the API stay implemented and tested, and the entry
+// returns to the rail (and the tab to the rail's visible order) with one
+// attribute when the process exists.
 const tabSub = window.document.getElementById('tab-submissions');
+tabSub.hidden = false;
 tabSub.dispatchEvent(new window.Event('click', { bubbles: true }));
+await waitFor(() => !byId('panel-submissions').hidden, { message: 'the Approvals panel to show' });
+tabSub.hidden = true;
 window.document.getElementById('submission-week').value = '2027-01-04';
 window.document.getElementById('submission-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
 await settle('the week submission to be created');

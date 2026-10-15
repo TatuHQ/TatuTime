@@ -89,6 +89,32 @@ test('a member deep link into a hidden admin panel falls back inside Settings', 
   dom.window.close();
 });
 
+test('the hidden Approvals view falls back to the default route (#16 not yet implemented)', async () => {
+  const dom = await bootAt('http://localhost/approvals');
+  const { document } = dom.window;
+  // The rail entry is hidden until the approval process exists, and a hidden tab
+  // is an unavailable view — the deep link must not select a tab nobody can see.
+  assert.equal(document.getElementById('tab-submissions').hidden, true,
+    'the Approvals rail entry is hidden for now');
+  assert.ok(tabSelected(document, 'tab-timesheet'), 'the default view is selected instead');
+  assert.equal(document.getElementById('panel-submissions').hidden, true, 'the Approvals panel stays closed');
+  assert.equal(dom.window.location.pathname, '/timesheets/day', 'the URL follows the view that rendered');
+  dom.window.close();
+});
+
+test('the Approvals view returns the moment its rail entry does (#16)', async () => {
+  const dom = await bootAt('http://localhost/timesheets/day');
+  const { window, document } = dom.window;
+  // One attribute — the whole tab, its panel and its route come back with it.
+  document.getElementById('tab-submissions').hidden = false;
+  window.history.pushState({ path: '/approvals' }, '', '/approvals');
+  window.dispatchEvent(new window.PopStateEvent('popstate'));
+  assert.ok(tabSelected(document, 'tab-submissions'), 'the unhidden tab is selectable again');
+  assert.equal(document.getElementById('panel-submissions').hidden, false);
+  assert.equal(window.location.pathname, '/approvals');
+  dom.window.close();
+});
+
 test('navigation updates the address bar and popstate restores the view', async () => {
   const dom = await bootAt('http://localhost/');
   const { window, document } = dom.window;

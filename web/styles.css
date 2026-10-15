@@ -462,7 +462,11 @@ dialog.p-modal::backdrop { background: transparent; }
 #dlg-input-wrap { display: block; margin: 0 0 .9rem; }
 #dlg-input-wrap[hidden] { display: none; }
 #dlg-input-wrap span { display: block; margin-bottom: .3rem; font-size: .85rem; }
-#dlg-input { width: 100%; padding: .45rem .5rem; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); }
+/* #232 phase 2f: `#dlg-input` is a plain text control like every other
+   form field, so it wears the same official Vanilla skin. The bespoke
+   border / radius / background / colour is retired — it was the reason the
+   prompt field looked different from the fields beside it. */
+#dlg-input { width: 100%; }
 .dlg-actions { display: flex; justify-content: flex-end; gap: .5rem; }
 
 /* --------------------------------- timesheet section + Day|Week segment -- #107 */

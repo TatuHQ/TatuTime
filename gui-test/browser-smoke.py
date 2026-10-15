@@ -107,9 +107,6 @@ VIEWS = [
     ("/expenses", "tab-expenses", "panel-expenses",
      "(() => { const t = document.getElementById('expense-table');"
      " return !!t && !!t.tHead; })()"),
-    ("/approvals", "tab-submissions", "panel-submissions",
-     "(() => { const t = document.getElementById('submission-table');"
-     " return !!t && !!t.tHead; })()"),
     ("/reports", "tab-reports", "panel-reports",
      "(() => { const t = document.getElementById('report-table');"
      " return !!t && !!t.tHead; })()"),
@@ -272,6 +269,71 @@ ACTION_TOP_ALIGNED = (
     "var d = Math.abs(b.getBoundingClientRect().top - head.getBoundingClientRect().top);"
     "return d <= 1 ? 'ok'"
     "  : 'the action sits ' + Math.round(d) + 'px below the top of its slot';"
+)
+
+# #16 is hidden for now (the approval process is not implemented): `hidden` on
+# the rail wrapper *and* on the tab takes the entry out of the rail without a
+# gap, and `route.js::applyRoute` refuses a hidden tab, so the stale /approvals
+# deep link falls back to the default route. The panel keeps its markup for the
+# day the tab returns.
+APPROVALS_HIDDEN = (
+    "var t = document.getElementById('tab-submissions');"
+    "var item = t && t.closest('.p-tabs__item');"
+    "var panel = document.getElementById('panel-submissions');"
+    "return JSON.stringify({"
+    " tabHidden: !!t && t.hidden,"
+    " itemHidden: !!item && item.hidden,"
+    " itemHeight: item ? Math.round(item.getBoundingClientRect().height) : -1,"
+    " selected: t ? t.getAttribute('aria-selected') : null,"
+    " panelExists: !!panel,"
+    " panelHidden: !!panel && panel.hidden,"
+    " panelHeadings: document.querySelectorAll('#submission-table thead th').length,"
+    " pathname: location.pathname,"
+    " timesheetShown: !document.getElementById('panel-timesheet').hidden"
+    "});"
+)
+
+# #232 phase 2f: every form control must wear the SAME Vanilla input skin.
+# Vanilla skins inputs with `[type=text]` / `[type=email]` / ... attribute
+# selectors and never with a bare `<input>`, so a control written without an
+# explicit `type` kept the browser's own skin and sat beside a Vanilla one
+# looking different (the Add-customer "Name" / "Billing email" pair). Every
+# text-like control's computed skin is compared with a reference control's;
+# selects and tick boxes are excluded (their own treatment) and so is the
+# app-owned timesheet grid (it is not a `p-form__control`).
+VANILLA_INPUT_SKIN = (
+    "var ref = document.getElementById('customer-email');"
+    "if (!ref) return JSON.stringify({ reference: null, checked: 0, bad: ['#customer-email is missing'] });"
+    "var props = ['paddingTop', 'paddingBottom', 'borderBottomWidth', 'borderBottomStyle',"
+    " 'backgroundColor', 'borderRadius', 'fontSize', 'fontFamily'];"
+    "var want = getComputedStyle(ref);"
+    # Compare lengths with a tolerance: Firefox serialises a *rendered* control's
+    # used value in 1/60px app units (5.06667px) but a control inside a closed
+    # dialog as the computed value (5.06px), so an exact string compare would be
+    # comparing a hidden field against a visible one.
+    "var near = function (a, b) {"
+    "  var na = parseFloat(a), nb = parseFloat(b);"
+    "  if (!isNaN(na) && !isNaN(nb)) return Math.abs(na - nb) <= 0.05;"
+    "  return a === b;"
+    "};"
+    "var list = document.querySelectorAll('input.p-form__control, textarea.p-form__control, #dlg-input');"
+    "var bad = [], checked = 0;"
+    "for (var i = 0; i < list.length; i++) {"
+    "  var el = list[i];"
+    "  if (el.type === 'checkbox' || el.type === 'radio' || el.type === 'hidden') continue;"
+    "  checked++;"
+    "  var cs = getComputedStyle(el), diff = [];"
+    "  for (var j = 0; j < props.length; j++) {"
+    "    if (!near(cs[props[j]], want[props[j]])) {"
+    "      diff.push(props[j] + ' ' + cs[props[j]] + ' vs ' + want[props[j]]);"
+    "    }"
+    "  }"
+    "  if (diff.length) {"
+    "    bad.push('#' + (el.id || el.name || '(unnamed)') + ' type='"
+    "             + (el.getAttribute('type') || '(none)') + ' -> ' + diff.join(', '));"
+    "  }"
+    "}"
+    "return JSON.stringify({ reference: '#customer-email', checked: checked, bad: bad });"
 )
 
 FILTER_MATCHES_ACTION = (
@@ -1027,6 +1089,34 @@ class Gate:
                 self._neutral_bg = deco["neuBg"]
             self.drain_console(f"view {path}")
 
+        # #16 is hidden for now: the rail entry leaves the rail while the tab,
+        # the panel and the API stay in place, and the stale deep link must land
+        # on the default view instead of a tab nobody can see.
+        self.navigate("/approvals")
+        self.wait_script(
+            "document.readyState === 'complete'"
+            " && document.getElementById('version').textContent === 'TucanoTime'",
+            "the app to boot at /approvals",
+        )
+        approvals = json.loads(self.marionette.script(APPROVALS_HIDDEN))
+        self.check(
+            "the Approvals rail entry is hidden and leaves no rail gap (#16)",
+            approvals["tabHidden"] and approvals["itemHidden"]
+            and approvals["itemHeight"] == 0 and approvals["selected"] == "false",
+            f"approvals={approvals}",
+        )
+        self.check(
+            "the Approvals panel keeps its markup for the day the tab returns (#16)",
+            approvals["panelExists"] and approvals["panelHidden"]
+            and approvals["panelHeadings"] >= 1,
+            f"approvals={approvals}",
+        )
+        self.check(
+            "/approvals falls back to the default view instead of a hidden tab (#16)",
+            approvals["pathname"].rstrip("/") == "/timesheets/day" and approvals["timesheetShown"],
+            f"pathname={approvals['pathname']!r} timesheet shown={approvals['timesheetShown']}",
+        )
+
     # ------------------------------------------------ forms (#232 phase 2b) --
     def forms_audit(self):
         """#232 phase 2b: the field/hint/error markup is the official Vanilla
@@ -1088,6 +1178,18 @@ class Gate:
             "every p-form__group pairs its official label with its own control",
             not pairing,
             "broken pairings: " + "; ".join(pairing),
+        )
+
+        # #232 phase 2f: a Vanilla skin is applied by `[type=…]`, so a control
+        # without an explicit type keeps the user agent's skin and sits beside a
+        # Vanilla one looking different. Compare every control's computed skin
+        # against a known Vanilla field.
+        skin = json.loads(self.marionette.script(VANILLA_INPUT_SKIN))
+        self.check(
+            "every form control wears the same Vanilla input skin (#232 phase 2f)",
+            skin["reference"] is not None and skin["checked"] >= 40 and skin["bad"] == [],
+            "controls painted differently from the reference: " + "; ".join(skin["bad"]),
+            info=f"{skin['checked']} controls match {skin['reference']}",
         )
 
         # Sample labels that are really laid out: the two settings panels that
