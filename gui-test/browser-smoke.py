@@ -236,6 +236,30 @@ CALENDAR_DAY_ALIGNMENT = (
 # "+ Project" action above it. The filter is a Vanilla form control, whose base
 # `select { width: 100% }` otherwise stretched it across the whole card — so a
 # stylesheet regression here is only visible in a real browser.
+# A register column whose header and cells disagree on `text-align` looks
+# broken however it is styled (the rate columns were right-aligned under
+# left-aligned headers). jsdom computes no cascade, so only a browser sees it.
+TABLE_CELL_ALIGNMENT = (
+    "var bad = [];"
+    "['customer-table', 'project-table'].forEach(function (id) {{"
+    "  var t = document.getElementById(id);"
+    "  if (!t || !t.tHead || !t.tBodies[0]) return;"
+    "  var ths = t.tHead.rows[0].cells, rows = t.tBodies[0].rows;"
+    "  if (rows.length === 0) {{ bad.push(id + ' has no rows to compare'); return; }}"
+    "  for (var c = 0; c < ths.length; c++) {{"
+    "    var ha = getComputedStyle(ths[c]).textAlign;"
+    "    for (var r = 0; r < rows.length; r++) {{"
+    "      var cell = rows[r].cells[c];"
+    "      if (!cell) continue;"
+    "      var ca = getComputedStyle(cell).textAlign;"
+    "      if (ca !== ha) bad.push(id + ' col ' + c + ': header ' + ha + ' vs cell ' + ca);"
+    "    }}"
+    "  }}"
+    "}});"
+    "var uniq = bad.filter(function (v, i) {{ return bad.indexOf(v) === i; }});"
+    "return uniq.length ? uniq.slice(0, 3).join('; ') : 'ok';"
+)
+
 FILTER_MATCHES_ACTION = (
     "var b = document.getElementById({button!r});"
     "var sels = document.querySelectorAll({filters!r} + ' select');"
@@ -923,6 +947,14 @@ class Gate:
                 )
             # #182 follow-up: each section's filter row must line up with its
             # creation action (and with its sibling filters).
+            # The register columns that have a header/cell alignment pair.
+            if path in ("/customers", "/projects"):
+                align = self.marionette.script(TABLE_CELL_ALIGNMENT)
+                self.check(
+                    f"{path} register columns align their values with the header",
+                    align == "ok",
+                    f"header and cell text-align disagree: {align}",
+                )
             if path == "/projects":
                 widths = self.marionette.script(FILTER_MATCHES_ACTION.format(
                     button="project-new", filters="#panel-projects .hierarchy-filters"))

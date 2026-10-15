@@ -510,6 +510,12 @@ export async function startApp() {
   // grid stayed empty until the segment was clicked. Paint the linked segment.
   segActiveId === 'ts-cal' ? refreshTimeCal() : null,
   refreshCustomerTable(),
+  // #182: Projects and Tasks were only ever painted by refreshPanel(), which
+  // applyRoute() suppresses while it selects a tab (the router trusts the boot
+  // sequence to paint). A deep link - or a plain reload - of /projects or /tasks
+  // therefore rendered an empty register until the tab was clicked again.
+  refreshProjectTable(),
+  refreshTaskTable(),
   refreshInvoices(),
   refreshTimer(),
   refreshNotifications(),
