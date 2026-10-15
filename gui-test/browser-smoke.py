@@ -384,6 +384,22 @@ FINDER_SLOT = (
     "if (Math.abs(f.top - h.top) > 1) {"
     "  problems.push('not top-aligned in its slot (' + Math.round(f.top - h.top) + 'px)');"
     "}"
+    # One centre line: the action's label, the fields' text, the arrow and the
+    # Convert button must all sit on it. A stacked-form `margin-bottom` on a
+    # control is inside its margin box, so it silently drops the arrow and the
+    # button by half that margin.
+    "function mid(n) { var r = n.getBoundingClientRect(); return (r.top + r.bottom) / 2; }"
+    "var line = [action, document.getElementById('fx-amount'), document.querySelector('.fx-arrow'),"
+    " document.getElementById('fx-from'), document.getElementById('fx-to'),"
+    " document.getElementById('fx-convert')];"
+    "var base = mid(action);"
+    "for (var i = 1; i < line.length; i++) {"
+    "  var off = mid(line[i]) - base;"
+    "  if (Math.abs(off) > 1) {"
+    "    problems.push((line[i].id || line[i].className) + ' sits ' + off.toFixed(1)"
+    "                  + 'px off the section action centre line');"
+    "  }"
+    "}"
     "return problems.length ? problems.join('; ') : 'ok';"
 )
 
@@ -1448,9 +1464,20 @@ class Gate:
             " && document.getElementById('version').textContent === 'TucanoTime'",
             "the app to boot at /expenses",
         )
+        empty = self.marionette.script(
+            "var f = document.getElementById('fx-form').getBoundingClientRect();"
+            "var a = document.getElementById('expense-new').getBoundingClientRect();"
+            "return Math.abs(f.height - a.height) <= 1"
+            "  ? 'ok' : 'the finder is ' + (f.height - a.height).toFixed(1) + 'px taller than the action';"
+        )
+        self.check(
+            "with nothing to read out, the finder is exactly as tall as + Expense",
+            empty == "ok",
+            f"empty finder: {empty}",
+        )
         slot = self.marionette.script(FINDER_SLOT)
         self.check(
-            "the finder sits top-right in the Expenses heading slot, like the Timesheets segments",
+            "the action, the fields, the arrow and Convert share one line in the Expenses heading slot",
             slot == "ok",
             f"finder slot: {slot}",
         )
@@ -1572,6 +1599,12 @@ class Gate:
                 answered and result == expected,
                 f"showed {result!r}, expected {expected!r}",
             )
+        slot = self.marionette.script(FINDER_SLOT)
+        self.check(
+            "showing a conversion leaves the finder's row on the action's line",
+            slot == "ok",
+            f"finder slot with a result: {slot}",
+        )
         self.drain_console("currency conversion")
 
     # ------------------------------------------- sortable register (#232 2d) --
