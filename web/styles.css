@@ -255,7 +255,7 @@ td.num, th.num, .ws-total.num { text-align: right; font-variant-numeric: tabular
    are Vanilla p-card shells — the card owns the frame and header rule, so the
    heading slot (and submit/report bars) drops its bottom margin; dense registers
    use p-table--mobile-card (data-heading) and summaries keep a plain table. */
-.p-card__header.customer-heading, .p-card__header.panel-heading-row, #report-form.bar, #submission-form.bar { margin-bottom: 0; }
+.p-card__header.panel-heading-row, #report-form.bar, #submission-form.bar { margin-bottom: 0; }
 
 /* #232 phase 2b: errors are the official `p-form-validation__message` (inside a
    `p-form-validation is-error` wrapper) and hints are `p-form-help-text`, so the
@@ -448,8 +448,6 @@ dialog.p-modal::backdrop { background: transparent; }
 .hierarchy-filters select { text-overflow: ellipsis; }
 /* Section H2s duplicate the masthead H1, so panels now lead with their
    creation action / filters in the heading slot, top-left. */
-.customer-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-start; gap: .5rem 1rem; margin-bottom: .35rem; }
-.customer-heading h2 { margin: 0; }
 #expense-dialog form, #expense-category-dialog form { margin: 0; }
 /* #232 phase 2b: a byte-identical duplicate of the retired
    `.field { margin-bottom: .65rem }`; the `.p-form__group` rhythm covers it. */

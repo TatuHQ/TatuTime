@@ -594,7 +594,7 @@ check('each section carries its own creation toolbar',
 // header) and the customer filter sits below the header where the old
 // "Projects - all customers" caption was, still naming the select.
 check('Projects leads with + Project and puts the customer filter under the header',
-  window.document.querySelector('#panel-projects .p-card__header button')?.id === 'project-new'
+  window.document.querySelector('#panel-projects .ts-head button')?.id === 'project-new'
   && !window.document.querySelector('#panel-projects .hierarchy-actions .filter-field')
   && window.document.querySelector('#panel-projects .hierarchy-filters')?.nextElementSibling?.id === 'projects-empty-state'
   && /customer/i.test(window.document.querySelector('#panel-projects label[for="proj-filter-customer"]')?.textContent || '')
@@ -602,19 +602,28 @@ check('Projects leads with + Project and puts the customer filter under the head
 // #182 follow-up: Tasks gets the same treatment - the action leads the header
 // and both dependent filters sit below it in place of the old scope caption.
 check('Tasks leads with + Task and puts both dependent filters under the header',
-  window.document.querySelector('#panel-tasks .p-card__header button')?.id === 'task-new'
+  window.document.querySelector('#panel-tasks .ts-head button')?.id === 'task-new'
   && !window.document.querySelector('#panel-tasks .hierarchy-actions .filter-field')
   && window.document.querySelectorAll('#panel-tasks .hierarchy-filters .filter-field').length === 2
   && window.document.querySelector('#panel-tasks .hierarchy-filters')?.nextElementSibling?.id === 'tasks-empty-state'
   && /customer/i.test(window.document.querySelector('#panel-tasks label[for="task-filter-customer"]')?.textContent || '')
   && /project/i.test(window.document.querySelector('#panel-tasks label[for="task-filter-project"]')?.textContent || '')
   && window.document.getElementById('task-scope-label') === null);
+// Every register's creation action sits ABOVE its card, in the same heading
+// slot Timesheets gives Track time — not inside the card background.
+check('register actions sit above the card, like Timesheets',
+  ['#panel-customers', '#panel-projects', '#panel-tasks', '#panel-expenses'].every((panel) => {
+    const row = window.document.querySelector(`${panel} .ts-head`);
+    const button = row && row.querySelector('button');
+    return !!button && !button.closest('.p-card')
+      && row.nextElementSibling?.classList.contains('p-card');
+  }));
 // Heading-slot cleanup: no duplicate section H2 under the masthead H1, and
 // the create action is the panel's first interactive element.
 check('panels lead with their action, not a duplicate H2',
   window.document.querySelector('#panel-customers h2') === null
   && window.document.querySelector('#panel-reports h2') === null
-  && window.document.querySelector('#panel-expenses .panel-heading-row button').id === 'expense-new'
+  && window.document.querySelector('#panel-expenses .ts-head button').id === 'expense-new'
   && window.document.querySelector('#panel-settings > .settings-head h2') === null);
 // Click "Projects" on the ACME row: cross-navigation filters the Projects
 // section (#182) — no shared selection state anymore.
