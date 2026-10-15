@@ -259,8 +259,6 @@ export async function refreshProjectTable() {
     for (const p of await loadProjects(cid)) rows.push({ cid, p });
   }
   if (!isProjectCurrent()) return; // #219: newer render won
-  $('project-scope-label').textContent = state.projectsFilter
-    ? `— ${customerName(state.projectsFilter)}` : '— all customers';
   const tbody = $('project-table').querySelector('tbody');
   tbody.textContent = '';
   for (const { cid, p } of rows) {

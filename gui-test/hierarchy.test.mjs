@@ -95,7 +95,8 @@ test('section navigation shows one panel at a time and scopes project rows (#182
   const scoped = [...document.querySelectorAll('#project-table tbody tr')];
   assert.equal(scoped.length, 1);
   assert.equal(scoped[0].cells[0].textContent.trim(), 'GX-1');
-  assert.match(document.getElementById('project-scope-label').textContent, /Globex/);
+  assert.equal(document.getElementById('project-scope-label'), null,
+    'the old scope caption is gone: the filter select itself carries the scope');
   assert.equal(document.getElementById('proj-filter-customer').value, 'c2', 'filter select reflects scope');
   // Clearing the filter returns to the all-customers view (#182 DoD).
   const sel = document.getElementById('proj-filter-customer');

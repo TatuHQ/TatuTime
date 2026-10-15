@@ -950,7 +950,7 @@ class Gate:
             "form vocabulary is in place (#232 phase 2b)",
             counts["field"] == 0 and counts["hint"] == 0 and counts["formError"] == 0
             and counts["groups"] == 116 and counts["labels"] == 112
-            and counts["controls"] == 112 and counts["help"] == 27
+            and counts["controls"] == 112 and counts["help"] == 26
             and counts["messages"] == counts["errorGroups"] == 23,
             f"counts={counts}",
             info=f"{counts['groups']} groups, {counts['help']} help texts, "
