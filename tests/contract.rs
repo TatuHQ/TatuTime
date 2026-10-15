@@ -2809,6 +2809,179 @@ async fn expense_receipt_roundtrips() {
     assert_eq!(got["receipt_b64"], "aGVsbG8=");
 }
 
+/// A converted expense keeps the amount as entered, its currency and the rate
+/// that produced the billed pair, and the billed pair stays authoritative.
+#[tokio::test]
+async fn expense_records_the_conversion_it_was_entered_with() {
+    let (app, _d) = app().await;
+    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap();
+    // USD 100.00 spent, billed as EUR 92.06 at the published 2026-10-01 rate.
+    // The rate is padded and carries trailing zeros on purpose: what is stored
+    // must be the digits the caller wrote, normalised — never a float's
+    // rendering of them (#11).
+    let (s, e) = json_req(
+        &app,
+        "POST",
+        "/api/expenses",
+        Some(json!({
+            "date":"2026-10-02","customer_id":cid,"amount_minor":9206,"currency":"EUR",
+            "original_amount_minor":10000,"original_currency":"USD",
+            "exchange_rate":" 0.920600 ","exchange_rate_date":"2026-10-01",
+            "note":"conference fee"
+        })),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{e}");
+    assert_eq!(
+        e["amount_minor"], 9206,
+        "the billed amount is authoritative"
+    );
+    assert_eq!(e["currency"], "EUR");
+    assert_eq!(e["original_amount_minor"], 10000);
+    assert_eq!(e["original_currency"], "USD");
+    assert_eq!(e["exchange_rate"], "0.9206");
+    assert_eq!(e["exchange_rate_date"], "2026-10-01");
+
+    // The provenance survives the document round-trip, on both read paths.
+    let eid = e["id"].as_str().unwrap();
+    let (_, got) = json_req(&app, "GET", &format!("/api/expenses/{eid}"), None).await;
+    assert_eq!(got["exchange_rate"], "0.9206");
+    assert_eq!(got["exchange_rate_date"], "2026-10-01");
+    let (_, list) = json_req(&app, "GET", "/api/expenses", None).await;
+    assert_eq!(list["expenses"][0]["original_currency"], "USD");
+
+    // An expense that was never converted carries none of the four keys, so a
+    // reader can tell "billed as entered" from "converted" without guessing.
+    let (sp, plain) = json_req(
+        &app,
+        "POST",
+        "/api/expenses",
+        Some(json!({"date":"2026-10-03","customer_id":cid,"amount_minor":500,"currency":"EUR"})),
+    )
+    .await;
+    assert_eq!(sp, StatusCode::CREATED, "{plain}");
+    for key in [
+        "original_amount_minor",
+        "original_currency",
+        "exchange_rate",
+        "exchange_rate_date",
+    ] {
+        assert!(
+            plain.get(key).is_none(),
+            "an unconverted expense must not carry {key}: {plain}"
+        );
+    }
+}
+
+/// The conversion group is all-or-nothing, a rate is a positive six-decimal
+/// number (never a float), and a rejected payload persists nothing.
+#[tokio::test]
+async fn expense_conversion_is_all_or_nothing_and_never_a_float() {
+    let (app, _d) = app().await;
+    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap();
+    // The billed pair is EUR; the amount was entered in USD.
+    let full = || {
+        json!({
+            "date":"2026-10-02","customer_id":cid,"amount_minor":9206,"currency":"EUR",
+            "original_amount_minor":10000,"original_currency":"USD",
+            "exchange_rate":"0.9206","exchange_rate_date":"2026-10-01"
+        })
+    };
+    let without = |keys: &[&str]| {
+        let mut body = full();
+        for key in keys {
+            body.as_object_mut().unwrap().remove(*key);
+        }
+        body
+    };
+    let (s, ok) = json_req(&app, "POST", "/api/expenses", Some(full())).await;
+    assert_eq!(s, StatusCode::CREATED, "{ok}");
+
+    let mut cases: Vec<(Value, &str, &str)> = vec![
+        (
+            without(&["original_amount_minor"]),
+            "original_amount_minor",
+            "the amount as entered is missing",
+        ),
+        (
+            without(&["original_currency"]),
+            "original_currency",
+            "the entered currency is missing",
+        ),
+        (
+            without(&["exchange_rate"]),
+            "exchange_rate",
+            "the applied rate is missing",
+        ),
+    ];
+    // No sign, no exponent, no thousands separator, no seventh decimal, no
+    // magnitude beyond the documented ceiling, and no zero.
+    for bad in [
+        "0",
+        "0.0",
+        "-1",
+        "+1",
+        "1e3",
+        "1.2345678",
+        "1000001",
+        "abc",
+        "1,5",
+    ] {
+        let mut body = full();
+        body["exchange_rate"] = json!(bad);
+        cases.push((
+            body,
+            "exchange_rate",
+            "a rate that is not positive and 6-decimal",
+        ));
+    }
+    let mut same_currency = full();
+    same_currency["original_currency"] = json!("EUR");
+    cases.push((
+        same_currency,
+        "original_currency",
+        "the billed currency converted with itself",
+    ));
+    let mut bad_date = full();
+    bad_date["exchange_rate_date"] = json!("yesterday");
+    cases.push((
+        bad_date,
+        "exchange_rate_date",
+        "a rate date that is not a date",
+    ));
+    let mut huge = full();
+    huge["original_amount_minor"] = json!(100_000_001);
+    cases.push((
+        huge,
+        "original_amount_minor",
+        "an original amount above the billed ceiling",
+    ));
+
+    for (body, field, why) in cases {
+        let (status, err) = json_req(&app, "POST", "/api/expenses", Some(body.clone())).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{why}: {err}");
+        let fields: Vec<&str> = err["error"]["fields"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|f| f["field"].as_str().unwrap())
+            .collect();
+        assert!(
+            fields.contains(&field),
+            "{why}: expected {field} in {fields:?}"
+        );
+        // Rejection without persistence is part of the contract.
+        let (_, list) = json_req(&app, "GET", "/api/expenses", None).await;
+        assert_eq!(
+            list["expenses"].as_array().unwrap().len(),
+            1,
+            "{why}: the refused payload must not be persisted"
+        );
+    }
+}
+
 // ------------------------------------------------------------ submissions --
 
 async fn seed_week(app: &Client, cid: &str) -> String {
