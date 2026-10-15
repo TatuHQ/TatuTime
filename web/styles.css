@@ -436,6 +436,13 @@ dialog.p-modal::backdrop { background: transparent; }
 /* #182: hierarchy-section filter controls + scope label */
 .filter-field { display: flex; flex-direction: column; gap: .15rem; font-size: .8rem; }
 .filter-field select { min-width: 11rem; }
+/* #182 follow-up: the Projects filter sits directly under the + Project action
+   and shares its width. Vanilla's base `select { width: 100% }` stretched the
+   filter across the whole card, so both controls are pinned to one width (the
+   action's natural width, 184px at the 16px root). */
+#panel-projects #project-new,
+#panel-projects .filter-field select { width: 11.5rem; }
+#panel-projects .filter-field select { text-overflow: ellipsis; }
 .scope-label { font-weight: 400; color: var(--muted); font-size: .95rem; }
 /* Section H2s duplicate the masthead H1, so panels now lead with their
    creation action / filters in the heading slot, top-left. */
