@@ -78,6 +78,24 @@ impl ApiError {
         )
     }
 
+    /// The path exists but not for this verb. Axum's own 405 is a bare status
+    /// with an empty body, which tells a client nothing — including when it is
+    /// talking to a server that does not serve the route it thinks it does.
+    pub fn method_not_allowed(method: &str, allowed: &[&str]) -> Self {
+        let message = match allowed.is_empty() {
+            true => format!("{method} is not allowed here"),
+            false => format!(
+                "{method} is not allowed here; this endpoint accepts {}",
+                allowed.join(", ")
+            ),
+        };
+        Self::new(
+            StatusCode::METHOD_NOT_ALLOWED,
+            "method_not_allowed",
+            message,
+        )
+    }
+
     /// A corrupt or unreadable stored document: server-side 500, logged with
     /// detail, generic message out.
     pub fn internal(context: String) -> Self {
@@ -100,6 +118,7 @@ pub const CODE_VOCABULARY: &[&str] = &[
     "validation_failed",
     "not_found",
     "conflict",
+    "method_not_allowed",
     "bad_request",
     "internal",
     "write_lock_busy",
