@@ -66,6 +66,18 @@ impl ApiError {
         )
     }
 
+    /// The exchange-rate reference table could not be loaded (offline, an
+    /// unreadable file, a malformed document). Fail-closed like the vault and
+    /// the SSO allow-list: the rate is never guessed, so the caller can type
+    /// one instead.
+    pub fn fx_unavailable() -> Self {
+        Self::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "fx_unavailable",
+            "exchange rates are unavailable; enter a rate manually",
+        )
+    }
+
     /// A corrupt or unreadable stored document: server-side 500, logged with
     /// detail, generic message out.
     pub fn internal(context: String) -> Self {
@@ -92,6 +104,7 @@ pub const CODE_VOCABULARY: &[&str] = &[
     "internal",
     "write_lock_busy",
     "lock_unavailable",
+    "fx_unavailable",
     "csrf",
     "unauthenticated",
     "forbidden",
