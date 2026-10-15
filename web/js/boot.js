@@ -6,7 +6,7 @@ import { addRecurring, createRetainer, iwInit, refreshCatalog, refreshRetainers,
 import { calState, refreshTimeCal, shiftMonth } from './calendar.js';
 import { $, addDays, announce, clearFormError, decorateUbuntuButton, isoDate, mondayOf } from './dom.js';
 import { ADD_CATEGORY_VALUE, addCategory, addExpense, addExpenseCategory, fillCategorySelect, refreshCategories, refreshExpenses, refreshSubmissions, resetCategoryForm, submitWeek } from './expenses.js';
-import { convertFx, refreshExpenseConversion, resetExpenseConversion, showConverted } from './fx.js';
+import { refreshExpenseConversion, resetExpenseConversion, showConverted } from './fx.js';
 import { cancelCustomerEdit, cancelProjectEdit, cancelTaskEdit, contactRow, fillParentCustomers, fillTaskParents, prefillProjectParent, refreshCustomerPickers, refreshCustomerTable, refreshProjectTable, refreshTaskTable, runReport, saveCustomer, saveProject, saveTask } from './hierarchy.js';
 import { closeInvoicePreview, dash, dashApplyColumns, downloadInvoicePdf, ed, edClose, edLineRow, edOpen, edRecalc, edSave, generateInvoice, invoicePreview, refreshInvoiceSummary, refreshInvoices } from './invoices.js';
 import { markNotificationsRead, refreshNotifications } from './notifications.js';
@@ -418,9 +418,6 @@ export function wireSetupPanels(today) {
   }
   $('expense-amount').addEventListener('input', showConverted);
   $('expense-rate').addEventListener('input', showConverted);
-  // The masthead finder converts on submit and whenever a code changes.
-  $('fx-form').addEventListener('submit', convertFx);
-  for (const id of ['fx-from', 'fx-to']) $(id).addEventListener('change', convertFx);
   $('expense-cancel').addEventListener('click', () => $('expense-dialog').close());
   let expenseCategoryBeforeQuickAdd = '';
   $('expense-category').addEventListener('change', () => {

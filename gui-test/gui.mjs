@@ -1714,23 +1714,6 @@ const convRow = [...window.document.querySelectorAll('#expense-table tbody tr')]
 check('the register shows the billed value and the amount as entered',
   convRow.textContent.includes('EUR 92.06') && convRow.textContent.includes('(USD 100.00 @ 0.9206)'));
 
-// The finder in the Expenses heading slot uses the same endpoint. A currency
-// with itself needs no rate table at all, so this holds whatever the host's
-// network does.
-window.document.getElementById('fx-from').value = 'EUR';
-window.document.getElementById('fx-to').value = 'EUR';
-window.document.getElementById('fx-amount').value = '1';
-window.document.getElementById('fx-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
-await waitFor(() => byId('fx-result').textContent === 'EUR 1.00 = EUR 1.00.', {
-  message: 'the finder identity conversion',
-});
-check('the top-bar finder converts a currency with itself', true);
-window.document.getElementById('fx-from').value = 'US';
-window.document.getElementById('fx-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
-await waitFor(() => /three-letter/.test(byId('fx-result').textContent), {
-  message: 'the finder to refuse a code that is not a currency',
-});
-check('the top-bar finder asks for a real currency code instead of calling the API', true);
 // #182 pattern: the expense register filters by customer and project, both
 // defaulting to "all".
 const expRows = () => [...window.document.querySelectorAll('#expense-table tbody tr')];

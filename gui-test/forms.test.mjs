@@ -254,7 +254,7 @@ test('decoration is attribute-only and every rendered button states what it need
     const vocab = {};
     for (const b of icons) vocab[b.dataset.icon] = (vocab[b.dataset.icon] || 0) + 1;
     assert.deepEqual(vocab, { plus: 10, copy: 2, play: 2, stop: 1 }, 'the shell icon vocabulary is pinned');
-    assert.equal(document.querySelectorAll('button[data-positive]').length, 33,
+    assert.equal(document.querySelectorAll('button[data-positive]').length, 32,
         'every positive shell button states data-positive');
 
     // The deleted label-mutation leaves no trace: no rendered label keeps a "+".

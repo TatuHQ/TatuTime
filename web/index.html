@@ -632,27 +632,6 @@
         <div class="hierarchy-actions" role="group" aria-label="Expense actions">
           <button type="button" id="expense-new" class="primary" data-icon="plus" data-positive="1">Expense</button>
         </div>
-        <!-- Currency finder (#…): the same GET /api/fx conversion the expense
-             dialog uses, in the heading slot to the right of the action — the
-             position the Day | Week | Calendar segments take in Timesheets, so
-             the section heads line up. It belongs to this page only: the panel
-             is hidden elsewhere, so the fields are not focusable there. Every
-             field keeps a real label (sr-only) — a placeholder is not an
-             accessible name — and the result is announced. -->
-        <form id="fx-form" class="fx-finder" aria-label="Currency converter" aria-describedby="fx-note">
-          <span class="sr-only" id="fx-note">Convert an amount between two currencies using the published daily reference rates.</span>
-          <label class="sr-only" for="fx-amount">Amount to convert</label>
-          <label class="sr-only" for="fx-from">From currency</label>
-          <label class="sr-only" for="fx-to">To currency</label>
-          <div class="fx-finder__row">
-            <input type="number" id="fx-amount" class="fx-amount" min="0" step="0.01" inputmode="decimal" value="1">
-            <input type="text" id="fx-from" class="fx-code" maxlength="3" autocomplete="off" value="USD">
-            <span class="fx-arrow" aria-hidden="true">→</span>
-            <input type="text" id="fx-to" class="fx-code" maxlength="3" autocomplete="off" value="EUR">
-            <button data-positive="1" type="submit" class="secondary" id="fx-convert">Convert</button>
-          </div>
-          <output id="fx-result" class="fx-result" for="fx-amount fx-from fx-to"></output>
-        </form>
       </div>
       <div class="p-card">
         <!-- #182 pattern: customer + project filters, both defaulting to "all",

@@ -326,7 +326,7 @@ VANILLA_INPUT_SKIN = (
     "  return a === b;"
     "};"
     "var list = document.querySelectorAll('input.p-form__control, textarea.p-form__control,"
-    " #dlg-input, .fx-finder input');"
+    " #dlg-input');"
     "var bad = [], checked = 0;"
     "for (var i = 0; i < list.length; i++) {"
     "  var el = list[i];"
@@ -362,45 +362,6 @@ FILLED_CONVERSION = (
     " note: document.getElementById('expense-rate-note').textContent,"
     " converted: document.getElementById('expense-converted').textContent"
     "});"
-)
-
-# The currency finder belongs to the Expenses page and to the heading slot: to
-# the right of the section's creation action and top-aligned with it — the
-# position the Day | Week | Calendar segments take in Timesheets. A finder that
-# drifted back into the global masthead, or below the action, fails here.
-FINDER_SLOT = (
-    "var form = document.getElementById('fx-form');"
-    "if (!form) return 'no finder';"
-    "var head = form.closest('.ts-head');"
-    "var panel = form.closest('#panel-expenses');"
-    "var action = document.getElementById('expense-new');"
-    "if (!head || !panel || !action) return 'missing markup';"
-    "var problems = [];"
-    "if (document.querySelector('.masthead #fx-form')) problems.push('still in the masthead');"
-    "if (head.parentElement !== panel) problems.push('not in the Expenses heading slot');"
-    "var f = form.getBoundingClientRect(), a = action.getBoundingClientRect();"
-    "var h = head.getBoundingClientRect();"
-    "if (f.left < a.right) problems.push('left of the section action');"
-    "if (Math.abs(f.top - h.top) > 1) {"
-    "  problems.push('not top-aligned in its slot (' + Math.round(f.top - h.top) + 'px)');"
-    "}"
-    # One centre line: the action's label, the fields' text, the arrow and the
-    # Convert button must all sit on it. A stacked-form `margin-bottom` on a
-    # control is inside its margin box, so it silently drops the arrow and the
-    # button by half that margin.
-    "function mid(n) { var r = n.getBoundingClientRect(); return (r.top + r.bottom) / 2; }"
-    "var line = [action, document.getElementById('fx-amount'), document.querySelector('.fx-arrow'),"
-    " document.getElementById('fx-from'), document.getElementById('fx-to'),"
-    " document.getElementById('fx-convert')];"
-    "var base = mid(action);"
-    "for (var i = 1; i < line.length; i++) {"
-    "  var off = mid(line[i]) - base;"
-    "  if (Math.abs(off) > 1) {"
-    "    problems.push((line[i].id || line[i].className) + ' sits ' + off.toFixed(1)"
-    "                  + 'px off the section action centre line');"
-    "  }"
-    "}"
-    "return problems.length ? problems.join('; ') : 'ok';"
 )
 
 FILTER_MATCHES_ACTION = (
@@ -1438,48 +1399,11 @@ class Gate:
         what is billed, and the register shows both. The rate table is served
         from disk (see `start_server`), so the arithmetic is exact and the check
         needs no network."""
-        # The finder belongs to the Expenses page alone: on any other section the
-        # panel is hidden, so it takes no room and its fields cannot be focused.
-        self.navigate("/customers")
-        self.wait_script(
-            "document.readyState === 'complete'"
-            " && document.getElementById('version').textContent === 'TucanoTime'",
-            "the app to boot at /customers",
-        )
-        outside = self.marionette.script(
-            "var f = document.getElementById('fx-form');"
-            "if (!f) return 'missing';"
-            "var r = f.getBoundingClientRect();"
-            "return r.width === 0 && r.height === 0"
-            "  ? 'ok' : 'laid out ' + Math.round(r.width) + 'x' + Math.round(r.height);"
-        )
-        self.check(
-            "the currency finder belongs to the Expenses page alone",
-            outside == "ok",
-            f"on the Customers section the finder is {outside}",
-        )
         self.navigate("/expenses")
         self.wait_script(
             "document.readyState === 'complete'"
             " && document.getElementById('version').textContent === 'TucanoTime'",
             "the app to boot at /expenses",
-        )
-        empty = self.marionette.script(
-            "var f = document.getElementById('fx-form').getBoundingClientRect();"
-            "var a = document.getElementById('expense-new').getBoundingClientRect();"
-            "return Math.abs(f.height - a.height) <= 1"
-            "  ? 'ok' : 'the finder is ' + (f.height - a.height).toFixed(1) + 'px taller than the action';"
-        )
-        self.check(
-            "with nothing to read out, the finder is exactly as tall as + Expense",
-            empty == "ok",
-            f"empty finder: {empty}",
-        )
-        slot = self.marionette.script(FINDER_SLOT)
-        self.check(
-            "the action, the fields, the arrow and Convert share one line in the Expenses heading slot",
-            slot == "ok",
-            f"finder slot: {slot}",
         )
         self.marionette.script(
             "document.getElementById('expense-new').click();"
@@ -1562,49 +1486,6 @@ class Gate:
             f"stored={stored}",
         )
 
-        # The finder in the Expenses heading slot converts with the same endpoint.
-        # A currency with itself needs no table at all, and a code that is not a
-        # currency is explained instead of requested.
-        finder = int(round(10000 * (1.0 / 1.0831)))
-        for frm, to, amount, expected, why in (
-            ("USD", "EUR", "100",
-             f"USD 100.00 = EUR {finder / 100:.2f} at the 2026-10-14 reference rate.",
-             "converts an amount at the published rate and names its date"),
-            ("EUR", "EUR", "1", "EUR 1.00 = EUR 1.00.",
-             "converts a currency with itself without a table"),
-            ("US", "EUR", "1", "Enter two three-letter currency codes (e.g. USD and EUR).",
-             "explains a code that is not a currency instead of calling the API"),
-        ):
-            self.marionette.script(
-                "document.getElementById('fx-from').value = %r;"
-                "document.getElementById('fx-to').value = %r;"
-                "document.getElementById('fx-amount').value = %r;"
-                "document.getElementById('fx-form')"
-                ".dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));"
-                "return true;" % (frm, to, amount)
-            )
-            try:
-                self.wait_script(
-                    "document.getElementById('fx-result').textContent === %r" % expected,
-                    f"the finder to answer {expected!r}",
-                )
-                answered = True
-            except RuntimeError:
-                answered = False
-            result = self.marionette.script(
-                "return document.getElementById('fx-result').textContent;"
-            )
-            self.check(
-                f"the currency finder {why}",
-                answered and result == expected,
-                f"showed {result!r}, expected {expected!r}",
-            )
-        slot = self.marionette.script(FINDER_SLOT)
-        self.check(
-            "showing a conversion leaves the finder's row on the action's line",
-            slot == "ok",
-            f"finder slot with a result: {slot}",
-        )
         self.drain_console("currency conversion")
 
     # ------------------------------------------- sortable register (#232 2d) --

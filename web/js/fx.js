@@ -1,4 +1,4 @@
-// fx.js — currency conversion for the expense dialog and the Expenses finder.
+// fx.js — currency conversion for the expense dialog.
 //
 // Pure presentation: every rate comes from `GET /api/fx?from=&to=` and is never
 // invented here. The endpoint answers `{from, to, rate, date, source}`, where
@@ -14,7 +14,7 @@
 
 
 import { api } from './api.js';
-import { $, announce, formatMoney } from './dom.js';
+import { $, formatMoney } from './dom.js';
 import { loadProjects, state } from './state.js';
 
 // ---------------------------------------------------------------- maths ---
@@ -179,33 +179,4 @@ export async function refreshExpenseConversion() {
     }
   }
   showConverted();
-}
-
-// ------------------------------------------ Expenses-page currency finder ---
-
-/// The finder in the Expenses heading slot: an amount and a pair, converted
-/// with the same endpoint the dialog uses.
-export async function convertFx(evt) {
-  if (evt) evt.preventDefault();
-  const out = $('fx-result');
-  const from = currencyCode($('fx-from').value);
-  const to = currencyCode($('fx-to').value);
-  const minor = toMinor($('fx-amount').value);
-  if (!from || !to) {
-    out.textContent = 'Enter two three-letter currency codes (e.g. USD and EUR).';
-    return;
-  }
-  if (!Number.isFinite(minor)) {
-    out.textContent = 'Enter the amount to convert.';
-    return;
-  }
-  const fetched = await fetchRate(from, to);
-  if (!fetched || !Number.isFinite(fetched.rate)) {
-    out.textContent = `No published ${from}/${to} rate is available right now.`;
-    announce(`No published ${from}/${to} reference rate is available right now.`);
-    return;
-  }
-  const converted = convertMinor(minor, fetched.rate);
-  const at = fetched.date ? ` at the ${fetched.date} reference rate` : '';
-  out.textContent = `${from} ${formatMoney(minor)} = ${to} ${formatMoney(converted)}${at}.`;
 }
