@@ -712,17 +712,23 @@ check('project row Tasks action opens the Tasks section with both filters set',
   && window.document.getElementById('task-filter-customer').value === acmeOpt.value
   && window.document.getElementById('task-filter-project').value === 'MKT-2'
   && window.document.getElementById('task-scope-label') === null);
-{ // Dependent reset (#182): clearing the customer clears the child pick.
+{ // #182-follow-up: both task filters offer an "all" scope, so clearing the
+  // customer widens the list instead of blocking it.
   const custSel = window.document.getElementById('task-filter-customer');
   custSel.value = '';
   custSel.dispatchEvent(new window.Event('change', { bubbles: true }));
-  await waitFor(() => byId('task-filter-project').value === '' && !byId('tasks-empty-state').hidden, {
-    message: 'clearing the customer to reset the dependent project filter',
-  });
   const projSel = window.document.getElementById('task-filter-project');
-  check('clearing the customer resets the dependent project filter',
-    projSel.value === '' && projSel.disabled === true
-    && !window.document.getElementById('tasks-empty-state').hidden);
+  await waitFor(() => projSel.value === '' && projSel.options[0].textContent === 'All projects'
+    && /all customers and projects/i.test(byId('live-region').textContent), {
+    message: 'clearing the customer to widen the task list to every customer',
+  });
+  check('clearing the customer widens the list and keeps the project pick usable',
+    projSel.value === '' && projSel.disabled === false
+    && custSel.options[0].textContent === 'All customers'
+    && projSel.options[0].textContent === 'All projects'
+    && /all customers and projects/i.test(byId('live-region').textContent)
+    && !byId('tasks-empty-state').hidden
+    && /No tasks yet/.test(byId('tasks-empty-state').textContent));
   custSel.value = acmeOpt.value;
   custSel.dispatchEvent(new window.Event('change', { bubbles: true }));
   await waitFor(() => [...byId('task-filter-project').options].some((o) => o.value === 'MKT-2'), {

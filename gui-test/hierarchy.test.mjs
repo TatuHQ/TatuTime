@@ -110,7 +110,7 @@ test('section navigation shows one panel at a time and scopes project rows (#182
   dom.window.close();
 });
 
-test('tasks filters are dependent and the project choices follow the customer (#182)', async () => {
+test('tasks filters scope by customer and project, and both default to all (#182)', async () => {
   const { dom, h, document } = setup();
   await h.openTasksFor('c1', 'MKT-2');
   await waitFor(() => document.getElementById('panel-tasks').hidden === false
@@ -120,44 +120,61 @@ test('tasks filters are dependent and the project choices follow the customer (#
   assert.equal(document.getElementById('panel-tasks').hidden, false);
   assert.equal(document.getElementById('task-filter-customer').value, 'c1');
   const proj = document.getElementById('task-filter-project');
-  assert.equal(proj.disabled, false, 'project filter enabled once a customer is picked');
+  assert.equal(proj.disabled, false, 'the project filter is always usable');
   assert.deepEqual(
     [...proj.options].map((o) => o.value),
     ['', 'ACM', 'MKT-2'],
     'project choices are scoped to the selected customer only',
   );
+  assert.equal(proj.options[0].textContent, 'All projects', 'the child filter offers "all"');
+  assert.equal(document.getElementById('task-filter-customer').options[0].textContent, 'All customers');
   assert.equal(proj.value, 'MKT-2');
   assert.equal(document.querySelector('#task-table tbody tr th').textContent, 'W-1');
   assert.equal(document.getElementById('tasks-empty-state').hidden, true);
 
-  // Clearing the customer resets the dependent project pick and shows the
-  // accessible empty state (#182 DoD).
+  // #182-follow-up: clearing the customer widens to every customer and project
+  // rather than blocking the list — an unset filter is a scope, not a gap.
   const cust = document.getElementById('task-filter-customer');
   cust.value = '';
   cust.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
-  await waitFor(() => proj.value === '' && proj.disabled === true, {
-    message: 'clearing the customer to reset the dependent project pick',
+  await waitFor(() => proj.value === '' && document.getElementById('task-table').hidden === false
+    && /all customers and projects/i.test(document.getElementById('live-region').textContent), {
+    message: 'clearing the customer to widen the task list',
   });
   assert.equal(proj.value, '', 'child selection reset with the parent');
-  assert.equal(proj.disabled, true, 'project filter disabled without a customer');
-  assert.equal(document.getElementById('task-table').hidden, true);
-  assert.equal(document.getElementById('tasks-empty-state').hidden, false);
-  assert.match(document.getElementById('live-region').textContent, /cleared/i);
+  assert.equal(proj.disabled, false, 'the project pick stays usable ("All projects")');
+  assert.deepEqual(
+    [...proj.options].map((o) => o.textContent),
+    ['All projects'],
+    'with no customer picked, no concrete project can be named',
+  );
+  assert.equal(rowsIn(document, '#task-table tbody tr').length, 1,
+    'the unscoped list shows every task (W-1 lives in ACME / MKT-2)');
+  assert.equal(document.getElementById('tasks-empty-state').hidden, true);
+  assert.match(document.getElementById('live-region').textContent, /all customers and projects/i);
   dom.window.close();
 });
 
-test('tasks list filters to the selected project and announces (#182)', async () => {
+test('an all-projects scope lists a customer\'s tasks and names each row\'s project (#182)', async () => {
   const { dom, h, document } = setup();
   await h.openTasksFor('c1', '');
-  // Customer only: no task list yet — empty state explains the next step.
-  await waitFor(() => /choose a project/i.test(document.getElementById('tasks-empty-state').textContent), {
-    message: 'the customer-only task view to explain the next step',
+  // Customer picked, project left on "all": every task of that customer lists,
+  // each row naming the project it came from.
+  await waitFor(() => rowsIn(document, '#task-table tbody tr').length === 1, {
+    message: 'the all-projects task list to render ACME\'s tasks',
   });
-  assert.match(document.getElementById('tasks-empty-state').textContent, /choose a project/i);
+  assert.equal(document.getElementById('task-filter-project').options[0].textContent, 'All projects');
+  assert.equal(
+    document.querySelector('#task-table tbody td[data-heading="Project"]').textContent,
+    'MKT-2',
+    'a row names its parent project when the scope spans projects',
+  );
+  assert.equal(document.getElementById('tasks-empty-state').hidden, true);
   const proj = document.getElementById('task-filter-project');
   proj.value = 'MKT-2';
   proj.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
-  await waitFor(() => document.querySelector('#task-table tbody tr th')?.textContent === 'W-1', {
+  await waitFor(() => document.querySelector('#task-table tbody tr th')?.textContent === 'W-1'
+    && /ACME \/ MKT-2/.test(document.getElementById('live-region').textContent), {
     message: 'the scoped task list to render its W-1 row',
   });
   assert.equal(document.querySelector('#task-table tbody tr th').textContent, 'W-1');
