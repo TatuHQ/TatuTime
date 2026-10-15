@@ -14,6 +14,8 @@ export const state = {
   // #182: the Setup hierarchy is three sections with filter state instead of
   // the old shared workspace selection.
   projectsFilter: null,    // customer id | null = all customers
+  expensesCustomer: null,  // expense filters (same "all" default as Tasks)
+  expensesProject: null,
   tasksCustomer: null,     // customer id | null
   tasksProject: null,      // project code | null
 };

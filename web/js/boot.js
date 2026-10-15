@@ -415,6 +415,25 @@ export function wireSetupPanels(today) {
     expenseCategoryBeforeQuickAdd = $('expense-category').value;
   });
   $('expense-category-form').addEventListener('submit', addExpenseCategory);
+  // Expense register filters (#182 pattern): customer and project, both "all"
+  // by default, with the dependent project reset when the customer changes.
+  $('expense-filter-customer').addEventListener('change', async () => {
+    state.expensesCustomer = $('expense-filter-customer').value || null;
+    state.expensesProject = null;
+    await refreshExpenses();
+    announce(state.expensesCustomer
+      ? `Expenses for ${customerName(state.expensesCustomer)} — all projects.`
+      : 'Expenses for all customers and projects.');
+  });
+  $('expense-filter-project').addEventListener('change', async () => {
+    state.expensesProject = $('expense-filter-project').value || null;
+    await refreshExpenses();
+    announce(state.expensesProject
+      ? `Expenses for ${customerName(state.expensesCustomer)} / ${state.expensesProject}.`
+      : state.expensesCustomer
+        ? `All projects for ${customerName(state.expensesCustomer)}.`
+        : 'Expenses for all customers and projects.');
+  });
   $('expense-category-cancel').addEventListener('click', () => $('expense-category-dialog').close());
   $('expense-form').addEventListener('submit', addExpense);
   $('submission-form').addEventListener('submit', submitWeek);

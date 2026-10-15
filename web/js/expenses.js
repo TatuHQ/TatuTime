@@ -4,7 +4,7 @@
 
 import { api } from './api.js';
 import { $, announce, askConfirm, clearFormError, el, fillSelect, formatMoney, showFormError, statusChip } from './dom.js';
-import { customerName, state } from './state.js';
+import { customerName, loadProjects, state } from './state.js';
 import { invalidateLockCache, refreshDay } from './timesheet.js';
 
 // ---------------------------------------------------------------- expenses --
@@ -132,7 +132,32 @@ export async function addExpenseCategory(evt) {
 
 export async function refreshExpenses() {
   const data = await api.get('/expenses');
-  const expenses = data.expenses || [];
+  const all = data.expenses || [];
+  // The register is scoped by customer and project, both defaulting to "all"
+  // (an unset filter is a scope, not a gap — same shape as the Tasks section).
+  const custSel = $('expense-filter-customer');
+  fillSelect(custSel, [
+    { value: '', text: 'All customers' },
+    ...state.customers.map((c) => ({
+      value: c.id,
+      text: c.active ? c.name : `${c.name} (inactive)`,
+      selected: c.id === state.expensesCustomer,
+    })),
+  ]);
+  custSel.value = state.expensesCustomer || '';
+  const projSel = $('expense-filter-project');
+  // Projects belong to a customer, so concrete choices only exist once one is
+  // picked; with all customers the pick rests on "All projects".
+  const projects = state.expensesCustomer ? await loadProjects(state.expensesCustomer) : [];
+  fillSelect(projSel, [
+    { value: '', text: 'All projects' },
+    ...projects.map((p) => ({ value: p.code, text: p.code, selected: p.code === state.expensesProject })),
+  ]);
+  projSel.disabled = false;
+  projSel.value = state.expensesProject || '';
+  const expenses = all.filter((x) =>
+    (!state.expensesCustomer || x.customer_id === state.expensesCustomer)
+    && (!state.expensesProject || (x.project_code || '') === state.expensesProject));
   const tbody = $('expense-table').querySelector('tbody');
   tbody.textContent = '';
   for (const x of expenses) {
@@ -143,7 +168,9 @@ export async function refreshExpenses() {
         el('td', { attrs: { 'data-heading': 'Customer' }, text: customerName(x.customer_id) }),
         el('td', { attrs: { 'data-heading': 'Project' }, text: x.project_code || '' }),
         el('td', { attrs: { 'data-heading': 'Category' }, text: c ? c.name : '' }),
-        el('td', { cls: 'num', attrs: { 'data-heading': 'Amount' }, text: `${x.currency} ${formatMoney(x.amount_minor)}` }),
+        // No `num`: the amount reads left-aligned with its column header, like
+        // every other register (the utility right-aligns).
+        el('td', { attrs: { 'data-heading': 'Amount' }, text: `${x.currency} ${formatMoney(x.amount_minor)}` }),
         el('td', { attrs: { 'data-heading': 'Billable' }, text: x.billable ? 'yes' : 'no' }),
         el('td', { cls: 'actions-col', attrs: { 'data-heading': 'Actions' } }, [
           el('button', {
