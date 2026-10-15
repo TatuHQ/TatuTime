@@ -65,13 +65,18 @@ test('Setup exposes three sibling sections with tab/panel wiring (#182)', () => 
   assert.ok(tabs.every((t) => t && t.getAttribute('role') === 'tab'), 'three tab buttons');
   const panels = tabs.map((t) => document.getElementById(t.getAttribute('aria-controls')));
   assert.ok(panels.every((p) => p && p.getAttribute('role') === 'tabpanel'), 'matching panels');
+  // #16 (Approvals) is hidden for now — the approval process is not implemented —
+  // so it keeps its tablist slot and its panel while dropping out of the rail's
+  // visible order.
   assert.deepEqual(
     [...document.querySelectorAll('#tabs .nav-group')].flatMap((g) =>
-      [...g.querySelectorAll('[role="tab"]')].map((t) => t.id)),
+      [...g.querySelectorAll('[role="tab"]')].filter((t) => !t.hidden).map((t) => t.id)),
     ['tab-timesheet', 'tab-customers', 'tab-projects', 'tab-tasks',
-      'tab-invoices', 'tab-expenses', 'tab-submissions', 'tab-reports', 'tab-settings'],
+      'tab-invoices', 'tab-expenses', 'tab-reports', 'tab-settings'],
     'Customers/Projects/Tasks sit together in the Setup group',
   );
+  assert.equal(document.getElementById('tab-submissions').hidden, true,
+    'Approvals stays on the rail, hidden, until its process exists (#16)');
   dom.window.close();
 });
 
