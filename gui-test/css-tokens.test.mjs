@@ -328,3 +328,16 @@ test('the week day-column header grid is declared on the inner .wk-head span (#1
   assert.equal(baseBody('#week-table.grid thead th .wk-date').includes('grid-row'), true,
     'the date/clock/weekday placement rules still target the .wk-head children');
 });
+
+test('the calendar day cell pins its content to the top of the cell (#140)', () => {
+  // A logged day renders as a <button> and an empty day as a <div>. Vanilla's
+  // base button rule sets `justify-content: center`, which centred the button's
+  // content vertically while the div top-aligned, so the date and status icon
+  // sat lower on days with time. jsdom computes no layout — only a real browser
+  // sees it (pinned too in browser-smoke.py).
+  assert.match(
+    (declared(baseBody('.cal-day'), 'justify-content') || '').trim(),
+    /^flex-start$/i,
+    '.cal-day must pin justify-content: flex-start, or a logged <button> day centres its content',
+  );
+});

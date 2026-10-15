@@ -580,7 +580,13 @@ dialog.p-modal::backdrop { background: transparent; }
   padding: 0; transition: background .12s; }
 #cal-grid td.cal-out { border: 1px dashed var(--line); opacity: .4; }
 #cal-grid td.cal-cell.today { outline: 2px solid var(--accent); outline-offset: -2px; }
-.cal-day { display: flex; flex-direction: column; align-items: flex-start; gap: .15rem; width: 100%;
+/* A logged day is a <button> (keyboard-activatable) and an empty day is a plain
+   <div>. Vanilla's base button rule sets `justify-content: center`, which centred
+   the button's content vertically while the div top-aligned — the date number and
+   the status icon then sat lower on exactly the days that had time. Pin both to
+   the top so every cell's head row sits on the same line. */
+.cal-day { display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start;
+  gap: .15rem; width: 100%;
   height: 100%; padding: .3rem .4rem; background: none; border: 0; font: inherit; color: inherit;
   cursor: pointer; text-align: left; }
 .cal-day.cal-plain { cursor: default; }

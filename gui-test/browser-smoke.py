@@ -214,6 +214,24 @@ WEEK_COLUMN_ALIGNMENT = (
     "return bad.length ? bad.join('; ') : 'ok';"
 )
 
+# #140: every calendar day cell must top-align its content. A logged day is a
+# <button> and an empty day a <div>, and Vanilla's base button rule centres
+# button content (`justify-content: center`) — so the date number and the status
+# icon dropped below the empty days' line. Acceptable values are `flex-start` on
+# the button and the default `normal` (flex-start) on the div; anything centred
+# fails. Works whether or not the displayed month has entries.
+CALENDAR_DAY_ALIGNMENT = (
+    "var days = document.querySelectorAll('#cal-grid .cal-day');"
+    "if (!days.length) return 'no day cells';"
+    "for (var i = 0; i < days.length; i++) {"
+    "  var jc = getComputedStyle(days[i]).justifyContent;"
+    "  if (jc !== 'flex-start' && jc !== 'normal') {"
+    "    return days[i].tagName + ' day cell is not top-aligned: justify-content=' + jc;"
+    "  }"
+    "}"
+    "return 'ok';"
+)
+
 
 # ---------------------------------------------------------------------------
 # Marionette client (protocol 2 and 3): a length-prefixed JSON wire protocol.
@@ -878,6 +896,13 @@ class Gate:
                     "/timesheets/week day headers share their column box (#12)",
                     align == "ok",
                     f"header cells no longer align with the days below them: {align}",
+                )
+            if path == "/timesheets/calendar":
+                align = self.marionette.script(CALENDAR_DAY_ALIGNMENT)
+                self.check(
+                    "/timesheets/calendar day cells top-align their content (#140)",
+                    align == "ok",
+                    f"a calendar day cell is not top-aligned: {align}",
                 )
             deco = json.loads(self.marionette.script(BUTTON_DECORATION))
             issues = (deco["badSubmit"] + deco["badPrimary"] + deco["badSkin"]
