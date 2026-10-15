@@ -1,4 +1,4 @@
-// fx.js — currency conversion for the expense dialog and the top-bar finder.
+// fx.js — currency conversion for the expense dialog and the Expenses finder.
 //
 // Pure presentation: every rate comes from `GET /api/fx?from=&to=` and is never
 // invented here. The endpoint answers `{from, to, rate, date, source}`, where
@@ -181,10 +181,10 @@ export async function refreshExpenseConversion() {
   showConverted();
 }
 
-// --------------------------------------------------------- top-bar finder ---
+// ------------------------------------------ Expenses-page currency finder ---
 
-/// The masthead converter: an amount and a pair, converted with the same
-/// endpoint the dialog uses.
+/// The finder in the Expenses heading slot: an amount and a pair, converted
+/// with the same endpoint the dialog uses.
 export async function convertFx(evt) {
   if (evt) evt.preventDefault();
   const out = $('fx-result');

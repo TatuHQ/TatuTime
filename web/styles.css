@@ -162,15 +162,17 @@ body {
 .customer-extra-details[open] > summary { margin-bottom: .45rem; }
 
 .content { flex: 1; display: flex; flex-direction: column; min-width: 0; }
-.masthead { padding: 1.1rem 1.5rem; border-bottom: 1px solid var(--line); background: var(--surface); display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+.masthead { padding: 1.1rem 1.5rem; border-bottom: 1px solid var(--line); background: var(--surface); }
 .masthead h1 { margin: 0; font-size: 2rem; line-height: 1.25; font-weight: 550; }
-/* Masthead currency finder + the expense dialog's conversion readout. The finder
-   is a toolbar, not a form row: its controls keep intrinsic widths (Vanilla's
-   base forms stretch every input to 100%) and its labels are sr-only, because
-   the visible pair of codes is the point of the widget. */
-.fx-finder { display: flex; align-items: center; gap: .4rem; margin: 0; flex-wrap: wrap; }
-.fx-finder input { width: 6.5rem; }
-.fx-finder .fx-code { width: 4.5rem; text-transform: uppercase; }
+/* The currency finder sits in the Expenses heading slot, to the right of the
+   creation action — the position the Day | Week | Calendar segments take in
+   Timesheets, so every section head lines up the same way. It is a toolbar, not
+   a form row: its controls keep intrinsic widths (Vanilla's base forms stretch
+   every input to 100%) and its labels are sr-only, because the visible pair of
+   codes is the point of the widget. */
+.fx-finder { display: flex; align-items: center; justify-content: flex-end; gap: .4rem; margin: 0; flex-wrap: wrap; }
+.fx-finder input { width: 5.5rem; }
+.fx-finder .fx-code { width: 4.25rem; text-transform: uppercase; }
 .fx-finder .fx-arrow { color: var(--muted); font-size: .95rem; }
 .fx-result { font-size: .875rem; color: var(--muted); }
 .fx-original { color: var(--muted); }
