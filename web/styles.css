@@ -468,8 +468,11 @@ dialog.p-modal::backdrop { background: transparent; }
 /* --------------------------------- timesheet section + Day|Week segment -- #107 */
 .ts-head {
   /* Heading slot: the section's create action sits left, the view segments
-     right — one Track time for Day/Week/Calendar alike. */
-  display: flex; align-items: center; justify-content: space-between;
+     right — one Track time for Day/Week/Calendar alike. Items are pinned to the
+     TOP of the slot: the Day|Week|Calendar segments are taller than the button,
+     and centring them pushed Track time ~6px below the + buttons in the other
+     sections, whose rows hold nothing but the action. */
+  display: flex; align-items: flex-start; justify-content: space-between;
   gap: 1rem; margin: 0 0 1.1rem; flex-wrap: wrap;
 }
 .settings-head { display: flex; align-items: center; justify-content: flex-start; gap: 1rem; flex-wrap: wrap; margin-bottom: .9rem; }

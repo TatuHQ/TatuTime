@@ -260,6 +260,20 @@ TABLE_CELL_ALIGNMENT = (
     "return uniq.length ? uniq.slice(0, 3).join('; ') : 'ok';"
 )
 
+# The section action must sit at the TOP of its heading slot. Centring it made
+# Track time (whose slot also holds the taller Day|Week|Calendar segments) land
+# ~6px below the + buttons in Customers/Projects/Tasks/Expenses, whose slots hold
+# nothing else — a difference visible side by side, and only in a real browser.
+ACTION_TOP_ALIGNED = (
+    "var b = document.getElementById({button!r});"
+    "if (!b) return 'missing ' + {button!r};"
+    "var head = b.closest('.ts-head');"
+    "if (!head) return {button!r} + ' has no heading slot';"
+    "var d = Math.abs(b.getBoundingClientRect().top - head.getBoundingClientRect().top);"
+    "return d <= 1 ? 'ok'"
+    "  : 'the action sits ' + Math.round(d) + 'px below the top of its slot';"
+)
+
 FILTER_MATCHES_ACTION = (
     "var b = document.getElementById({button!r});"
     "var sels = document.querySelectorAll({filters!r} + ' select');"
@@ -957,6 +971,24 @@ class Gate:
                 )
             # #182 follow-up: each section's filter row must line up with its
             # creation action (and with its sibling filters).
+            # Every section's action is top-aligned in the same heading slot
+            # Timesheets uses, so they line up across sections.
+            action_button = {
+                "/timesheets/day": "day-add",
+                "/customers": "customer-new",
+                "/projects": "project-new",
+                "/tasks": "task-new",
+                "/expenses": "expense-new",
+            }.get(path)
+            if action_button:
+                top = self.marionette.script(
+                    ACTION_TOP_ALIGNED.format(button=action_button)
+                )
+                self.check(
+                    f"{path} action is top-aligned in its heading slot",
+                    top == "ok",
+                    f"the action is not flush with its slot: {top}",
+                )
             # The register columns that have a header/cell alignment pair.
             if path in ("/customers", "/projects"):
                 align = self.marionette.script(TABLE_CELL_ALIGNMENT)
