@@ -125,6 +125,25 @@ test('every dialog adopts the official p-modal pattern with an accessible name (
   }
 });
 
+test('every dialog ships a visible cancel button (#141)', () => {
+  // The + Track time dialog shipped its only way out with `hidden` (it was only
+  // revealed while editing), and the setup wizard hid its only dismiss button on
+  // its last step — a popup you cannot visibly back out of. Every native dialog
+  // must carry a cancel affordance that is not hidden in the markup.
+  const document = new JSDOM(html).window.document;
+  const dialogs = [...document.querySelectorAll('dialog')];
+  assert.ok(dialogs.length >= 10, `expected the full dialog set, got ${dialogs.length}`);
+  for (const dlg of dialogs) {
+    const cancels = [...dlg.querySelectorAll('button')]
+      .filter((b) => /cancel/i.test(`${b.id} ${b.textContent}`));
+    assert.ok(cancels.length > 0, `${dlg.id} has no cancel button`);
+    assert.ok(
+      cancels.some((b) => !b.hasAttribute('hidden')),
+      `${dlg.id} ships its cancel button hidden — every popup needs a visible way out`,
+    );
+  }
+});
+
 test('the bespoke dialog skins are retired, keeping only the p-modal adapter (#232 inc 4)', () => {
   assert.ok(stylesCss.includes('dialog.p-modal'), 'the native dialog keeps the overlay role');
   assert.ok(!stylesCss.includes('dialog { max-height'), 'no generic <dialog> box rule survives');
