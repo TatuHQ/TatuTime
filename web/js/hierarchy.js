@@ -196,18 +196,13 @@ export async function removeCustomer(c) {
       $('projects-empty-state').hidden = false;
     }
     if (state.tasksCustomer === c.id) {
-      // Dependent reset (#182 DoD): clearing the parent filter clears the
-      // child selection and restores the section's empty state.
+      // The deleted customer was the Tasks filter: fall back to the "all" scope
+      // and re-render, rather than faking an empty state.
       state.tasksCustomer = null;
       state.tasksProject = null;
-      $('task-filter-customer').value = '';
-      $('task-filter-project').textContent = '';
-      $('task-filter-project').disabled = true;
-      $('task-filter-project').appendChild(el('option', { attrs: { value: '' }, text: 'Choose a customer first…' }));
-      $('task-table').hidden = true;
-      $('tasks-empty-state').hidden = false;
     }
     delete state.projectsByCustomer[c.id];
+    await refreshTaskTable();
     announce('Customer deleted.');
   } catch (err) {
     announce(err.message);
@@ -417,16 +412,13 @@ export async function removeProject(cid, p) {
   if (!(await askConfirm(`Delete project ${p.code}?`))) return;
   try {
     await api.del(`/customers/${cid}/projects/${encodeURIComponent(p.code)}`);
-    // Dependent reset (#182): the Tasks filters must not point at a deleted
-    // project — clear the child pick and its empty state takes over.
+    // Dependent reset (#182): the Tasks filter must not point at a deleted
+    // project — drop it back to "all projects" and re-render.
     if (state.tasksCustomer === cid && state.tasksProject === p.code) {
       state.tasksProject = null;
-      $('task-filter-project').value = '';
-      $('task-table').hidden = true;
-      $('tasks-empty-state').hidden = false;
-      updateHierarchyActions();
     }
     await refreshProjectTable();
+    await refreshTaskTable();
     announce('Project deleted.');
   } catch (err) {
     await askAlert(err.message); // #189: was double-reported (announce + dialog)
@@ -446,46 +438,56 @@ export async function openTasksFor(cid, pcode) {
 }
 
 export async function refreshTaskTable() {
-  // #182: the section is driven by its two dependent filter selects; tasks
-  // need both parents, so any missing pick shows the empty state.
+  // #182: the section is filtered by customer and project. Both default to
+  // "all" — an unset filter is a SCOPE here, not a missing parent — so the list
+  // is never blocked. The API lists one project's tasks, so an "all" scope fans
+  // out across the projects it covers.
   const isTaskCurrent = taskSeq();
-  fillHierarchyFilter($('task-filter-customer'), state.tasksCustomer, 'Choose a customer…');
+  fillHierarchyFilter($('task-filter-customer'), state.tasksCustomer, 'All customers');
   const projSel = $('task-filter-project');
-  projSel.disabled = !state.tasksCustomer;
-  if (state.tasksCustomer) {
-    const projects = await loadProjects(state.tasksCustomer);
-    fillSelect(projSel, [
-      { value: '', text: 'Choose a project…' },
-      ...projects.map((p) => ({ value: p.code, text: p.code, selected: p.code === state.tasksProject })),
-    ]);
-    projSel.value = state.tasksProject || '';
-  } else {
-    fillSelect(projSel, [{ value: '', text: 'Choose a customer first…' }]);
-  }
+  // Projects belong to a customer, so concrete choices only exist once one is
+  // picked; with "all customers" the pick rests on "All projects".
+  const projects = state.tasksCustomer ? await loadProjects(state.tasksCustomer) : [];
+  fillSelect(projSel, [
+    { value: '', text: 'All projects' },
+    ...projects.map((p) => ({ value: p.code, text: p.code, selected: p.code === state.tasksProject })),
+  ]);
+  projSel.disabled = false;
+  projSel.value = state.tasksProject || '';
   if (!isTaskCurrent()) return; // #219
   updateHierarchyActions();
-  const empty = $('tasks-empty-state');
-  const both = state.tasksCustomer && state.tasksProject;
-  if (!both) {
-    $('task-table').hidden = true;
-    empty.hidden = false;
-    // #182: the empty state explains the next step in the dependent pair.
-    empty.textContent = !state.tasksCustomer
-      ? 'Choose a customer and a project to list their tasks.'
-      : 'Choose a project to list this customer’s tasks.';
-    return;
+
+  const cids = state.tasksCustomer ? [state.tasksCustomer] : state.customers.map((c) => c.id);
+  const tasks = [];
+  for (const cid of cids) {
+    for (const p of await loadProjects(cid)) {
+      if (state.tasksProject && p.code !== state.tasksProject) continue;
+      const data = await api.get(
+        `/customers/${cid}/projects/${encodeURIComponent(p.code)}/tasks`,
+      );
+      for (const t of data.tasks || []) {
+        // A row must know its own parents whatever the filter says (#182).
+        tasks.push({
+          ...t,
+          customer_id: t.customer_id || cid,
+          project_code: t.project_code || p.code,
+        });
+      }
+    }
   }
-  const data = await api.get(
-    `/customers/${state.tasksCustomer}/projects/${encodeURIComponent(state.tasksProject)}/tasks`,
-  );
   if (!isTaskCurrent()) return; // #219: a newer filter won
-  const tasks = data.tasks || [];
+
   const tbody = $('task-table').querySelector('tbody');
   tbody.textContent = '';
+  // The scope spans projects, so each row names its parent project; project
+  // codes are per customer, so across customers the name is part of that.
+  const parentOf = (t) =>
+    state.tasksCustomer ? t.project_code : `${customerName(t.customer_id)} / ${t.project_code}`;
   for (const t of tasks) {
     tbody.appendChild(
       el('tr', {}, [
         el('th', { attrs: { scope: 'row' }, text: t.code }),
+        el('td', { attrs: { 'data-heading': 'Project' }, text: parentOf(t) }),
         el('td', { attrs: { 'data-heading': 'Name' }, text: t.name }),
         el('td', { attrs: { 'data-heading': 'Status' } }, [
           statusChip(t.active ? 'Active' : 'Inactive', t.active),
@@ -509,11 +511,13 @@ export async function refreshTaskTable() {
       ]),
     );
   }
-  // #182: a selected project with no tasks still explains the next step.
   $('task-table').hidden = tasks.length === 0;
+  const empty = $('tasks-empty-state');
   empty.hidden = tasks.length !== 0;
   if (tasks.length === 0) {
-    empty.textContent = 'No tasks on this project yet. Use + Task to add one.';
+    empty.textContent = state.tasksProject
+      ? 'No tasks on this project yet. Use + Task to add one.'
+      : 'No tasks yet. Use + Task to add one.';
   }
 }
 
@@ -597,15 +601,17 @@ $('task-filter-customer').addEventListener('change', async () => {
   state.tasksProject = null; // dependent reset (#182)
   await refreshTaskTable();
   announce(state.tasksCustomer
-    ? `Tasks: choose a project for ${customerName(state.tasksCustomer)}.`
-    : 'Task filters cleared.');
+    ? `Tasks for ${customerName(state.tasksCustomer)} — all projects.`
+    : 'Tasks for all customers and projects.');
 });
 $('task-filter-project').addEventListener('change', async () => {
   state.tasksProject = $('task-filter-project').value || null;
   await refreshTaskTable();
   announce(state.tasksProject
     ? `Tasks for ${customerName(state.tasksCustomer)} / ${state.tasksProject}.`
-    : 'Project filter cleared — choose a project to list tasks.');
+    : state.tasksCustomer
+      ? `All projects for ${customerName(state.tasksCustomer)}.`
+      : 'Tasks for all customers and projects.');
 });
 export async function refreshCustomerPickers() {
   // C7: every customer picker (day form, invoices, expenses, timer) refreshes

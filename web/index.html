@@ -372,14 +372,14 @@
              without a visible caption. -->
         <div class="hierarchy-filters">
           <div class="filter-field"><label class="sr-only" for="task-filter-customer">Customer</label>
-            <select id="task-filter-customer"><option value="">Choose a customer&#8230;</option></select></div>
+            <select id="task-filter-customer"><option value="">All customers</option></select></div>
           <div class="filter-field"><label class="sr-only" for="task-filter-project">Project</label>
-            <select id="task-filter-project" disabled><option value="">Choose a customer first&#8230;</option></select></div>
+            <select id="task-filter-project"><option value="">All projects</option></select></div>
         </div>
-        <p id="tasks-empty-state" class="workspace-empty">Choose a customer and a project to list their tasks.</p>
+        <p id="tasks-empty-state" class="workspace-empty">No tasks yet. Use <strong>+ Task</strong> to add one.</p>
         <div class="table-scroll"><table id="task-table" class="p-table--mobile-card" hidden>
           <caption class="sr-only">Tasks</caption>
-          <thead><tr><th scope="col">Code</th><th scope="col">Name</th><th scope="col">Status</th><th scope="col" class="actions-col">Actions</th></tr></thead>
+          <thead><tr><th scope="col">Code</th><th scope="col">Project</th><th scope="col">Name</th><th scope="col">Status</th><th scope="col" class="actions-col">Actions</th></tr></thead>
           <tbody></tbody>
         </table></div>
       </div>
