@@ -596,9 +596,19 @@ check('each section carries its own creation toolbar',
 check('Projects leads with + Project and puts the customer filter under the header',
   window.document.querySelector('#panel-projects .p-card__header button')?.id === 'project-new'
   && !window.document.querySelector('#panel-projects .hierarchy-actions .filter-field')
-  && window.document.querySelector('#panel-projects .filter-field')?.nextElementSibling?.id === 'projects-empty-state'
+  && window.document.querySelector('#panel-projects .hierarchy-filters')?.nextElementSibling?.id === 'projects-empty-state'
   && /customer/i.test(window.document.querySelector('#panel-projects label[for="proj-filter-customer"]')?.textContent || '')
   && window.document.getElementById('project-scope-label') === null);
+// #182 follow-up: Tasks gets the same treatment - the action leads the header
+// and both dependent filters sit below it in place of the old scope caption.
+check('Tasks leads with + Task and puts both dependent filters under the header',
+  window.document.querySelector('#panel-tasks .p-card__header button')?.id === 'task-new'
+  && !window.document.querySelector('#panel-tasks .hierarchy-actions .filter-field')
+  && window.document.querySelectorAll('#panel-tasks .hierarchy-filters .filter-field').length === 2
+  && window.document.querySelector('#panel-tasks .hierarchy-filters')?.nextElementSibling?.id === 'tasks-empty-state'
+  && /customer/i.test(window.document.querySelector('#panel-tasks label[for="task-filter-customer"]')?.textContent || '')
+  && /project/i.test(window.document.querySelector('#panel-tasks label[for="task-filter-project"]')?.textContent || '')
+  && window.document.getElementById('task-scope-label') === null);
 // Heading-slot cleanup: no duplicate section H2 under the masthead H1, and
 // the create action is the panel's first interactive element.
 check('panels lead with their action, not a duplicate H2',
@@ -692,7 +702,7 @@ tasksBtn.dispatchEvent(new window.Event('click', { bubbles: true }));
 const tasksScopedToMkt2 = () => !byId('panel-tasks').hidden
   && byId('task-filter-customer').value === acmeOpt.value
   && byId('task-filter-project').value === 'MKT-2'
-  && /ACME \/ MKT-2/.test(byId('task-scope-label').textContent)
+  && byId('task-scope-label') === null
   && !byId('tasks-empty-state').hidden;
 await waitFor(tasksScopedToMkt2, {
   message: 'the Tasks section to render scoped to ACME / MKT-2',
@@ -701,7 +711,7 @@ check('project row Tasks action opens the Tasks section with both filters set',
   !window.document.getElementById('panel-tasks').hidden
   && window.document.getElementById('task-filter-customer').value === acmeOpt.value
   && window.document.getElementById('task-filter-project').value === 'MKT-2'
-  && /ACME \/ MKT-2/.test(window.document.getElementById('task-scope-label').textContent));
+  && window.document.getElementById('task-scope-label') === null);
 { // Dependent reset (#182): clearing the customer clears the child pick.
   const custSel = window.document.getElementById('task-filter-customer');
   custSel.value = '';
@@ -726,7 +736,7 @@ check('project row Tasks action opens the Tasks section with both filters set',
   check('re-selecting the scoped project restores its scoped state',
     !window.document.getElementById('tasks-empty-state').hidden
     && /No tasks on this project yet/.test(window.document.getElementById('tasks-empty-state').textContent)
-    && window.document.getElementById('task-scope-label').textContent.includes('MKT-2'));
+    && window.document.getElementById('task-scope-label') === null);
 }
 const taskDialog = window.document.getElementById('task-dialog');
 window.document.getElementById('task-new').click();

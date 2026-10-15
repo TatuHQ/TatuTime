@@ -465,7 +465,6 @@ export async function refreshTaskTable() {
   const empty = $('tasks-empty-state');
   const both = state.tasksCustomer && state.tasksProject;
   if (!both) {
-    $('task-scope-label').textContent = '';
     $('task-table').hidden = true;
     empty.hidden = false;
     // #182: the empty state explains the next step in the dependent pair.
@@ -474,7 +473,6 @@ export async function refreshTaskTable() {
       : 'Choose a project to list this customer’s tasks.';
     return;
   }
-  $('task-scope-label').textContent = `— ${customerName(state.tasksCustomer)} / ${state.tasksProject}`;
   const data = await api.get(
     `/customers/${state.tasksCustomer}/projects/${encodeURIComponent(state.tasksProject)}/tasks`,
   );
