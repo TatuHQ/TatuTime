@@ -155,10 +155,11 @@ what a restore verifies against.
    manifest of sha256s in the shape `src/backup.rs:104-117` already uses, and (e) drops
    the relocated days' keys from `entries/.idx.users.json` (`src/store.rs:605`) so the
    index shrinks with the documents.
-2. (#350) A read story for the cold tree: `get_entry`/`list_range` merge it, or the refusal
-   is explicit and documented — and the lifetime scans behind budgets
-   (`src/budgets.rs:125-127`) must still see cold data, or the ADR must state that
-   budget totals become hot-only.
+2. (#350, **decided and implemented — see "Read story (#350)" below**) Every reader merges
+   the cold tree: `list_by_date`/`list_range`/`get_entry` and the lifetime
+   `scan_all_entries` answer from hot ∪ cold, so the lifetime scans behind budgets
+   (`src/budgets.rs:125-127`) keep seeing cold data. The alternative branch — declaring
+   budget totals hot-only — is explicitly **not** taken.
 3. The #336 guard kept honest: the archive tree added to `DOC_COLLECTIONS`
    (`src/store.rs:265-279`) and to the `AGENTS.md` bullet (`AGENTS.md:52-67`) in the
    same change.
@@ -171,6 +172,58 @@ is operator-run and threshold-triggered — the `--backup`/`--restore` shape alr
 bullet (`AGENTS.md:52-67`) and the #336 guard's `DOC_COLLECTIONS` list
 (`src/store.rs:265-279`) are untouched by this ADR. When option B is implemented, the
 guard requires both to change in the same commit.
+
+## Read story (#350)
+
+Precondition 2, in the form it was implemented: **archiving relocates bytes and changes no
+number any caller or user can see.** The cold tree is the same documents in a different
+folder, so the read story is a merge, not a second store.
+
+- **The merge.** `list_by_date` answers from the merged day — the hot day folder plus the
+  cold day folder — and every reader built on it (`list_range`, `list_range_for_user`,
+  `list_by_date_for_user`) inherits it unchanged. `get_entry` keeps its hot walk and
+  resolves the cold copy on a miss. `scan_all_entries` — and therefore
+  `list_all_entries`, the budget report and the deletion guards built on it — walks the
+  hot day folders and then the cold ones, under **one** `MAX_DOCS` budget over the union.
+- **Hot wins the deduplication.** The merge is by entry id and the hot copy wins. The
+  #349 pass removes the hot day only after its cold copy is complete, so a crash can leave
+  a day in both trees; resolving to the hot copy means such a day reads exactly as it read
+  before the pass, and no document is ever counted or returned twice.
+- **Rehydration.** A cold entry is writable by construction (#349 refuses locked and
+  invoiced days), so every write — `put_entry`, `save_entry_inner` (both the old and the
+  new date, so moving out of or between cold days strands nothing), `delete_entry` and
+  `delete_entry_guarded` — removes the cold copy and leaves exactly one document. The
+  existence check behind a delete spans both trees, so an entry `get_entry` resolved is
+  never a 404 on DELETE. A cold day folder emptied by a write is pruned best-effort.
+- **The #335 per-user index compares against the merged day.** #349 prunes the relocated
+  day's key, which makes the index's id set (empty) equal the hot folder's id set (empty):
+  comparing against the hot folder alone would therefore *validate* an empty read and show
+  a member their own archived week as zero hours with no error. The comparison is against
+  hot ∪ cold, and the opportunistic heal files **hot ids only** — filing the merged set
+  would re-add a key naming a day that is not on disk and regress #349's invariant.
+- **Cold id index.** `archive/entries/.idx.ids.json` (`date -> ids`; a dot file, not a
+  document) is written **only** by the archival pass, in its end-of-pass block. A read
+  consults it as a *hint* for point reads, validates a slice against the cold day folder
+  before believing it, and falls back to the authoritative walk when the index is absent,
+  truncated or drifted. Correctness never depends on it, and no read writes it.
+- **Enumeration.** The cold tree is listed with the same `dir_entries` helper as every
+  other walk, so the run manifests, the cold id index and a pass's `.<day>.staging`
+  leftovers can never be mistaken for a day folder or count toward `MAX_DOCS`.
+
+**Accepted limitation.** Rehydrating an entry — or deleting one — leaves the manifest of
+the run that archived it naming a file that is no longer under `archive/entries/`: a
+relocation back while the id is hot, a loss otherwise. The manifest is the operator's
+restore record, no reader consults it, and a verifier for it is deliberately not built
+here.
+
+**Guarded by** `tests/contract/store.rs::cold_tree_reads`, with the API-level cases in
+`tests/contract/entries_reports.rs` and `tests/contract/invoicing.rs`: a cold day reads by
+date, range and id; the lifetime scan counts hot and cold exactly once, hot winning; budgets
+and the `list_all_entries`-backed deletion guards still see archived history; a member's own
+archived day is not emptied (and the heal adds no key naming the cold day); an edit, a date
+move or a delete rehydrates without duplicating, the second delete being a 404; a
+half-published day reads without error or duplicates; the cold index is never the source of
+truth; and an archived unbilled period still previews and issues.
 
 ## Consequences
 
@@ -204,6 +257,7 @@ Raised with this ADR; neither is implemented here.
 1. **#349 — Store-owned archival primitive:** `archive_entries_before` with dry-run,
    the lock/invoice refusal predicate, a per-run sha256 manifest and the index shrink.
    This is the precondition that makes the trigger actionable.
-2. **#350 — Cold-tree read story:** merge cold days into `get_entry`/`list_range`/
-   `scan_all_entries`, or an explicit, documented refusal. Without it a relocation
-   silently changes what queries and budget totals see.
+2. **#350 — Cold-tree read story:** **implemented** — see "Read story (#350)": the merge
+   into `list_by_date`/`list_range`/`get_entry`/`scan_all_entries`, the hot-wins
+   deduplication, rehydration on write, the merged #335 trust rule and the pass-written
+   cold id index. A relocation no longer changes what queries and budget totals see.

@@ -1044,3 +1044,781 @@ mod entries_archive {
         assert_eq!(manifests, 1, "exactly the manifest the first pass wrote");
     }
 }
+
+/// #350: the cold-tree *read story* — ADR-003 precondition 2. A relocation moves
+/// bytes and changes no number any caller or user can see.
+///
+/// WHAT THESE PIN
+/// * a relocated day is still a day: it reads by date, by range, by id, from the
+///   lifetime scan and from every `list_all_entries`-backed guard, and nothing
+///   the user sees changes because a folder moved;
+/// * the merge is by entry id with the **hot** copy winning, so a day a crash
+///   left in both trees is never counted or returned twice;
+/// * the #335 trust rule compares against the **merged** day, and its heal files
+///   hot ids only — otherwise a member's own archived week reads as zero hours,
+///   or the index re-gains a key naming a day that is not on disk (#349);
+/// * a cold entry stays writable and deletable: an edit rehydrates it (exactly
+///   one document, hot) and a delete works, including the second one that must
+///   404 rather than silently succeed;
+/// * the cold id index is a hint: absent, truncated or lying, the read is still
+///   the right one, and no read ever writes it;
+/// * the `MAX_DOCS` cap is one budget over the union, not one per tree.
+mod cold_tree_reads {
+    use std::collections::HashSet;
+    use std::path::{Path, PathBuf};
+
+    use axum::http::StatusCode;
+    use serde_json::{Value, json};
+    use tucano_time::domain::Entry;
+    use tucano_time::lock::NoLocks;
+    use tucano_time::store::{ArchiveRefusal, Store, StoreError};
+    use uuid::Uuid;
+
+    use crate::support::{
+        Client, app, entry_body, json_req, member_cookie, new_customer, new_project, raw,
+    };
+
+    /// One day old enough to be a candidate, one newer than the cutoff, and the
+    /// cutoff itself (#349's fixture days).
+    const DAY: &str = "2026-08-03";
+    const LATER: &str = "2026-10-09";
+    const CUTOFF: &str = "2026-09-01";
+    const MEMBER_EMAIL: &str = "dana@test.local";
+    const MEMBER_PW: &str = "danapass123";
+
+    fn cutoff() -> chrono::NaiveDate {
+        chrono::NaiveDate::parse_from_str(CUTOFF, "%Y-%m-%d").expect("cutoff")
+    }
+
+    fn day() -> chrono::NaiveDate {
+        chrono::NaiveDate::parse_from_str(DAY, "%Y-%m-%d").expect("day")
+    }
+
+    fn later() -> chrono::NaiveDate {
+        chrono::NaiveDate::parse_from_str(LATER, "%Y-%m-%d").expect("later")
+    }
+
+    /// The data root below the temp dir the harness hands out.
+    fn data_root(dir: &tempfile::TempDir) -> PathBuf {
+        dir.path().join("data")
+    }
+
+    fn hot_day(data: &Path, date: &str) -> PathBuf {
+        data.join("entries").join(date)
+    }
+
+    /// `archive/entries/<YYYY-MM>/<YYYY-MM-DD>/` — the documented cold layout,
+    /// spelled here so the test does not borrow the store's own builder.
+    fn cold_day(data: &Path, date: &str) -> PathBuf {
+        data.join("archive/entries").join(&date[..7]).join(date)
+    }
+
+    /// The #350 cold id index: a dot file in the cold root.
+    fn cold_index_path(data: &Path) -> PathBuf {
+        data.join("archive/entries/.idx.ids.json")
+    }
+
+    /// The #335 per-user index.
+    fn user_index_path(data: &Path) -> PathBuf {
+        data.join("entries").join(".idx.users.json")
+    }
+
+    fn store_at(data: &Path) -> Store {
+        Store::open(data).expect("store")
+    }
+
+    /// Run the #349 pass over the temp data dir and return how many days moved.
+    /// A refused day fails the call: these tests archive clean days only.
+    fn archive(data: &Path) -> usize {
+        let report = store_at(data)
+            .archive_entries_before(cutoff(), false, &NoLocks)
+            .expect("the pass runs");
+        assert!(report.skipped.is_empty(), "{:?}", report.skipped);
+        report.days.len()
+    }
+
+    /// A customer with project `P1`, as the customer token payloads need.
+    async fn fixture(client: &Client) -> String {
+        let customer = new_customer(client, "ACME", "EUR", 6000).await;
+        let token = customer["id"].as_str().expect("customer id").to_string();
+        new_project(client, &token, "P1", json!({})).await;
+        token
+    }
+
+    /// One entry on `date`, created by `cookie`'s session (the harness's admin
+    /// when `None`) — the only way to give a member a row of their own.
+    async fn entry_on(
+        client: &Client,
+        cookie: Option<&str>,
+        token: &str,
+        date: &str,
+        hours: u32,
+        task: Option<&str>,
+    ) -> String {
+        let mut body = entry_body(token, "P1", json!(hours), date);
+        if let Some(code) = task {
+            body["task_code"] = json!(code);
+        }
+        let (status, created) = match cookie {
+            Some(c) => {
+                let (s, v, _) =
+                    raw(&client.router, "POST", "/api/entries", Some(body), Some(c)).await;
+                (s, v)
+            }
+            None => json_req(client, "POST", "/api/entries", Some(body)).await,
+        };
+        assert_eq!(status, StatusCode::CREATED, "create entry: {created}");
+        created["id"].as_str().expect("entry id").to_string()
+    }
+
+    /// `GET /api/entries?...` as `cookie`'s session when given, as the harness's
+    /// admin otherwise. The status must be 200: these tests read valid queries.
+    async fn list_entries(client: &Client, cookie: Option<&str>, query: &str) -> Value {
+        let uri = format!("/api/entries?{query}");
+        let (status, body) = match cookie {
+            Some(c) => {
+                let (s, v, _) = raw(&client.router, "GET", &uri, None, Some(c)).await;
+                (s, v)
+            }
+            None => json_req(client, "GET", &uri, None).await,
+        };
+        assert_eq!(status, StatusCode::OK, "{body}");
+        body
+    }
+
+    fn listed_ids(body: &Value) -> HashSet<String> {
+        body["entries"]
+            .as_array()
+            .expect("an entries array")
+            .iter()
+            .map(|e| e["id"].as_str().expect("an entry id").to_string())
+            .collect()
+    }
+
+    /// The ids of a store-level day read, for the merge assertions.
+    fn doc_ids(docs: &[Entry]) -> Vec<String> {
+        docs.iter().map(|e| e.id.to_string()).collect()
+    }
+
+    /// A day read, by date and by a one-day range, is unchanged by a relocation.
+    #[tokio::test]
+    async fn an_archived_day_still_reads_by_date_and_by_range() {
+        let (client, d) = app().await;
+        let token = fixture(&client).await;
+        let first = entry_on(&client, None, &token, DAY, 3, None).await;
+        let second = entry_on(&client, None, &token, DAY, 4, None).await;
+        let hot = entry_on(&client, None, &token, LATER, 1, None).await;
+
+        let data = data_root(&d);
+        assert_eq!(archive(&data), 1, "exactly the one candidate day moved");
+
+        // By date.
+        let listed = list_entries(&client, None, &format!("date={DAY}")).await;
+        assert_eq!(
+            listed_ids(&listed),
+            HashSet::from([first.clone(), second.clone()]),
+            "{listed}"
+        );
+        // The hours the relocation must not change, whatever the page order.
+        let mut hours: Vec<u64> = listed["entries"]
+            .as_array()
+            .expect("entries")
+            .iter()
+            .map(|e| e["hours"].as_u64().expect("hours"))
+            .collect();
+        hours.sort();
+        assert_eq!(hours, vec![3, 4], "{listed}");
+
+        // By range: the archived day and the hot day together, in one answer.
+        let ranged = list_entries(&client, None, &format!("from={DAY}&to={LATER}")).await;
+        assert_eq!(
+            listed_ids(&ranged),
+            HashSet::from([first.clone(), second.clone(), hot.clone()]),
+            "{ranged}"
+        );
+
+        // By id, and at the store level too: the numbers a relocation must not
+        // touch are the same hundredths they were before the move.
+        let store = store_at(&data);
+        let docs = store.list_by_date(day()).expect("day read");
+        assert_eq!(docs.len(), 2);
+        assert_eq!(docs.iter().map(|e| e.hours.0).sum::<u32>(), 700);
+        assert_eq!(
+            store.list_range(day(), day()).expect("range read").len(),
+            2,
+            "a one-day range is the same day"
+        );
+
+        // Negative: a day with nothing in either tree is empty, not an error; and
+        // a query carrying neither a date nor a range is refused.
+        let empty = list_entries(&client, None, "date=2026-08-04").await;
+        assert!(listed_ids(&empty).is_empty(), "{empty}");
+        let (bad, body) = json_req(&client, "GET", "/api/entries", None).await;
+        assert_eq!(bad, StatusCode::BAD_REQUEST, "{body}");
+    }
+
+    /// A point read resolves the cold copy, and an unknown id still misses.
+    #[tokio::test]
+    async fn a_point_read_finds_an_archived_entry_and_an_unknown_id_still_misses() {
+        let (client, d) = app().await;
+        let token = fixture(&client).await;
+        let archived = entry_on(&client, None, &token, DAY, 4, None).await;
+
+        let data = data_root(&d);
+        assert_eq!(archive(&data), 1);
+        let id = Uuid::parse_str(&archived).expect("uuid");
+
+        let store = store_at(&data);
+        let found = store
+            .get_entry(id)
+            .expect("point read")
+            .expect("the cold copy answers");
+        assert_eq!(found.id, id);
+        assert_eq!(found.hours.0, 400);
+        assert_eq!(found.date, day());
+        assert!(
+            store
+                .get_entry(Uuid::new_v4())
+                .expect("point read")
+                .is_none(),
+            "an id in neither tree is still a miss"
+        );
+
+        // The HTTP surface answers the same way, and 404s the same way.
+        let (ok, body) = json_req(&client, "GET", &format!("/api/entries/{archived}"), None).await;
+        assert_eq!(ok, StatusCode::OK, "{body}");
+        assert_eq!(body["id"], archived.as_str());
+        assert_eq!(body["hours"], json!(4));
+        let (missing, _) = json_req(
+            &client,
+            "GET",
+            &format!("/api/entries/{}", Uuid::new_v4()),
+            None,
+        )
+        .await;
+        assert_eq!(missing, StatusCode::NOT_FOUND);
+    }
+
+    /// The lifetime scan is hot ∪ cold, and counts a document that is in both
+    /// trees exactly once.
+    #[tokio::test]
+    async fn the_lifetime_scan_counts_a_relocated_day_exactly_once() {
+        let (client, d) = app().await;
+        let token = fixture(&client).await;
+        let first = entry_on(&client, None, &token, DAY, 3, None).await;
+        let second = entry_on(&client, None, &token, DAY, 4, None).await;
+        entry_on(&client, None, &token, LATER, 1, None).await;
+
+        let data = data_root(&d);
+        assert_eq!(archive(&data), 1);
+        let store = store_at(&data);
+        let all = store.list_all_entries().expect("lifetime scan");
+        assert_eq!(all.len(), 3, "hot ∪ cold, once each");
+        assert_eq!(
+            all.iter()
+                .map(|e| e.id.to_string())
+                .collect::<HashSet<_>>()
+                .len(),
+            3,
+            "no id twice"
+        );
+
+        // The crash window the #349 pass is built to survive, reproduced by hand:
+        // the cold copy is complete and the hot day has not been removed yet.
+        let hot_dir = hot_day(&data, DAY);
+        std::fs::create_dir_all(&hot_dir).expect("hot day");
+        for id in [&first, &second] {
+            std::fs::copy(
+                cold_day(&data, DAY).join(format!("{id}.json")),
+                hot_dir.join(format!("{id}.json")),
+            )
+            .expect("copy back");
+        }
+        let all = store.list_all_entries().expect("lifetime scan");
+        assert_eq!(all.len(), 3, "a day in both trees is still three entries");
+        assert_eq!(
+            store.list_by_date(day()).expect("day read").len(),
+            2,
+            "nor does a day read return it twice"
+        );
+
+        // Hot wins the merge: it is the copy the pass had not finished with, so a
+        // half-published day reads as the document it read as before the pass.
+        let path = hot_dir.join(format!("{first}.json"));
+        let mut doc: Value =
+            serde_json::from_slice(&std::fs::read(&path).expect("hot copy")).expect("json");
+        doc["hours"] = json!(9);
+        std::fs::write(&path, serde_json::to_vec(&doc).expect("json")).expect("rewrite hot copy");
+        let docs = store.list_by_date(day()).expect("day read");
+        assert_eq!(docs.len(), 2);
+        let merged = docs
+            .iter()
+            .find(|e| e.id.to_string() == first)
+            .expect("the hot copy answers");
+        assert_eq!(merged.hours.0, 900, "the hot copy wins the merge");
+    }
+
+    /// `MAX_DOCS` is one budget over the union, not one per tree: a day split
+    /// between the trees whose union exceeds it is refused, not silently
+    /// truncated.
+    #[tokio::test]
+    async fn the_document_cap_is_one_budget_over_the_union() {
+        let (client, d) = app().await;
+        let token = fixture(&client).await;
+        // Two rows move to the cold tree, and two more land on the same date in
+        // the hot tree afterwards: one day, split between the trees.
+        entry_on(&client, None, &token, DAY, 3, None).await;
+        entry_on(&client, None, &token, DAY, 4, None).await;
+
+        let data = data_root(&d);
+        assert_eq!(archive(&data), 1);
+        let cold = cold_day(&data, DAY).read_dir().expect("cold day").count();
+        assert_eq!(cold, 2, "the whole day moved");
+        entry_on(&client, None, &token, DAY, 1, None).await;
+        entry_on(&client, None, &token, DAY, 2, None).await;
+
+        // Each tree alone is inside a cap of three; only their union is not — so
+        // an error here is the union budget and nothing else.
+        let capped = store_at(&data).with_max_docs(3);
+        let merged = capped.list_by_date(day());
+        assert!(
+            matches!(merged, Err(StoreError::TooManyItems)),
+            "the merged day is capped as one union: {merged:?}"
+        );
+        let all = capped.list_all_entries();
+        assert!(
+            matches!(all, Err(StoreError::TooManyItems)),
+            "and so is the lifetime scan: {all:?}"
+        );
+
+        // Without the cap biting, the day is the union: all four documents.
+        assert_eq!(
+            store_at(&data).list_by_date(day()).expect("day read").len(),
+            4
+        );
+    }
+
+    /// Budget totals and every `list_all_entries`-backed deletion guard still see
+    /// archived history — and stop seeing it when it is deleted.
+    #[tokio::test]
+    async fn budget_totals_and_the_deletion_guards_still_see_archived_history() {
+        let (client, d) = app().await;
+        let customer = new_customer(&client, "ACME", "EUR", 6000).await;
+        let cid = customer["id"].as_str().expect("customer id").to_string();
+        new_project(&client, &cid, "P1", json!({"budget_hours": 10})).await;
+        let (s_task, task) = json_req(
+            &client,
+            "POST",
+            &format!("/api/customers/{cid}/projects/P1/tasks"),
+            Some(json!({"code": "T-9"})),
+        )
+        .await;
+        assert_eq!(s_task, StatusCode::CREATED, "{task}");
+
+        // A member's own row, carrying the task, so `delete_user` and
+        // `has_entries_for_task` both have archived history to answer on.
+        let dana = member_cookie(&client, MEMBER_EMAIL, MEMBER_PW).await;
+        let member_row = entry_on(&client, Some(&dana), &cid, DAY, 4, Some("T-9")).await;
+        entry_on(&client, None, &cid, LATER, 3, None).await;
+        let (_, users) = json_req(&client, "GET", "/api/users", None).await;
+        let member_id = users["users"]
+            .as_array()
+            .expect("users")
+            .iter()
+            .find(|u| u["email"] == MEMBER_EMAIL)
+            .expect("the member")["id"]
+            .as_str()
+            .expect("member id")
+            .to_string();
+
+        let data = data_root(&d);
+        assert_eq!(archive(&data), 1);
+
+        // The budget report is the lifetime scan behind the merge: the archived
+        // member row is 4 of the 7 hours burned.
+        let (s_budget, budgets) = json_req(&client, "GET", "/api/reports/budgets", None).await;
+        assert_eq!(s_budget, StatusCode::OK, "{budgets}");
+        let row = budgets["rows"]
+            .as_array()
+            .expect("budget rows")
+            .iter()
+            .find(|r| r["customer"] == "ACME")
+            .expect("the budgeted project");
+        assert_eq!(
+            row["burn_hours"].as_f64(),
+            Some(7.0),
+            "archived hours are lifetime hours: {row}"
+        );
+
+        // Every guard behind `list_all_entries` refuses while the archived rows
+        // exist — so the refusals below are proof the cold tree was scanned.
+        for uri in [
+            format!("/api/users/{member_id}"),
+            format!("/api/customers/{cid}"),
+            format!("/api/customers/{cid}/projects/P1"),
+            format!("/api/customers/{cid}/projects/P1/tasks/T-9"),
+        ] {
+            let (status, body) = json_req(&client, "DELETE", &uri, None).await;
+            assert_eq!(status, StatusCode::CONFLICT, "{uri}: {body}");
+        }
+
+        // Delete the archived row: the task and the member are no longer refused,
+        // while the customer and the project still are (the hot row remains).
+        let (s_del, body) = json_req(
+            &client,
+            "DELETE",
+            &format!("/api/entries/{member_row}"),
+            None,
+        )
+        .await;
+        assert_eq!(s_del, StatusCode::NO_CONTENT, "{body}");
+        assert!(
+            !cold_day(&data, DAY)
+                .join(format!("{member_row}.json"))
+                .exists(),
+            "the cold copy goes with the delete"
+        );
+        for uri in [
+            format!("/api/customers/{cid}/projects/P1/tasks/T-9"),
+            format!("/api/users/{member_id}"),
+        ] {
+            let (status, body) = json_req(&client, "DELETE", &uri, None).await;
+            assert!(
+                status.is_success(),
+                "the archived row was what refused this: {uri}: {status} {body}"
+            );
+        }
+        let (still, body) =
+            json_req(&client, "DELETE", &format!("/api/customers/{cid}"), None).await;
+        assert_eq!(still, StatusCode::CONFLICT, "{body}");
+    }
+
+    /// The #335 trust rule must compare against the **merged** day, or a member's
+    /// own archived week reads as zero hours with no error.
+    #[tokio::test]
+    async fn a_members_own_archived_day_is_not_emptied_by_the_trust_rule() {
+        let (client, d) = app().await;
+        let token = fixture(&client).await;
+        let dana = member_cookie(&client, MEMBER_EMAIL, MEMBER_PW).await;
+        let mine = entry_on(&client, Some(&dana), &token, DAY, 4, None).await;
+        let theirs = entry_on(&client, None, &token, DAY, 3, None).await;
+
+        let data = data_root(&d);
+        assert_eq!(archive(&data), 1, "both owners' rows moved with the day");
+
+        // #349 pruned the day from the per-user index (it may only name days that
+        // are on disk), so the index's id set for it is empty *and* the hot day
+        // folder's is empty: comparing against the hot folder alone would
+        // "validate" an empty read.
+        let index: Value =
+            serde_json::from_slice(&std::fs::read(user_index_path(&data)).expect("index"))
+                .expect("json");
+        assert!(index["days"].get(DAY).is_none(), "{index}");
+
+        let listed = list_entries(&client, Some(&dana), &format!("date={DAY}")).await;
+        assert_eq!(
+            listed_ids(&listed),
+            HashSet::from([mine.clone()]),
+            "{listed}"
+        );
+        assert_eq!(listed["entries"][0]["hours"], json!(4), "{listed}");
+
+        // A sibling's archived row is never a member's to see (#51) — by day or by
+        // id, and a 404 rather than a 403 so existence is not leaked.
+        let (s_sibling, _, _) = raw(
+            &client.router,
+            "GET",
+            &format!("/api/entries/{theirs}"),
+            None,
+            Some(&dana),
+        )
+        .await;
+        assert_eq!(s_sibling, StatusCode::NOT_FOUND);
+
+        // The heal filed hot ids only: the index gained no key naming the cold day,
+        // which is exactly the #349 invariant a merged heal would regress.
+        let index: Value =
+            serde_json::from_slice(&std::fs::read(user_index_path(&data)).expect("index"))
+                .expect("json");
+        assert!(
+            index["days"].get(DAY).is_none(),
+            "the heal must not name a cold day: {index}"
+        );
+
+        // Negative: the same member reads a day with nothing in either tree.
+        let empty = list_entries(&client, Some(&dana), "date=2026-08-05").await;
+        assert!(listed_ids(&empty).is_empty(), "{empty}");
+    }
+
+    /// A cold entry is edited, moved out of a cold day and deleted: each write
+    /// rehydrates it and leaves exactly one document behind.
+    #[tokio::test]
+    async fn editing_moving_or_deleting_a_cold_entry_rehydrates_it() {
+        let (client, d) = app().await;
+        let token = fixture(&client).await;
+        let first = entry_on(&client, None, &token, DAY, 3, None).await;
+        let second = entry_on(&client, None, &token, DAY, 4, None).await;
+
+        let data = data_root(&d);
+        assert_eq!(archive(&data), 1);
+
+        // An edit rehydrates: the hot document exists, the cold copy is gone, and
+        // the sibling that was not touched stays cold.
+        let (s_edit, edited) = json_req(
+            &client,
+            "PUT",
+            &format!("/api/entries/{first}"),
+            Some(entry_body(&token, "P1", json!(6), DAY)),
+        )
+        .await;
+        assert_eq!(s_edit, StatusCode::OK, "{edited}");
+        assert!(hot_day(&data, DAY).join(format!("{first}.json")).is_file());
+        assert!(
+            !cold_day(&data, DAY).join(format!("{first}.json")).exists(),
+            "the edit removed the cold copy"
+        );
+        assert!(
+            cold_day(&data, DAY)
+                .join(format!("{second}.json"))
+                .is_file(),
+            "the untouched sibling stays cold"
+        );
+        let docs = store_at(&data).list_by_date(day()).expect("day read");
+        assert_eq!(doc_ids(&docs).len(), 2, "an edit never duplicates a day");
+
+        // A move **out of** a cold day strands nothing: the cold copy of the moved
+        // id is gone, and each day holds one document.
+        let (s_move, moved) = json_req(
+            &client,
+            "PUT",
+            &format!("/api/entries/{second}"),
+            Some(entry_body(&token, "P1", json!(5), LATER)),
+        )
+        .await;
+        assert_eq!(s_move, StatusCode::OK, "{moved}");
+        assert_eq!(moved["date"], LATER);
+        assert!(
+            !cold_day(&data, DAY).join(format!("{second}.json")).exists(),
+            "the move left nothing cold behind"
+        );
+        let store = store_at(&data);
+        assert_eq!(
+            doc_ids(&store.list_by_date(day()).expect("day read")),
+            vec![first.clone()]
+        );
+        assert_eq!(
+            doc_ids(&store.list_by_date(later()).expect("day read")),
+            vec![second.clone()]
+        );
+
+        // A delete of a cold entry works, and the second one is a 404 — the check
+        // spans both trees, so a successful `get_entry` is never a 404 here.
+        let third = entry_on(&client, None, &token, "2026-08-06", 2, None).await;
+        let report = store
+            .archive_entries_before(cutoff(), false, &NoLocks)
+            .expect("second pass");
+        assert!(
+            report.days.iter().any(|d| d.day == "2026-08-06"),
+            "{:?}",
+            report.days
+        );
+        assert!(
+            cold_day(&data, "2026-08-06")
+                .join(format!("{third}.json"))
+                .is_file()
+        );
+        let (s_del, body) =
+            json_req(&client, "DELETE", &format!("/api/entries/{third}"), None).await;
+        assert_eq!(s_del, StatusCode::NO_CONTENT, "{body}");
+        assert!(
+            !cold_day(&data, "2026-08-06")
+                .join(format!("{third}.json"))
+                .exists()
+        );
+        let (s_again, body) =
+            json_req(&client, "DELETE", &format!("/api/entries/{third}"), None).await;
+        assert_eq!(s_again, StatusCode::NOT_FOUND, "{body}");
+    }
+
+    /// A half-published day — a day partly back in the hot tree, a stale index and
+    /// a leftover staging folder — reads without error and without duplicates.
+    #[tokio::test]
+    async fn a_half_published_day_reads_without_error_or_duplicates() {
+        let (client, d) = app().await;
+        let token = fixture(&client).await;
+        let first = entry_on(&client, None, &token, DAY, 3, None).await;
+        let second = entry_on(&client, None, &token, DAY, 4, None).await;
+
+        let data = data_root(&d);
+        assert_eq!(archive(&data), 1);
+
+        // The crash window, half-resolved: the cold copies of both documents are
+        // complete, but only one of them is back in the hot tree — so the day is
+        // now genuinely split between the trees. The index still does not name the
+        // day, and the pass's hidden staging folder is still there.
+        let hot_dir = hot_day(&data, DAY);
+        std::fs::create_dir_all(&hot_dir).expect("hot day");
+        std::fs::copy(
+            cold_day(&data, DAY).join(format!("{first}.json")),
+            hot_dir.join(format!("{first}.json")),
+        )
+        .expect("copy back");
+        let mut doc: Value = serde_json::from_slice(
+            &std::fs::read(hot_dir.join(format!("{first}.json"))).expect("hot copy"),
+        )
+        .expect("json");
+        doc["hours"] = json!(9);
+        std::fs::write(
+            hot_dir.join(format!("{first}.json")),
+            serde_json::to_vec(&doc).expect("json"),
+        )
+        .expect("rewrite the hot copy");
+        let staging = data
+            .join("archive/entries/2026-08")
+            .join(format!(".{DAY}.staging"));
+        std::fs::create_dir_all(&staging).expect("staging folder");
+        std::fs::write(staging.join("junk.json"), b"{\"junk\":true}").expect("junk document");
+
+        // The day is the union, and each id resolves to the copy that wins: `first`
+        // to the hot one the pass had not finished with, `second` to the cold one.
+        let store = store_at(&data);
+        let docs = store.list_by_date(day()).expect("day read");
+        assert_eq!(doc_ids(&docs).len(), 2, "a split day is one day: {docs:?}");
+        assert_eq!(
+            docs.iter()
+                .find(|e| e.id.to_string() == first)
+                .expect("the hot copy answers")
+                .hours
+                .0,
+            900,
+            "the hot copy wins the merge"
+        );
+        assert_eq!(
+            docs.iter()
+                .find(|e| e.id.to_string() == second)
+                .expect("the cold copy answers")
+                .hours
+                .0,
+            400,
+            "a cold-only row is in the day too"
+        );
+        assert_eq!(
+            store.list_all_entries().expect("lifetime scan").len(),
+            2,
+            "the union counts each document once"
+        );
+        assert!(
+            store
+                .get_entry(Uuid::parse_str(&second).expect("uuid"))
+                .expect("point read")
+                .is_some()
+        );
+        assert_eq!(
+            store.list_range(day(), later()).expect("range read").len(),
+            2
+        );
+
+        let listed = list_entries(&client, None, &format!("date={DAY}")).await;
+        assert_eq!(
+            listed_ids(&listed),
+            HashSet::from([first.clone(), second.clone()]),
+            "{listed}"
+        );
+
+        // Publishing the day again is refused rather than merged: the staging
+        // folder and the dot files are not day folders, and the cold day it would
+        // overwrite is.
+        let report = store
+            .archive_entries_before(cutoff(), false, &NoLocks)
+            .expect("second pass");
+        assert!(report.days.is_empty(), "{:?}", report.days);
+        assert!(
+            report
+                .skipped
+                .iter()
+                .any(|s| s.day == DAY && s.reason == ArchiveRefusal::ColdDayExists),
+            "{:?}",
+            report.skipped
+        );
+    }
+
+    /// The cold id index is written by the pass and never trusted blindly: absent,
+    /// truncated or lying, the read is still the right one — and no read writes it.
+    #[tokio::test]
+    async fn the_cold_index_is_never_the_source_of_truth() {
+        let (client, d) = app().await;
+        let token = fixture(&client).await;
+        let first = entry_on(&client, None, &token, DAY, 3, None).await;
+        let second = entry_on(&client, None, &token, DAY, 4, None).await;
+
+        let data = data_root(&d);
+        assert_eq!(archive(&data), 1);
+        let written: Value = serde_json::from_slice(
+            &std::fs::read(cold_index_path(&data)).expect("the pass writes the cold id index"),
+        )
+        .expect("json");
+        assert_eq!(
+            written[DAY].as_array().expect("the day slice").len(),
+            2,
+            "{written}"
+        );
+
+        // Absent: the walk answers, and a read never puts the file back.
+        std::fs::remove_file(cold_index_path(&data)).expect("remove the index");
+        let store = store_at(&data);
+        assert!(
+            store
+                .get_entry(Uuid::parse_str(&second).expect("uuid"))
+                .expect("point read")
+                .is_some(),
+            "an absent index costs a walk, not the answer"
+        );
+        assert!(
+            !cold_index_path(&data).exists(),
+            "no read writes the cold index"
+        );
+
+        // Truncated: the same.
+        std::fs::write(cold_index_path(&data), b"{\"2026-08-03\": [").expect("truncated index");
+        assert!(
+            store
+                .get_entry(Uuid::parse_str(&first).expect("uuid"))
+                .expect("point read")
+                .is_some(),
+            "a truncated index costs a walk, not the answer"
+        );
+
+        // Lying: a slice that omits an id would hide it if it were believed, and a
+        // date the cold tree does not have is refused as a hint.
+        std::fs::write(
+            cold_index_path(&data),
+            format!("{{\"{DAY}\": [\"{first}\"]}}").into_bytes(),
+        )
+        .expect("lying index");
+        assert!(
+            store
+                .get_entry(Uuid::parse_str(&second).expect("uuid"))
+                .expect("point read")
+                .is_some(),
+            "a lying index may not hide an entry"
+        );
+        std::fs::write(
+            cold_index_path(&data),
+            format!("{{\"2026-01-01\": [\"{second}\"]}}").into_bytes(),
+        )
+        .expect("lying index");
+        assert!(
+            store
+                .get_entry(Uuid::parse_str(&second).expect("uuid"))
+                .expect("point read")
+                .is_some(),
+            "a hint that names a day the cold tree does not have is not a day"
+        );
+
+        // The day read never consults the index at all, and the union is intact.
+        assert_eq!(
+            doc_ids(&store.list_by_date(day()).expect("day read")).len(),
+            2
+        );
+    }
+}

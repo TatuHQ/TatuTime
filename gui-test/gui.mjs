@@ -930,6 +930,14 @@ check('issuing locks the invoiced entry (edit -> 409)', editRes.status === 409);
     ![...dayRow.querySelectorAll('button')].some((b) => ['Edit', 'Delete'].includes(b.textContent)));
   check('invoiced day row shows a lock naming its invoice',
     lockLink.getAttribute('title').includes(acmeInv.number));
+  // The day table and the week strip are rendered by separate async paths, so
+  // wait for the strip to catch up instead of asserting on the first pass --
+  // this is the race that intermittently failed the gui-test job.
+  await waitFor(
+    () => !!window.document.querySelector(
+      '#week-strip .ws-day[data-date="2026-12-01"] .p-icon--lock-locked'),
+    { timeoutMs: 15000, message: 'the week strip day box to wear the invoice lock' },
+  );
   check('week strip day box wears the lock',
     !!window.document.querySelector('#week-strip .ws-day[data-date="2026-12-01"] .p-icon--lock-locked'));
   // The lock jumps to the Invoices panel and opens exactly that invoice.
@@ -1877,18 +1885,31 @@ if (emailBtn) {
   });
   check('Send email from the panel reports the transport honestly (#349)',
     /NOT sent \(SMTP not configured\)|Invoice emailed to/.test(byId('live-region').textContent));
-  // The re-render is two concurrent fetches (the timeline and the PDF), so wait
-  // for the settled panel — a half-rendered panel is not evidence of anything.
+  // The re-render is two concurrent fetches (the timeline and the PDF). Wait for
+  // each half explicitly: a composite predicate hides which of the two stalled,
+  // and a half-rendered panel is not evidence of anything.
+  //
+  // The budget is deliberately large. Opening a panel re-renders the invoice PDF
+  // *on demand* (`GET /invoices/{id}/pdf/preview` is uncached and CPU-bound), and
+  // this suite opens a preview many times, so on a single-core CI runner a later
+  // render can queue behind earlier ones and outlast 15s. These waits assert the
+  // settled state, never latency; a render that genuinely fails still surfaces as
+  // "Preview unavailable" in `#ip-pdf-state`, which the messages below report.
+  await waitFor(() => sentCount() === emailsBefore + 1, {
+    timeoutMs: 60000,
+    message: 'the history to record the new delivery'
+      + ` (entries=${sentCount()}, state=${byId('ip-pdf-state').textContent})`,
+  });
+  await waitFor(
+    () => !!byId('ip-frame') && String(byId('ip-frame').getAttribute('src')).startsWith('blob:'),
+    {
+      timeoutMs: 60000,
+      message: 'the panel to re-frame the rendered PDF'
+        + ` (frame=${!!byId('ip-frame')}, state=${byId('ip-pdf-state').textContent})`,
+    },
+  );
   const sendSettled = () => sentCount() === emailsBefore + 1
     && !!byId('ip-frame') && String(byId('ip-frame').getAttribute('src')).startsWith('blob:');
-  // A send re-renders the panel through two concurrent fetches (the timeline
-  // and the PDF), so the settled state can legitimately outlast the default 5s
-  // poll budget: give it the same 15s the other multi-fetch waits here use
-  // instead of failing on one slow round trip.
-  await waitFor(sendSettled, {
-    timeoutMs: 15000,
-    message: 'the panel to re-render the history and refresh the framed PDF',
-  });
   check('Send email from the panel refreshes the preview and the history (#349)', sendSettled());
   // Mark as sent is idempotent: this invoice already has a delivery, so the
   // repeat must report the original timestamp and append no second entry.
