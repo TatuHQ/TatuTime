@@ -216,6 +216,7 @@ pub async fn org_put(
         &[],
         0,
         0,
+        &None,
         &mut billing_errors,
     );
     errors.append(&mut billing_errors);
@@ -485,6 +486,11 @@ pub async fn send_invoice_email(State(app): State<AppState>, Path(id): Path<Uuid
     let org = org_for(&app)?;
     let template = load_template(&app)?;
     let content = content_for(&invoice, &customer, &template);
+    // "How to pay": the customer's own configured payment details (#get-paid).
+    let payment = customer
+        .payment_details
+        .as_ref()
+        .and_then(|p| p.email_block());
     let text = crate::email::render_invoice_email(
         &customer.name,
         &invoice.number,
@@ -492,6 +498,7 @@ pub async fn send_invoice_email(State(app): State<AppState>, Path(id): Path<Uuid
         due.as_deref(),
         &org.name,
         true,
+        payment.as_deref(),
     );
     // #116: the template subject wins when configured (customer override →
     // org template → legacy); the HTML letter is set only when there is
@@ -897,7 +904,7 @@ pub(crate) fn content_for(
         .issued_at
         .or(Some(invoice.created_at))
         .map(|dt| dt.date_naive());
-    let vars = crate::template::vars_for(invoice, &customer.name, issue_day);
+    let vars = crate::template::vars_for(invoice, customer, issue_day);
     crate::template::doc_content(template, customer, &vars)
 }
 
@@ -1007,10 +1014,11 @@ pub async fn invoice_template_put(
             tax_hundredths: 0,
             discount_hundredths: 0,
         };
-        let vars = crate::template::vars_for(&sample, "Sample Customer", None);
+        let sample_customer = synthetic_customer();
+        let vars = crate::template::vars_for(&sample, &sample_customer, None);
         // interpolate/parse cannot fail by design; the call is the assertion
         // that no panic escapes for this template.
-        let _ = crate::template::doc_content(&template, &synthetic_customer(), &vars);
+        let _ = crate::template::doc_content(&template, &sample_customer, &vars);
     }
     if !errors.is_empty() {
         return Err(ApiError::validation(errors));
@@ -1035,6 +1043,7 @@ fn synthetic_customer() -> crate::domain::Customer {
         contacts: vec![],
         tax_hundredths: 0,
         discount_hundredths: 0,
+        payment_details: None,
     }
 }
 

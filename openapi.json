@@ -270,6 +270,17 @@
             "minimum": 0,
             "maximum": 10000,
             "description": "Default discount, same encoding."
+          },
+          "payment_details": {
+            "description": "Company payment details configured for this customer — the \"Get paid\" answer: rendered in the GUI panel, mailed as \"How to pay\", printed on documents. Absent when unset; settlement stays manual.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PaymentDetails"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false
@@ -353,6 +364,17 @@
             "minimum": 0,
             "maximum": 10000,
             "description": "Default discount, same encoding."
+          },
+          "payment_details": {
+            "description": "Company payment details configured for this customer — the \"Get paid\" answer: rendered in the GUI panel, mailed as \"How to pay\", printed on documents. Absent when unset; settlement stays manual.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PaymentDetails"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false
@@ -1930,6 +1952,45 @@
           "active": {
             "type": "boolean",
             "description": "false pauses generation; the billing cursor (last_period_end) is kept (#136)."
+          }
+        },
+        "additionalProperties": false
+      },
+      "PaymentDetails": {
+        "type": "object",
+        "description": "The company's payment details as configured for one customer (Get-paid panel, invoice emails, %payment_details%). Every part is optional free text; an all-blank block never persists. No provider integration exists by design — the client pays in on these details and settlement is recorded manually.",
+        "properties": {
+          "bank_name": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "account_name": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "account_number": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "iban": {
+            "type": "string",
+            "maxLength": 34,
+            "description": "When set: 5-34 letters/digits."
+          },
+          "bic": {
+            "type": "string",
+            "maxLength": 11,
+            "description": "When set: exactly 8 or 11 letters/digits."
+          },
+          "reference": {
+            "type": "string",
+            "maxLength": 60,
+            "description": "What the payer should quote as the transfer reference."
+          },
+          "instructions": {
+            "type": "string",
+            "maxLength": 500,
+            "description": "Free-form text shown last, verbatim."
           }
         },
         "additionalProperties": false

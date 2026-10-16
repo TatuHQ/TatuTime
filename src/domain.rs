@@ -186,6 +186,10 @@ pub struct Customer {
     /// Default discount percent, same hundredths encoding, applied by #143.
     #[serde(default, skip_serializing_if = "is_zero_u16")]
     pub discount_hundredths: u16,
+    /// Company payment details configured for this customer ("Get paid"
+    /// panel, invoice emails, `%payment_details%`). `None` on legacy docs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub payment_details: Option<PaymentDetails>,
 }
 
 fn is_zero_u16(v: &u16) -> bool {
@@ -220,6 +224,114 @@ pub struct Contact {
     pub billing: bool,
 }
 
+/// The company's payment details as configured **for one customer** — the
+/// answer to "how does this client pay us". Deliberately no provider
+/// integration: the GUI's *Get paid* panel, invoice emails and the
+/// `%payment_details%` document variable all render this; settlement
+/// itself is recorded manually on the invoice ledger. Every part is free
+/// text with validated bounds, mirroring `Address`; an all-empty struct
+/// never persists.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PaymentDetails {
+    /// The bank the money goes to.
+    #[serde(default)]
+    pub bank_name: String,
+    /// Account holder name as the bank knows it.
+    #[serde(default)]
+    pub account_name: String,
+    /// Local account number.
+    #[serde(default)]
+    pub account_number: String,
+    /// SEPA IBAN (preferred for transfers where IBAN is the norm).
+    #[serde(default)]
+    pub iban: String,
+    /// BIC/SWIFT code.
+    #[serde(default)]
+    pub bic: String,
+    /// What the payer should quote as reference (e.g. "%invoice_number%"
+    /// is NOT expanded here — the ledger/due-date flow keeps invoice
+    /// numbers; this is a plain hint like "Invoice number").
+    #[serde(default)]
+    pub reference: String,
+    /// Free-form instructions shown verbatim last.
+    #[serde(default)]
+    pub instructions: String,
+}
+
+impl PaymentDetails {
+    /// True when any field carries content; an all-blank block is not
+    /// worth persisting (the input normaliser maps it to `None`).
+    #[must_use]
+    pub fn has_content(&self) -> bool {
+        [
+            &self.bank_name,
+            &self.account_name,
+            &self.account_number,
+            &self.iban,
+            &self.bic,
+            &self.reference,
+            &self.instructions,
+        ]
+        .iter()
+        .any(|v| !v.trim().is_empty())
+    }
+
+    /// Trimmed copy for persistence.
+    #[must_use]
+    pub fn trimmed(&self) -> Self {
+        Self {
+            bank_name: self.bank_name.trim().to_string(),
+            account_name: self.account_name.trim().to_string(),
+            account_number: self.account_number.trim().to_string(),
+            iban: self.iban.trim().to_string(),
+            bic: self.bic.trim().to_string(),
+            reference: self.reference.trim().to_string(),
+            instructions: self.instructions.trim().to_string(),
+        }
+    }
+
+    /// Structured `(label, value)` rows for the GUI's Get-paid panel — only
+    /// non-empty fields, in display order. The caller decides layout; the
+    /// GUI inserts them with `textContent`, never HTML.
+    #[must_use]
+    pub fn rows(&self) -> Vec<(&'static str, String)> {
+        let mut out: Vec<(&'static str, String)> = Vec::new();
+        for (label, value) in [
+            ("Bank", &self.bank_name),
+            ("Account name", &self.account_name),
+            ("Account number", &self.account_number),
+            ("IBAN", &self.iban),
+            ("BIC/SWIFT", &self.bic),
+            ("Reference", &self.reference),
+        ] {
+            if !value.trim().is_empty() {
+                out.push((label, value.trim().to_string()));
+            }
+        }
+        out
+    }
+
+    /// Plain-text block for emails and the `%payment_details%` document
+    /// variable: rows first, instructions last. `None` when empty so
+    /// senders can omit the section honestly.
+    #[must_use]
+    pub fn email_block(&self) -> Option<String> {
+        let mut lines = Vec::new();
+        for (label, value) in self.rows() {
+            lines.push(format!("{label}: {value}"));
+        }
+        if !self.instructions.trim().is_empty() {
+            lines.push(self.instructions.trim().to_string());
+        }
+        if lines.is_empty() {
+            None
+        } else {
+            Some(lines.join("\n"))
+        }
+    }
+}
+
 impl Customer {
     /// Where invoice emails go: the flagged billing contact's address when
     /// present, else the legacy top-level email (#139 keeps both truthful).
@@ -241,6 +353,7 @@ pub fn validate_customer_billing_fields(
     contacts: &[Contact],
     tax_hundredths: u16,
     discount_hundredths: u16,
+    payment_details: &Option<PaymentDetails>,
     errors: &mut Vec<FieldError>,
 ) {
     if let Some(a) = address {
@@ -306,6 +419,42 @@ pub fn validate_customer_billing_fields(
     ] {
         if v > 10_000 {
             errors.push(FieldError::new(field, "at most 100.00 percent"));
+        }
+    }
+    if let Some(p) = payment_details {
+        for (field, val, max) in [
+            ("payment_details.bank_name", &p.bank_name, 120usize),
+            ("payment_details.account_name", &p.account_name, 120),
+            ("payment_details.account_number", &p.account_number, 64),
+            ("payment_details.iban", &p.iban, 34),
+            ("payment_details.bic", &p.bic, 11),
+            ("payment_details.reference", &p.reference, 60),
+            ("payment_details.instructions", &p.instructions, 500),
+        ] {
+            if val.chars().count() > max {
+                errors.push(FieldError::new(field, format!("too long (max {max})")));
+            }
+        }
+        // Shapes the document must not print nonsense for: IBAN is up to 34
+        // alphanumerics (no checksum library — no false negatives), BIC is
+        // exactly 8 or 11. Empty means "not used", which is always valid.
+        let iban = p.iban.trim();
+        if !iban.is_empty() && (iban.len() < 5 || !iban.chars().all(|c| c.is_ascii_alphanumeric()))
+        {
+            errors.push(FieldError::new(
+                "payment_details.iban",
+                "must be 5-34 letters/digits",
+            ));
+        }
+        let bic = p.bic.trim();
+        if !bic.is_empty()
+            && ((bic.len() != 8 && bic.len() != 11)
+                || !bic.chars().all(|c| c.is_ascii_alphanumeric()))
+        {
+            errors.push(FieldError::new(
+                "payment_details.bic",
+                "must be 8 or 11 letters/digits",
+            ));
         }
     }
 }
@@ -1718,6 +1867,8 @@ pub struct CustomerInput {
     pub tax_hundredths: u16,
     #[serde(default)]
     pub discount_hundredths: u16,
+    #[serde(default)]
+    pub payment_details: Option<PaymentDetails>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1828,6 +1979,7 @@ pub fn validate_customer_input(input: &CustomerInput) -> Result<CustomerDraft, V
         &input.contacts,
         input.tax_hundredths,
         input.discount_hundredths,
+        &input.payment_details,
         &mut errors,
     );
     if errors.is_empty() {
@@ -1858,6 +2010,13 @@ pub fn validate_customer_input(input: &CustomerInput) -> Result<CustomerDraft, V
                 .collect(),
             tax_hundredths: input.tax_hundredths,
             discount_hundredths: input.discount_hundredths,
+            // An all-blank payment block normalises to "not configured" —
+            // the Get-paid panel and emails then honestly omit it.
+            payment_details: input
+                .payment_details
+                .as_ref()
+                .filter(|p| p.has_content())
+                .map(PaymentDetails::trimmed),
         })
     } else {
         Err(errors)
@@ -1963,6 +2122,7 @@ pub struct CustomerDraft {
     pub contacts: Vec<Contact>,
     pub tax_hundredths: u16,
     pub discount_hundredths: u16,
+    pub payment_details: Option<PaymentDetails>,
 }
 
 #[derive(Debug)]
@@ -2087,6 +2247,7 @@ mod tests {
             contacts: vec![],
             tax_hundredths: 0,
             discount_hundredths: 0,
+            payment_details: None,
         }
     }
 
@@ -2154,6 +2315,8 @@ mod tests {
             contacts: vec![],
             tax_hundredths: 0,
             discount_hundredths: 0,
+
+            payment_details: None,
         };
         let project = Project {
             customer_id: customer.id,

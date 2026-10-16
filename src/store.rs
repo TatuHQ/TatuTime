@@ -2532,6 +2532,7 @@ mod tests {
             contacts: vec![],
             tax_hundredths: 0,
             discount_hundredths: 0,
+            payment_details: None,
         }
     }
 

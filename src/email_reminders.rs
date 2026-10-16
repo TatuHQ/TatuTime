@@ -159,7 +159,7 @@ impl EmailReminderJob {
                 let mut doc = crate::pdf::doc_for_labeled(inv, customer, &org, &template.labels);
                 let vars = crate::template::vars_for(
                     inv,
-                    &customer.name,
+                    customer,
                     Some(inv.issued_at.unwrap_or(inv.created_at).date_naive()),
                 );
                 let content = crate::template::doc_content(&template, customer, &vars);
@@ -216,6 +216,10 @@ impl Job for EmailReminderJob {
             let attachment = self.resolve_pdf(&inv, customer, now);
             let amount = crate::api::money_for_email(inv.balance_minor(), &inv.currency.0);
             let due = inv.due_date.map(|d| d.to_string()).unwrap_or_default();
+            let payment = customer
+                .payment_details
+                .as_ref()
+                .and_then(|p| p.email_block());
             let text = render_reminder_email(
                 &customer.name,
                 &inv.number,
@@ -224,6 +228,7 @@ impl Job for EmailReminderJob {
                 days_over,
                 &self.org.name,
                 attachment.is_some(),
+                payment.as_deref(),
             );
             let msg = EmailMessage {
                 to: billing_email,
