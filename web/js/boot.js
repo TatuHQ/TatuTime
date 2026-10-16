@@ -5,11 +5,12 @@
 import { addRecurring, createRetainer, iwInit, refreshCatalog, refreshRetainers, refreshSchedules, saveCatalogItem } from './billing.js';
 import { calState, refreshTimeCal, shiftMonth } from './calendar.js';
 import { $, addDays, announce, clearFormError, decorateUbuntuButton, isoDate, mondayOf } from './dom.js';
-import { ADD_CATEGORY_VALUE, addCategory, addExpenseCategory, fillCategorySelect, initReceiptPreview, refreshCategories, refreshExpenses, refreshSubmissions, resetCategoryForm, resetExpenseForm, saveExpense, submitWeek } from './expenses.js';
+import { ADD_CATEGORY_VALUE, addCategory, addExpenseCategory, fillCategorySelect, refreshCategories, refreshExpenses, refreshSubmissions, resetCategoryForm, resetExpenseForm, saveExpense, submitWeek } from './expenses.js';
 import { refreshExpenseConversion, resetExpenseConversion, showConverted } from './fx.js';
 import { cancelCustomerEdit, cancelProjectEdit, cancelTaskEdit, contactRow, fillParentCustomers, fillTaskParents, prefillProjectParent, refreshCustomerPickers, refreshCustomerTable, refreshProjectTable, refreshTaskTable, runReport, saveCustomer, saveProject, saveTask } from './hierarchy.js';
 import { closeInvoicePreview, dash, dashApplyColumns, downloadInvoicePdf, ed, edClose, edLineRow, edOpen, edRecalc, edSave, generateInvoice, invoicePreview, refreshInvoiceSummary, refreshInvoices } from './invoices.js';
 import { markNotificationsRead, refreshNotifications } from './notifications.js';
+import { initReceiptPreview } from './receipt.js';
 import { initRouter, initSegTabs, initSettingsTabs, initTabs, refreshTimesheetView, segActiveId, showTimesheet } from './route.js';
 import { addSecret, closeUserForm, closeUserPassword, newUserForm, paintAccent, refreshSettings, renderUsers, saveConfig, saveInvoiceTemplate, saveOrgProfile, saveUser, saveUserPassword } from './settings.js';
 import { customerName, fillProjectSelect, fillTaskSelect, loadCustomers, state } from './state.js';

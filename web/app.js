@@ -24,6 +24,7 @@ import './js/timesheet.js';
 import './js/hierarchy.js';
 import './js/invoices.js';
 import './js/billing.js';
+import './js/receipt.js';
 import './js/expenses.js';
 import './js/fx.js';
 import './js/settings.js';
