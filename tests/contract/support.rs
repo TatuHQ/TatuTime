@@ -1,0 +1,340 @@
+use axum::Router;
+use axum::body::Body;
+use axum::http::{Request, StatusCode, header};
+use http_body_util::BodyExt;
+use serde_json::{Value, json};
+use std::sync::Arc;
+use tower::ServiceExt;
+
+use tucano_time::api::AppState;
+use tucano_time::auth::Session;
+use tucano_time::clock::SystemClock;
+use tucano_time::lock::{EntryLock, LockReason};
+use tucano_time::store::Store;
+
+pub(crate) const ADMIN_EMAIL: &str = "admin@test.local";
+pub(crate) const ADMIN_PW: &str = "supersecret1";
+
+/// An in-process client holding a router and an authenticated session cookie.
+pub(crate) struct Client {
+    pub(crate) router: Router,
+    pub(crate) cookie: String,
+    /// The recording email transport installed on the router (#35).
+    pub(crate) email: Arc<tucano_time::email::RecordingEmailSender>,
+}
+
+pub(crate) async fn raw(
+    router: &Router,
+    method: &str,
+    uri: &str,
+    body: Option<Value>,
+    cookie: Option<&str>,
+) -> (StatusCode, Value, Option<String>) {
+    let mut b = Request::builder().method(method).uri(uri);
+    if let Some(c) = cookie {
+        b = b.header(header::COOKIE, c);
+    }
+    // The CSRF guard requires this on mutations; send it on all test requests.
+    b = b.header("x-csrf-protection", "1");
+    let req = match body {
+        Some(v) => {
+            b = b.header("content-type", "application/json");
+            b.body(Body::from(v.to_string())).unwrap()
+        }
+        None => b.body(Body::empty()).unwrap(),
+    };
+    let res = router.clone().oneshot(req).await.expect("oneshot");
+    let status = res.status();
+    let set_cookie = res
+        .headers()
+        .get(header::SET_COOKIE)
+        .and_then(|v| v.to_str().ok())
+        .map(|v| v.split(';').next().unwrap_or("").to_string());
+    let bytes = res.into_body().collect().await.expect("body").to_bytes();
+    let value = if bytes.is_empty() {
+        Value::Null
+    } else {
+        serde_json::from_slice(&bytes)
+            .unwrap_or_else(|_| Value::String(String::from_utf8_lossy(&bytes).into_owned()))
+    };
+    (status, value, set_cookie)
+}
+
+pub(crate) async fn login_cookie(router: &Router, email: &str, pw: &str) -> String {
+    let (_s, _b, c) = raw(
+        router,
+        "POST",
+        "/api/auth/login",
+        Some(json!({"email": email, "password": pw})),
+        None,
+    )
+    .await;
+    c.unwrap_or_default()
+}
+
+impl Client {
+    pub(crate) async fn new(store: Store, locks: Option<Arc<dyn EntryLock>>) -> Self {
+        Self::build(
+            store,
+            locks,
+            tucano_time::payments::PaymentRegistry::default(),
+            tucano_time::accounting::AccountingRegistry::default(),
+        )
+        .await
+    }
+
+    /// Client with accounting providers injected (#33 tests).
+    pub(crate) async fn with_accounting(
+        store: Store,
+        accounting: tucano_time::accounting::AccountingRegistry,
+    ) -> Self {
+        Self::build(
+            store,
+            None,
+            tucano_time::payments::PaymentRegistry::default(),
+            accounting,
+        )
+        .await
+    }
+
+    pub(crate) async fn with_payments(
+        store: Store,
+        payments: tucano_time::payments::PaymentRegistry,
+    ) -> Self {
+        Self::build(
+            store,
+            None,
+            payments,
+            tucano_time::accounting::AccountingRegistry::default(),
+        )
+        .await
+    }
+
+    pub(crate) async fn build(
+        store: Store,
+        locks: Option<Arc<dyn EntryLock>>,
+        payments: tucano_time::payments::PaymentRegistry,
+        accounting: tucano_time::accounting::AccountingRegistry,
+    ) -> Self {
+        let session = Arc::new(Session::new(
+            b"test-session-secret-0000000000000032".to_vec(),
+            3600,
+            false,
+        ));
+        let recorder = Arc::new(tucano_time::email::RecordingEmailSender::default());
+        let payments = Arc::new(payments);
+        let accounting = Arc::new(accounting);
+        let state = match locks {
+            Some(l) => {
+                let store = Arc::new(store);
+                let audit = Arc::new(tucano_time::audit::AuditLog::new(store.root()));
+                let revocations = Arc::new(tucano_time::revoke::Revocations::new(store.root()));
+                AppState {
+                    store,
+                    clock: Arc::new(SystemClock),
+                    locks: l,
+                    session,
+                    rate: Arc::new(tucano_time::ratelimit::RateLimiter::new(
+                        8,
+                        std::time::Duration::from_secs(300),
+                    )),
+                    audit,
+                    revocations,
+                    vault: None,
+                    email: recorder.clone(),
+                    payments,
+                    accounting,
+                    sso: Arc::new(tucano_time::sso::SsoRegistry::default()),
+                    oauth_flows: Arc::new(tucano_time::calendar_oauth::OAuthFlows::new()),
+                    cfg: Arc::new(std::sync::Mutex::new(Arc::new(
+                        tucano_time::appconfig::AppConfig::empty(),
+                    ))),
+                }
+            }
+            None => AppState::with_session(store, session)
+                .with_email(recorder.clone())
+                .with_payments(payments)
+                .with_accounting(accounting),
+        };
+        let router = tucano_time::build_router(state);
+        // Bootstrap the first admin (403 if users already exist — fine).
+        let _ = raw(
+            &router,
+            "POST",
+            "/api/auth/bootstrap",
+            Some(json!({"name":"Admin","email":ADMIN_EMAIL,"password":ADMIN_PW})),
+            None,
+        )
+        .await;
+        let cookie = login_cookie(&router, ADMIN_EMAIL, ADMIN_PW).await;
+        Self {
+            router,
+            cookie,
+            email: recorder,
+        }
+    }
+}
+
+/// A test lock provider that freezes a single entry id.
+pub(crate) struct LockOne(pub(crate) Option<uuid::Uuid>);
+impl EntryLock for LockOne {
+    fn entry_lock(
+        &self,
+        entry_id: uuid::Uuid,
+    ) -> Result<Option<LockReason>, tucano_time::lock::LockUnavailable> {
+        if self.0 == Some(entry_id) {
+            Ok(Some(LockReason::Invoiced { id: "INV-1".into() }))
+        } else {
+            Ok(None)
+        }
+    }
+    fn locked_entries(
+        &self,
+    ) -> Result<std::collections::HashSet<uuid::Uuid>, tucano_time::lock::LockUnavailable> {
+        Ok(self.0.into_iter().collect())
+    }
+}
+
+pub(crate) async fn app() -> (Client, tempfile::TempDir) {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = Store::open(dir.path().join("data")).expect("store");
+    (Client::new(store, None).await, dir)
+}
+
+pub(crate) async fn app_locked(dir_path: &std::path::Path, locks: Arc<dyn EntryLock>) -> Client {
+    let store = Store::open(dir_path.join("data")).expect("store");
+    Client::new(store, Some(locks)).await
+}
+
+/// Authenticated request.
+pub(crate) async fn json_req(
+    client: &Client,
+    method: &str,
+    uri: &str,
+    body: Option<Value>,
+) -> (StatusCode, Value) {
+    let (s, v, _) = raw(&client.router, method, uri, body, Some(&client.cookie)).await;
+    (s, v)
+}
+
+/// Authenticated request that keeps the **raw response bytes and headers** —
+/// needed for the binary PDF download (#113), where the body is not JSON.
+pub(crate) async fn raw_req(
+    client: &Client,
+    method: &str,
+    uri: &str,
+) -> (StatusCode, axum::http::HeaderMap, Vec<u8>) {
+    let req = Request::builder()
+        .method(method)
+        .uri(uri)
+        .header(header::COOKIE, &client.cookie)
+        .header("x-csrf-protection", "1")
+        .body(Body::empty())
+        .unwrap();
+    let res = client.router.clone().oneshot(req).await.expect("oneshot");
+    let status = res.status();
+    let headers = res.headers().clone();
+    let bytes = res
+        .into_body()
+        .collect()
+        .await
+        .expect("body")
+        .to_bytes()
+        .to_vec();
+    (status, headers, bytes)
+}
+
+/// Seed a customer (with billing email), one project and an entry, then
+/// generate + issue an invoice. Returns the issued invoice JSON and the
+/// invoice id. Shared by the #113 PDF tests.
+pub(crate) async fn seed_issued_invoice(client: &Client) -> (Value, String) {
+    let (sc, cust) = json_req(
+        client,
+        "POST",
+        "/api/customers",
+        Some(json!({"name":"ACME","currency":"EUR","default_rate_minor":6000,"email":"billing@acme.test"})),
+    )
+    .await;
+    assert_eq!(sc, StatusCode::CREATED, "{cust}");
+    let cid = cust["id"].as_str().unwrap();
+    new_project(client, cid, "P1", json!({"rate_minor": 6000})).await;
+    json_req(
+        client,
+        "POST",
+        "/api/entries",
+        Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":3})),
+    )
+    .await;
+    let (_s, inv) = json_req(
+        client,
+        "POST",
+        "/api/invoices",
+        Some(json!({"customer_id":cid,"from":"2026-10-01","to":"2026-10-07"})),
+    )
+    .await;
+    let iid = inv["id"].as_str().unwrap().to_string();
+    let (si, issued) = json_req(client, "POST", &format!("/api/invoices/{iid}/issue"), None).await;
+    assert_eq!(si, StatusCode::OK, "{issued}");
+    (issued, iid)
+}
+
+/// Unauthenticated request (for the auth tests).
+pub(crate) async fn anon_req(
+    client: &Client,
+    method: &str,
+    uri: &str,
+    body: Option<Value>,
+) -> (StatusCode, Value) {
+    let (s, v, _) = raw(&client.router, method, uri, body, None).await;
+    (s, v)
+}
+
+/// Create a customer and return its object.
+pub(crate) async fn new_customer(app: &Client, name: &str, currency: &str, rate: u64) -> Value {
+    let (status, body) = json_req(
+        app,
+        "POST",
+        "/api/customers",
+        Some(json!({"name": name, "currency": currency, "default_rate_minor": rate})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "create customer: {body}");
+    body
+}
+
+pub(crate) async fn new_project(app: &Client, cid: &str, code: &str, extra: Value) -> Value {
+    // currency + rate_minor are required since #11; default to the customer's
+    // values and let `extra` override (e.g. a project-specific rate).
+    let mut body = json!({"code": code, "currency": "EUR", "rate_minor": 6000});
+    if let Value::Object(map) = extra {
+        for (k, v) in map {
+            body[k] = v;
+        }
+    }
+    let (status, created) = json_req(
+        app,
+        "POST",
+        &format!("/api/customers/{cid}/projects"),
+        Some(body),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "create project: {created}");
+    created
+}
+
+pub(crate) fn entry_body(cid: &str, code: &str, hours: Value, date: &str) -> Value {
+    json!({"date": date, "customer_id": cid, "project_code": code, "hours": hours})
+}
+
+/// Create a member and return their session cookie (shared by the RBAC tests).
+pub(crate) async fn member_cookie(app: &Client, email: &str, pw: &str) -> String {
+    let (s, body) = json_req(
+        app,
+        "POST",
+        "/api/users",
+        Some(json!({"name":"Member","email":email,"password":pw,"role":"member"})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "create member: {body}");
+    login_cookie(&app.router, email, pw).await
+}
