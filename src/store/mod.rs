@@ -273,7 +273,7 @@ pub const ARCHIVE_DIR: &str = "archive";
 /// non-`Entity` dirs [`ENTRIES_DIR`] (date-sharded), [`NOTIFICATIONS_DIR`] and
 /// [`ARCHIVE_DIR`] (#349/#350), each row its own `DIR` constant.
 ///
-/// The guard (`tests/contract.rs`, `storage_layout`) holds this list and
+/// The guard (`tests/contract/store.rs`, `storage_layout`) holds this list and
 /// `AGENTS.md`'s storage bullet together both ways (#336); a collection lands
 /// in both in one change. Not here: the flat side-car files (`audit.log`,
 /// `revoked.json`, `scheduler.json`, `secrets.bin`, `config.json`,
