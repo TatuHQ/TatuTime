@@ -10,6 +10,15 @@ use crate::{
     API_ROUTES, dev_reload, dev_reload_script, docs, openapi, spawn_web_watcher, static_assets,
 };
 
+/// Assemble the router: server meta and the GUI shell stay at the root, every
+/// JSON endpoint lives under `/api`, so the top-level paths are free for GUI page
+/// routes.
+///
+/// ```rust
+/// let app = build_router(state);
+/// // root: /healthz, /openapi.json, /docs, the GUI
+/// // /api/auth/login is public; /api/customers needs a session; /api/users an admin
+/// ```
 pub fn build_router(state: AppState) -> Router {
     // Server meta and the GUI shell stay at the root; every JSON endpoint lives
     // under `/api` so the top-level paths are free for GUI page routes (e.g.

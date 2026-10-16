@@ -74,13 +74,15 @@ pub struct Contact {
     pub billing: bool,
 }
 
-/// The company's payment details as configured **for one customer** — the
-/// answer to "how does this client pay us". Deliberately no provider
-/// integration: the GUI's *Get paid* panel, invoice emails and the
-/// `%payment_details%` document variable all render this; settlement
-/// itself is recorded manually on the invoice ledger. Every part is free
-/// text with validated bounds, mirroring `Address`; an all-empty struct
-/// never persists.
+/// The company's payment details **for one customer** — the answer to "how does
+/// this client pay us". The GUI's *Get paid* panel, the invoice/reminder emails
+/// and the `%payment_details%` document variable all render this, with no provider
+/// integration; every part is validated free text and an all-empty block never persists.
+///
+/// ```rust
+/// details.iban = "DE89 3704 0044 0532 0130 00".into();
+/// // -> the "How to pay" section of the invoice, its email and its PDF
+/// ```
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PaymentDetails {

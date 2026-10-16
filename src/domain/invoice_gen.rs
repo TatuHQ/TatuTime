@@ -10,12 +10,15 @@ use uuid::Uuid;
 
 /// Entry and expense ids already committed to a **non-draft** invoice, in the
 /// `excluded_entries` / `excluded_expenses` shape [`generate_invoice`] consumes
-/// (#8). This is the single "already invoiced" predicate: the API draft/preview
-/// builder and the recurring scheduler both call it, so a line captured on an
-/// issued, settled (`partly_paid` / `paid`) or written-off document can never be
-/// billed twice (#248). Settling or writing off an invoice releases its entries
-/// from the edit lock (#114) but **not** from billing. Drafts are deliberately
-/// not excluded — their lines stay billable until the draft is issued.
+/// (#8/#248): the single "already invoiced" predicate, so a line on an issued,
+/// settled (`partly_paid`/`paid`) or written-off document is never billed twice.
+/// Settling or writing off releases the edit lock (#114) but not the billing
+/// exclusion; drafts stay billable until issued.
+///
+/// ```rust
+/// let (entries, expenses) = already_invoiced(&invoices);
+/// // entries = every id on a non-draft invoice; expenses = their expense ids
+/// ```
 pub fn already_invoiced(invoices: &[Invoice]) -> (Vec<Uuid>, Vec<Uuid>) {
     let billed: Vec<&Invoice> = invoices
         .iter()
@@ -54,10 +57,14 @@ pub struct InvoiceSources<'a> {
 }
 
 /// Build a draft invoice from the billable entries (and, if enabled, billable
-/// expenses) in `[from, to]` for one customer. Time-line rates are resolved per
-/// entry (person > project > customer) and snapshotted, so a later rate
-/// change never rewrites an issued invoice. Items already on a non-draft
-/// invoice (`excluded_*`, e.g. from [`already_invoiced`]) are skipped.
+/// expenses) in `[from, to]` for one customer. Each line snapshots the rate
+/// resolved per entry (person > project > customer), so a later rate change never
+/// rewrites an issued invoice; `excluded_*` ids (see [`already_invoiced`]) are skipped.
+///
+/// ```rust
+/// // a month's billable time becomes one draft, the rate frozen on every line
+/// let draft = generate_invoice(number, &customer, &sources, from, to, now)?;
+/// ```
 pub fn generate_invoice(
     number: String,
     customer: &Customer,

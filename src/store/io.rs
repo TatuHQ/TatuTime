@@ -186,6 +186,13 @@ where
     }
 }
 
+/// Write a document with the store's atomic discipline: pretty JSON into a
+/// sibling `.tmp`, then `rename` over the target, so a reader never observes a
+/// half-written file. Callers hold the writer lock.
+///
+/// ```rust
+/// write_json(path, &doc)?;   // tmp write, then one atomic rename
+/// ```
 pub(super) fn write_json<T>(path: &Path, value: &T) -> Result<(), StoreError>
 where
     T: serde::Serialize + ?Sized,

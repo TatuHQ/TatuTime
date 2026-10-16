@@ -210,6 +210,12 @@ impl Store {
         Ok(out)
     }
 
+    /// Every entry in `[from, to]`, both bounds inclusive, hot ∪ cold. The span
+    /// is capped at `MAX_RANGE_DAYS`, so a malformed query cannot walk the tree.
+    ///
+    /// ```rust
+    /// let week = store.list_range(monday, sunday)?; // inclusive on both ends
+    /// ```
     pub fn list_range(&self, from: NaiveDate, to: NaiveDate) -> Result<Vec<Entry>, StoreError> {
         if (to - from).num_days() > MAX_RANGE_DAYS {
             return Err(StoreError::RangeTooLarge);

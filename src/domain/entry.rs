@@ -65,12 +65,18 @@ pub struct Entry {
     pub updated_at: DateTime<Utc>,
 }
 
-/// Effective (currency, rate) of an entry. Rate precedence (#21):
-/// **person → project → customer default**. Currency precedence:
-/// project → customer. `user_rate` is the logging person's default
-/// (Some only when > 0), kept as a plain number so `domain` stays independent
-/// of the `auth` module. Tasks stopped carrying billing overrides in #177;
-/// the entry/task parameters they once needed are gone (#189).
+/// Effective (currency, rate) of an entry. Rate precedence (#21): **person →
+/// project → customer default**; currency precedence: project → customer. The
+/// customer supplies only the *default*, so a project's own rate always wins.
+/// `user_rate` is the logging person's default (Some only when > 0), kept as a
+/// plain number so `domain` stays independent of `auth`; tasks carry no billing
+/// overrides (#177/#189).
+///
+/// ```rust
+/// // project rate 6000 wins over the customer default 5000
+/// let (currency, rate) = effective_rates(&customer, Some(&project), None);
+/// // with no project, and no user rate, rate == customer.default_rate_minor
+/// ```
 pub fn effective_rates(
     customer: &Customer,
     project: Option<&Project>,

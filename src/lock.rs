@@ -49,6 +49,17 @@ impl LockReason {
 #[derive(Debug)]
 pub struct LockUnavailable(pub String);
 
+/// One entry's frozen state, plus one pass over every frozen entry. The providers
+/// (invoices #8, submissions #16, claims #24) answer from one memoized snapshot
+/// (#255); reads are never blocked — only a write to a frozen record is refused.
+///
+/// ```rust
+/// match lock.entry_lock(id) {
+///     Ok(Some(_reason)) => /* 409: invoiced, submitted or claimed */,
+///     Ok(None)          => /* editable */,
+///     Err(_)            => /* fail closed: 503 lock_unavailable (#185) */,
+/// }
+/// ```
 pub trait EntryLock: Send + Sync {
     /// `Ok(Some(reason))` if the entry is locked and must not be edited or
     /// deleted; `Ok(None)` if provably unlocked; `Err` if the state cannot be

@@ -1,7 +1,15 @@
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Number;
 
-/// Hours as hundredths (1 = 0.01 h, 2400 = 24.00 h).
+/// Hours as hundredths — the one hours convention: `1` = 0.01 h, so
+/// `Hours(150)` is 1.50 h and `Hours(2400)` is 24.00 h (the maximum). A
+/// duration is never held in a float; `amount_minor` does the exact integer
+/// billing.
+///
+/// ```rust
+/// let half = Hours(150);                       // 1.50 h
+/// assert_eq!(half.amount_minor(6000), 9000);   // 1.5 h at 60.00/h = 90.00
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Hours(pub u32);
 
