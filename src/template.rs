@@ -1,23 +1,14 @@
 //! Invoice document templates (#116): `%variable%` interpolation plus a
 //! deliberately tiny markdown subset.
 //!
-//! Pure module — no I/O, no clock beyond dates passed in, no randomness.
-//! The markdown parses **once** into the `pdf::Block` model (#113's seam)
-//! and two emitters consume it: `pdf::render_invoice_pdf` lays the blocks
-//! out into the document, `to_html` renders them for `EmailMessage.html`.
-//! HTML output escapes all input first — the GUI's "textContent, never
-//! innerHTML" rule has no reason to be weaker server-side. Tables, links,
-//! images and raw HTML are out of the subset on purpose: anything else is
-//! literal text.
-//!
-//! Variable resolution is **fail-loud at save time** (`validate_*` rejects
-//! unknown `%tokens%` with the standard 422 `FieldError` shape, so typos
-//! never persist) and **fail-safe at render time** (an unknown token that
-//! somehow reaches the renderer is left literal and logged — it never
-//! panics and never guesses).
-//!
-//! Money comes from persisted minor units through `api::money_for_email`;
-//! month names come from a static table. Floats and locale crates stay out.
+//! Pure: no I/O, no clock beyond dates passed in, no randomness. The markdown
+//! parses **once** into the `pdf::Block` model, consumed by `render_invoice_pdf`
+//! (the layout) and `to_html` (the email; all input escaped first, so the
+//! server-side rule is no weaker than the GUI's "textContent, never innerHTML").
+//! Tables, links, images and raw HTML are out of the subset on purpose. Variable
+//! resolution is **fail-loud at save time** (`validate_*` rejects unknown
+//! `%tokens%` with the 422 `FieldError` shape) and **fail-safe at render time**
+//! (an unknown token is left literal and logged — never a panic).
 
 use std::collections::BTreeMap;
 

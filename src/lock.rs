@@ -1,15 +1,11 @@
-//! Entry/expense-lock port. A single seam answers "is this record frozen, and
-//! why?". Invoices (#8), timesheet submissions (#16) and reimbursement claims
-//! (#24) are lock providers here; the entry edit/delete and expense delete
-//! handlers consult this one seam so a record cannot be changed through any
-//! route once locked. (#255 folded the claims scan — which used to live inline
-//! in `api::expenses` as the #190 follow-up — into a third provider.)
+//! Entry/expense-lock port: one seam answers "is this record frozen, and why?".
 //!
-//! `NoLocks` is the default: with no invoice/submission feature shipped yet,
-//! nothing is locked. Real providers implement `EntryLock` and are composed by
-//! `CombinedLocks` (first lock wins). The invoice, submission and claim
-//! providers all answer from one memoized `store::LockSnapshot` (#255), so a
-//! per-record check no longer re-reads every document.
+//! Invoices (#8), timesheet submissions (#16) and reimbursement claims (#24) are
+//! lock providers; the entry edit/delete and expense delete handlers consult this
+//! seam, so a record cannot be changed through any route once locked.
+//! `CombinedLocks` composes the providers (first lock wins) and all three answer
+//! from one memoized `store::LockSnapshot` (#255), so a per-record check never
+//! re-reads every document. `NoLocks` locks nothing.
 
 use uuid::Uuid;
 
@@ -53,6 +49,17 @@ impl LockReason {
 #[derive(Debug)]
 pub struct LockUnavailable(pub String);
 
+/// One entry's frozen state, plus one pass over every frozen entry. The providers
+/// (invoices #8, submissions #16, claims #24) answer from one memoized snapshot
+/// (#255); reads are never blocked — only a write to a frozen record is refused.
+///
+/// ```rust
+/// match lock.entry_lock(id) {
+///     Ok(Some(_reason)) => /* 409: invoiced, submitted or claimed */,
+///     Ok(None)          => /* editable */,
+///     Err(_)            => /* fail closed: 503 lock_unavailable (#185) */,
+/// }
+/// ```
 pub trait EntryLock: Send + Sync {
     /// `Ok(Some(reason))` if the entry is locked and must not be edited or
     /// deleted; `Ok(None)` if provably unlocked; `Err` if the state cannot be
@@ -229,9 +236,8 @@ impl EntryLock for SubmissionLock {
 
 /// Lock provider backed by submitted/approved reimbursement claims (#24): an
 /// expense referenced by one is frozen until the claim is rejected (or the
-/// expense leaves it). #190/#255: this is the third provider behind the same
-/// seam the entry locks use, replacing the direct scan that used to live in
-/// `api::expenses`.
+/// expense leaves it). It is the third provider behind the same seam the entry
+/// locks use (#190/#255).
 pub struct ClaimLock {
     store: std::sync::Arc<crate::store::Store>,
 }

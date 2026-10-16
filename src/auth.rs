@@ -187,16 +187,12 @@ pub fn token_from_cookie_header(header: &str) -> Option<&str> {
     })
 }
 
-/// Build the session signer from config. In production a strong secret is
-/// required (#44): missing or shorter than 32 bytes fails fast rather than
-/// silently using an ephemeral key that logs everyone out on restart.
-/// Resolve the session signing secret (#94). Precedence:
-/// `TUCANO_SESSION_SECRET` > `TUCANO_SESSION_SECRET_FILE` (mount-friendly) >
-/// `<root>/session.key` — which is **auto-created** with fresh randomness on
-/// first boot so a plain container restart/update no longer logs everyone
-/// out. Returns `(secret, ephemeral)`; `secret` is `None` only when the file
-/// could not be created (read-only volume), in which case the caller keeps
-/// the old ephemeral behaviour.
+/// Resolve the session signing secret (#94): `TUCANO_SESSION_SECRET` >
+/// `TUCANO_SESSION_SECRET_FILE` (mount-friendly) > `<root>/session.key`, which is
+/// **auto-created** on first boot so a restart or update keeps everyone signed
+/// in. In production a strong secret is required (#44): missing or shorter than
+/// 32 bytes fails fast. Returns `(secret, ephemeral)`; `secret` is `None` only
+/// when the file could not be created (read-only volume).
 pub fn resolve_session_secret(
     root: &std::path::Path,
     env_secret: Option<String>,

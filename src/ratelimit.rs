@@ -1,18 +1,14 @@
 //! In-process rate limiting for authentication endpoints (#47).
 //!
-//! A fixed-window failure counter per key (e.g. `login:<email>` or
-//! `bootstrap`). Successful auth clears the key; repeated failures within the
-//! window lock it out. In-memory and per-process — a multi-process deployment
-//! shares the data dir but not this map, which is acceptable for a small
-//! self-hosted tool (a hardening follow-up could back it with the filesystem).
+//! A fixed-window failure counter per key (e.g. `login:<email>` or `bootstrap`);
+//! successful auth clears the key, repeated failures within the window lock it
+//! out. In-memory and per-process — a multi-process deployment shares the data
+//! dir but not this map, acceptable for a small self-hosted tool.
 //!
-//! The map is bounded (A12): each write prunes windows that have fully elapsed
-//! and enforces a hard key cap, evicting the oldest key when the cap is
-//! exceeded. Without this, a flood of attempts with random identities on the
-//! public login/bootstrap endpoints would grow the map without bound (a
-//! memory-exhaustion DoS). Eviction fails *open* for the evicted key — its
-//! counter is forgotten, so that identity gets a fresh window — but that is the
-//! deliberate trade-off that keeps memory bounded.
+//! The map is bounded (A12): each write prunes elapsed windows and evicts the
+//! oldest key beyond a hard cap. Without this a flood of random identities on the
+//! public endpoints would grow it without bound (a memory-exhaustion DoS).
+//! Eviction fails *open* for the evicted key — the trade-off that bounds memory.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};

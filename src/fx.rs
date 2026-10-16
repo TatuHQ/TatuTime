@@ -1,19 +1,14 @@
-//! Exchange rates for the expense currency conversion (#…).
+//! Exchange rates for the expense currency conversion.
 //!
 //! Rates come from the European Central Bank's free daily reference feed: one
-//! small XML document, EUR-based, no key, published once a working day. The
-//! table is fetched lazily, cached in-process **with its reference date**, and
-//! never invented — when no table can be loaded the caller gets
-//! [`FxError::Unavailable`] and the API answers `503 fx_unavailable`
-//! (fail-closed, like the vault and the SSO allow-list).
-//!
-//! `TUCANO_FX_RATES_FILE` points the loader at a local copy of the *same*
-//! document instead of the network. That is the seam the contract tests use
-//! (they must run offline) and it doubles as an air-gapped deployment story: a
-//! cron can drop the published file on disk and the app never dials out. A
-//! configured file is read on every call, so replacing it takes effect without
-//! a restart — and it never populates the network cache, so the two sources
-//! cannot contaminate each other.
+//! small XML document, EUR-based, no key, published once a working day. The table
+//! is fetched lazily and cached in-process **with its reference date**, and never
+//! invented — with no table the caller gets [`FxError::Unavailable`] and the API
+//! answers `503 fx_unavailable` (fail-closed, like the vault and SSO allow-list).
+//! `TUCANO_FX_RATES_FILE` points the loader at a local copy of the *same* document
+//! instead of the network — the seam the contract tests use offline, and an
+//! air-gapped deployment story; a configured file is read on every call and never
+//! populates the network cache, so the two sources cannot contaminate each other.
 
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};

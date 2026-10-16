@@ -204,8 +204,8 @@ pub async fn close_retainer(
             Ok(())
         })
         .map_err(retainer_update_error)?;
-    // A second close now answers 409 RetainerError::Closed (it used to be
-    // erased to StoreError::Io and surfaced as a 500) (#187).
+    // A second close answers 409 RetainerError::Closed (#187), never a 500 from
+    // an error erased to StoreError::Io.
     app.audit.record(
         "retainer_closed",
         &format!("{}:{}", id, actor.0.id),

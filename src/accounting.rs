@@ -170,9 +170,9 @@ impl XeroProvider {
 }
 
 /// QBO money is a plain decimal string — the exact encoding for BOTH invoice
-/// totals and payments (#186: `doc_amount` used to send `TotalAmt` as a JSON
-/// float while payments sent a string, so the two could not both be right).
-/// Two-decimal minor-unit math, no accumulated float error at real sizes.
+/// totals and payments (#186): `doc_amount` always emits `TotalAmt` as that
+/// string, never a JSON float. Two-decimal minor-unit math, no accumulated
+/// float error at real sizes.
 fn qbo_amount(minor: u64) -> String {
     format!("{:.2}", minor as f64 / 100.0)
 }
@@ -664,9 +664,8 @@ mod tests {
         let posts = t.posts.lock().unwrap();
         let body = &posts[0].1;
         assert_eq!(body["IdDoc"]["DocNumber"], "INV-0042");
-        // #186: invoice and payment totals use the identical exact decimal
-        // string encoding (this used to be a JSON float on one, a string on
-        // the other).
+        // #186: invoice and payment totals share the identical exact decimal
+        // string encoding.
         assert_eq!(body["IdDoc"]["TotalAmt"], "180.00");
         assert_eq!(body["Line"][0]["Amount"], "180.00");
         assert_eq!(body["synchronized_id"], "qbo:INV-0042");

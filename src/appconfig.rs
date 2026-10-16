@@ -1,18 +1,12 @@
-//! Externalised configuration (#94). Settings that decide *how the app
-//! behaves* (not what it stores) used to be env-only, and env dies with the
-//! container: a restart or image update silently reverted them. This module
-//! gives every non-secret knob a durable home in `<data>/config.json` with a
-//! fixed precedence:
-//!
-//! ```text
-//! explicit env var  >  config.json entry  >  built-in default
-//! ```
+//! Externalised configuration (#94): every non-secret knob gets a durable home in
+//! `<data>/config.json`, with a fixed precedence — `explicit env var >
+//! config.json entry > built-in default`.
 //!
 //! Secret material (vault key, session secret, SMTP passwords, webhook/tokens)
-//! deliberately does NOT live here — config.json is plaintext next to the
-//! data it protects. Secrets keep the env/vault story (#77) plus the new
-//! `*_FILE` mounts; the whitelist below is enforced on write, so
-//! `PUT /api/admin/config` physically cannot persist a secret by accident.
+//! deliberately does NOT live here: config.json is plaintext next to the data it
+//! protects. Secrets keep the env/vault story (#77) plus the `*_FILE` mounts, and
+//! the whitelist below is enforced on write, so `PUT /api/admin/config` physically
+//! cannot persist a secret by accident.
 
 use std::path::{Path, PathBuf};
 

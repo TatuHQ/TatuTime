@@ -6,17 +6,26 @@
       "type": "lldb",
       "request": "launch",
       "cargo": {
-        "args": ["build", "--bin", "tucano-time"],
-        "filter": { "name": "tucano-time", "kind": "bin" }
+        "args": [
+          "build",
+          "--bin",
+          "tucano-time"
+        ],
+        "filter": {
+          "name": "tucano-time",
+          "kind": "bin"
+        }
       },
       "args": [],
       "cwd": "${workspaceFolder}",
       "env": {
         "RUST_BACKTRACE": "1",
-        "TUCANO_DATA_DIR": "${workspaceFolder}/data",
+        "TUCANO_DATA_DIR": "${workspaceFolder}/Data",
         "TUCANO_PORT": "8080"
       },
-      "sourceLanguages": ["rust"],
+      "sourceLanguages": [
+        "rust"
+      ],
       "preLaunchTask": "cargo build",
       "serverReadyAction": {
         "pattern": "listening on :(\\d+)",
@@ -29,26 +38,49 @@
       "type": "lldb",
       "request": "launch",
       "cargo": {
-        "args": ["test", "--no-run", "--lib"],
-        "filter": { "name": "tucano-time", "kind": "lib" }
+        "args": [
+          "test",
+          "--no-run",
+          "--lib"
+        ],
+        "filter": {
+          "name": "tucano-time",
+          "kind": "lib"
+        }
       },
       "args": [],
       "cwd": "${workspaceFolder}",
-      "env": { "RUST_BACKTRACE": "1" },
-      "sourceLanguages": ["rust"]
+      "env": {
+        "RUST_BACKTRACE": "1"
+      },
+      "sourceLanguages": [
+        "rust"
+      ]
     },
     {
       "name": "Debug contract tests",
       "type": "lldb",
       "request": "launch",
       "cargo": {
-        "args": ["test", "--no-run", "--test", "contract"],
-        "filter": { "name": "contract", "kind": "test" }
+        "args": [
+          "test",
+          "--no-run",
+          "--test",
+          "contract"
+        ],
+        "filter": {
+          "name": "contract",
+          "kind": "test"
+        }
       },
       "args": [],
       "cwd": "${workspaceFolder}",
-      "env": { "RUST_BACKTRACE": "1" },
-      "sourceLanguages": ["rust"]
+      "env": {
+        "RUST_BACKTRACE": "1"
+      },
+      "sourceLanguages": [
+        "rust"
+      ]
     }
   ]
 }

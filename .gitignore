@@ -1,5 +1,27 @@
 /target/
+
+# Local runtime data (TUCANO_DATA_DIR; the server's default is ./Data, so a
+# default `cargo run` never dirties the repo). /data is kept for the older
+# local naming.
+/Data/
 /data/
+
+# Belt-and-braces: the same documents straight in the repo root, should anyone
+# ever point TUCANO_DATA_DIR at it. Mirrors the storage layout in AGENTS.md.
+/customers/
+/entries/
+/expenses/
+/invoices/
+/users/
+/categories/
+/notifications/
+/audit.log
+/scheduler.json
+/email_reminders.json
+/session.key
+/secrets.bin
+/.server.lock
+/.tucanotime.lock
 
 # Local editor and scratch artifacts.
 *.json.tmp

@@ -181,7 +181,7 @@ the `v0.1.8` release notes is no longer needed.
 
 | Task | Command |
 | --- | --- |
-| Run (GUI + API on :8080, data in `./data`) | `cargo run` |
+| Run (GUI + API on :8080, data in `./Data`) | `cargo run` |
 | All tests (domain units + HTTP contract) | `cargo test --all-targets` |
 | Format check / apply | `cargo fmt --all -- --check` / `cargo fmt --all` |
 | Lint (CI treats all clippy lints as errors) | `cargo clippy --all-targets -- -D warnings` |

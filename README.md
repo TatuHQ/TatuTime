@@ -87,7 +87,7 @@ carries a vault store while no key is configured.
 ### Bind mounts
 
 The container runs as uid **10001**; bind-mounted host dirs need to be
-writable by it (`chown -R 10001:10001 ./data`), or just use a named volume.
+writable by it (`chown -R 10001:10001 ./Data`), or just use a named volume.
 
 ## Authentication
 
@@ -139,7 +139,7 @@ logged. Without `TUCANO_SECRET_KEY` the vault is disabled (fail-closed).
 ## Development
 
 ```sh
-cargo run                     # serve GUI + API on :8080 (data in ./data)
+cargo run                     # serve GUI + API on :8080 (data in ./Data)
 cargo test                    # unit + contract tests
 cargo fmt --all -- --check
 cargo clippy --all-targets -- -D warnings
@@ -170,6 +170,12 @@ is exactly one list to keep current.
 The REST surface is defined by [`openapi.json`](openapi.json) and served at
 `/openapi.json`; change both together. See [`AGENTS.md`](AGENTS.md) for the
 rules AI agents follow in this repository.
+
+Code and documentation style is recorded in
+[`docs/coding-style.md`](docs/coding-style.md) — the Rust style bar this
+repository holds itself to, with
+[*Rust by Example*](https://doc.rust-lang.org/rust-by-example/) as its reference
+exemplar for idiomatic, example-led Rust.
 
 ## Architecture decision records
 

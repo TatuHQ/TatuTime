@@ -335,9 +335,9 @@ fn auth_line(s: &str) -> String {
     base64::engine::general_purpose::STANDARD.encode(s)
 }
 
-/// RFC 2047: headers are ASCII unless they carry a display name or a
-/// non-ASCII subject (org/customer names — #112 put the customer name in the
-/// copy subject, so "Café München" used to emit raw UTF-8 header bytes that
+/// RFC 2047: headers stay ASCII unless they carry a display name or a
+/// non-ASCII subject (org/customer names — #112 puts the customer name in the
+/// copy subject, so "Café München" must not emit raw UTF-8 header bytes that
 /// strict relays reject). Encoded words are Base64 (`?B?`) — deterministic
 /// and safe for any value length.
 pub fn encode_header(value: &str) -> String {

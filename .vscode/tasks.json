@@ -5,20 +5,31 @@
       "label": "cargo build",
       "type": "shell",
       "command": "cargo",
-      "args": ["build"],
-      "problemMatcher": ["$rustc"],
-      "group": { "kind": "build", "isDefault": true }
+      "args": [
+        "build"
+      ],
+      "problemMatcher": [
+        "$rustc"
+      ],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      }
     },
     {
       "label": "cargo run",
       "type": "shell",
       "command": "cargo",
-      "args": ["run"],
-      "problemMatcher": ["$rustc"],
+      "args": [
+        "run"
+      ],
+      "problemMatcher": [
+        "$rustc"
+      ],
       "options": {
         "env": {
           "RUST_BACKTRACE": "1",
-          "TUCANO_DATA_DIR": "${workspaceFolder}/data"
+          "TUCANO_DATA_DIR": "${workspaceFolder}/Data"
         }
       }
     },
@@ -26,41 +37,71 @@
       "label": "cargo test",
       "type": "shell",
       "command": "cargo",
-      "args": ["test", "--all-targets"],
-      "problemMatcher": ["$rustc"],
-      "group": { "kind": "test", "isDefault": true }
+      "args": [
+        "test",
+        "--all-targets"
+      ],
+      "problemMatcher": [
+        "$rustc"
+      ],
+      "group": {
+        "kind": "test",
+        "isDefault": true
+      }
     },
     {
       "label": "cargo clippy",
       "type": "shell",
       "command": "cargo",
-      "args": ["clippy", "--all-targets", "--", "-D", "warnings"],
-      "problemMatcher": ["$rustc"]
+      "args": [
+        "clippy",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "problemMatcher": [
+        "$rustc"
+      ]
     },
     {
       "label": "cargo fmt",
       "type": "shell",
       "command": "cargo",
-      "args": ["fmt", "--all"],
+      "args": [
+        "fmt",
+        "--all"
+      ],
       "problemMatcher": []
     },
     {
       "label": "cargo fmt check",
       "type": "shell",
       "command": "cargo",
-      "args": ["fmt", "--all", "--", "--check"],
+      "args": [
+        "fmt",
+        "--all",
+        "--",
+        "--check"
+      ],
       "problemMatcher": []
     },
     {
       "label": "gui: server (background)",
       "type": "shell",
       "command": "cargo",
-      "args": ["run"],
+      "args": [
+        "run"
+      ],
       "isBackground": true,
       "problemMatcher": [
         {
           "owner": "custom",
-          "pattern": [{ "regexp": "^$" }],
+          "pattern": [
+            {
+              "regexp": "^$"
+            }
+          ],
           "background": {
             "activeOnStart": true,
             "beginsPattern": "Compiling|Finished",
@@ -71,10 +112,13 @@
       "options": {
         "env": {
           "RUST_BACKTRACE": "1",
-          "TUCANO_DATA_DIR": "${workspaceFolder}/data"
+          "TUCANO_DATA_DIR": "${workspaceFolder}/Data"
         }
       },
-      "presentation": { "reveal": "always", "panel": "dedicated" }
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      }
     },
     {
       "label": "gui: open browser",
@@ -83,7 +127,10 @@
     },
     {
       "label": "gui: run (server + browser)",
-      "dependsOn": ["gui: server (background)", "gui: open browser"],
+      "dependsOn": [
+        "gui: server (background)",
+        "gui: open browser"
+      ],
       "dependsOrder": "sequence",
       "problemMatcher": []
     }
@@ -93,7 +140,9 @@
       "id": "openDefaultBrowser",
       "type": "command",
       "command": "vscode.open",
-      "args": ["http://127.0.0.1:8080"]
+      "args": [
+        "http://127.0.0.1:8080"
+      ]
     }
   ]
 }
