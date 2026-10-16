@@ -228,6 +228,50 @@ impl Entity for Timer {
     }
 }
 
+/// Date-sharded entry collection: `entries/<YYYY-MM-DD>/<id>.json`, one folder
+/// per day rather than one flat `Entity` directory (#38).
+pub const ENTRIES_DIR: &str = "entries";
+
+/// Per-user notifications, `notifications/<user_id>.json` — keyed by owner like
+/// `timers/`, not by document id.
+pub const NOTIFICATIONS_DIR: &str = "notifications";
+
+/// The store's collection directories in one place: one row per [`Entity`]
+/// impl, plus the two collections that are not flat `Entity` dirs
+/// ([`ENTRIES_DIR`], date-sharded; [`NOTIFICATIONS_DIR`], per-user). Every row
+/// is the impl's own `DIR` constant — never a re-typed literal — so this is the
+/// layout as the store derives it; the store's path builders below use the same
+/// constants for the two non-`Entity` collections.
+///
+/// The storage-layout guard
+/// (`storage_layout::collections_match_agents_md`, tests/contract.rs) holds this
+/// list and `AGENTS.md`'s "Architecture invariants" storage bullet together, in
+/// both directions (#336): a collection added here with no sentence there, or a
+/// documented directory with no row here, fails the build named for the drift.
+/// Adding a collection therefore means editing this list and the docs in the
+/// same change.
+///
+/// Deliberately *not* here: the flat side-car files (`audit.log`,
+/// `revoked.json`, `scheduler.json`, `secrets.bin`, `config.json`,
+/// `session.key`, `.server.lock`, `sync/accounting.json`, `invoices/.seq.json`,
+/// the `*.idx.*` indexes). This list is about collection directories; those
+/// files belong to the module that owns them.
+pub const DOC_COLLECTIONS: &[&str] = &[
+    User::DIR,
+    Customer::DIR,
+    Invoice::DIR,
+    Category::DIR,
+    Expense::DIR,
+    Submission::DIR,
+    ExpenseClaim::DIR,
+    RecurringSchedule::DIR,
+    crate::retainer::Retainer::DIR,
+    crate::domain::ItemType::DIR,
+    Timer::DIR,
+    ENTRIES_DIR,
+    NOTIFICATIONS_DIR,
+];
+
 impl Store {
     pub fn open(root: impl AsRef<Path>) -> Result<Self, StoreError> {
         Self::with_lock_timeout(root, DEFAULT_LOCK_TIMEOUT)
@@ -251,8 +295,8 @@ impl Store {
         ] {
             prune_tmp_files(&root.join(dir));
         }
-        prune_tmp_files(&root.join("entries"));
-        if let Ok(days) = std::fs::read_dir(root.join("entries")) {
+        prune_tmp_files(&root.join(ENTRIES_DIR));
+        if let Ok(days) = std::fs::read_dir(root.join(ENTRIES_DIR)) {
             for day in days.filter_map(|e| e.ok()) {
                 if day.path().is_dir() {
                     prune_tmp_files(&day.path());
@@ -260,7 +304,7 @@ impl Store {
             }
         }
         std::fs::create_dir_all(root.join("customers"))?;
-        std::fs::create_dir_all(root.join("entries"))?;
+        std::fs::create_dir_all(root.join(ENTRIES_DIR))?;
         std::fs::create_dir_all(root.join("users"))?;
         std::fs::create_dir_all(root.join("categories"))?;
         std::fs::create_dir_all(root.join("expenses"))?;
@@ -1088,7 +1132,7 @@ impl Store {
 
     fn notifications_path(&self, user_id: Uuid) -> PathBuf {
         self.root
-            .join("notifications")
+            .join(NOTIFICATIONS_DIR)
             .join(format!("{user_id}.json"))
     }
 
@@ -1106,7 +1150,7 @@ impl Store {
             let start = list.len() - 200;
             list = list[start..].to_vec();
         }
-        std::fs::create_dir_all(self.root.join("notifications"))?;
+        std::fs::create_dir_all(self.root.join(NOTIFICATIONS_DIR))?;
         write_json(&self.notifications_path(user_id), &list)
     }
 
@@ -1117,7 +1161,7 @@ impl Store {
         for n in list.iter_mut() {
             n.read = true;
         }
-        std::fs::create_dir_all(self.root.join("notifications"))?;
+        std::fs::create_dir_all(self.root.join(NOTIFICATIONS_DIR))?;
         write_json(&self.notifications_path(user_id), &list)
     }
 
@@ -1346,7 +1390,7 @@ impl Store {
 
     fn day_dir(&self, date: NaiveDate) -> PathBuf {
         self.root
-            .join("entries")
+            .join(ENTRIES_DIR)
             .join(date.format("%Y-%m-%d").to_string())
     }
 
@@ -1381,7 +1425,7 @@ impl Store {
     /// bound here — the earlier comment claimed one but the body never
     /// implemented it. Cost is O(days) directory probes, not O(entries).
     pub fn get_entry(&self, id: Uuid) -> Result<Option<Entry>, StoreError> {
-        let dir = self.root.join("entries");
+        let dir = self.root.join(ENTRIES_DIR);
         if !dir.exists() {
             return Ok(None);
         }
@@ -1447,7 +1491,7 @@ impl Store {
     }
 
     fn scan_all_entries(&self) -> Result<Vec<Entry>, StoreError> {
-        let dir = self.root.join("entries");
+        let dir = self.root.join(ENTRIES_DIR);
         let mut out = Vec::new();
         if !dir.exists() {
             return Ok(out);
