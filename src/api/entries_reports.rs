@@ -117,19 +117,39 @@ pub async fn list_entries(
     // #334: the page is part of the query, so a malformed `limit`/`cursor` is
     // the caller's error — resolved (and refused) before the scan runs.
     let page = pagination::page_request(q.limit.as_ref(), q.cursor.as_ref())?;
+    // #335: an admin sees every user's rows, so the scan is already the answer;
+    // a member reads through the per-user side index, which decodes only their
+    // own documents. Both yield the same set, and the `visible_to` filter below
+    // stays the one authority on visibility for either actor.
+    let admin = actor.0.role == crate::auth::Role::Admin;
+    let viewer = actor.0.id;
     // #254: the range/day scans read the whole entry tree from disk; run them
     // on the blocking pool so a large scan never stalls an async worker.
     let entries = match (&q.date, &q.from, &q.to) {
         (Some(date), None, None) => {
             let date = parse_date(date)?;
-            store_blocking("entry day list", &app.store, move |s| s.list_by_date(date)).await?
+            if admin {
+                store_blocking("entry day list", &app.store, move |s| s.list_by_date(date)).await?
+            } else {
+                store_blocking("entry day list", &app.store, move |s| {
+                    s.list_by_date_for_user(date, viewer)
+                })
+                .await?
+            }
         }
         (None, Some(_), Some(_)) => {
             let (from, to) = parse_range(q.from.as_ref(), q.to.as_ref())?;
-            store_blocking("entry range list", &app.store, move |s| {
-                s.list_range(from, to)
-            })
-            .await?
+            if admin {
+                store_blocking("entry range list", &app.store, move |s| {
+                    s.list_range(from, to)
+                })
+                .await?
+            } else {
+                store_blocking("entry range list", &app.store, move |s| {
+                    s.list_range_for_user(from, to, viewer)
+                })
+                .await?
+            }
         }
         _ => {
             return Err(ApiError::bad_request(

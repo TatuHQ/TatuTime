@@ -82,7 +82,19 @@ pub async fn list_expenses(
 ) -> ApiResult {
     // #334: resolve (and refuse) the page before the collection read.
     let page = pagination::page_request(q.limit.as_ref(), q.cursor.as_ref())?;
-    let mut expenses = store_blocking("expense list", &app.store, |s| s.list_expenses()).await?;
+    // #335: an admin's scan already spans every user; a member reads only their
+    // own rows through the per-user side index. The `visible_to` filter below
+    // stays the shared authority on visibility, and both paths answer with the
+    // same set.
+    let mut expenses = if actor.0.role == crate::auth::Role::Admin {
+        store_blocking("expense list", &app.store, |s| s.list_expenses()).await?
+    } else {
+        let viewer = actor.0.id;
+        store_blocking("expense list", &app.store, move |s| {
+            s.list_expenses_for_user(viewer)
+        })
+        .await?
+    };
     if let Some(cid) = &q.customer_id {
         let cid = Uuid::parse_str(cid)
             .map_err(|_| ApiError::bad_request("'customer_id' must be a UUID"))?;
