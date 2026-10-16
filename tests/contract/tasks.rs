@@ -187,6 +187,7 @@ async fn tasks_reject_billing_overrides_without_persistence() {
     }
 }
 
+/// #262(6d): `GET …/tasks` (list) — project-scoped task listing.
 #[tokio::test]
 async fn tasks_list_returns_the_projects_tasks() {
     let (app, _d) = app().await;

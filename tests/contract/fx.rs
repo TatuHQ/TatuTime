@@ -2,7 +2,6 @@ use crate::support::*;
 
 use axum::http::StatusCode;
 
-/// #262(6d): `GET …/tasks` (list) — project-scoped task listing.
 /// A minimal ECB-shaped reference document for the offline FX tests. The
 /// endpoint's real source is the ECB's published daily feed; this seam keeps
 /// the maths, the reference date and the fail-closed path testable with no
