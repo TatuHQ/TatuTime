@@ -87,7 +87,7 @@ carries a vault store while no key is configured.
 ### Bind mounts
 
 The container runs as uid **10001**; bind-mounted host dirs need to be
-writable by it (`chown -R 10001:10001 ./data`), or just use a named volume.
+writable by it (`chown -R 10001:10001 ./Data`), or just use a named volume.
 
 ## Authentication
 
@@ -139,7 +139,7 @@ logged. Without `TUCANO_SECRET_KEY` the vault is disabled (fail-closed).
 ## Development
 
 ```sh
-cargo run                     # serve GUI + API on :8080 (data in ./data)
+cargo run                     # serve GUI + API on :8080 (data in ./Data)
 cargo test                    # unit + contract tests
 cargo fmt --all -- --check
 cargo clippy --all-targets -- -D warnings

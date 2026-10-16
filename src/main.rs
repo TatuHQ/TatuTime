@@ -16,7 +16,7 @@ use tucano_time::api::AppState;
 fn data_dir() -> std::path::PathBuf {
     std::env::var("TUCANO_DATA_DIR")
         .map(std::path::PathBuf::from)
-        .unwrap_or_else(|_| std::path::PathBuf::from("data"))
+        .unwrap_or_else(|_| std::path::PathBuf::from("Data"))
 }
 
 /// Run one of the operator subcommands. `Ok(true)` means "a CLI action ran,
