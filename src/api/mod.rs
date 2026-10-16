@@ -56,7 +56,7 @@ impl<T: DeserializeOwned, S: Send + Sync> FromRequest<S> for ValidJson<T> {
         let body = Bytes::from_request(req, state)
             .await
             .map_err(|_| ApiError::bad_request("failed to read the request body"))?;
-        let value = serde_json::from_slice::<T>(&body).map_err(deser_error)?;
+        let value = serde_json::from_slice::<T>(&body).map_err(|e| deser_error(e, &body))?;
         Ok(ValidJson(value))
     }
 }
@@ -86,7 +86,18 @@ impl FromRequestParts<AppState> for AuthUser {
 /// the *reason* becomes serde's own sentence rather than a generic line that hides
 /// it; `unknown field` keeps its exact wording, which the GUI keys on to spot a
 /// server older than the page.
-fn deser_error(e: serde_json::Error) -> ApiError {
+///
+/// A *type* mismatch (#338) carries no marker: serde names the value, not the
+/// key. The field is recovered from the raw body instead — [`key_at`] maps the
+/// error's position back to the object key whose value it was parsing, which is
+/// exact for the flat and single-level-nested shapes these endpoints accept
+/// (`{"name":42}` names `name`; `{"inner":{"name":42}}` names the leaf `name`).
+/// The mapping is attempted only for serde's *data* errors, so a syntax error's
+/// position (an unclosed brace, trailing characters) can never borrow a key from
+/// an unrelated byte. Where the body holds no enclosing key — a bare scalar, or a
+/// body that is not JSON — the field stays empty exactly as before and the reason
+/// remains serde's sentence.
+fn deser_error(e: serde_json::Error, body: &[u8]) -> ApiError {
     let msg = e.to_string();
     let after = |marker: &str| -> Option<String> {
         msg.split(marker)
@@ -109,6 +120,7 @@ fn deser_error(e: serde_json::Error) -> ApiError {
     let field = after("for field `")
         .or_else(|| after("missing field `"))
         .or_else(|| after("duplicate field `"))
+        .or_else(|| type_mismatch_key(&e, body))
         .unwrap_or_default();
     ApiError {
         status: StatusCode::UNPROCESSABLE_ENTITY,
@@ -116,6 +128,129 @@ fn deser_error(e: serde_json::Error) -> ApiError {
         message: "payload failed validation".into(),
         fields: vec![FieldError::new(field, msg)],
     }
+}
+
+/// The key a context-free serde failure (a type mismatch, #338) was about, or
+/// `None` when the body cannot supply one.
+///
+/// Only a *data* error is mapped: serde reports the position of a value it was
+/// already parsing, so the key whose value's first token begins at or before that
+/// position is the field. A syntax error's position can land anywhere in the text,
+/// so it is left alone rather than misattributed to a neighbouring key.
+fn type_mismatch_key(e: &serde_json::Error, body: &[u8]) -> Option<String> {
+    if e.classify() != serde_json::error::Category::Data {
+        return None;
+    }
+    key_at(body, e.line(), e.column())
+}
+
+/// The object key whose value's first token begins at or before `(line, column)`.
+///
+/// A byte-level scan rather than a parse: it reads the body left to right and,
+/// whenever it meets a string that is a key — one whose next non-space byte is
+/// `:` — remembers it with the byte where its value's first token starts. The
+/// last such key that begins at or before the error wins. That is the innermost
+/// key, because serde is depth-first and reports the position of the value it was
+/// parsing. The limits are deliberate and documented so the mapping is trusted no
+/// further than it goes:
+///
+/// - it names the *innermost key only*, never a dotted path, so a nested mismatch
+///   reports the leaf (`{"inner":{"name":42}}` → `name`) — the key the GUI can
+///   match a control against — rather than `inner.name`;
+/// - an offending array element is reported under its key (`{"tags":[…,42]}` →
+///   `tags`), since elements have no key of their own;
+/// - a string *value* that merely looks like a key (`"a\": b"`) is skipped: only a
+///   string followed by `:` is a key;
+/// - a string it cannot decode (an unknown escape, an unterminated quote) ends the
+///   scan with whatever key it had already found, never with a wrong one.
+///
+/// Column is 1-based and counts bytes — serde_json's own convention, the one a
+/// multibyte body must be measured in — so the offset is the line's first byte
+/// plus `column - 1`.
+fn key_at(body: &[u8], line: usize, column: usize) -> Option<String> {
+    let offset = byte_offset(body, line, column);
+    let mut i = 0;
+    let mut found: Option<(usize, String)> = None;
+    while i < body.len() && i <= offset {
+        if body[i] != b'"' {
+            i += 1;
+            continue;
+        }
+        let Some((key, end)) = read_string(body, i) else {
+            break;
+        };
+        let mut j = end;
+        while j < body.len() && body[j].is_ascii_whitespace() {
+            j += 1;
+        }
+        if body.get(j) == Some(&b':') {
+            let mut value_start = j + 1;
+            while value_start < body.len() && body[value_start].is_ascii_whitespace() {
+                value_start += 1;
+            }
+            if value_start <= offset {
+                found = Some((value_start, key));
+            }
+        }
+        i = end;
+    }
+    found.map(|(_, key)| key)
+}
+
+/// The byte offset the 1-based `line`/`column` point at, clamped to the body.
+fn byte_offset(body: &[u8], line: usize, column: usize) -> usize {
+    let mut start = 0;
+    for _ in 1..line {
+        match body[start..].iter().position(|&b| b == b'\n') {
+            Some(nl) => start += nl + 1,
+            None => return body.len(),
+        }
+    }
+    let line_end = body[start..]
+        .iter()
+        .position(|&b| b == b'\n')
+        .map_or(body.len(), |nl| start + nl);
+    (start + column.saturating_sub(1)).min(line_end)
+}
+
+/// The unescaped text of the JSON string starting at `start` (its opening quote),
+/// and the index just past its closing quote.
+fn read_string(body: &[u8], start: usize) -> Option<(String, usize)> {
+    let mut out: Vec<u8> = Vec::new();
+    let mut i = start + 1;
+    while i < body.len() {
+        match body[i] {
+            b'"' => return String::from_utf8(out).ok().map(|s| (s, i + 1)),
+            b'\\' => {
+                i += 1;
+                match *body.get(i)? {
+                    b'"' => out.push(b'"'),
+                    b'\\' => out.push(b'\\'),
+                    b'/' => out.push(b'/'),
+                    b'b' => out.push(b'\x08'),
+                    b'f' => out.push(b'\x0c'),
+                    b'n' => out.push(b'\n'),
+                    b'r' => out.push(b'\r'),
+                    b't' => out.push(b'\t'),
+                    b'u' => {
+                        let hex = std::str::from_utf8(body.get(i + 1..i + 5)?).ok()?;
+                        let cp = u32::from_str_radix(hex, 16).ok()?;
+                        let ch = char::from_u32(cp)?;
+                        let mut buf = [0u8; 4];
+                        out.extend_from_slice(ch.encode_utf8(&mut buf).as_bytes());
+                        i += 4;
+                    }
+                    _ => return None,
+                }
+                i += 1;
+            }
+            byte => {
+                out.push(byte);
+                i += 1;
+            }
+        }
+    }
+    None
 }
 
 #[derive(Clone)]
@@ -581,6 +716,7 @@ pub use self::vault_config::{
 #[cfg(test)]
 mod deser_error_tests {
     use super::*;
+    use serde::de::DeserializeOwned;
 
     /// A payload shape small enough to provoke each serde failure by hand.
     #[derive(Debug, serde::Deserialize)]
@@ -590,9 +726,36 @@ mod deser_error_tests {
         name: String,
     }
 
-    fn failure(json: &str) -> (String, String) {
-        let err = serde_json::from_str::<Probe>(json).expect_err("the probe must be refused");
-        let mapped = deser_error(err);
+    /// One level of nesting, for the innermost-key shape.
+    #[derive(Debug, serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Nested {
+        #[allow(dead_code)]
+        inner: Probe,
+    }
+
+    /// A sequence field, for the array-element shape.
+    #[derive(Debug, serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Tags {
+        #[allow(dead_code)]
+        tags: Vec<String>,
+    }
+
+    /// Two keys, to check *which* key is named and that a key-lookalike inside a
+    /// string value is not one.
+    #[derive(Debug, serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct TwoKeys {
+        #[allow(dead_code)]
+        note: String,
+        #[allow(dead_code)]
+        name: String,
+    }
+
+    fn failure<T: DeserializeOwned + std::fmt::Debug>(json: &str) -> (String, String) {
+        let err = serde_json::from_str::<T>(json).expect_err("the probe must be refused");
+        let mapped = deser_error(err, json.as_bytes());
         assert_eq!(mapped.status, StatusCode::UNPROCESSABLE_ENTITY);
         assert_eq!(mapped.code, "validation_failed");
         let field = &mapped.fields[0];
@@ -600,23 +763,79 @@ mod deser_error_tests {
     }
 
     #[test]
-    fn a_wrong_typed_field_is_never_quoted_as_the_field() {
-        let (field, reason) = failure("{\"name\":42}");
-        // serde_json names no key for a struct type mismatch — it quotes the
-        // *value* and gives its position. Reporting that token as the field is the
-        // bug this guards: the field stays empty and the reason carries serde's
-        // sentence and the position, so the caller can find the value.
-        assert_eq!(field, "", "never the value serde quotes: {reason}");
+    fn a_wrong_typed_field_is_named_by_its_key_not_its_value() {
+        let (field, reason) = failure::<Probe>("{\"name\":42}");
+        // #338: serde_json names no key for a struct type mismatch — it quotes the
+        // *value* (`42`) and gives its position. The mapper ties that position back
+        // to the key, so the field is the real key and never the quoted value.
+        assert_eq!(
+            field, "name",
+            "the key, not the value serde quotes: {reason}"
+        );
+        assert_ne!(field, "42");
         assert!(reason.contains("invalid type"), "the reason: {reason}");
         assert!(
             reason.contains("column 10"),
-            "the position of the offending value survives: {reason}"
+            "serde's own position survives: {reason}"
         );
     }
 
     #[test]
+    fn whitespace_between_key_and_value_does_not_move_the_field() {
+        let (field, _) = failure::<Probe>("{\"name\": 42 }");
+        assert_eq!(field, "name");
+    }
+
+    #[test]
+    fn the_innermost_key_is_named_for_a_nested_mismatch() {
+        let (field, reason) = failure::<Nested>("{\"inner\":{\"name\":42}}");
+        assert_eq!(field, "name", "the leaf key, not a dotted path: {reason}");
+    }
+
+    #[test]
+    fn an_offending_array_element_is_reported_under_its_key() {
+        let (field, reason) = failure::<Tags>("{\"tags\":[\"a\",42]}");
+        assert_eq!(field, "tags", "elements have no key of their own: {reason}");
+    }
+
+    #[test]
+    fn the_last_key_before_the_error_wins() {
+        let (field, reason) = failure::<TwoKeys>("{\"note\":\"x\",\"name\":42}");
+        assert_eq!(field, "name", "the second key, not the first: {reason}");
+    }
+
+    #[test]
+    fn a_key_lookalike_inside_a_string_value_is_not_a_key() {
+        // The `": ` here is inside a string *value*; only `name` is a key.
+        let (field, _) = failure::<TwoKeys>("{\"note\":\"a\\\": b\",\"name\":42}");
+        assert_eq!(field, "name");
+    }
+
+    #[test]
+    fn a_position_on_a_later_line_is_still_named() {
+        let (field, _) = failure::<Probe>("{\n  \"name\": 42\n}");
+        assert_eq!(field, "name", "the column is measured within its line");
+    }
+
+    #[test]
+    fn no_enclosing_key_leaves_the_field_empty() {
+        // A bare scalar names no key; the reason is still serde's sentence.
+        let (field, reason) = failure::<Probe>("42");
+        assert_eq!(field, "");
+        assert!(reason.contains("invalid type"), "{reason}");
+    }
+
+    #[test]
+    fn a_syntax_error_never_borrows_a_key() {
+        // `trailing characters` is a syntax error; its position must not name the
+        // `name` key the parsed prefix happened to contain.
+        let (field, reason) = failure::<Probe>("{\"name\":\"x\"} nope");
+        assert_eq!(field, "", "a syntax error names no field: {reason}");
+    }
+
+    #[test]
     fn an_unknown_field_keeps_its_exact_wording() {
-        let (field, reason) = failure("{\"evil\":1}");
+        let (field, reason) = failure::<Probe>("{\"evil\":1}");
         assert_eq!(field, "evil");
         assert_eq!(
             reason, "unknown field",
@@ -626,12 +845,12 @@ mod deser_error_tests {
 
     #[test]
     fn a_missing_field_is_named_and_a_broken_body_still_says_why() {
-        let (field, reason) = failure("{}");
+        let (field, reason) = failure::<Probe>("{}");
         assert_eq!(field, "name");
         assert!(reason.contains("missing field"), "{reason}");
 
         let err = serde_json::from_str::<Probe>("{\"name\":").expect_err("not JSON");
-        let mapped = deser_error(err);
+        let mapped = deser_error(err, b"{\"name\":");
         assert_eq!(
             mapped.fields[0].field, "",
             "a body that is not JSON names no field"
