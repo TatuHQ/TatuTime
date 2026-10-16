@@ -318,7 +318,7 @@ impl Store {
             .ok()
             .and_then(|s| s.parse().ok())
             .unwrap_or(MAX_DOCS);
-        Ok(Self {
+        let store = Self {
             root,
             write_guard: Mutex::new(()),
             lock_timeout,
@@ -326,7 +326,18 @@ impl Store {
             lock_cache: Mutex::new(None),
             #[cfg(test)]
             doc_reads: std::sync::atomic::AtomicU64::new(0),
-        })
+        };
+        // #335 migration: a data dir written before the per-user index existed
+        // has none, so build it once here — otherwise every member read would
+        // rebuild each touched day (or expenses) lazily. Best-effort: the index
+        // is only an optimisation, so a failure is harmless and reads still
+        // self-heal, while a boot left unable to serve would not be.
+        if !store.entry_index_path().exists()
+            && let Err(e) = store.rebuild_read_indexes()
+        {
+            tracing::warn!(error = %e, "per-user index migration skipped; reads will rebuild lazily");
+        }
+        Ok(store)
     }
 
     /// Acquire the writer lock for a mutating operation: the process-local
@@ -873,6 +884,37 @@ impl Store {
         let docs = self.walk_docs(&self.doc_dir::<Expense>(), |p| self.read_expense(p))?;
         self.write_expense_index_locked(&docs)?;
         Ok(docs)
+    }
+
+    /// Rebuild **both** per-user side indexes from the documents (#335).
+    /// Idempotent: this is the one-time migration of a data dir written before
+    /// the index existed (run by [`Store::open`] when the index is absent) and a
+    /// maintenance primitive. Takes the write lock once for the whole pass.
+    pub fn rebuild_read_indexes(&self) -> Result<(), StoreError> {
+        let _guard = self.write_lock()?;
+        let mut idx = EntryUserIndex::default();
+        let entries_dir = self.root.join(ENTRIES_DIR);
+        if entries_dir.exists() {
+            for day in dir_entries(&entries_dir, self.max_docs)? {
+                if !day.is_dir() {
+                    continue;
+                }
+                let Some(name) = day.file_name().and_then(|n| n.to_str()) else {
+                    continue;
+                };
+                let docs = self.walk_docs(&day, |p| self.read_entry(p))?;
+                if !docs.is_empty() {
+                    idx.days
+                        .insert(name.to_string(), group_entries_by_user(&docs));
+                }
+            }
+        }
+        if let Some(parent) = self.entry_index_path().parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        write_json(&self.entry_index_path(), &idx)?;
+        let expenses = self.walk_docs(&self.doc_dir::<Expense>(), |p| self.read_expense(p))?;
+        self.write_expense_index_locked(&expenses)
     }
 
     /// A member's own entries for one day (#335): the indexed fast path decodes
@@ -3324,5 +3366,46 @@ mod per_user_index_tests {
         // Delete unindexes the row.
         store.delete_expense(a.id).unwrap();
         assert!(store.list_expenses_for_user(alice).unwrap().is_empty());
+    }
+
+    #[test]
+    fn open_migrates_a_pre_index_data_dir() {
+        // A data dir written before #335 exists (documents but no index); the
+        // one-time migration at `Store::open` must build both indexes so the
+        // first member read is already served from them.
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("data");
+        let alice = Uuid::new_v4();
+        let e = entry_at(Some(alice), 1, day());
+        let day_dir = root.join("entries").join("2026-10-02");
+        std::fs::create_dir_all(&day_dir).unwrap();
+        std::fs::write(
+            day_dir.join(format!("{}.json", e.id)),
+            serde_json::to_vec(&e).unwrap(),
+        )
+        .unwrap();
+        let exp = expense(Some(alice));
+        std::fs::create_dir_all(root.join("expenses")).unwrap();
+        std::fs::write(
+            root.join("expenses").join(format!("{}.json", exp.id)),
+            serde_json::to_vec(&exp).unwrap(),
+        )
+        .unwrap();
+        assert!(!root.join("entries").join(".idx.users.json").exists());
+
+        let store = Store::open(&root).unwrap();
+        assert!(
+            entry_index_path(&store).exists(),
+            "entries index migrated at open"
+        );
+        assert!(
+            expense_index_path(&store).exists(),
+            "expense index migrated at open"
+        );
+        assert_eq!(
+            ids(store.list_by_date_for_user(day(), alice).unwrap()),
+            vec![e.id]
+        );
+        assert_eq!(store.list_expenses_for_user(alice).unwrap()[0].id, exp.id);
     }
 }
