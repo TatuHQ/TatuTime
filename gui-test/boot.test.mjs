@@ -54,7 +54,7 @@ test('the invoice chart renders real bar heights via el() style (#188)', () => {
   ];
   context.dashRenderOverview(invoices);
   const bars = [...document.querySelectorAll('#inv-chart .inv-bar')];
-  assert.equal(bars.length, 24, 'twelve months x open+paid');
+  assert.equal(bars.length, 24, 'twelve months x open+closed');
   for (const bar of bars) {
     assert.match(
       bar.getAttribute('style') || '',
@@ -92,11 +92,11 @@ test('the chart labels months in words and names the period on hover (#F)', () =
     assert.equal(short.getAttribute('aria-hidden'), 'true',
       'the short variant is never announced, so no month is read twice');
   }
-  // Hovering a bar answers for the whole month: period, open and paid.
+  // Hovering a bar answers for the whole month: period, open and closed.
   const march = document.querySelectorAll('#inv-chart .inv-col-chart')[2];
   assert.equal(march.querySelector('.inv-bar.open').getAttribute('title'),
-    'March 2026 \u2014 Open EUR 1800.00 \u00b7 Paid EUR 0.00');
-  assert.equal(march.querySelector('.inv-bar.paid').getAttribute('title'),
+    'March 2026 \u2014 Open EUR 1800.00 \u00b7 Closed EUR 0.00');
+  assert.equal(march.querySelector('.inv-bar.closed').getAttribute('title'),
     march.querySelector('.inv-bar.open').getAttribute('title'),
     'both bars of a month describe the same month');
   dom.window.close();
@@ -132,10 +132,10 @@ api.get = async (path) => {
     '1 USD = 0.9214 EUR (2026-10-15)');
   // Per-currency sums are converted once, then added: 1000.00 EUR + 1842.80 EUR.
   assert.equal(document.getElementById('inv-chart-title').textContent,
-    'Open vs paid (EUR) \u2014 2026');
+    'Open vs closed (EUR) \u2014 2026');
   const march = document.querySelectorAll('#inv-chart .inv-col-chart')[2];
   assert.equal(march.querySelector('.inv-bar.open').getAttribute('title'),
-    'March 2026 \u2014 Open EUR 2842.80 \u00b7 Paid EUR 0.00');
+    'March 2026 \u2014 Open EUR 2842.80 \u00b7 Closed EUR 0.00');
   assert.equal(document.querySelectorAll('#inv-chart .inv-bar').length, 24,
     'a combined chart is still 12 months x 2 series');
   dom.window.close();
@@ -173,7 +173,7 @@ api.get = async (path) => {
   // silently added to the EUR one, and no rate is invented.
   const march = document.querySelectorAll('#inv-chart .inv-col-chart')[2];
   assert.equal(march.querySelector('.inv-bar.open').getAttribute('title'),
-    'March 2026 \u2014 Open EUR 1000.00 \u00b7 Paid EUR 0.00');
+    'March 2026 \u2014 Open EUR 1000.00 \u00b7 Closed EUR 0.00');
   dom.window.close();
 });
 
@@ -714,19 +714,36 @@ test('the timestamp helper is the requested "on Oct 1, 2026 at 11:26 AM" shape (
 // actually moving the year, and the unset-base-currency honesty for a mixed
 // set. Every assertion reads a real property of the rendered DOM.
 
-test('+ Invoice reveals the tracked-work wizard at step 1 and + Manual Invoice opens the editor (#349)', () => {
+test('+ Invoice opens the tracked-work wizard as a modal at step 1 and + Manual Invoice opens the editor (#349)', () => {
   const { dom, context, document } = makeDom();
   context.state.customers = [{ id: 'c1', name: 'ACME', currency: 'EUR' }];
   context.iwInit();
   context.wireWeekGrid();
   const wizard = document.getElementById('invoice-wizard');
-  assert.equal(wizard.hidden, true, 'the wizard starts hidden -- it is revealed, never open at boot');
+  const wizardOpen = () => wizard.open === true || wizard.hasAttribute('open');
+  assert.equal(wizardOpen(), false, 'the wizard dialog starts closed -- never open at boot');
+  assert.ok(wizard.classList.contains('p-modal'), 'the wizard is the p-modal overlay');
+  assert.equal(wizard.querySelector('h3'), null, 'the wizard no longer renders as the inline p-card');
   document.getElementById('invoice-new').dispatchEvent(new dom.window.Event('click', { bubbles: true }));
-  assert.equal(wizard.hidden, false, '+ Invoice reveals the wizard in place');
+  assert.equal(wizardOpen(), true, '+ Invoice opens the wizard as a modal');
+  assert.ok(wizard.querySelector('.p-modal__dialog .p-modal__footer'),
+    'the wizard renders inside a p-modal__dialog with a footer');
   assert.equal(document.getElementById('iw-step1').hidden, false, 'step 1 is shown');
   assert.equal(document.getElementById('iw-step2').hidden, true, 'step 2 is still hidden');
   assert.equal(document.getElementById('iw-step3').hidden, true, 'step 3 is still hidden');
   assert.match(document.getElementById('iw-title').textContent, /^Create from tracked work \u2014 1 of 3:/);
+  // Closing the dialog discards nothing: the step is preserved, so re-pressing
+  // + Invoice resumes where the user left off (never a half-entered restart).
+  document.getElementById('iw-close').dispatchEvent(new dom.window.Event('click', { bubbles: true }));
+  assert.equal(wizardOpen(), false, 'Close dismisses the wizard dialog');
+  document.getElementById('invoice-new').dispatchEvent(new dom.window.Event('click', { bubbles: true }));
+  assert.equal(wizardOpen(), true, '+ Invoice reopens the wizard');
+  assert.equal(document.getElementById('iw-step1').hidden, false, 'the wizard step is preserved');
+  // The shared keydown Escape fallback (jsdom never fires `cancel`) is wired too.
+  wizard.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  assert.equal(wizardOpen(), false, 'Escape closes the wizard dialog');
+  document.getElementById('invoice-new').dispatchEvent(new dom.window.Event('click', { bubbles: true }));
+  assert.equal(wizardOpen(), true, 'the wizard stays usable after Escape');
   const dlg = document.getElementById('invoice-editor');
   const isOpen = () => dlg.open === true || dlg.hasAttribute('open');
   assert.equal(isOpen(), false, 'the editor starts closed');
@@ -817,7 +834,7 @@ api.get = async (path) => {
   assert.equal(document.getElementById('inv-year-label').textContent, String(year));
   const marchOpen = () => document.querySelectorAll('#inv-chart .inv-col-chart')[2]
     .querySelector('.inv-bar.open').getAttribute('title');
-  assert.equal(marchOpen(), `March ${year} \u2014 Open EUR 1800.00 \u00b7 Paid EUR 0.00`);
+  assert.equal(marchOpen(), `March ${year} \u2014 Open EUR 1800.00 \u00b7 Closed EUR 0.00`);
   // The stepper is the app's own .day-nav period bar (chevron buttons).
   const nav = document.getElementById('inv-year-prev').parentElement;
   assert.equal(nav.tagName, 'NAV');
@@ -831,7 +848,7 @@ api.get = async (path) => {
   });
   assert.equal(context.dash.year, year - 1, 'the stepper decrements the rendered year');
   assert.match(document.getElementById('inv-chart-title').textContent, new RegExp(String(year - 1)));
-  assert.equal(marchOpen(), `March ${year - 1} \u2014 Open EUR 0.00 \u00b7 Paid EUR 0.00`,
+  assert.equal(marchOpen(), `March ${year - 1} \u2014 Open EUR 0.00 \u00b7 Closed EUR 0.00`,
     'the chart re-renders for the new year -- last year holds no March data');
   click('inv-year-next');
   await waitFor(() => document.getElementById('inv-year-label').textContent === String(year));
@@ -859,7 +876,7 @@ api.get = async (path) => {
     'Showing EUR only \u2014 set a base currency in Settings to combine EUR, USD.');
   const march = document.querySelectorAll('#inv-chart .inv-col-chart')[2];
   assert.equal(march.querySelector('.inv-bar.open').getAttribute('title'),
-    `March ${year} \u2014 Open EUR 1000.00 \u00b7 Paid EUR 0.00`,
+    `March ${year} \u2014 Open EUR 1000.00 \u00b7 Closed EUR 0.00`,
     'the USD invoice is not silently added to the EUR one');
   dom.window.close();
 });

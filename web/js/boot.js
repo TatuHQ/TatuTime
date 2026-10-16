@@ -2,13 +2,13 @@
 // Moved from the original monolithic app.js; behaviour is unchanged.
 
 
-import { addRecurring, createRetainer, iwInit, iwOpen, refreshCatalog, refreshRetainers, refreshSchedules, saveCatalogItem } from './billing.js';
+import { addRecurring, createRetainer, iwClose, iwInit, iwOpen, refreshCatalog, refreshRetainers, refreshSchedules, saveCatalogItem } from './billing.js';
 import { calState, refreshTimeCal, shiftMonth } from './calendar.js';
 import { $, addDays, announce, clearFormError, decorateUbuntuButton, isoDate, mondayOf } from './dom.js';
 import { ADD_CATEGORY_VALUE, addCategory, addExpenseCategory, fillCategorySelect, refreshCategories, refreshExpenses, refreshSubmissions, resetCategoryForm, resetExpenseForm, saveExpense, submitWeek } from './expenses.js';
 import { refreshExpenseConversion, resetExpenseConversion, showConverted } from './fx.js';
 import { cancelCustomerEdit, cancelProjectEdit, cancelTaskEdit, contactRow, fillParentCustomers, fillTaskParents, prefillProjectParent, refreshCustomerPickers, refreshCustomerTable, refreshProjectTable, refreshTaskTable, runReport, saveCustomer, saveProject, saveTask } from './hierarchy.js';
-import { closeDeliveryRecord, closeInvoicePreview, dash, dashApplyColumns, downloadInvoicePdf, ed, edCancel, edLineRow, edOpen, edRecalc, edSave, generateInvoice, invoicePreview, markInvoiceSent, refreshInvoiceSummary, refreshInvoices, sendInvoiceEmail } from './invoices.js';
+import { closeDeliveryRecord, closeInvoicePreview, dash, dashApplyColumns, downloadInvoicePdf, ed, edCancel, edLineRow, edOpen, edRecalc, edSave, invoicePreview, markInvoiceSent, refreshInvoiceSummary, refreshInvoices, sendInvoiceEmail } from './invoices.js';
 import { markNotificationsRead, refreshNotifications } from './notifications.js';
 import { initReceiptPreview } from './receipt.js';
 import { initRouter, initSegTabs, initSettingsTabs, initTabs, refreshTimesheetView, segActiveId, showTimesheet } from './route.js';
@@ -302,6 +302,22 @@ export function wireWeekGrid() {
   $('invoice-new').addEventListener('click', iwOpen);
   $('manual-new').addEventListener('click', () => edOpen(null));
   iwInit(); // #134 staged invoice wizard
+  // #349: the wizard is a p-modal dialog, so Close, the native `cancel` event
+  // and Escape all close it. Closing keeps the entered steps (iwClose), so
+  // re-pressing `+ Invoice` never discards half-entered work.
+  $('iw-close').addEventListener('click', iwClose);
+  $('invoice-wizard').addEventListener('cancel', (event) => {
+    // native Escape on a real browser: dismiss it, never leave it half-open.
+    event.preventDefault();
+    iwClose();
+  });
+  $('invoice-wizard').addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      // jsdom never fires 'cancel'; emulate it here (browsers do both).
+      event.preventDefault();
+      iwClose();
+    }
+  });
   $('ed-cancel').addEventListener('click', edCancel);
   $('invoice-editor').addEventListener('cancel', (event) => {
     // native Escape on a real browser: cancel, never a half-open popup.
@@ -432,8 +448,6 @@ export function wireSetupPanels(today) {
   }
 
   $('report-form').addEventListener('submit', runReport);
-
-  $('invoice-form').addEventListener('submit', generateInvoice);
 
   $('category-form').addEventListener('submit', addCategory);
   $('category-cancel').addEventListener('click', resetCategoryForm);

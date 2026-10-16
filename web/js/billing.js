@@ -99,22 +99,42 @@ export function iwShow() {
   clearFormError($('iw-error'));
 }
 
-// #349: the wizard is revealed on demand by `+ Invoice` instead of rendering
-// open at boot. It is revealed IN PLACE rather than moved into a dialog: the
-// #134 flow is a multi-step form whose project tick-boxes (#iw-projects), the
-// #iw-error alert and its aria-live status line are all written into a fixed
-// DOM tree by iwInit()/iwShow()/iwLoadProjects(), so revealing the existing card
-// keeps every id, label and announcement intact and leaves the 1-of-3 sequence
-// (POST /invoices/preview → POST /invoices) untouched. Calling it again while
-// the wizard is already open only re-focuses, so half-entered work is never
-// discarded.
+// #349: the wizard is a `p-modal` dialog opened on demand by `+ Invoice` rather
+// than an inline card that used to render open at boot. The #134 flow is a
+// multi-step form whose project tick-boxes (#iw-projects), the #iw-error alert
+// and its aria-live status line are all written into the same fixed DOM tree by
+// iwInit()/iwShow()/iwLoadProjects(), so every id, label and announcement is
+// unchanged and the 1-of-3 sequence (POST /invoices/preview → POST /invoices)
+// is untouched. Opening preserves `iw.step` and the entered values: pressing
+// `+ Invoice` while the dialog is already open — or after a close — only shows
+// it again and re-focuses the current step's first control, so half-entered work
+// is never discarded.
 export function iwOpen() {
-  const card = $('invoice-wizard');
-  card.hidden = false;
-  card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  const dlg = $('invoice-wizard');
+  const alreadyOpen = dlg.open === true || dlg.hasAttribute('open');
+  // #232 increment 4: the native <dialog> owns the top layer, the focus trap and
+  // the return of focus to the opener; jsdom has no modal support, so fall back
+  // to the [open] attribute exactly as edOpen() does.
+  if (!alreadyOpen) {
+    if (typeof dlg.showModal === 'function') dlg.showModal();
+    else dlg.setAttribute('open', '');
+  }
   const first = iw.step === 2 ? $('iw-preset') : iw.step === 3 ? $('iw-save') : $('iw-customer');
   first.focus();
   announce(`Invoice wizard open — step ${iw.step} of 3.`);
+}
+
+// Closing the wizard is not a cancel: the steps keep their state, so a later
+// `+ Invoice` resumes exactly where the user left off and nothing half-entered
+// is thrown away — nothing was persisted at all, so the #143 "no partial
+// persistence" rule holds. The native <dialog> returns focus to #invoice-new via
+// dom.js initDialogFocusReturn. Silent on the live region on purpose: there is no
+// state change to announce, and the successful save below must be free to
+// announce the draft it created.
+export function iwClose() {
+  const dlg = $('invoice-wizard');
+  if (typeof dlg.close === 'function') dlg.close();
+  else dlg.removeAttribute('open');
 }
 
 export function iwSelectedProjects() {
@@ -209,6 +229,7 @@ export async function iwSave() {
     iw.step = 1;
     iw.preview = null;
     iwShow();
+    iwClose();
     await refreshInvoices();
   } catch (err) {
     showFormError($('iw-error'), err);

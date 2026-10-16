@@ -23,9 +23,10 @@ const vendorCss = readFileSync(new URL('../web/vendor/ubuntu/components.css', im
 const stylesRules = stylesCss.replace(/\/\*[\s\S]*?\*\//g, '');
 
 // The 22 form/panel error messages (`<p id="…-error" role="alert">`), now the
-// official validation message inside an `is-error` group.
+// official validation message inside an `is-error` group. `#invoice-error` left
+// with the legacy direct draft generator (#349).
 const ERROR_IDS = [
-    'auth-error', 'entry-error', 'iw-error', 'ed-error', 'invoice-error',
+    'auth-error', 'entry-error', 'iw-error', 'ed-error',
     'rec-error', 'ret-error', 'expense-error', 'expense-category-error',
     'submission-error', 'user-error', 'user-password-error', 'secret-error',
     'config-error', 'category-error', 'org-error', 'template-error',
@@ -53,9 +54,11 @@ window.f = { api, state, refreshCatalog, iwLoadProjects, fillSelect, $, decorate
 test('the shell ships the official form vocabulary and no bespoke class (#232 phase 2b)', () => {
     const { dom, document } = shell();
     const groups = document.querySelectorAll('.p-form__group');
-    assert.equal(groups.length, 128, 'every former .field wrapper is a p-form__group');
-    assert.equal(document.querySelectorAll('.p-form__label').length, 123, 'one official label per field row');
-    assert.equal(document.querySelectorAll('.p-form__control').length, 123, 'one official control per field row');
+    // 125/120/120 after #349 removed the legacy direct draft generator's three
+    // field rows (customer / from / to) along with its form.
+    assert.equal(groups.length, 125, 'every former .field wrapper is a p-form__group');
+    assert.equal(document.querySelectorAll('.p-form__label').length, 120, 'one official label per field row');
+    assert.equal(document.querySelectorAll('.p-form__control').length, 120, 'one official control per field row');
     // 32 after the rebase: upstream's Get paid box contributes one help text
     // (#357), and the #349 invoice detail panel adds the history state line plus
     // the delivery-record note in the message dialog.
@@ -97,7 +100,9 @@ test('every p-form__group pairs its label with its own control (#232 phase 2b)',
         assert.ok(label.textContent.trim().length > 0, `${control.id} keeps an accessible name`);
         paired += 1;
     }
-    assert.equal(paired, 123, 'all 123 label/control pairs were verified');
+    // 120 after #349 removed the legacy direct draft generator's three field
+    // rows (customer / from / to) along with its form.
+    assert.equal(paired, 120, 'all 120 label/control pairs were verified');
     assert.equal(composed.length, 5, 'five composed rows have no label of their own');
     assert.equal(composed.filter((tag) => tag === 'FIELDSET').length, 4, 'four grouped fieldsets');
     assert.equal(composed.filter((tag) => tag.startsWith('DIV')).length, 1, 'the Contacts row');
@@ -257,11 +262,12 @@ test('decoration is attribute-only and every rendered button states what it need
     const vocab = {};
     for (const b of icons) vocab[b.dataset.icon] = (vocab[b.dataset.icon] || 0) + 1;
     assert.deepEqual(vocab, { plus: 12, copy: 2, play: 2, stop: 1 }, 'the shell icon vocabulary is pinned');
-    // 34 since the receipt preview's Download joined the shell (#23) and the
-    // Invoices action row added `+ Invoice` (#349 — `+ Manual Invoice` is the
-    // secondary action and deliberately carries no data-positive): the pinned
-    // count makes a new positive action update this guard on purpose.
-    assert.equal(document.querySelectorAll('button[data-positive]').length, 34,
+    // 33 after #349 removed the legacy direct draft generator (whose `Generate
+    // draft` carried data-positive). The count is pinned so a new positive
+    // action updates this guard on purpose: `+ Manual Invoice` is the secondary
+    // action and deliberately carries no data-positive, and the wizard dialog's
+    // `Close` is a plain secondary button, so neither adds to it.
+    assert.equal(document.querySelectorAll('button[data-positive]').length, 33,
         'every positive shell button states data-positive');
 
     // The deleted label-mutation leaves no trace: no rendered label keeps a "+".

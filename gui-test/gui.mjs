@@ -499,7 +499,7 @@ check('customer save closes the popup and restores focus',
 // C7 regression: every customer picker refreshes immediately (used to need a
 // page reload, so a new customer could not be invoiced/expensed/timed).
 const optHas = (id, name) => [...window.document.getElementById(id).options].some((o) => o.textContent.includes(name));
-check('invoice picker sees the new customer', optHas('invoice-customer', 'Globex'));
+check('invoice wizard picker sees the new customer', optHas('iw-customer', 'Globex'));
 check('expense picker sees the new customer', optHas('expense-customer', 'Globex'));
 check('timer picker sees the new customer', optHas('timer-customer', 'Globex'));
 check('currency normalised to USD', globex && globex.currency === 'USD');
@@ -851,14 +851,37 @@ await settle('the task-based entry to save');
 const dec = (await (await fetch(BASE + '/api/entries?date=2026-12-01')).json()).entries;
 check('entry logged against task T1', dec.some((e) => e.task_code === 'T1'));
 
-// ---- INVOICES (#8): generate a draft for ACME's billable work, then issue ----
+// ---- INVOICES (#8): create a draft for ACME's billable work with the
+// tracked-work wizard -- the legacy direct draft generator is gone (#349) --
+// then issue it and confirm the invoiced entry is locked.
 const tabInv = window.document.getElementById('tab-invoices');
 tabInv.dispatchEvent(new window.Event('click', { bubbles: true }));
-window.document.getElementById('invoice-customer').value = acmeOpt.value;
-window.document.getElementById('invoice-from').value = '2026-12-01';
-window.document.getElementById('invoice-to').value = '2026-12-31';
-window.document.getElementById('invoice-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
-await settle('the invoice form to generate the ACME draft');
+await settle('the Invoices section to load before opening the wizard');
+byId('invoice-new').dispatchEvent(new window.Event('click', { bubbles: true }));
+await waitFor(() => dialogOpen(byId('invoice-wizard')), {
+  message: 'the + Invoice action to open the tracked-work wizard modal',
+});
+byId('iw-customer').value = acmeOpt.value;
+byId('iw-next').dispatchEvent(new window.Event('click', { bubbles: true }));
+await waitFor(() => !byId('iw-step2').hidden, { message: 'the wizard to advance to step 2' });
+byId('iw-preset').value = 'custom';
+byId('iw-preset').dispatchEvent(new window.Event('change', { bubbles: true }));
+byId('iw-from').value = '2026-12-01';
+byId('iw-from').dispatchEvent(new window.Event('change', { bubbles: true }));
+await settle('the wizard period to reload from the new start date');
+byId('iw-to').value = '2026-12-31';
+byId('iw-to').dispatchEvent(new window.Event('change', { bubbles: true }));
+await waitFor(() => !!byId('iw-p-MKT-2'), {
+  message: 'the wizard to list the MKT-2 project with its December work',
+});
+byId('iw-p-MKT-2').checked = true;
+byId('iw-next').dispatchEvent(new window.Event('click', { bubbles: true }));
+await waitFor(() => !byId('iw-step3').hidden, { message: 'the wizard to reach the review step' });
+byId('iw-save').dispatchEvent(new window.Event('click', { bubbles: true }));
+await waitFor(() => !dialogOpen(byId('invoice-wizard')), {
+  message: 'the wizard to close after saving the ACME draft',
+});
+await settle('the saved draft to reach the invoice register');
 const invs = (await (await fetch(BASE + '/api/invoices')).json()).invoices;
 const acmeInv = invs.find((i) => i.customer_id === acmeOpt.value);
 check('draft invoice generated', !!acmeInv && acmeInv.status === 'draft');
@@ -1379,8 +1402,10 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
 {
   window.document.getElementById('tab-invoices').dispatchEvent(new window.Event('click', { bubbles: true }));
   await settle('the Invoices section to reload before opening the manual editor');
-  window.document.getElementById('invoice-customer').value = acmeOpt.value;
-  window.document.getElementById('manual-new').dispatchEvent(new window.Event('click', { bubbles: true }));
+  // #349: the legacy generator that used to prefill this value is gone; the
+  // editor's own customer picker carries the choice.
+  byId('ed-customer').value = acmeOpt.value;
+  byId('manual-new').dispatchEvent(new window.Event('click', { bubbles: true }));
   await waitFor(() => dialogOpen(byId('invoice-editor')) && byId('invoice-editor').querySelectorAll('tbody tr').length === 1, {
     message: 'the manual editor modal to open with one line row',
   });
@@ -1454,14 +1479,15 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
     });
   }
   const invsBefore = (await (await fetch(BASE + '/api/invoices', { headers: { Cookie: SESSION_COOKIE } })).json()).invoices.length;
-  // #349: the wizard is revealed by the `+ Invoice` action instead of rendering
+  // #349: the wizard is opened by the `+ Invoice` action instead of rendering
   // open at boot; the #134 sequence below is otherwise unchanged.
   byId('invoice-new').dispatchEvent(new window.Event('click', { bubbles: true }));
-  await waitFor(() => byId('invoice-wizard').hidden === false, {
-    message: 'the + Invoice action to reveal the tracked-work wizard',
+  await waitFor(() => dialogOpen(byId('invoice-wizard')), {
+    message: 'the + Invoice action to open the tracked-work wizard modal',
   });
-  check('+ Invoice opens the tracked-work wizard at step 1 (#349)',
-    byId('invoice-wizard').hidden === false
+  check('+ Invoice opens the tracked-work wizard modal at step 1 (#349)',
+    dialogOpen(byId('invoice-wizard'))
+    && byId('invoice-wizard').classList.contains('p-modal')
     && byId('iw-step1').hidden === false
     && window.document.activeElement === byId('iw-customer'));
   window.document.getElementById('iw-customer').value = acmeOpt.value;
@@ -1499,8 +1525,8 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
   const invsMid = (await (await fetch(BASE + '/api/invoices', { headers: { Cookie: SESSION_COOKIE } })).json()).invoices.length;
   check('preview persisted nothing before Save (#134)', invsMid === invsBefore);
   window.document.getElementById('iw-save').dispatchEvent(new window.Event('click', { bubbles: true }));
-  await waitFor(() => byId('iw-step1').hidden === false, {
-    message: 'the wizard to save the draft and reset to step 1',
+  await waitFor(() => byId('iw-step1').hidden === false && !dialogOpen(byId('invoice-wizard')), {
+    message: 'the wizard to save the draft, close and reset to step 1',
   });
   const invsAfter = (await (await fetch(BASE + '/api/invoices', { headers: { Cookie: SESSION_COOKIE } })).json()).invoices;
   const wizardDraft = invsAfter.find((i) => i.total_minor === 28500 && i.status === 'draft');
@@ -1508,9 +1534,10 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
     invsAfter.length === invsBefore + 1 && !!wizardDraft && wizardDraft.lines.length === 2);
   check('draft save announced without issuing (#134)',
     /Draft INV-\d+ created.*Issue/.test(window.document.getElementById('live-region').textContent));
-  // the wizard reset back to step 1
-  check('wizard returns to step 1 after save (#134)',
-    window.document.getElementById('iw-step1').hidden === false && window.document.getElementById('iw-title').textContent.includes('1 of 3'));
+  // the wizard closed and reset back to step 1
+  check('wizard closes and returns to step 1 after save (#134)',
+    window.document.getElementById('iw-step1').hidden === false && !dialogOpen(byId('invoice-wizard'))
+    && window.document.getElementById('iw-title').textContent.includes('1 of 3'));
 }
 
 // ---- RETAINERS (#144): create, add, draw, history, guards ----
@@ -1672,10 +1699,11 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
     monthLabels.join(',') === 'Jan,Feb,Mar,Apr,May,Jun,Jul,Aug,Sep,Oct,Nov,Dec'
     && shortLabels.length === 12
     && shortLabels.every((s) => s.getAttribute('aria-hidden') === 'true' && s.textContent.length === 1));
-  // #F: hovering a bar names the month and the year beside both series.
+  // #F: hovering a bar names the month and the year beside both series, the
+  // second of which is Closed (paid or written off), never "Paid".
   const firstBarTitle = (window.document.querySelector('#inv-chart .inv-bar')?.getAttribute('title')) || '';
   check('hovering a bar names the month, the year and both series (#F)',
-    /^(January|February|March|April|May|June|July|August|September|October|November|December) \d{4} \u2014 Open .+ \u00b7 Paid .+$/.test(firstBarTitle));
+    /^(January|February|March|April|May|June|July|August|September|October|November|December) \d{4} \u2014 Open .+ \u00b7 Closed .+$/.test(firstBarTitle));
   // No base_currency is set for the harness data dir, so nothing may be
   // converted and no rate may be invented: the note is silent for a
   // single-currency set, and never mentions a rate.
@@ -2610,8 +2638,8 @@ if (recBtn) {
   await settle('the Invoices section to reload before reading the draft count');
   const invsBefore = (await getJson('/api/invoices')).invoices.length;
   byId('invoice-new').dispatchEvent(new window.Event('click', { bubbles: true }));
-  await waitFor(() => byId('invoice-wizard').hidden === false, {
-    message: 'the + Invoice action to reveal the tracked-work wizard',
+  await waitFor(() => dialogOpen(byId('invoice-wizard')), {
+    message: 'the + Invoice action to open the tracked-work wizard modal',
   });
   window.document.getElementById('iw-customer').value = wfCust.id;
   window.document.getElementById('iw-next').dispatchEvent(new window.Event('click', { bubbles: true }));
@@ -2648,6 +2676,8 @@ if (recBtn) {
   });
   check('save announced a draft with Issue still ahead (#141)',
     /Draft INV-\d+ created from 1 line/.test(window.document.getElementById('live-region').textContent));
+  check('the wizard dialog closes after saving the draft (#141)',
+    !dialogOpen(byId('invoice-wizard')));
   const wfInv = (await getJson('/api/invoices')).invoices.find((i) => i.customer_id === wfCust.id);
   check('exactly one draft exists, locked nothing (#141)',
     (await getJson('/api/invoices')).invoices.length === invsBefore + 1
@@ -2665,7 +2695,8 @@ if (recBtn) {
   check('draft issued nothing: PDF 409 and source entry still editable (#141)',
     wfPdf.status === 409 && wfPut.status === 200);
 
-  // ---- DASHBOARD states (#135): hidden on Open, found on All + search ----
+  // ---- DASHBOARD states (#135): a saved draft is Open (not closed), so the
+  // default Open filter lists it -- searchable there and on All ----
   const wfOpen = window.document.getElementById('inv-tab-open');
   const wfAll = window.document.getElementById('inv-tab-all');
   const wfSearch = window.document.getElementById('invoice-search');
@@ -2676,22 +2707,32 @@ if (recBtn) {
   wfSearch.value = wfInv.number;
   ev(wfSearch, 'input');
   await settle('the draft-number search to re-render the Open list');
-  const openHas = [...window.document.querySelectorAll('#invoice-table tbody tr')]
-    .some((r) => r.textContent.includes(wfInv.number));
+  const openRow = [...window.document.querySelectorAll('#invoice-table tbody tr')]
+    .find((r) => r.textContent.includes(wfInv.number));
+  const openHas = !!openRow;
+  check('a saved draft is Open: the default Open filter lists it (#135)',
+    openHas && /draft/i.test(openRow.textContent));
+  check('the Open list offers the draft actions, never Record payment (#135)',
+    openHas && /Edit/.test(openRow.textContent) && /Issue/.test(openRow.textContent)
+    && /Delete/.test(openRow.textContent) && !/Record payment/.test(openRow.textContent));
   wfAll.dispatchEvent(new window.Event('click', { bubbles: true }));
   await waitFor(() => [...window.document.querySelectorAll('#invoice-table tbody tr')].some((r) => r.textContent.includes(wfInv.number)), {
     message: 'the All tab to list the searched draft',
   });
   const allHas = [...window.document.querySelectorAll('#invoice-table tbody tr')]
     .some((r) => r.textContent.includes(wfInv.number));
-  check('draft invisible on Open, searchable on All; tab states honest (#141/#135)',
-    !openHas && allHas && wfAll.getAttribute('aria-pressed') === 'true'
+  check('draft visible on Open and All; tab states honest (#141/#135)',
+    openHas && allHas && wfAll.getAttribute('aria-pressed') === 'true'
     && wfOpen.getAttribute('aria-pressed') === 'false');
   wfSearch.value = '';
   ev(wfSearch, 'input');
   await settle('the cleared draft-number search to re-render');
 
   // ---- NO BILLABLE WORK: explains itself, persists nothing (#141) ----
+  byId('invoice-new').dispatchEvent(new window.Event('click', { bubbles: true }));
+  await waitFor(() => dialogOpen(byId('invoice-wizard')), {
+    message: 'the wizard to reopen for the empty-period check',
+  });
   window.document.getElementById('iw-customer').value = weCust.id;
   window.document.getElementById('iw-next').dispatchEvent(new window.Event('click', { bubbles: true }));
   await waitFor(() => byId('iw-step2').hidden === false, { message: 'the invoice wizard to advance to step 2' });

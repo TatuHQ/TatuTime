@@ -39,7 +39,10 @@ test('invoice chart exposes its numbers through the accessible name (#191)', () 
   const chart = document.getElementById('inv-chart');
   assert.equal(chart.getAttribute('role'), 'img');
   const label = chart.getAttribute('aria-label') || '';
+  assert.match(label, /Monthly open versus closed amounts/,
+    `the accessible name states the Open/Closed pairing: ${label}`);
   assert.match(label, /open 1800\.00/, `summary must ride the name: ${label}`);
+  assert.match(label, /closed 0\.00/, `the settled series is Closed, never Paid: ${label}`);
   // Children of role="img" are presentational — the old sr-only child is gone.
   assert.equal(chart.querySelector('.sr-only'), null,
     'no DOM summary inside a role="img" subtree');

@@ -1307,11 +1307,14 @@ class Gate:
             "the bespoke .field/.hint/.form-error markup is gone and the official "
             "form vocabulary is in place (#232 phase 2b)",
             counts["field"] == 0 and counts["hint"] == 0 and counts["formError"] == 0
-            and counts["groups"] == 128 and counts["labels"] == 123
+            # 125/120/120 after #349 removed the legacy direct draft
+            # generator's three field rows (customer / from / to).
+            and counts["groups"] == 125 and counts["labels"] == 120
             # 32 after the rebase: upstream's Get paid box (#357) plus the #349
             # invoice detail panel's history state line and delivery-record note.
-            and counts["controls"] == 123 and counts["help"] == 32
-            and counts["messages"] == counts["errorGroups"] == 23,
+            and counts["controls"] == 120 and counts["help"] == 32
+            # 22: the legacy direct draft generator's #invoice-error is gone.
+            and counts["messages"] == counts["errorGroups"] == 22,
             f"counts={counts}",
             info=f"{counts['groups']} groups, {counts['help']} help texts, "
                  f"{counts['messages']} validation messages",

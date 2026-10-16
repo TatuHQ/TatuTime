@@ -89,6 +89,11 @@ export async function refreshInvoices() {
         el('td', { cls: 'num', text: `${inv.currency} ${formatMoney(inv.total_minor)}` }),
         el('td', { cls: 'num', text: open ? `${inv.currency} ${formatMoney(balance)}` : '\u2014' }),
         el('td', {}, [
+          // The chip's second argument is the emphasis flag, and `open` here is
+          // isOpenInvoice (collectable now): issued and partly paid read
+          // positive while draft, paid and written off stay neutral. Every chip
+          // still spells out the stored status, so a draft is never mistaken for
+          // a settled one and a draft legitimately appears under the Open filter.
           statusChip(inv.status.replace('_', ' '), open),
         ]),
         el('td', { cls: 'actions-col' }, actions),
@@ -211,22 +216,6 @@ export async function writeOffInvoice(inv, balance) {
   }
 }
 
-export async function generateInvoice(evt) {
-  evt.preventDefault();
-  clearFormError($('invoice-error'));
-  try {
-    await api.post('/invoices', {
-      customer_id: $('invoice-customer').value,
-      from: $('invoice-from').value,
-      to: $('invoice-to').value,
-    });
-    announce('Draft invoice generated.');
-    await refreshInvoices();
-  } catch (err) {
-    showFormError($('invoice-error'), err);
-  }
-}
-
 // Same resolution order as the server (#116): customer terms → org template
 // terms → legacy net-14 from the period end. Only the confirm text; the
 // server always owns the persisted value.
@@ -333,9 +322,9 @@ export async function downloadInvoicePdf(id, number) {
 
 // -------------------------------------------------- invoice dashboard (#135) --
 //
-// Overview band (open/paid tiles, monthly Open-vs-Paid chart with year
-// navigation) + Open/All lists with search, client/project/date filters,
-// sortable columns and column visibility. Everything derives from the
+// The Trends chart (monthly Open-vs-Closed with year navigation) + Open/All
+// lists with search, client/project/date filters, sortable columns and column
+// visibility. Everything derives from the
 // existing GET /invoices + ledger semantics (#114 balances) — no records
 // are ever mutated by filtering/sorting; row selection still opens the
 // #133 preview.
@@ -353,14 +342,26 @@ export const dash = {
   currency: '',
 };
 
-// "Collectable right now": issued or partly paid — drives the Open dashboard
-// filter, the ageing columns and the Record-payment affordance. NOT the lock
+// "Collectable right now": issued or partly paid — drives the Record-payment
+// affordance, the balance column and which row actions appear. NOT the lock
 // predicate: entry/expense locks are permanent for ANY non-draft invoice
 // (settling no longer releases them — see weekLockIndex in timesheet.js and
-// the InvoiceLock provider in src/lock.rs). #217 heritage: this one predicate
-// replaced four ad-hoc copies that had drifted.
+// the InvoiceLock provider in src/lock.rs). NOT the Open register filter either
+// — see isClosedInvoice below. #217 heritage: this one predicate replaced four
+// ad-hoc copies that had drifted.
 export function isOpenInvoice(inv) {
   return inv.status === 'issued' || inv.status === 'partly_paid';
+}
+
+// The ratified Open/Closed grouping (the owner's definition): an invoice is
+// **Closed** once it is paid or written off and **Open** in every other state —
+// draft, issued (sent) and partly paid. This is the single home of that rule,
+// used by the register's Open filter and by the Trends chart's Closed series. It
+// is deliberately NOT isOpenInvoice, which keeps the narrower "collectable now"
+// meaning above: a draft is open for the register but is not collectable, so it
+// never offers "Record payment".
+export function isClosedInvoice(inv) {
+  return inv.status === 'paid' || inv.status === 'written_off';
 }
 
 export function invBalance(inv) {
@@ -371,7 +372,9 @@ export function invBalance(inv) {
 
 export function dashFilter(invoices) {
   let rows = invoices;
-  if (dash.openOnly) rows = rows.filter(isOpenInvoice);
+  // The Open view means "not closed": draft | issued | partly_paid. A freshly
+  // saved draft is therefore listed under the default filter.
+  if (dash.openOnly) rows = rows.filter((inv) => !isClosedInvoice(inv));
   const q = dash.q.trim().toLowerCase();
   if (q) {
     rows = rows.filter(
@@ -417,21 +420,31 @@ export function dashFilter(invoices) {
 //     that unit and the rate used is printed under the chart; without one the
 //     historical single-currency view stands, and it now *says* so.
 //
-// The settled series is called **paid** everywhere (hover, subtitle, accessible
-// name): that is the vocabulary the domain already uses for the status, and
-// "closed" here is exactly that state — one word for one thing in one view.
+// The second series is **Closed**, not "Paid" (the ratified Open/Closed
+// grouping): it counts every invoice that has left the open set — paid AND
+// written off — so the hover, the subtitle and the accessible name all say
+// "Closed", while the persisted status enum (`paid`/`written_off`) is untouched.
 
 // The three-letter axis table is the app's one month table (#189,
 // `timesheet.js`), imported rather than copied; only the long names are new
 // here, because the hover sentence says "March 2026", not "Mar 2026".
 const MONTH_FULL = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
-const emptySeries = () => ({ open: Array(12).fill(0), paid: Array(12).fill(0) });
+const emptySeries = () => ({ open: Array(12).fill(0), closed: Array(12).fill(0) });
 
-/// The open/paid month series for the selected year, **grouped by source
+/// The open/closed month series for the selected year, **grouped by source
 /// currency** (#F). Grouping first is what keeps the money honest once a
 /// conversion is applied: sums are converted, never the individual invoices, so
 /// rounding cannot accumulate across them (#11).
+///
+///   * `open` — the outstanding balance of every invoice still in the open set
+///     (draft | issued | partly paid), bucketed by the invoice's period end, as
+///     before.
+///   * `closed` — every amount that has left that set this year: each payment by
+///     its `received_at`, a legacy settled invoice (no ledger) by `paid_at`, and a
+///     written-off invoice's **forgiven remainder** by `written_off_at`. Adding
+///     only the remainder — never `total_minor` — is what stops a partly-paid
+///     then written-off invoice from counting its received payment twice.
 export function chartSeriesByCurrency(invoices) {
   const byCur = new Map();
   const bucket = (cur) => {
@@ -441,17 +454,29 @@ export function chartSeriesByCurrency(invoices) {
   for (const i of invoices) {
     const series = bucket(i.currency || '');
     const cy = String(i.period_to).slice(0, 4) === String(dash.year);
-    if (cy && isOpenInvoice(i)) {
+    if (cy && !isClosedInvoice(i)) {
       series.open[Number(String(i.period_to).slice(5, 7)) - 1] += invBalance(i);
     }
+    const paidMinor = (i.payments || []).reduce((a, p) => a + p.amount_minor, 0);
     for (const p of i.payments || []) {
       const m = String(p.received_at).slice(0, 7);
-      if (m.slice(0, 4) === String(dash.year)) series.paid[Number(m.slice(5, 7)) - 1] += p.amount_minor;
+      if (m.slice(0, 4) === String(dash.year)) series.closed[Number(m.slice(5, 7)) - 1] += p.amount_minor;
     }
     if (!i.payments || i.payments.length === 0) {
       const pm = String(i.paid_at || '').slice(0, 7);
       if (i.status === 'paid' && pm.slice(0, 4) === String(dash.year)) {
-        series.paid[Number(pm.slice(5, 7)) - 1] += i.total_minor;
+        series.closed[Number(pm.slice(5, 7)) - 1] += i.total_minor;
+      }
+    }
+    if (i.status === 'written_off') {
+      // The domain stamps `written_off_at` on the write-off, so a forgiven
+      // balance is bucketed by the month it was actually forgiven. A document
+      // that somehow lacks the stamp (a legacy hand-edited file) falls back to
+      // the invoice's period end — the same month the Open series already uses
+      // for this invoice — rather than inventing a date.
+      const wm = String(i.written_off_at || i.period_to).slice(0, 7);
+      if (wm.slice(0, 4) === String(dash.year)) {
+        series.closed[Number(wm.slice(5, 7)) - 1] += Math.max(i.total_minor - paidMinor, 0);
       }
     }
   }
@@ -495,16 +520,16 @@ function rateCaption(quotes, base) {
 function drawChart({ series, unit, subtitle, note }) {
   $('inv-year-label').textContent = String(dash.year);
   $('inv-chart-title').textContent = subtitle;
-  const max = Math.max(...series.open, ...series.paid, 1);
+  const max = Math.max(...series.open, ...series.closed, 1);
   const chart = $('inv-chart');
   chart.textContent = '';
   const labels = [];
   for (let m = 0; m < 12; m += 1) {
     // Both bars of a month carry the same sentence, so hovering either one
-    // answers for the month: period, then open and paid in the chart's unit.
+    // answers for the month: period, then open and closed in the chart's unit.
     const hover =
       `${MONTH_FULL[m]} ${dash.year} \u2014 Open ${unit} ${formatMoney(series.open[m])}` +
-      ` \u00b7 Paid ${unit} ${formatMoney(series.paid[m])}`;
+      ` \u00b7 Closed ${unit} ${formatMoney(series.closed[m])}`;
     const col = el('div', { cls: 'inv-col-chart' }, [
       el('div', { cls: 'inv-bars' }, [
         el('span', {
@@ -513,8 +538,8 @@ function drawChart({ series, unit, subtitle, note }) {
           attrs: { title: hover },
         }),
         el('span', {
-          cls: 'inv-bar paid',
-          style: `height:${Math.max(2, Math.round((series.paid[m] / max) * 54))}px`,
+          cls: 'inv-bar closed',
+          style: `height:${Math.max(2, Math.round((series.closed[m] / max) * 54))}px`,
           attrs: { title: hover },
         }),
       ]),
@@ -527,11 +552,11 @@ function drawChart({ series, unit, subtitle, note }) {
       ]),
     ]);
     chart.appendChild(col);
-    labels.push(`${MONTH_NAMES[m]}: open ${formatMoney(series.open[m])}, paid ${formatMoney(series.paid[m])}`);
+    labels.push(`${MONTH_NAMES[m]}: open ${formatMoney(series.open[m])}, closed ${formatMoney(series.closed[m])}`);
   }
   // #191: children of a role="img" node are presentational to AT, so the
   // per-month summary must ride the accessible NAME, not the subtree.
-  chart.setAttribute('aria-label', `Monthly open versus paid amounts in ${unit}, ${dash.year}. ${labels.join('; ')}`);
+  chart.setAttribute('aria-label', `Monthly open versus closed amounts in ${unit}, ${dash.year}. ${labels.join('; ')}`);
   $('inv-chart-note').textContent = note;
 }
 
@@ -544,7 +569,7 @@ async function drawConverted(byCur, codes, base, primary) {
   const unconverted = (note) => drawChart({
     series: byCur.get(unit) || emptySeries(),
     unit,
-    subtitle: `Open vs paid (${unit}) \u2014 ${dash.year}`,
+    subtitle: `Open vs closed (${unit}) \u2014 ${dash.year}`,
     note,
   });
   const quotes = [];
@@ -563,16 +588,16 @@ async function drawConverted(byCur, codes, base, primary) {
     const rate = cur === base ? null : quotes.find((q) => q.from === cur)?.rate;
     for (let m = 0; m < 12; m += 1) {
       const open = rate === null ? series.open[m] : convertMinor(series.open[m], rate);
-      const paid = rate === null ? series.paid[m] : convertMinor(series.paid[m], rate);
-      if (!Number.isFinite(open) || !Number.isFinite(paid)) {
+      const closed = rate === null ? series.closed[m] : convertMinor(series.closed[m], rate);
+      if (!Number.isFinite(open) || !Number.isFinite(closed)) {
         unconverted(`Exchange rates unavailable \u2014 showing ${unit} unconverted.`);
         return;
       }
       totals.open[m] += open;
-      totals.paid[m] += paid;
+      totals.closed[m] += closed;
     }
   }
-  drawChart({ series: totals, unit: base, subtitle: `Open vs paid (${base}) \u2014 ${dash.year}`, note: rateCaption(quotes, base) });
+  drawChart({ series: totals, unit: base, subtitle: `Open vs closed (${base}) \u2014 ${dash.year}`, note: rateCaption(quotes, base) });
 }
 
 export function dashRenderOverview(invoices) {
@@ -589,7 +614,7 @@ export function dashRenderOverview(invoices) {
   drawChart({
     series: byCur.get(unit) || emptySeries(),
     unit,
-    subtitle: `Open vs paid (${unit}) \u2014 ${dash.year}`,
+    subtitle: `Open vs closed (${unit}) \u2014 ${dash.year}`,
     note: codes.length > 1
       ? `Showing ${unit} only \u2014 set a base currency in Settings to combine ${codes.join(', ')}.`
       : '',
@@ -1143,10 +1168,9 @@ export function edRecalc() {
 export function edOpen(draft) {
   ed.id = draft ? draft.id : null;
   ed.tracked = draft ? (draft.lines || []).filter((l) => l.entry_id || l.expense_id) : [];
-  ed.currency = draft ? draft.currency : (state.customers.find((c) => c.id === $('invoice-customer').value)?.currency || 'EUR');
+  ed.currency = draft ? draft.currency : (state.customers.find((c) => c.id === $('ed-customer').value)?.currency || 'EUR');
   $('ed-title').textContent = draft ? `Edit draft ${draft.number}` : 'Manual invoice';
   $('ed-customer').disabled = Boolean(draft);
-  if (!draft) $('ed-customer').value = $('invoice-customer').value || $('ed-customer').value;
   const tbody = $('ed-lines').querySelector('tbody');
   tbody.textContent = '';
   for (const l of ed.tracked) tbody.appendChild(edTrackedRow(l));

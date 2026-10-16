@@ -441,6 +441,11 @@
           <button type="button" id="manual-new" class="secondary" data-icon="plus">Manual Invoice</button>
         </div>
       </div>
+      <!-- #135: the draft/issued/paid status line that used to head the left-hand
+           create column now stands on its own full-width row directly under the
+           action row, above the Trends section. It stays written by
+           refreshInvoiceSummary() and announced (role="status", aria-live). -->
+      <p id="invoice-summary" class="p-form-help-text" role="status" aria-live="polite"></p>
       <!-- Invoice trends promoted to the page's top content section (#135): the
            Total open / Paid in tiles are retired, and the year label that lived
            inside the paid tile moves into this header, so the year stays visible
@@ -459,65 +464,16 @@
                  `#inv-year-prev` / `#inv-year-next` (web/js/boot.js). -->
             <nav class="day-nav" aria-label="Change year">
               <button type="button" id="inv-year-prev" aria-label="Previous year" title="Previous year"><i class="p-icon--chevron-left" aria-hidden="true"></i></button>
-              <span id="inv-chart-title" class="day-label">Open vs paid by month</span>
+              <span id="inv-chart-title" class="day-label">Open vs closed by month</span>
               <button type="button" id="inv-year-next" aria-label="Next year" title="Next year"><i class="p-icon--chevron-right" aria-hidden="true"></i></button>
             </nav>
-            <div id="inv-chart" role="img" aria-label="Monthly open versus paid amounts"></div>
+            <div id="inv-chart" role="img" aria-label="Monthly open versus closed amounts"></div>
             <!-- One honest line about the numbers: the exchange rate used when
                  currencies are combined, or why they are not. Announced politely
                  the way the rest of the page announces derived state. -->
             <p id="inv-chart-note" class="p-form-help-text" role="status" aria-live="polite"></p>
           </div>
         </div>
-      </section>
-      <div class="invoice-workspace">
-      <section class="invoice-create-column" aria-label="Create invoice">
-      <p id="invoice-summary" class="p-form-help-text" role="status" aria-live="polite"></p>
-      <!-- #134: tracked-work path only; manual lines are a separate path below.
-           Hidden until `+ Invoice` reveals it (iwOpen, web/js/billing.js): the
-           wizard is no longer the create column's always-open boot state, but it
-           stays in place, so every id, label, aria-live announcement and the
-           1-of-3 sequence are unchanged. -->
-      <div id="invoice-wizard" class="p-card" role="group" aria-label="Invoice wizard" hidden>
-        <div class="p-card__header">
-          <h3 id="iw-title">Create from tracked work — 1 of 3: customer and source</h3>
-        </div>
-        <div id="iw-step1">
-          <div class="p-form__group"><label class="p-form__label" for="iw-customer">Customer</label><select class="p-form__control" id="iw-customer"></select></div>
-          <div class="p-form__group"><label class="p-form__label" for="iw-expenses"><input class="p-form__control" type="checkbox" id="iw-expenses" checked>
-            Include billable expenses (#25)</label></div>
-        </div>
-        <div id="iw-step2" hidden>
-          <div class="p-form__group"><label class="p-form__label" for="iw-preset">Period</label><select class="p-form__control" id="iw-preset">
-            <option value="this-month" selected>This month</option>
-            <option value="last-month">Last month</option>
-            <option value="this-week">This week</option>
-            <option value="custom">Custom dates</option>
-          </select></div>
-          <div class="p-form__group"><label class="p-form__label" for="iw-from">From</label><input class="p-form__control" type="date" id="iw-from"></div>
-          <div class="p-form__group"><label class="p-form__label" for="iw-to">To</label><input class="p-form__control" type="date" id="iw-to"></div>
-          <fieldset class="p-form__group"><legend>Projects with uninvoiced work</legend>
-            <div id="iw-projects"><span class="p-form-help-text">Loading…</span></div>
-          </fieldset>
-        </div>
-        <div id="iw-step3" hidden>
-          <div class="p-form__group"><label class="p-form__label" for="iw-grouping">Group lines by</label><select class="p-form__control" id="iw-grouping">
-            <option value="project" selected>Project</option>
-            <option value="task">Task</option>
-            <option value="detailed">Every line</option>
-          </select></div>
-          <dl id="iw-summary" class="ip-facts"></dl>
-          <ul id="iw-lines"></ul>
-        </div>
-        <div class="p-form-validation is-error">
-          <p class="p-form-validation__message" id="iw-error" role="alert" hidden></p>
-        </div>
-        <div class="buttons">
-          <button type="button" id="iw-back" class="secondary" hidden>Back</button>
-          <button data-positive="1" type="button" id="iw-next" class="primary">Next</button>
-          <button type="button" id="iw-save" class="primary" data-positive="1" hidden>Save draft</button>
-        </div>
-      </div>
       </section>
       <section class="invoice-register-column" aria-label="Invoice register">
       <div id="inv-list-head">
@@ -604,21 +560,8 @@
         </section>
       </div>
       </section>
-      </div>
       <details id="advanced-billing" class="advanced-billing">
       <summary>Advanced billing tools: recurring schedules and retainers</summary>
-      <details class="invoice-legacy">
-        <summary>Legacy direct draft generator</summary>
-        <form id="invoice-form" class="p-card">
-          <div class="p-form__group"><label class="p-form__label" for="invoice-customer">Customer</label><select class="p-form__control" id="invoice-customer" required></select></div>
-          <div class="p-form__group"><label class="p-form__label" for="invoice-from">From</label><input class="p-form__control" type="date" id="invoice-from" required></div>
-          <div class="p-form__group"><label class="p-form__label" for="invoice-to">To</label><input class="p-form__control" type="date" id="invoice-to" required></div>
-          <div class="p-form-validation is-error">
-            <p class="p-form-validation__message" id="invoice-error" role="alert" hidden></p>
-          </div>
-          <div class="buttons"><button data-positive="1" type="submit" id="invoice-generate" class="secondary">Generate draft</button></div>
-        </form>
-      </details>
       <div class="advanced-billing-grid">
       <section class="advanced-billing-section" aria-labelledby="recurring-title">
       <h2>Recurring schedules</h2>
@@ -677,6 +620,57 @@
       </section>
       </div>
       </details>
+      <!-- #134/#349: the tracked-work wizard is a p-modal dialog, not an inline
+           card: `+ Invoice` opens it over the register (iwOpen, web/js/billing.js)
+           and every existing id, label, aria-live announcement and the 1-of-3
+           sequence (POST /invoices/preview -> POST /invoices) are unchanged.
+           Escape, the focus trap and the return of focus to #invoice-new come
+           from the native <dialog> plus dom.js initDialogFocusReturn; closing it
+           keeps the in-progress state, so re-pressing `+ Invoice` never discards
+           half-entered work. -->
+      <dialog id="invoice-wizard" class="p-modal" aria-modal="true" aria-labelledby="iw-title">
+        <div class="p-modal__dialog">
+          <header class="p-modal__header">
+            <h2 class="p-modal__title" id="iw-title">Create from tracked work — 1 of 3: customer and source</h2>
+          </header>
+          <div id="iw-step1">
+            <div class="p-form__group"><label class="p-form__label" for="iw-customer">Customer</label><select class="p-form__control" id="iw-customer"></select></div>
+            <div class="p-form__group"><label class="p-form__label" for="iw-expenses"><input class="p-form__control" type="checkbox" id="iw-expenses" checked>
+              Include billable expenses (#25)</label></div>
+          </div>
+          <div id="iw-step2" hidden>
+            <div class="p-form__group"><label class="p-form__label" for="iw-preset">Period</label><select class="p-form__control" id="iw-preset">
+              <option value="this-month" selected>This month</option>
+              <option value="last-month">Last month</option>
+              <option value="this-week">This week</option>
+              <option value="custom">Custom dates</option>
+            </select></div>
+            <div class="p-form__group"><label class="p-form__label" for="iw-from">From</label><input class="p-form__control" type="date" id="iw-from"></div>
+            <div class="p-form__group"><label class="p-form__label" for="iw-to">To</label><input class="p-form__control" type="date" id="iw-to"></div>
+            <fieldset class="p-form__group"><legend>Projects with uninvoiced work</legend>
+              <div id="iw-projects"><span class="p-form-help-text">Loading…</span></div>
+            </fieldset>
+          </div>
+          <div id="iw-step3" hidden>
+            <div class="p-form__group"><label class="p-form__label" for="iw-grouping">Group lines by</label><select class="p-form__control" id="iw-grouping">
+              <option value="project" selected>Project</option>
+              <option value="task">Task</option>
+              <option value="detailed">Every line</option>
+            </select></div>
+            <dl id="iw-summary" class="ip-facts"></dl>
+            <ul id="iw-lines"></ul>
+          </div>
+          <div class="p-form-validation is-error">
+            <p class="p-form-validation__message" id="iw-error" role="alert" hidden></p>
+          </div>
+          <footer class="buttons p-modal__footer">
+            <button type="button" id="iw-back" class="secondary" hidden>Back</button>
+            <button data-positive="1" type="button" id="iw-next" class="primary">Next</button>
+            <button type="button" id="iw-save" class="primary" data-positive="1" hidden>Save draft</button>
+            <button type="button" id="iw-close" class="secondary">Close</button>
+          </footer>
+        </div>
+      </dialog>
       <!-- #143: the manual-lines / draft-editing editor, now a p-modal popup
            (#232 increment 4) instead of an inline p-card: it keeps the existing
            POST /invoices/manual + PUT /invoices/{id} behaviour behind an
