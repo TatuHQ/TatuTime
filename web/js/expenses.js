@@ -3,7 +3,7 @@
 // The receipt half lives in ./receipt.js (#332).
 
 
-import { api } from './api.js';
+import { api, fetchAll } from './api.js';
 import { $, announce, askConfirm, clearFormError, el, fillSelect, formatMoney, showFormError, statusChip } from './dom.js';
 import { customerName, fillCustomerSelect, fillProjectSelect, loadProjects, state } from './state.js';
 import { adoptExpenseRate, billedCurrency, currencyCode, refreshExpenseConversion, resetExpenseConversion, toMinor } from './fx.js';
@@ -181,8 +181,14 @@ export async function startExpenseEdit(x) {
 }
 
 export async function refreshExpenses() {
-  const data = await api.get('/expenses');
-  const all = data.expenses || [];
+  // #334: the register is the one view with no range filter, so it is the one
+  // that can outgrow a single page. It follows every cursor, and says so if the
+  // client-side cap stopped the walk — a register that quietly showed the first
+  // page would be the silent cut this bound exists to prevent.
+  const { rows: all, truncated } = await fetchAll('/expenses', 'expenses');
+  if (truncated) {
+    announce(`Showing the first ${all.length} expenses — more exist than this view can page through.`);
+  }
   // The register is scoped by customer and project, both defaulting to "all"
   // (an unset filter is a scope, not a gap — same shape as the Tasks section).
   const custSel = $('expense-filter-customer');

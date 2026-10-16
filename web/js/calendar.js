@@ -2,7 +2,7 @@
 // Moved from the original monolithic app.js; behaviour is unchanged.
 
 
-import { api } from './api.js';
+import { api, fetchAll } from './api.js';
 import { $, announce, el, isoDate, ubuntuIcon } from './dom.js';
 import { activateSeg } from './route.js';
 import { createSeqGuard } from './seq.js';
@@ -39,9 +39,10 @@ export async function refreshTimeCal() {
   const monthStart = `${month}-01`;
   const monthEnd = `${month}-${String(last).padStart(2, '0')}`;
   $('cal-label').textContent = monthName(month);
-  const data = await api.get(`/entries?from=${monthStart}&to=${monthEnd}`);
+  // #334: the month is one query but may be several pages — follow the cursor
+  // so a busy month never renders a partial grid.
+  const { rows: entries } = await fetchAll(`/entries?from=${monthStart}&to=${monthEnd}`, 'entries');
   if (!isCalCurrent()) return; // #188: a newer month change superseded this
-  const entries = data.entries || [];
   const byDate = new Map();
   let totalHundredths = 0;
   for (const e of entries) {

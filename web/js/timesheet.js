@@ -2,7 +2,7 @@
 // Moved from the original monolithic app.js; behaviour is unchanged.
 
 
-import { api } from './api.js';
+import { api, fetchAll } from './api.js';
 import { refreshCalendar } from './calendar.js';
 import { $, addDays, announce, askAlert, askConfirm, askPrompt, clearFormError, el, isoDate, mondayOf, rowAction, showFormError, statusChip, ubuntuIcon } from './dom.js';
 import { isOpenInvoice } from './invoices.js';
@@ -12,6 +12,20 @@ import { createSeqGuard } from './seq.js';
 import { customerName, fillCustomerSelect, fillProjectSelect, fillTaskSelect, state } from './state.js';
 
 const daySeq = createSeqGuard();
+
+/// The entry list walks its pages in `(date, id)` order — the total order that
+/// makes a keyset cursor safe while writes land mid-walk (#334) — and a
+/// timesheet is read as a diary: rows in the order the hours were recorded. The
+/// views below restore creation order for what they *display* and *copy*: a
+/// copy-forward takes the first entry of each project line, so its choice must
+/// not depend on where a page boundary fell. `id` breaks ties exactly as the
+/// store's own order does; `created_at` alone is not unique.
+const byCreatedAt = (a, b) => {
+  const at = Date.parse(a.created_at) || 0;
+  const bt = Date.parse(b.created_at) || 0;
+  if (at !== bt) return at - bt;
+  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+};
 
 // ----------------------------------------------------------------- day ---
 
@@ -45,8 +59,7 @@ export async function refreshWeekStrip() {
   const end = addDays(start, 6);
   let entries = [];
   try {
-    const data = await api.get(`/entries?from=${start}&to=${end}`);
-    entries = data.entries || [];
+    entries = (await fetchAll(`/entries?from=${start}&to=${end}`, 'entries')).rows;
   } catch {
     $('week-strip').textContent = '';
     return;
@@ -100,9 +113,10 @@ export async function refreshDay() {
   if (!date) return;
   const isDayCurrent = daySeq();
   setDayLabel();
-  const data = await api.get(`/entries?date=${encodeURIComponent(date)}`);
+  // #334: every page of the day, not just the first one.
+  const { rows } = await fetchAll(`/entries?date=${encodeURIComponent(date)}`, 'entries');
   if (!isDayCurrent()) return; // #188: a newer navigation superseded this
-  const rows = data.entries || [];
+  rows.sort(byCreatedAt); // the diary's own order — see byCreatedAt
   // #108: rows carry a lock indicator when the entry sits on an issued
   // invoice or a submitted/approved week (same lookup the grid uses, cached).
   const locked = await weekLockIds();
@@ -178,8 +192,11 @@ export async function copyPreviousDay(ago = 1) {
   list.textContent = '';
   let rows = [];
   try {
-    const data = await api.get(`/entries?date=${prev}`);
-    rows = data.entries || [];
+    rows = (await fetchAll(`/entries?date=${prev}`, 'entries')).rows;
+    // Which entry represents a project line here decides which task_code is
+    // offered for the copy (#12), so the order is the records' own, not a
+    // page's (#334).
+    rows.sort(byCreatedAt);
   } catch (err) {
     announce(`Could not read ${prev}: ${err.message}`);
     return;
@@ -424,8 +441,10 @@ export async function refreshWeek() {
   const today = isoDate(new Date());
   $('week-label').textContent = `${weekShort(start)} – ${weekShort(end)} ${end.slice(0, 4)}`;
 
-  const data = await api.get(`/entries?from=${start}&to=${end}`);
-  const entries = data.entries || [];
+  const { rows: entries } = await fetchAll(`/entries?from=${start}&to=${end}`, 'entries');
+  // Rows of the week grid appear in the order their lines were first recorded
+  // (#334: the page order is `(date, id)`, which is not that order).
+  entries.sort(byCreatedAt);
   // Days in the displayed week that carry at least one entry — drives the
   // per-column status icon (mirrors the Day view's week strip).
   const entryDates = new Set(entries.map((e) => e.date));
@@ -832,10 +851,14 @@ export async function copyLastWeek(weeksAgo = 1) {
   const start = addDays(targetWeek, -7 * weeksAgo);
   const end = addDays(start, 6);
   try {
-    const data = await api.get(`/entries?from=${start}&to=${end}`);
+    const { rows } = await fetchAll(`/entries?from=${start}&to=${end}`, 'entries');
+    // One row per project line, first-recorded wins (#334: the page order is
+    // `(date, id)`, so the choice is restored here rather than left to the
+    // cursor).
+    rows.sort(byCreatedAt);
     const seen = new Set();
     let added = 0;
-    for (const e of data.entries || []) {
+    for (const e of rows) {
       const k = `${e.customer_id}|${e.project_code}|${e.task_code || ''}`;
       if (seen.has(k)) continue;
       seen.add(k);

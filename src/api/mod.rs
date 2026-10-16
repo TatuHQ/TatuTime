@@ -39,6 +39,7 @@ pub mod entries_reports;
 pub mod expenses;
 pub mod fx;
 pub mod invoicing;
+pub mod pagination;
 pub mod people;
 pub mod retainers;
 pub mod timer_calendar;

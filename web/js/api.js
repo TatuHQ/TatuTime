@@ -71,3 +71,38 @@ export const api = {
   put: (u, b) => api.request('PUT', u, b),
   del: (u) => api.request('DELETE', u),
 };
+
+/// How many pages a single call to `fetchAll` will walk. A page is bounded by
+/// the server (200 rows by default, 1000 at most), so this is a runaway guard,
+/// not a truncation policy: reaching it is reported, never swallowed.
+export const MAX_PAGES = 50;
+
+/// Every row a list endpoint has for a query, in its documented order (#334).
+///
+/// The two list endpoints page: a response carries at most `limit` rows and
+/// answers `next_cursor` — null when that page ended the matching set, or an
+/// opaque cursor when it did not. A view that read only the first page would
+/// silently drop the tail, which is the failure pagination exists to prevent, so
+/// every view that needs *all* the rows it asked for walks the cursors here.
+///
+/// The first request is the caller's own URL, unchanged: the bound is the
+/// server's default, not something each view has to opt into, and the cursor is
+/// only ever sent back verbatim — the app never parses one.
+///
+/// `truncated` is the one case where rows are left behind (the walk hit
+/// [`MAX_PAGES`]). Callers must say so; it means the collection outgrew the
+/// harness, not that the view may quietly show less.
+export async function fetchAll(path, key) {
+  const rows = [];
+  let cursor = null;
+  for (let page = 0; page < MAX_PAGES; page += 1) {
+    const url = cursor
+      ? `${path}${path.includes('?') ? '&' : '?'}cursor=${encodeURIComponent(cursor)}`
+      : path;
+    const data = await api.get(url);
+    rows.push(...(data[key] || []));
+    cursor = data.next_cursor || null;
+    if (!cursor) return { rows, truncated: false };
+  }
+  return { rows, truncated: true };
+}

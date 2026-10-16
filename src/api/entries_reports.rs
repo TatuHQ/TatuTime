@@ -1,13 +1,20 @@
 //! Entries and reports: the CRUD surface for time entries (#51 rules) and
 //! the read-side reports built over them.
 
+use super::pagination::{self, Order};
 use super::*;
 
 /// Entry list body: serialised exactly once by `Json`, with no intermediate
 /// `serde_json::Value` per row (#256).
+///
+/// `next_cursor` is a key of the payload with no `skip_serializing_if` (#334):
+/// `null` is the answer to "was that all of it?", and a response that dropped
+/// the key would put the caller back to guessing — the silent cut this endpoint
+/// used to be.
 #[derive(serde::Serialize)]
 struct EntryList<'a> {
     entries: Vec<&'a Entry>,
+    next_cursor: Option<String>,
 }
 
 /// Entry cross-references: the customer must exist and the project must
@@ -86,7 +93,8 @@ fn ensure_entry_refs(store: &Store, draft: &crate::domain::EntryDraft) -> Result
     }
 }
 
-/// `GET /entries`: either `?date=` for one day or `?from=&to=` for a range.
+/// `GET /entries`: either `?date=` for one day or `?from=&to=` for a range,
+/// with `?limit=`/`?cursor=` for the page (#334).
 #[derive(Debug, serde::Deserialize)]
 pub struct EntryQuery {
     #[serde(default)]
@@ -95,6 +103,10 @@ pub struct EntryQuery {
     from: Option<String>,
     #[serde(default)]
     to: Option<String>,
+    #[serde(default)]
+    limit: Option<String>,
+    #[serde(default)]
+    cursor: Option<String>,
 }
 
 pub async fn list_entries(
@@ -102,6 +114,9 @@ pub async fn list_entries(
     actor: AuthUser,
     Query(q): Query<EntryQuery>,
 ) -> ApiResult {
+    // #334: the page is part of the query, so a malformed `limit`/`cursor` is
+    // the caller's error — resolved (and refused) before the scan runs.
+    let page = pagination::page_request(q.limit.as_ref(), q.cursor.as_ref())?;
     // #254: the range/day scans read the whole entry tree from disk; run them
     // on the blocking pool so a large scan never stalls an async worker.
     let entries = match (&q.date, &q.from, &q.to) {
@@ -122,12 +137,25 @@ pub async fn list_entries(
             ));
         }
     };
-    // Private-per-user (#51): a member sees only their own entries.
-    let items: Vec<&Entry> = entries
+    // Private-per-user (#51): a member sees only their own entries — and only
+    // afterwards is the page cut, so a page for a member holds `limit` of
+    // *their* rows, not whatever survived someone else's filtering.
+    let mut items: Vec<&Entry> = entries
         .iter()
         .filter(|e| visible_to(&actor.0, e.user_id))
         .collect();
-    Ok(Json(EntryList { entries: items }).into_response())
+    // #334: the documented total order — `(date, id)` ascending — applied here
+    // rather than relied on from the store, because a keyset cursor is only
+    // sound over an order the contract fixes. `id` is unique and immutable, so
+    // no two rows compare equal and a write cannot move one across the walk.
+    items.sort_by_key(|e| (e.date, e.id));
+    let (items, next_cursor) =
+        pagination::paginate(items, |e| (e.date, e.id), &page, Order::Ascending);
+    Ok(Json(EntryList {
+        entries: items,
+        next_cursor,
+    })
+    .into_response())
 }
 
 pub async fn create_entry(
