@@ -16,12 +16,21 @@ function makeDom(prelude = '', url = 'http://localhost/') {
   const dom = new JSDOM(html, { runScripts: 'outside-only', url });
   dom.window.HTMLDialogElement.prototype.showModal = function () { this.open = true; };
   dom.window.HTMLDialogElement.prototype.close = function () { this.open = false; };
+  // jsdom lays nothing out, so it has no scrollIntoView; the invoice detail
+  // panel calls it when it opens (#349). Stub it exactly as gui.mjs does.
+  if (!dom.window.Element.prototype.scrollIntoView) dom.window.Element.prototype.scrollIntoView = () => {};
   const exports = `${app}
 ${prelude}
 window.bootTest = {
   dashRenderOverview, refreshInvoices, refreshCustomerPickers,
   writeOffInvoice, navigateDay, weekLockIndex, state,
   refreshWeek, openWeekRowForm, saveWeekRow, fillProjectSelect, refreshTimeCal, calState,
+  openInvoicePreview, closeInvoicePreview, showDeliveryRecord, formatTimelineStamp,
+  // #349 journeys: the invoice action row, the year stepper and the manual
+  // editor are wired by the focused wire*() functions; expose them so a test
+  // drives the same listeners the app registers at boot.
+  dash, refreshInvoiceSummary, wireInvoiceDashboard, wireWeekGrid,
+  iwInit, iwOpen, edOpen, edSave, edCancel, ed,
   peekLockCache: () => weekLockCache,
   liveText: () => document.getElementById('live-region').textContent,
   api,
@@ -57,6 +66,114 @@ test('the invoice chart renders real bar heights via el() style (#188)', () => {
     ...bars.map((b) => Number(/height:(\d+)px/.exec(b.getAttribute('style'))[1])),
   );
   assert.ok(tallest > 2, `non-zero data renders taller than the 2px floor (got ${tallest})`);
+  dom.window.close();
+});
+test('the chart labels months in words and names the period on hover (#F)', () => {
+  const { dom, context, document } = makeDom();
+  context.dashRenderOverview([
+    {
+      id: 'i1', number: 'INV-0001', status: 'issued', currency: 'EUR',
+      period_to: '2026-03-10', total_minor: 180000, payments: [],
+    },
+  ]);
+  // The month axis is a name, not a letter: three-letter codes by default, with
+  // a single-letter variant the CSS media query swaps in below 480px. Both are
+  // in the DOM; only the full one is announced (the short one is aria-hidden).
+  const labels = [...document.querySelectorAll('#inv-chart .inv-clabel-full')];
+  assert.deepEqual(
+    labels.map((s) => s.textContent),
+    ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
+    '3-letter month codes, January first',
+  );
+  const shorts = [...document.querySelectorAll('#inv-chart .inv-clabel-short')];
+  assert.deepEqual(shorts.map((s) => s.textContent), labels.map((s) => s.textContent[0]),
+    'one letter per month');
+  for (const short of shorts) {
+    assert.equal(short.getAttribute('aria-hidden'), 'true',
+      'the short variant is never announced, so no month is read twice');
+  }
+  // Hovering a bar answers for the whole month: period, open and paid.
+  const march = document.querySelectorAll('#inv-chart .inv-col-chart')[2];
+  assert.equal(march.querySelector('.inv-bar.open').getAttribute('title'),
+    'March 2026 \u2014 Open EUR 1800.00 \u00b7 Paid EUR 0.00');
+  assert.equal(march.querySelector('.inv-bar.paid').getAttribute('title'),
+    march.querySelector('.inv-bar.open').getAttribute('title'),
+    'both bars of a month describe the same month');
+  dom.window.close();
+});
+
+test('the chart combines currencies into base_currency and prints the rate (#F)', async () => {
+  const { dom, context, document } = makeDom(`
+api.get = async (path) => {
+  if (path === '/admin/config') return { config: [{ key: 'base_currency', value: 'EUR' }] };
+  if (path.startsWith('/fx?')) {
+    return { from: 'USD', to: 'EUR', rate: '0.921400', date: '2026-10-15', source: 'ECB' };
+  }
+  throw new Error('unexpected ' + path);
+};
+`);
+  context.dashRenderOverview([
+    {
+      id: 'e1', number: 'INV-1', status: 'issued', currency: 'EUR',
+      period_to: '2026-03-10', total_minor: 100000, payments: [],
+    },
+    {
+      id: 'u1', number: 'INV-2', status: 'issued', currency: 'USD',
+      period_to: '2026-03-20', total_minor: 200000, payments: [],
+    },
+  ]);
+  // The first paint is already captioned ("showing EUR only"), so wait for the
+  // converted caption itself, not merely for a non-empty note.
+  await waitFor(() => /1 USD = 0\.9214 EUR/.test(document.getElementById('inv-chart-note').textContent), {
+    message: 'the converted chart to render once the rates resolve',
+  });
+  // The rate is the published decimal string, with the date it was published for.
+  assert.equal(document.getElementById('inv-chart-note').textContent,
+    '1 USD = 0.9214 EUR (2026-10-15)');
+  // Per-currency sums are converted once, then added: 1000.00 EUR + 1842.80 EUR.
+  assert.equal(document.getElementById('inv-chart-title').textContent,
+    'Open vs paid (EUR) \u2014 2026');
+  const march = document.querySelectorAll('#inv-chart .inv-col-chart')[2];
+  assert.equal(march.querySelector('.inv-bar.open').getAttribute('title'),
+    'March 2026 \u2014 Open EUR 2842.80 \u00b7 Paid EUR 0.00');
+  assert.equal(document.querySelectorAll('#inv-chart .inv-bar').length, 24,
+    'a combined chart is still 12 months x 2 series');
+  dom.window.close();
+});
+
+test('a failing FX table shows the unconverted values and says so (#F)', async () => {
+  const { dom, context, document } = makeDom(`
+api.get = async (path) => {
+  if (path === '/admin/config') return { config: [{ key: 'base_currency', value: 'EUR' }] };
+  if (path.startsWith('/fx?')) {
+    const err = new Error('no published table');
+    err.status = 503;
+    throw err;
+  }
+  throw new Error('unexpected ' + path);
+};
+`);
+  context.dashRenderOverview([
+    {
+      id: 'e1', number: 'INV-1', status: 'issued', currency: 'EUR',
+      period_to: '2026-03-10', total_minor: 100000, payments: [],
+    },
+    {
+      id: 'u1', number: 'INV-2', status: 'issued', currency: 'USD',
+      period_to: '2026-03-20', total_minor: 200000, payments: [],
+    },
+  ]);
+  await waitFor(
+    () => /Exchange rates unavailable/.test(document.getElementById('inv-chart-note').textContent),
+    { message: 'the fail-closed note to replace the chart caption' },
+  );
+  assert.equal(document.getElementById('inv-chart-note').textContent,
+    'Exchange rates unavailable \u2014 showing EUR unconverted.');
+  // Never a fabricated 1:1 and never a partial sum: the USD invoice is not
+  // silently added to the EUR one, and no rate is invented.
+  const march = document.querySelectorAll('#inv-chart .inv-col-chart')[2];
+  assert.equal(march.querySelector('.inv-bar.open').getAttribute('title'),
+    'March 2026 \u2014 Open EUR 1000.00 \u00b7 Paid EUR 0.00');
   dom.window.close();
 });
 
@@ -413,4 +530,344 @@ api.post = async () => ({});
     'refreshTimeCal ran on boot (the Total hours readout is painted)',
   );
   dom.window.close();
+});
+
+// ------------------------------------------- invoice detail panel (#349) ----
+//
+// The detail panel shows the invoice's rendered PDF (framed from a client-side
+// blob: URL, because the global X-Frame-Options: DENY refuses the API path
+// itself) and its activity history. These run offline in jsdom: the blob fetch
+// is stubbed, the URL factory is stubbed (jsdom has no blob URLs), and the
+// history comes from a stubbed response so the shape is pinned exactly.
+
+test('the detail panel frames the rendered PDF and renders the history (#349)', async () => {
+  const { dom, context, document } = makeDom(`
+api.getBlob = async (path) => {
+  if (path !== '/invoices/i1/pdf/preview') throw new Error('unexpected blob ' + path);
+  // "%PDF-1.4"
+  return new Blob([new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x34])], { type: 'application/pdf' });
+};
+api.get = async (path) => {
+  if (path !== '/invoices/i1/timeline') throw new Error('unexpected ' + path);
+  return { events: [
+    { kind: 'email_sent', description: 'Sent invoice to ap@x.test, from Acme <a@x.test>.',
+      actor_name: 'Emanuele Ciurleo', at: '2026-10-01T11:26:00Z',
+      meta: { to: 'ap@x.test', subject: 'INV-0001', from_name: 'Acme', from_email: 'a@x.test', transport: 'smtp' } },
+    { kind: 'created', description: 'Invoice created.', actor_name: 'Emanuele Ciurleo', at: '2026-09-28T10:12:00Z' },
+  ] };
+};
+`);
+  dom.window.URL.createObjectURL = () => 'blob:test-1';
+  dom.window.URL.revokeObjectURL = () => {};
+  await context.openInvoicePreview({
+    id: 'i1', number: 'INV-0001', status: 'issued', currency: 'EUR',
+    period_from: '2026-09-01', period_to: '2026-09-30', total_minor: 1000, lines: [],
+  }, null);
+  assert.equal(document.getElementById('invoice-preview').hidden, false, 'the panel opens');
+  const frame = document.getElementById('ip-frame');
+  assert.ok(frame, 'the rendered PDF is framed');
+  assert.equal(frame.getAttribute('src'), 'blob:test-1', 'the frame shows the client-side blob URL');
+  assert.equal(document.getElementById('ip-pdf').children.length, 1,
+    'the preview region holds the frame and nothing else (#349)');
+  assert.equal(document.getElementById('ip-pdf-state').hidden, true, 'no state line while the PDF shows');
+  assert.equal(document.getElementById('ip-download').hidden, false,
+    'an issued invoice can still download its archived PDF (#113)');
+  const items = [...document.querySelectorAll('#ip-timeline li')];
+  assert.equal(items.length, 2, 'both events render, newest first');
+  assert.match(items[0].querySelector('.ip-tl-desc').textContent, /^Sent invoice to/);
+  assert.equal(items[0].querySelector('.ip-tl-actor').textContent, 'Emanuele Ciurleo');
+  const when = items[0].querySelector('.ip-tl-when time');
+  assert.equal(when.getAttribute('datetime'), '2026-10-01T11:26:00Z',
+    'the machine-readable RFC 3339 value is preserved on <time datetime>');
+  // The display shape, computed independently with the same Intl rules so the
+  // assertion holds whatever the runner's timezone is: "on Oct 1, 2026 at 11:26 AM".
+  const d = new Date('2026-10-01T11:26:00Z');
+  const want = `on ${new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).format(d)}`;
+  const wantTime = new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }).format(d);
+  assert.equal(when.textContent, `${want} at ${wantTime}`);
+  assert.match(when.textContent, /^on [A-Z][a-z]{2} \d{1,2}, \d{4} at \d{1,2}:\d{2} (AM|PM)$/);
+  // View message: the delivery record only, and only on the delivery.
+  const buttons = [...document.querySelectorAll('#ip-timeline button')];
+  assert.equal(buttons.length, 1, 'only the email_sent entry offers View message');
+  assert.equal(buttons[0].textContent, 'View message');
+  assert.equal(buttons[0].tagName, 'BUTTON', 'it is a button, never a navigating link');
+  buttons[0].dispatchEvent(new dom.window.Event('click', { bubbles: true }));
+  const rec = document.getElementById('message-fields');
+  assert.match(rec.textContent, /ap@x\.test/, 'the recipient that was actually used');
+  assert.match(rec.textContent, /INV-0001/, 'the retained subject');
+  assert.match(rec.textContent, /Acme <a@x\.test>/, 'the From identity');
+  assert.ok([...rec.children].every((n) => n.children.length === 0), 'the record is text only');
+  assert.match(document.getElementById('message-note').textContent, /not retained/);
+  assert.ok(!/Apologies|Dear/.test(document.getElementById('message-dialog').textContent),
+    'the popup never fabricates a message body');
+  // Closing releases the frame and the history.
+  context.closeInvoicePreview();
+  assert.equal(document.getElementById('invoice-preview').hidden, true);
+  assert.equal(document.getElementById('ip-pdf').children.length, 0, 'the frame is released on close');
+  assert.equal(document.querySelectorAll('#ip-timeline li').length, 0);
+  dom.window.close();
+});
+
+test('a non-PDF preview body is reported, never framed (#349)', async () => {
+  const { dom, context, document } = makeDom(`
+api.getBlob = async () => new Blob([new Uint8Array([0x7b, 0x22, 0x65])], { type: 'application/json' });
+api.get = async () => ({ events: [] });
+`);
+  dom.window.URL.createObjectURL = () => 'blob:never';
+  await context.openInvoicePreview({ id: 'x1', number: 'INV-9', status: 'draft' }, null);
+  assert.equal(document.getElementById('ip-pdf').children.length, 0, 'a non-PDF body is never framed');
+  assert.equal(document.getElementById('ip-pdf-state').hidden, false);
+  assert.match(document.getElementById('ip-pdf-state').textContent, /did not return a PDF/);
+  assert.equal(document.getElementById('ip-download').hidden, true, 'a draft has no archived PDF to download');
+  assert.equal(document.getElementById('ip-timeline-state').textContent, 'No history yet.',
+    'an empty history says so instead of rendering a fabricated entry');
+  dom.window.close();
+});
+
+test('a superseded preview render revokes the URL it minted (#C4)', async () => {
+  // Closing the panel and reopening the *same* invoice while the first fetch is
+  // still in flight used to pass the id guard, so the older response overwrote
+  // previewPdfUrl without revoking the URL the newer render had minted. The
+  // render counter makes the older one revoke its own URL instead.
+  const { dom, context, document } = makeDom(`
+let releaseFirst;
+const firstGate = new Promise((resolve) => { releaseFirst = resolve; });
+let call = 0;
+api.getBlob = async () => {
+  call += 1;
+  // "%PDF-1.4"
+  const bytes = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x34]);
+  if (call === 1) {
+    // The first render is held inside its own arrayBuffer() await, so the
+    // supersession lands after it has already passed the first guard.
+    return { type: 'application/pdf', arrayBuffer: () => firstGate.then(() => bytes.buffer) };
+  }
+  return new Blob([bytes], { type: 'application/pdf' });
+};
+api.get = async () => ({ events: [] });
+window.releaseFirst = () => releaseFirst();
+`);
+  const created = [];
+  const revoked = [];
+  dom.window.URL.createObjectURL = () => {
+    const url = `blob:render-${created.length + 1}`;
+    created.push(url);
+    return url;
+  };
+  dom.window.URL.revokeObjectURL = (url) => revoked.push(url);
+  const inv = { id: 'i1', number: 'INV-0001', status: 'issued' };
+
+  const superseded = context.openInvoicePreview(inv, null); // render 1, held open
+  await yieldToEventLoop(); // it reaches the arrayBuffer() await, past the guard
+  context.closeInvoicePreview();
+  await context.openInvoicePreview(inv, null); // render 2, the same invoice
+
+  assert.equal(document.getElementById('ip-frame').getAttribute('src'), 'blob:render-1',
+    'the surviving frame is the newest render');
+  dom.window.releaseFirst(); // render 1 resumes and finds itself superseded
+  await superseded;
+
+  assert.deepEqual(created, ['blob:render-1', 'blob:render-2'],
+    'each render minted exactly one URL');
+  assert.deepEqual(revoked, ['blob:render-2'],
+    "the superseded render's URL is revoked, not left pinned");
+  assert.equal(document.getElementById('ip-frame').getAttribute('src'), 'blob:render-1',
+    'the newer frame still displays after the stale render resolves');
+  assert.equal(document.querySelectorAll('#ip-pdf iframe').length, 1, 'one frame, never two');
+  context.closeInvoicePreview();
+  assert.deepEqual([...revoked].sort(), ['blob:render-1', 'blob:render-2'],
+    'every minted URL is revoked exactly once');
+  dom.window.close();
+});
+
+test('a failed preview or history fetch is reported honestly (#349)', async () => {
+  const { dom, context, document } = makeDom(`
+api.getBlob = async () => { const e = new Error('HTTP 403'); e.status = 403; throw e; };
+api.get = async () => { const e = new Error('GET /api/invoices/x/timeline failed: HTTP 500'); e.status = 500; throw e; };
+`);
+  await context.openInvoicePreview({ id: 'x1', number: 'INV-9', status: 'issued' }, null);
+  assert.equal(document.getElementById('ip-pdf').children.length, 0);
+  assert.match(document.getElementById('ip-pdf-state').textContent, /Preview unavailable/);
+  assert.match(document.getElementById('ip-pdf-state').textContent, /HTTP 403/);
+  assert.match(document.getElementById('ip-timeline-state').textContent, /History unavailable/);
+  assert.match(document.getElementById('ip-timeline-state').textContent, /HTTP 500/);
+  assert.equal(document.querySelectorAll('#ip-timeline li').length, 0, 'a failure fabricates nothing');
+  dom.window.close();
+});
+
+test('the timestamp helper is the requested "on Oct 1, 2026 at 11:26 AM" shape (#349)', () => {
+  const { dom, context } = makeDom();
+  const d = new Date('2026-10-01T11:26:00Z');
+  const date = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).format(d);
+  const time = new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }).format(d);
+  assert.equal(context.formatTimelineStamp('2026-10-01T11:26:00Z'), `on ${date} at ${time}`);
+  assert.match(context.formatTimelineStamp('2026-09-28T10:12:00Z'), /^on Sep 28, 2026 at /);
+  assert.match(context.formatTimelineStamp('2026-09-28T10:12:00Z'), / (AM|PM)$/);
+  dom.window.close();
+});
+
+// ------------------------------- creation journeys + trends gaps (#349) ----
+//
+// The batch's own suites drive these journeys live in the browser gate; the
+// tests here pin the *same* behaviours fast and deterministically in jsdom, and
+// close the two gaps the batch's jsdom suites left open: the year stepper
+// actually moving the year, and the unset-base-currency honesty for a mixed
+// set. Every assertion reads a real property of the rendered DOM.
+
+test('+ Invoice reveals the tracked-work wizard at step 1 and + Manual Invoice opens the editor (#349)', () => {
+  const { dom, context, document } = makeDom();
+  context.state.customers = [{ id: 'c1', name: 'ACME', currency: 'EUR' }];
+  context.iwInit();
+  context.wireWeekGrid();
+  const wizard = document.getElementById('invoice-wizard');
+  assert.equal(wizard.hidden, true, 'the wizard starts hidden -- it is revealed, never open at boot');
+  document.getElementById('invoice-new').dispatchEvent(new dom.window.Event('click', { bubbles: true }));
+  assert.equal(wizard.hidden, false, '+ Invoice reveals the wizard in place');
+  assert.equal(document.getElementById('iw-step1').hidden, false, 'step 1 is shown');
+  assert.equal(document.getElementById('iw-step2').hidden, true, 'step 2 is still hidden');
+  assert.equal(document.getElementById('iw-step3').hidden, true, 'step 3 is still hidden');
+  assert.match(document.getElementById('iw-title').textContent, /^Create from tracked work \u2014 1 of 3:/);
+  const dlg = document.getElementById('invoice-editor');
+  const isOpen = () => dlg.open === true || dlg.hasAttribute('open');
+  assert.equal(isOpen(), false, 'the editor starts closed');
+  document.getElementById('manual-new').dispatchEvent(new dom.window.Event('click', { bubbles: true }));
+  assert.equal(isOpen(), true, '+ Manual Invoice opens the manual editor modal');
+  assert.equal(document.getElementById('ed-title').textContent, 'Manual invoice');
+  assert.equal(document.getElementById('ed-lines').querySelectorAll('tbody tr').length, 1, 'one empty line row');
+  dom.window.close();
+});
+
+// The editor's select has no options in jsdom (the app fills it from the server
+// at boot); add the one option a real session would already carry, so the value
+// the Save reads is the one a user typed.
+function addCustomerOption(document, id, label) {
+  const opt = document.createElement('option');
+  opt.value = id;
+  opt.textContent = label;
+  document.getElementById('ed-customer').appendChild(opt);
+}
+
+test('the manual editor Cancel saves nothing and Save posts exactly one manual draft (#349/#143)', async () => {
+  const { dom, context, document } = makeDom('refreshInvoices = async () => {};');
+  context.state.customers = [{ id: 'c1', name: 'ACME', currency: 'EUR' }];
+  context.wireWeekGrid();
+  const posts = [];
+  context.api.post = async (path, body) => {
+    posts.push({ path, body });
+    return { number: 'INV-0042', total_minor: 2000, currency: 'EUR' };
+  };
+  const dlg = document.getElementById('invoice-editor');
+  const isOpen = () => dlg.open === true || dlg.hasAttribute('open');
+  const openEditor = () => document.getElementById('manual-new')
+    .dispatchEvent(new dom.window.Event('click', { bubbles: true }));
+
+  // Cancel is the explicit way out: it discards the draft with no request at
+  // all (the "no partial persistence" rule -- nothing half-saved to undo).
+  openEditor();
+  addCustomerOption(document, 'c1', 'ACME');
+  document.getElementById('ed-customer').value = 'c1';
+  document.getElementById('ed-lines').querySelector('tbody tr')
+    .querySelector('input[type=text]').value = 'Should not persist';
+  document.getElementById('ed-cancel').dispatchEvent(new dom.window.Event('click', { bubbles: true }));
+  assert.equal(isOpen(), false, 'Cancel closes the editor');
+  assert.equal(posts.length, 0, 'Cancel issues no request at all');
+  assert.match(context.liveText(), /cancelled/);
+
+  // Save: exactly one POST /invoices/manual, carrying the line as typed, with
+  // money in integer hundredths/minor units.
+  openEditor();
+  addCustomerOption(document, 'c1', 'ACME');
+  document.getElementById('ed-customer').value = 'c1';
+  const row = document.getElementById('ed-lines').querySelector('tbody tr');
+  row.querySelector('input[type=text]').value = 'Consulting';
+  const nums = row.querySelectorAll('input[type=number]');
+  nums[0].value = '2';      // quantity
+  nums[1].value = '10.00';  // unit price
+  await context.edSave();
+  assert.equal(posts.length, 1, 'Save issues exactly one request');
+  assert.equal(posts[0].path, '/invoices/manual');
+  assert.equal(posts[0].body.customer_id, 'c1');
+  assert.equal(posts[0].body.lines.length, 1);
+  assert.equal(posts[0].body.lines[0].description, 'Consulting');
+  assert.equal(posts[0].body.lines[0].quantity_hundredths, 200, 'quantity in hundredths, never a float');
+  assert.equal(posts[0].body.lines[0].unit_price_minor, 1000, 'unit price in minor units');
+  assert.equal(isOpen(), false, 'Save closes the editor');
+  assert.match(context.liveText(), /Draft INV-0042 saved/);
+  dom.window.close();
+});
+
+test('the .day-nav year stepper moves the chart to another year (#F)', async () => {
+  const { dom, context, document } = makeDom(`
+const __YEAR__ = new Date().getUTCFullYear();
+api.get = async (path) => {
+  if (path === '/invoices/summary') return { draft: 0, issued: 1, paid: 0, outstanding: {} };
+  if (path === '/invoices') return { invoices: [{
+    id: 'i1', number: 'INV-0001', status: 'issued', currency: 'EUR',
+    period_to: __YEAR__ + '-03-10', total_minor: 180000, payments: [],
+  }] };
+  if (path === '/admin/config') return { config: [] };
+  throw new Error('unexpected ' + path);
+};
+`);
+  context.state.customers = [];
+  context.wireInvoiceDashboard();
+  const year = new Date().getUTCFullYear();
+  context.dash.year = year;
+  await context.refreshInvoiceSummary();
+  assert.equal(document.getElementById('inv-year-label').textContent, String(year));
+  const marchOpen = () => document.querySelectorAll('#inv-chart .inv-col-chart')[2]
+    .querySelector('.inv-bar.open').getAttribute('title');
+  assert.equal(marchOpen(), `March ${year} \u2014 Open EUR 1800.00 \u00b7 Paid EUR 0.00`);
+  // The stepper is the app's own .day-nav period bar (chevron buttons).
+  const nav = document.getElementById('inv-year-prev').parentElement;
+  assert.equal(nav.tagName, 'NAV');
+  assert.ok(nav.className.includes('day-nav'), 'the year stepper rides the shared .day-nav bar');
+
+  const click = (id) => document.getElementById(id)
+    .dispatchEvent(new dom.window.Event('click', { bubbles: true }));
+  click('inv-year-prev');
+  await waitFor(() => document.getElementById('inv-year-label').textContent === String(year - 1), {
+    message: 'the year stepper to move the chart back a year',
+  });
+  assert.equal(context.dash.year, year - 1, 'the stepper decrements the rendered year');
+  assert.match(document.getElementById('inv-chart-title').textContent, new RegExp(String(year - 1)));
+  assert.equal(marchOpen(), `March ${year - 1} \u2014 Open EUR 0.00 \u00b7 Paid EUR 0.00`,
+    'the chart re-renders for the new year -- last year holds no March data');
+  click('inv-year-next');
+  await waitFor(() => document.getElementById('inv-year-label').textContent === String(year));
+  click('inv-year-next');
+  await waitFor(() => document.getElementById('inv-year-label').textContent === String(year + 1));
+  assert.equal(context.dash.year, year + 1, 'the stepper increments past the original year');
+  dom.window.close();
+});
+
+test('a mixed-currency set with no base currency says so and drops no currency silently (#F)', () => {
+  const { dom, context, document } = makeDom(`
+api.get = async (path) => {
+  if (path === '/admin/config') return { config: [] };
+  throw new Error('unexpected ' + path);
+};
+`);
+  const year = new Date().getUTCFullYear();
+  context.dashRenderOverview([
+    { id: 'e1', number: 'INV-1', status: 'issued', currency: 'EUR', period_to: `${year}-03-10`, total_minor: 100000, payments: [] },
+    { id: 'u1', number: 'INV-2', status: 'issued', currency: 'USD', period_to: `${year}-03-20`, total_minor: 200000, payments: [] },
+  ]);
+  // The first paint is synchronous and names what is on screen and why --
+  // never a fabricated rate, never a silently dropped currency (#F).
+  assert.equal(document.getElementById('inv-chart-note').textContent,
+    'Showing EUR only \u2014 set a base currency in Settings to combine EUR, USD.');
+  const march = document.querySelectorAll('#inv-chart .inv-col-chart')[2];
+  assert.equal(march.querySelector('.inv-bar.open').getAttribute('title'),
+    `March ${year} \u2014 Open EUR 1000.00 \u00b7 Paid EUR 0.00`,
+    'the USD invoice is not silently added to the EUR one');
+  dom.window.close();
+});
+
+test('the single-letter month variant is hidden by default, revealed only at narrow widths (#F)', () => {
+  const css = readFileSync(new URL('../web/styles.css', import.meta.url), 'utf8');
+  assert.match(css, /\.inv-clabel-short \{ display: none; \}/,
+    'the one-letter variant is off by default, so the three-letter name is what shows');
+  assert.match(css, /\.inv-clabel-full \{ display: none; \}\s*\.inv-clabel-short \{ display: inline; \}/,
+    'below 480px the one-letter variant replaces the three-letter one');
 });

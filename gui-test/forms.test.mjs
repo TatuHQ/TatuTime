@@ -56,7 +56,10 @@ test('the shell ships the official form vocabulary and no bespoke class (#232 ph
     assert.equal(groups.length, 128, 'every former .field wrapper is a p-form__group');
     assert.equal(document.querySelectorAll('.p-form__label').length, 123, 'one official label per field row');
     assert.equal(document.querySelectorAll('.p-form__control').length, 123, 'one official control per field row');
-    assert.equal(document.querySelectorAll('.p-form-help-text').length, 29, 'the hints became p-form-help-text');
+    // 32 after the rebase: upstream's Get paid box contributes one help text
+    // (#357), and the #349 invoice detail panel adds the history state line plus
+    // the delivery-record note in the message dialog.
+    assert.equal(document.querySelectorAll('.p-form-help-text').length, 32, 'the hints became p-form-help-text');
     assert.equal(document.querySelectorAll('.p-form-validation__message').length, ERROR_IDS.length,
         'every error message is the official validation message');
     assert.equal(document.querySelectorAll('.p-form-validation.is-error').length, ERROR_IDS.length,
@@ -250,13 +253,15 @@ test('decoration is attribute-only and every rendered button states what it need
     // Pinned coverage: dropping a data-* attribute from any shell button makes
     // one of these counts drop and fails the guard.
     const icons = [...document.querySelectorAll('button[data-icon]')];
-    assert.equal(icons.length, 15, 'every icon-bearing shell button states data-icon');
+    assert.equal(icons.length, 17, 'every icon-bearing shell button states data-icon');
     const vocab = {};
     for (const b of icons) vocab[b.dataset.icon] = (vocab[b.dataset.icon] || 0) + 1;
-    assert.deepEqual(vocab, { plus: 10, copy: 2, play: 2, stop: 1 }, 'the shell icon vocabulary is pinned');
-    // 33 since the receipt preview's Download joined the shell (#23): the pinned
+    assert.deepEqual(vocab, { plus: 12, copy: 2, play: 2, stop: 1 }, 'the shell icon vocabulary is pinned');
+    // 34 since the receipt preview's Download joined the shell (#23) and the
+    // Invoices action row added `+ Invoice` (#349 — `+ Manual Invoice` is the
+    // secondary action and deliberately carries no data-positive): the pinned
     // count makes a new positive action update this guard on purpose.
-    assert.equal(document.querySelectorAll('button[data-positive]').length, 33,
+    assert.equal(document.querySelectorAll('button[data-positive]').length, 34,
         'every positive shell button states data-positive');
 
     // The deleted label-mutation leaves no trace: no rendered label keeps a "+".

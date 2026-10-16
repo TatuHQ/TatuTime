@@ -995,6 +995,138 @@ pub struct Invoice {
     pub written_off_at: Option<DateTime<Utc>>,
 }
 
+/// One retained entry of an invoice's activity timeline (Subtask A).
+///
+/// Persisted as a **dot-file sidecar** next to the invoice
+/// (`invoices/.timeline.<id>.json`) and returned by
+/// `GET /api/invoices/{id}/timeline`. It is a *display aid*, never a record of
+/// authority: the invoice document and its archived PDF stay the source of
+/// truth, so a missing or malformed sidecar simply reads as an empty timeline.
+/// Recording an event must never touch invoice semantics — it cannot affect
+/// [`InvoiceStatus::is_open`] or [`already_invoiced`], and it adds no field to
+/// the closed [`Invoice`] schema.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct InvoiceTimelineEvent {
+    pub kind: InvoiceTimelineEventKind,
+    /// Human-readable sentence for the GUI, e.g. `Invoice created.`
+    pub description: String,
+    /// Display name of the acting user. Never a password hash or any secret.
+    pub actor_name: String,
+    /// When it happened, from the injected `Clock` (RFC 3339 on the wire), the
+    /// same serialisation as every other persisted timestamp.
+    pub at: DateTime<Utc>,
+    /// Optional per-kind structured extras (e.g. the recipient + From identity
+    /// for `email_sent`). Omitted when absent so older events stay clean.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub meta: Option<serde_json::Map<String, serde_json::Value>>,
+}
+
+/// The stable, machine-readable timeline kinds. Subtask A emits `created`,
+/// `issued`, `updated` and `email_sent`; Subtask B adds `sent`, `paid` and
+/// `write_off`. `payment` stays reserved (a recorded payment is emitted as
+/// `paid` today) so a later subtask can add it without a contract change.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InvoiceTimelineEventKind {
+    Created,
+    Issued,
+    Updated,
+    EmailSent,
+    /// An explicit "marked as sent" transition (`POST /invoices/{id}/sent`).
+    Sent,
+    /// Money was received: a full or partial settlement of the invoice.
+    Paid,
+    /// The remaining balance was forgiven (#114).
+    WriteOff,
+    Payment,
+}
+
+/// The watermark stage a fresh render of an invoice document carries
+/// (Subtask B). Derived state only: there is no persisted flag, and the
+/// archived issue-time PDF stays write-once and byte-stable (#113), so the
+/// watermark can only ever apply to an on-demand render.
+///
+/// Deterministic precedence, **Paid > Sent > Draft**:
+///
+/// 1. [`InvoiceWatermarkStage::Paid`] — the invoice has been paid. Both
+///    [`InvoiceStatus::Paid`] **and** [`InvoiceStatus::PartlyPaid`] count: a
+///    partial settlement means money has already been received, so the
+///    document must no longer read as an unpaid one. `WrittenOff` does **not**
+///    count: the balance was forgiven, never collected, so a written-off
+///    invoice keeps whatever delivery stage it had.
+/// 2. [`InvoiceWatermarkStage::Sent`] — a delivery has happened: **any**
+///    timeline event with kind [`InvoiceTimelineEventKind::Sent`] or
+///    [`InvoiceTimelineEventKind::EmailSent`]. An email send therefore marks
+///    the invoice sent *automatically*, with no separate manual step.
+/// 3. [`InvoiceWatermarkStage::Draft`] — anything else, an issued invoice that
+///    has never been delivered included.
+///
+/// Pure, no I/O, no allocation: the timeline sidecar is the single source of
+/// truth for "sent" and the invoice document for "paid".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InvoiceWatermarkStage {
+    Draft,
+    Sent,
+    Paid,
+}
+
+impl InvoiceWatermarkStage {
+    /// Stable lower-case name, for logs and tests (`paid`/`sent`/`draft`).
+    #[must_use]
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            InvoiceWatermarkStage::Draft => "draft",
+            InvoiceWatermarkStage::Sent => "sent",
+            InvoiceWatermarkStage::Paid => "paid",
+        }
+    }
+}
+
+/// The watermark stage for `invoice` given its retained `events` (oldest or
+/// newest first — the result does not depend on order). See
+/// [`InvoiceWatermarkStage`] for the documented Paid > Sent > Draft precedence.
+#[must_use]
+pub fn invoice_watermark_stage(
+    invoice: &Invoice,
+    events: &[InvoiceTimelineEvent],
+) -> InvoiceWatermarkStage {
+    if matches!(
+        invoice.status,
+        InvoiceStatus::Paid | InvoiceStatus::PartlyPaid
+    ) {
+        return InvoiceWatermarkStage::Paid;
+    }
+    if invoice_sent_at(events).is_some() {
+        return InvoiceWatermarkStage::Sent;
+    }
+    InvoiceWatermarkStage::Draft
+}
+
+/// The earliest delivery timestamp the timeline implies, if any (Subtask B).
+///
+/// A delivery is a [`InvoiceTimelineEventKind::Sent`] (the manual
+/// `POST /invoices/{id}/sent` transition) or an
+/// [`InvoiceTimelineEventKind::EmailSent`] (the `/email` route), so both count
+/// and the derived `sent_at` needs no field on the closed [`Invoice`] schema.
+/// The *earliest* such event wins and the result is independent of the order
+/// the sidecar stores its events in — that is what makes the manual transition
+/// idempotent: re-marking an already-sent invoice reports the original
+/// timestamp rather than minting a second one.
+#[must_use]
+pub fn invoice_sent_at(events: &[InvoiceTimelineEvent]) -> Option<DateTime<Utc>> {
+    events
+        .iter()
+        .filter(|e| {
+            matches!(
+                e.kind,
+                InvoiceTimelineEventKind::Sent | InvoiceTimelineEventKind::EmailSent
+            )
+        })
+        .map(|e| e.at)
+        .min()
+}
+
 /// Filesystem-safe display name for generated PDFs (#189: `store` and
 /// `api::invoicing` kept two sanitizers that disagreed on `.`, so
 /// `PdfHint.filename` could differ from the `Content-Disposition` name).
@@ -1974,6 +2106,15 @@ pub fn validate_customer_input(input: &CustomerInput) -> Result<CustomerDraft, V
         crate::template::SUBJECT_MAX,
         &mut errors,
     );
+    // #S1: the subject is header-bound, so a CR/LF/NUL in it could fold a
+    // header into an email the app sends in the organisation's name. Refused on
+    // write, like every other invalid shape -- never silently stripped.
+    if crate::email::has_control_characters(&input.invoice_subject) {
+        errors.push(FieldError::new(
+            "invoice_subject",
+            "must be a single line without control characters",
+        ));
+    }
     validate_customer_billing_fields(
         &input.address,
         &input.contacts,
@@ -2389,6 +2530,123 @@ mod tests {
             tax_hundredths: 0,
             discount_hundredths: 0,
         }
+    }
+
+    /// A timeline event stamped at a fixed epoch second, so `min` is testable
+    /// without a clock.
+    fn tl(kind: InvoiceTimelineEventKind, epoch_secs: i64) -> InvoiceTimelineEvent {
+        InvoiceTimelineEvent {
+            kind,
+            description: String::new(),
+            actor_name: "Tester".into(),
+            at: DateTime::from_timestamp(epoch_secs, 0).unwrap(),
+            meta: None,
+        }
+    }
+
+    #[test]
+    fn watermark_stage_ignores_lifecycle_and_forgiven_states() {
+        let invoice = inv(InvoiceStatus::Issued, 100, None);
+        // No events at all: nothing has been delivered.
+        assert_eq!(
+            invoice_watermark_stage(&invoice, &[]),
+            InvoiceWatermarkStage::Draft
+        );
+        // Created/issued/updated are lifecycle, not delivery: still draft.
+        let lifecycle = [
+            tl(InvoiceTimelineEventKind::Created, 10),
+            tl(InvoiceTimelineEventKind::Issued, 20),
+            tl(InvoiceTimelineEventKind::Updated, 30),
+        ];
+        assert_eq!(
+            invoice_watermark_stage(&invoice, &lifecycle),
+            InvoiceWatermarkStage::Draft
+        );
+        // A written-off balance is never "paid" (it was forgiven, not
+        // collected), so the delivery stage decides on its own.
+        assert_eq!(
+            invoice_watermark_stage(&inv(InvoiceStatus::WrittenOff, 100, None), &[]),
+            InvoiceWatermarkStage::Draft
+        );
+        assert_eq!(
+            invoice_watermark_stage(&inv(InvoiceStatus::WrittenOff, 100, None), &lifecycle),
+            InvoiceWatermarkStage::Draft
+        );
+    }
+
+    #[test]
+    fn watermark_stage_is_sent_for_a_manual_or_emailed_delivery() {
+        let invoice = inv(InvoiceStatus::Issued, 100, None);
+        // The manual transition.
+        assert_eq!(
+            invoice_watermark_stage(&invoice, &[tl(InvoiceTimelineEventKind::Sent, 20)]),
+            InvoiceWatermarkStage::Sent
+        );
+        // An email send marks the invoice sent automatically.
+        assert_eq!(
+            invoice_watermark_stage(&invoice, &[tl(InvoiceTimelineEventKind::EmailSent, 20)]),
+            InvoiceWatermarkStage::Sent
+        );
+        // Both delivery kinds at once: still exactly one stage.
+        let both = [
+            tl(InvoiceTimelineEventKind::EmailSent, 20),
+            tl(InvoiceTimelineEventKind::Sent, 30),
+        ];
+        assert_eq!(
+            invoice_watermark_stage(&invoice, &both),
+            InvoiceWatermarkStage::Sent
+        );
+        // A written-off invoice that was delivered keeps `Sent`.
+        assert_eq!(
+            invoice_watermark_stage(&inv(InvoiceStatus::WrittenOff, 100, None), &both),
+            InvoiceWatermarkStage::Sent
+        );
+    }
+
+    #[test]
+    fn watermark_stage_paid_beats_sent() {
+        let delivered = [tl(InvoiceTimelineEventKind::EmailSent, 20)];
+        // Paid with no timeline events at all.
+        assert_eq!(
+            invoice_watermark_stage(&inv(InvoiceStatus::Paid, 100, None), &[]),
+            InvoiceWatermarkStage::Paid
+        );
+        // Paid beats a delivery.
+        assert_eq!(
+            invoice_watermark_stage(&inv(InvoiceStatus::Paid, 100, None), &delivered),
+            InvoiceWatermarkStage::Paid
+        );
+        // Money has been received on a partly paid invoice too.
+        assert_eq!(
+            invoice_watermark_stage(&inv(InvoiceStatus::PartlyPaid, 100, None), &delivered),
+            InvoiceWatermarkStage::Paid
+        );
+        // Stable names for logs and tests.
+        assert_eq!(InvoiceWatermarkStage::Paid.as_str(), "paid");
+        assert_eq!(InvoiceWatermarkStage::Sent.as_str(), "sent");
+        assert_eq!(InvoiceWatermarkStage::Draft.as_str(), "draft");
+    }
+
+    #[test]
+    fn invoice_sent_at_is_the_earliest_delivery_whatever_the_order() {
+        assert_eq!(invoice_sent_at(&[]), None);
+        // Lifecycle and settlement events are not deliveries.
+        let none = [
+            tl(InvoiceTimelineEventKind::Created, 10),
+            tl(InvoiceTimelineEventKind::Issued, 20),
+            tl(InvoiceTimelineEventKind::Paid, 30),
+        ];
+        assert_eq!(invoice_sent_at(&none), None);
+        // The oldest delivery wins, even when a newer one is stored first.
+        let out_of_order = [
+            tl(InvoiceTimelineEventKind::Sent, 50),
+            tl(InvoiceTimelineEventKind::EmailSent, 20),
+            tl(InvoiceTimelineEventKind::Paid, 60),
+        ];
+        assert_eq!(
+            invoice_sent_at(&out_of_order),
+            Some(DateTime::from_timestamp(20, 0).unwrap())
+        );
     }
 
     #[test]

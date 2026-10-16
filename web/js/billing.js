@@ -99,6 +99,24 @@ export function iwShow() {
   clearFormError($('iw-error'));
 }
 
+// #349: the wizard is revealed on demand by `+ Invoice` instead of rendering
+// open at boot. It is revealed IN PLACE rather than moved into a dialog: the
+// #134 flow is a multi-step form whose project tick-boxes (#iw-projects), the
+// #iw-error alert and its aria-live status line are all written into a fixed
+// DOM tree by iwInit()/iwShow()/iwLoadProjects(), so revealing the existing card
+// keeps every id, label and announcement intact and leaves the 1-of-3 sequence
+// (POST /invoices/preview → POST /invoices) untouched. Calling it again while
+// the wizard is already open only re-focuses, so half-entered work is never
+// discarded.
+export function iwOpen() {
+  const card = $('invoice-wizard');
+  card.hidden = false;
+  card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  const first = iw.step === 2 ? $('iw-preset') : iw.step === 3 ? $('iw-save') : $('iw-customer');
+  first.focus();
+  announce(`Invoice wizard open — step ${iw.step} of 3.`);
+}
+
 export function iwSelectedProjects() {
   return [...$('iw-projects').querySelectorAll('input:checked')].map((c) => c.value);
 }

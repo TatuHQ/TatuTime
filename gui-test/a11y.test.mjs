@@ -249,6 +249,27 @@ test('the bespoke tab skins are retired in favour of the p-tabs adapter (#232 in
   // role="group" of aria-pressed buttons — not a tablist.
   assert.match(stylesCss, /\.seg \{\n\s+display: inline-flex/, 'the .seg shell stays for the toggle group');
 });
+test('the Open|All filter keeps its .seg semantics under the Ubuntu skin (#F)', () => {
+  const { dom, document } = setup();
+  const group = document.querySelector('#inv-list-head .seg');
+  assert.ok(group, 'the segmented shell is still there (#F)');
+  assert.equal(group.getAttribute('role'), 'group', 'a group, never a tablist');
+  const buttons = [...group.querySelectorAll('button')];
+  assert.equal(buttons.length, 2, 'Open | All');
+  for (const button of buttons) {
+    assert.ok(button.classList.contains('seg-btn'), button.id + ' keeps the segment skin');
+    assert.ok(['true', 'false'].includes(button.getAttribute('aria-pressed')),
+      button.id + ' stays an aria-pressed toggle');
+  }
+  assert.equal(group.querySelector('[role="tab"]'), null, 'no tab pattern is introduced');
+  // The restyle is the app-owned skin over the same group: the pressed segment
+  // is filled with the accent tint in the rail's selected-tab ink, the pairing
+  // contrast.mjs pins for both themes.
+  assert.match(stylesCss, /\.seg \.seg-btn\[aria-pressed="true"\] \{ background: var\(--accent-soft\); color: var\(--brand-deep\)/,
+    'the pressed segment carries the Ubuntu skin on the app ink');
+  dom.window.close();
+});
+
 
 test('the selected tab is signalled by the text colour, not a faint tint, in both themes (#232 inc 5)', () => {
   // The classic tab contrast gap is an active state carried by a low-contrast

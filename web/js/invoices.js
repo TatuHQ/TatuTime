@@ -6,9 +6,10 @@ import { api } from './api.js';
 import { catalogItems } from './billing.js';
 import { startApp, switchTab } from './boot.js';
 import { $, announce, askConfirm, askPrompt, clearFormError, el, formatMoney, rowAction, showFormError, statusChip } from './dom.js';
+import { convertMinor, currencyCode, fetchRateQuote } from './fx.js';
 import { createSeqGuard } from './seq.js';
 import { customerName, state } from './state.js';
-import { invalidateLockCache } from './timesheet.js';
+import { MONTH_NAMES, invalidateLockCache } from './timesheet.js';
 
 const invoiceSeq = createSeqGuard();
 
@@ -103,7 +104,9 @@ export async function refreshInvoices() {
     const fresh = invoices.find((i) => i.id === invoicePreview.id);
     if (fresh) {
       const opener = invoicePreview.opener;
-      openInvoicePreview({ ...fresh }, opener && document.contains(opener) ? opener : null);
+      // #349: awaited so callers that act on the refreshed panel (the delivery
+      // actions) see the new render and history, not the pre-action state.
+      await openInvoicePreview({ ...fresh }, opener && document.contains(opener) ? opener : null);
     } else {
       closeInvoicePreview();
     }
@@ -281,7 +284,12 @@ export async function emailInvoice(id) {
     announce(emailOutcome(res, `Invoice emailed to ${res.sent_to} (PDF attached).`));
   } catch (err) {
     announce(`Email failed: ${err.message}`);
+    return;
   }
+  // #349: a delivery changes both surfaces of the detail panel -- the timeline
+  // gains its `email_sent` entry and the preview's watermark advances to SENT --
+  // so re-render instead of leaving the panel on the pre-send state.
+  await refreshInvoices();
 }
 
 // Sends a PDF copy of the invoice to any address — e.g. the accountant
@@ -392,77 +400,210 @@ export function dashFilter(invoices) {
   });
 }
 
-export function dashChartMonths(invoices) {
-  const open = Array(12).fill(0);
-  const paid = Array(12).fill(0);
+// -------------------------------------------------------- trends chart (#F) --
+//
+// The chart is presentation only: the same balances and ledger entries the
+// register shows, in minor units, and nothing here is ever written back. Three
+// things #F fixes in the view:
+//
+//   * the month axis is a *name*, not a letter — three-letter codes that
+//     collapse to one letter at narrow widths. The variant is chosen in CSS
+//     (no re-render on resize) and the short one is `aria-hidden`, so no screen
+//     reader is ever read the same month twice;
+//   * hovering a bar answers the question the chart raises: which month, how
+//     much open, how much paid;
+//   * quantities in other currencies are no longer silently dropped. With a
+//     `base_currency` configured (appconfig, #D) every currency is combined in
+//     that unit and the rate used is printed under the chart; without one the
+//     historical single-currency view stands, and it now *says* so.
+//
+// The settled series is called **paid** everywhere (hover, subtitle, accessible
+// name): that is the vocabulary the domain already uses for the status, and
+// "closed" here is exactly that state — one word for one thing in one view.
+
+// The three-letter axis table is the app's one month table (#189,
+// `timesheet.js`), imported rather than copied; only the long names are new
+// here, because the hover sentence says "March 2026", not "Mar 2026".
+const MONTH_FULL = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+const emptySeries = () => ({ open: Array(12).fill(0), paid: Array(12).fill(0) });
+
+/// The open/paid month series for the selected year, **grouped by source
+/// currency** (#F). Grouping first is what keeps the money honest once a
+/// conversion is applied: sums are converted, never the individual invoices, so
+/// rounding cannot accumulate across them (#11).
+export function chartSeriesByCurrency(invoices) {
+  const byCur = new Map();
+  const bucket = (cur) => {
+    if (!byCur.has(cur)) byCur.set(cur, emptySeries());
+    return byCur.get(cur);
+  };
   for (const i of invoices) {
-    const cy = i.period_to.slice(0, 4) === String(dash.year);
+    const series = bucket(i.currency || '');
+    const cy = String(i.period_to).slice(0, 4) === String(dash.year);
     if (cy && isOpenInvoice(i)) {
-      open[Number(i.period_to.slice(5, 7)) - 1] += invBalance(i);
+      series.open[Number(String(i.period_to).slice(5, 7)) - 1] += invBalance(i);
     }
     for (const p of i.payments || []) {
       const m = String(p.received_at).slice(0, 7);
-      if (m.slice(0, 4) === String(dash.year)) paid[Number(m.slice(5, 7)) - 1] += p.amount_minor;
+      if (m.slice(0, 4) === String(dash.year)) series.paid[Number(m.slice(5, 7)) - 1] += p.amount_minor;
     }
     if (!i.payments || i.payments.length === 0) {
       const pm = String(i.paid_at || '').slice(0, 7);
       if (i.status === 'paid' && pm.slice(0, 4) === String(dash.year)) {
-        paid[Number(pm.slice(5, 7)) - 1] += i.total_minor;
+        series.paid[Number(pm.slice(5, 7)) - 1] += i.total_minor;
       }
     }
   }
-  return { open, paid };
+  return byCur;
 }
 
-export function dashRenderOverview(invoices) {
-  const cur = dash.currency || invoices.find((i) => i.status !== 'draft')?.currency || 'EUR';
-  const mine = invoices.filter((i) => i.currency === cur);
-  const totalOpen = mine.reduce((a, i) => a + invBalance(i), 0);
-  const months = dashChartMonths(mine);
-  const totalPaid = months.paid.reduce((a, b) => a + b, 0);
-  const multi = new Set(invoices.filter((i) => i.status !== 'draft').map((i) => i.currency));
-  const openByCur = {};
-  for (const i of invoices) {
-    if (isOpenInvoice(i)) {
-      openByCur[i.currency] = (openByCur[i.currency] || 0) + invBalance(i);
-    }
+/// The base currency, read once per boot from the same `GET /admin/config` the
+/// settings card reads (#D). A 403 (member), an absent entry and an explicit
+/// `null` all mean the same thing — **no base currency** — so no conversion and
+/// never an invented rate. Cached: the chart re-renders on every filter change.
+let baseCurrencyCache; // undefined = not looked up yet
+export async function baseCurrency() {
+  if (baseCurrencyCache !== undefined) return baseCurrencyCache;
+  try {
+    const data = await api.get('/admin/config');
+    const row = (data.config || []).find((c) => c.key === 'base_currency');
+    baseCurrencyCache = currencyCode(row ? row.value : '');
+  } catch {
+    baseCurrencyCache = '';
   }
-  const tileOpen = multi.size > 1
-    ? Object.entries(openByCur).map(([c, v]) => `${c} ${formatMoney(v)}`).join(' · ')
-    : `${cur} ${formatMoney(totalOpen)}`;
-  $('inv-tile-open').textContent = tileOpen;
-  $('inv-tile-paid').textContent = `${cur} ${formatMoney(totalPaid)}`;
+  return baseCurrencyCache;
+}
+
+/// `0.921400` → `0.9214`. The published rate is a decimal string and stays one:
+/// only trailing zeros are trimmed for display, no float arithmetic.
+function trimRate(rate) {
+  const text = String(rate);
+  return text.includes('.') ? text.replace(/0+$/, '').replace(/\.$/, '') : text;
+}
+
+/// `1 USD = 0.9214 EUR (2026-10-15)` — the rates every converted number on
+/// screen was produced with, plus the reference date when the table carries one.
+function rateCaption(quotes, base) {
+  const parts = quotes.map((q) => `1 ${q.from} = ${trimRate(q.rate)} ${base}`);
+  const dates = [...new Set(quotes.map((q) => q.date).filter(Boolean))].sort();
+  return dates.length ? `${parts.join(' \u00b7 ')} (${dates.join(', ')})` : parts.join(' \u00b7 ');
+}
+
+/// Draws one 12-month, 2-bar-per-month series (24 bars, #135) and the single
+/// line of context under it.
+function drawChart({ series, unit, subtitle, note }) {
   $('inv-year-label').textContent = String(dash.year);
-  $('inv-chart-title').textContent = `Open vs paid (${cur}) — ${dash.year}`;
-  const max = Math.max(...months.open, ...months.paid, 1);
+  $('inv-chart-title').textContent = subtitle;
+  const max = Math.max(...series.open, ...series.paid, 1);
   const chart = $('inv-chart');
   chart.textContent = '';
-  const names = ['J', 'F', 'M', 'A', 'M', 'J', 'J', 'A', 'S', 'O', 'N', 'D'];
   const labels = [];
-  const bars = [];
   for (let m = 0; m < 12; m += 1) {
+    // Both bars of a month carry the same sentence, so hovering either one
+    // answers for the month: period, then open and paid in the chart's unit.
+    const hover =
+      `${MONTH_FULL[m]} ${dash.year} \u2014 Open ${unit} ${formatMoney(series.open[m])}` +
+      ` \u00b7 Paid ${unit} ${formatMoney(series.paid[m])}`;
     const col = el('div', { cls: 'inv-col-chart' }, [
       el('div', { cls: 'inv-bars' }, [
         el('span', {
           cls: 'inv-bar open',
-          style: `height:${Math.max(2, Math.round((months.open[m] / max) * 54))}px`,
-          attrs: { title: `Open ${cur} ${formatMoney(months.open[m])}` },
+          style: `height:${Math.max(2, Math.round((series.open[m] / max) * 54))}px`,
+          attrs: { title: hover },
         }),
         el('span', {
           cls: 'inv-bar paid',
-          style: `height:${Math.max(2, Math.round((months.paid[m] / max) * 54))}px`,
-          attrs: { title: `Paid ${cur} ${formatMoney(months.paid[m])}` },
+          style: `height:${Math.max(2, Math.round((series.paid[m] / max) * 54))}px`,
+          attrs: { title: hover },
         }),
       ]),
+      // Full code by default, single letter on a narrow screen: two variants of
+      // one label, toggled by a media query so the width is a CSS decision and
+      // the short one is never announced (aria-hidden).
+      el('span', { cls: 'inv-clabel' }, [
+        el('span', { cls: 'inv-clabel-full', text: MONTH_NAMES[m] }),
+        el('span', { cls: 'inv-clabel-short', attrs: { 'aria-hidden': 'true' }, text: MONTH_NAMES[m][0] }),
+      ]),
     ]);
-    col.appendChild(el('span', { cls: 'inv-clabel', text: names[m] }));
-    bars.push(col);
-    labels.push(`${names[m]}: open ${formatMoney(months.open[m])}, paid ${formatMoney(months.paid[m])}`);
+    chart.appendChild(col);
+    labels.push(`${MONTH_NAMES[m]}: open ${formatMoney(series.open[m])}, paid ${formatMoney(series.paid[m])}`);
   }
   // #191: children of a role="img" node are presentational to AT, so the
   // per-month summary must ride the accessible NAME, not the subtree.
-  chart.setAttribute('aria-label', `Monthly open versus paid amounts, ${dash.year}. ${labels.join('; ')}`);
-  for (const b of bars) chart.appendChild(b);
+  chart.setAttribute('aria-label', `Monthly open versus paid amounts in ${unit}, ${dash.year}. ${labels.join('; ')}`);
+  $('inv-chart-note').textContent = note;
+}
+
+/// Every currency combined into `base` (#F). Sums were converted once, above;
+/// the caption names the rate. A rate that cannot be quoted leaves the
+/// unconverted view standing with a note — never a fabricated 1:1 and never a
+/// silent partial sum.
+async function drawConverted(byCur, codes, base, primary) {
+  const unit = byCur.has(primary) ? primary : codes[0];
+  const unconverted = (note) => drawChart({
+    series: byCur.get(unit) || emptySeries(),
+    unit,
+    subtitle: `Open vs paid (${unit}) \u2014 ${dash.year}`,
+    note,
+  });
+  const quotes = [];
+  for (const cur of codes) {
+    if (cur === base) continue;
+    try {
+      quotes.push(await fetchRateQuote(cur, base));
+    } catch {
+      unconverted(`Exchange rates unavailable \u2014 showing ${unit} unconverted.`);
+      return;
+    }
+  }
+  const totals = emptySeries();
+  for (const [cur, series] of byCur) {
+    // The base unit needs no rate at all: its own amounts are already there.
+    const rate = cur === base ? null : quotes.find((q) => q.from === cur)?.rate;
+    for (let m = 0; m < 12; m += 1) {
+      const open = rate === null ? series.open[m] : convertMinor(series.open[m], rate);
+      const paid = rate === null ? series.paid[m] : convertMinor(series.paid[m], rate);
+      if (!Number.isFinite(open) || !Number.isFinite(paid)) {
+        unconverted(`Exchange rates unavailable \u2014 showing ${unit} unconverted.`);
+        return;
+      }
+      totals.open[m] += open;
+      totals.paid[m] += paid;
+    }
+  }
+  drawChart({ series: totals, unit: base, subtitle: `Open vs paid (${base}) \u2014 ${dash.year}`, note: rateCaption(quotes, base) });
+}
+
+export function dashRenderOverview(invoices) {
+  // #349: the Total open / Paid in tiles are retired, so the overview renders
+  // the chart only. The year label lives in the promoted Trends header
+  // (web/index.html) and is still driven from here, so the year navigation
+  // (inv-year-prev / inv-year-next, web/js/boot.js) keeps working.
+  const byCur = chartSeriesByCurrency(invoices);
+  const codes = [...byCur.keys()].filter(Boolean);
+  const primary = dash.currency || invoices.find((i) => i.status !== 'draft')?.currency || 'EUR';
+  const unit = byCur.has(primary) ? primary : (codes[0] || primary);
+  // First paint: the historical single-currency view. A mixed set is not
+  // silently trimmed — the note names what is on screen and why.
+  drawChart({
+    series: byCur.get(unit) || emptySeries(),
+    unit,
+    subtitle: `Open vs paid (${unit}) \u2014 ${dash.year}`,
+    note: codes.length > 1
+      ? `Showing ${unit} only \u2014 set a base currency in Settings to combine ${codes.join(', ')}.`
+      : '',
+  });
+  // Second paint (#F): with a base currency configured, re-draw in that unit.
+  // The rates are read once per render — never once per bar — and a failure
+  // leaves the first paint exactly as it is.
+  baseCurrency()
+    .then((base) => {
+      if (!base || codes.length === 0) return null;
+      if (codes.length === 1 && codes[0] === base) return null; // already the base unit
+      return drawConverted(byCur, codes, base, primary);
+    })
+    .catch(() => { });
 }
 
 export function dashApplyColumns() {
@@ -478,26 +619,49 @@ export function dashApplyColumns() {
   }
 }
 
-// ------------------------------------------------ invoice document preview --
+// ------------------------------------------- invoice detail panel (#349) --
 //
-// #133: selecting an invoice row opens a live preview. Like the expense
-// receipt preview (#23), the document is shown as the ACTUAL PDF: the
-// archived bytes come from GET /invoices/{id}/pdf (#113) and are framed
-// from a blob URL the browser renders with its own viewer (the CSP allows
-// `frame-src 'self' blob:`). The blob URL is revoked whenever the preview
-// is replaced or closed. Drafts have no archived PDF yet: the panel says
-// so honestly.
+// Selecting a register row opens the invoice detail view (#133): the invoice's
+// *rendered document*, its activity history, and the two delivery actions.
+//
+// The document is the live render from GET /invoices/{id}/pdf/preview, fetched
+// with the app's own credentialed request and framed from a client-side blob:
+// URL. Framing the API path directly is refused by the browser -- the global
+// X-Frame-Options: DENY is deliberate and stays -- while a blob URL is
+// same-origin by construction, which is exactly what `frame-src 'self' blob:`
+// already permits. Nothing the server returns is ever inserted as markup: the
+// document is a binary body, and every string of the history enters the DOM
+// through textContent / the el() builder.
 
 export let invoicePreview = null; // { id, inv, opener }
 
-/// The blob URL the open preview embeds, so re-opening and closing revoke
-/// it — a rendered PDF must not stay alive behind a dismissed panel.
-let ipDocUrl = '';
+/// The blob URL of the document currently framed, kept in one place so every
+/// re-render and every close revokes exactly the URL it minted -- a
+/// multi-hundred-kilobyte PDF must not stay alive in an object URL the panel
+/// stopped showing (the rule the receipt preview follows, #332).
+let previewPdfUrl = '';
 
-function releaseIpDoc() {
-  if (ipDocUrl) URL.revokeObjectURL(ipDocUrl);
-  ipDocUrl = '';
-  $('ip-doc').textContent = '';
+/// The history the panel last rendered, so a delivery action can tell an
+/// idempotent repeat (no new entry) from a first transition without a second
+/// request.
+let previewTimeline = [];
+
+function releasePreviewPdfUrl() {
+  if (previewPdfUrl) URL.revokeObjectURL(previewPdfUrl);
+  previewPdfUrl = '';
+}
+
+/// Bumped by every render of the document region. The panel can be closed and
+/// the *same* invoice reopened while an earlier fetch is still in flight, so the
+/// invoice id alone cannot tell two renders apart -- only the newest render may
+/// frame a document, report a failure, or own a blob URL.
+let previewRenderSeq = 0;
+
+/// True while `seq`'s render is still the one the panel wants: the newest render
+/// *and* still the invoice on screen. Both halves are needed -- a close-and-
+/// reopen of the same invoice leaves the id equal but the render superseded.
+function previewRenderCurrent(seq, id) {
+  return seq === previewRenderSeq && invoicePreview !== null && invoicePreview.id === id;
 }
 
 export function invoiceBalance(inv) {
@@ -507,29 +671,177 @@ export function invoiceBalance(inv) {
   return invBalance(inv);
 }
 
+/// `on Oct 1, 2026 at 11:26 AM` -- the exact shape the history is read in.
+/// The app has no shared timestamp formatter (calendar.js formats a calendar
+/// event's time with `toLocaleTimeString` and nothing else), so the parts are
+/// named explicitly with `Intl.DateTimeFormat` in en-US: a fixed, unambiguous
+/// 12-hour form with the US month abbreviation, never the host locale's. The
+/// machine-readable RFC 3339 value rides the `<time datetime>` attribute, so
+/// nothing is lost to the display format.
+export function formatTimelineStamp(at) {
+  const d = new Date(at);
+  if (Number.isNaN(d.getTime())) return String(at);
+  const date = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).format(d);
+  const time = new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }).format(d);
+  return `on ${date} at ${time}`;
+}
+
+/// A PDF preview must actually be a PDF: a proxy error page or a JSON body
+/// returned under a 200 would otherwise paint a blank frame with no
+/// explanation. The file signature is the first five bytes, `%PDF-`.
+function isPdfBody(blob, bytes) {
+  if (blob && typeof blob.type === 'string' && blob.type && blob.type !== 'application/pdf') return false;
+  const sig = [0x25, 0x50, 0x44, 0x46, 0x2d]; // "%PDF-"
+  if (bytes.length < sig.length) return false;
+  return sig.every((b, i) => bytes[i] === b);
+}
+
+/// Fetch the live render and frame it. A failure surfaces as a sentence in
+/// `#ip-pdf-state` -- never a blank frame, and never the response as markup.
+async function renderPreviewPdf(inv) {
+  const host = $('ip-pdf');
+  const state = $('ip-pdf-state');
+  const seq = ++previewRenderSeq;
+  host.textContent = '';
+  releasePreviewPdfUrl();
+  const id = inv.id;
+  try {
+    const blob = await api.getBlob(`/invoices/${id}/pdf/preview`);
+    if (!previewRenderCurrent(seq, id)) return; // superseded by a newer selection
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    if (!isPdfBody(blob, bytes)) {
+      state.textContent = `Preview unavailable — the server did not return a PDF (${blob.type || 'no content type'}).`;
+      state.hidden = false;
+      return;
+    }
+    // Re-wrapped with an explicit PDF type so the browser's own viewer renders
+    // it inline even when the response carried a generic content type.
+    const url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
+    // The `arrayBuffer()` await above is a real suspension point, so a newer
+    // render (or a close and reopen of the same invoice) can have started since
+    // the guard. The URL just minted is ours alone and was never installed, so
+    // revoke it here rather than overwrite: a superseded render must revoke
+    // exactly the URL it minted, never the newer render's -- overwriting that
+    // one is what used to pin a few hundred KB until the next render or close.
+    if (!previewRenderCurrent(seq, id)) {
+      URL.revokeObjectURL(url);
+      return;
+    }
+    previewPdfUrl = url;
+    host.appendChild(el('iframe', {
+      cls: 'ip-frame',
+      attrs: { id: 'ip-frame', src: previewPdfUrl, title: `Invoice ${inv.number} PDF preview` },
+    }));
+    state.hidden = true;
+    state.textContent = '';
+  } catch (err) {
+    if (!previewRenderCurrent(seq, id)) return;
+    state.textContent = `Preview unavailable — ${err.message}`;
+    state.hidden = false;
+  }
+}
+
+/// One history entry: the description, the actor's display name and the human
+/// timestamp, plus `View message` on a delivery. Every value is plain text.
+function timelineEntry(ev) {
+  const item = el('li', { cls: 'ip-tl-item' }, [
+    el('p', { cls: 'ip-tl-desc', text: ev.description || '' }),
+    el('p', { cls: 'ip-tl-actor', text: ev.actor_name || '' }),
+    el('p', { cls: 'ip-tl-when' }, [
+      el('time', { attrs: { datetime: String(ev.at) }, text: formatTimelineStamp(ev.at) }),
+    ]),
+  ]);
+  if (ev.kind === 'email_sent' && ev.meta) {
+    item.appendChild(el('button', {
+      cls: 'link',
+      type: 'button',
+      text: 'View message',
+      attrs: { 'aria-label': `View the delivery record for ${formatTimelineStamp(ev.at)}` },
+      on: { click: () => showDeliveryRecord(ev) },
+    }));
+  }
+  return item;
+}
+
+/// Render `GET /invoices/{id}/timeline` (newest-first) into the ordered list.
+/// An empty history says so; a 404/403/network failure reports itself honestly
+/// rather than leaving a fabricated entry behind.
+async function renderTimeline(inv) {
+  const list = $('ip-timeline');
+  const state = $('ip-timeline-state');
+  list.textContent = '';
+  state.hidden = true;
+  state.textContent = '';
+  const id = inv.id;
+  try {
+    const data = await api.get(`/invoices/${id}/timeline`);
+    if (!invoicePreview || invoicePreview.id !== id) return;
+    const events = data.events || [];
+    previewTimeline = events;
+    if (events.length === 0) {
+      state.textContent = 'No history yet.';
+      state.hidden = false;
+      return;
+    }
+    for (const ev of events) list.appendChild(timelineEntry(ev));
+  } catch (err) {
+    if (!invoicePreview || invoicePreview.id !== id) return;
+    previewTimeline = [];
+    state.textContent = `History unavailable — ${err.message}`;
+    state.hidden = false;
+  }
+}
+
+/// `View message`: what was *retained* about an email send -- the recipient, the
+/// subject, the From identity and the transport it went through. The message
+/// body was deliberately never persisted, so the popup presents itself as the
+/// delivery record and says the body is not kept rather than pretending to show
+/// a message. A transport other than `smtp` is named as a non-delivery.
+export function showDeliveryRecord(ev) {
+  const meta = (ev && ev.meta) || {};
+  const fields = $('message-fields');
+  fields.textContent = '';
+  const row = (label, value) => {
+    if (value === undefined || value === null || value === '') return;
+    fields.appendChild(el('dt', { text: label }));
+    fields.appendChild(el('dd', { text: String(value) }));
+  };
+  $('message-dialog-title').textContent = 'Email delivery record';
+  row('To', meta.to);
+  row('Subject', meta.subject);
+  row('From', meta.from_email ? `${meta.from_name} <${meta.from_email}>` : meta.from_name);
+  const delivered = meta.transport === 'smtp';
+  row('Transport', delivered ? 'smtp' : `${meta.transport || 'unknown'} — not delivered`);
+  $('message-note').textContent = delivered
+    ? 'The message body is not retained — this is the delivery record kept for the invoice.'
+    : 'The message body is not retained, and no SMTP transport was configured: nothing left the building for this record.';
+  const dlg = $('message-dialog');
+  if (typeof dlg.showModal === 'function') dlg.showModal();
+  else dlg.setAttribute('open', ''); // jsdom fallback (no modal support here)
+  $('message-close').focus();
+}
+
+export function closeDeliveryRecord() {
+  const dlg = $('message-dialog');
+  if (typeof dlg.close === 'function') dlg.close();
+  else dlg.removeAttribute('open');
+}
+
 export async function openInvoicePreview(inv, opener) {
+  // A re-render of the panel the user already has open (after a payment, a
+  // delivery, any refresh) must not re-announce the preview: the live region is
+  // how every action reports itself, and a second "Previewing invoice …" would
+  // overwrite the announcement of whatever just happened.
+  const reopening = Boolean(invoicePreview && invoicePreview.id === inv.id && !$('invoice-preview').hidden);
   invoicePreview = { id: inv.id, inv, opener: opener || null };
+  previewTimeline = [];
   const card = $('invoice-preview');
   card.hidden = false;
-  const facts = $('ip-facts');
-  facts.textContent = '';
-  const dl = (label, value) => {
-    facts.appendChild(el('dt', { text: label }));
-    facts.appendChild(el('dd', { text: value }));
-  };
-  dl('Number', inv.number);
-  dl('Customer', customerName(inv.customer_id));
-  dl('Period', `${inv.period_from} → ${inv.period_to}`);
-  dl('Status', inv.status.replace(/_/g, ' '));
-  dl('Total', `${inv.currency} ${formatMoney(inv.total_minor)}`);
-  const bal = invoiceBalance(inv);
-  dl('Balance', bal ? `${inv.currency} ${formatMoney(bal)}` : 'Settled');
-  if (inv.due_date) dl('Due', inv.due_date);
-  if (inv.write_off_reason) dl('Written off', inv.write_off_reason);
+  // #349: the detail panel is PDF-only by design -- there is no facts readout
+  // beside the document. The invoice's identity travels on the framed
+  // document's own accessible name (the iframe title), so nothing is duplicated
+  // here and the region stays the rendered PDF plus the history.
   const draft = inv.status === 'draft';
-  // The document host: the real PDF for anything issued, empty for a draft
-  // (whose only honest state is the message below).
-  releaseIpDoc();
   // ---- Get paid: the collect-payment box on the invoice. No hosted
   // checkout exists by design, so this shows the customer's own payment
   // details, what has been settled and when, and offers manual
@@ -591,42 +903,32 @@ export async function openInvoicePreview(inv, opener) {
     gpBtn.hidden = !(isOpenInvoice(inv) && bal > 0);
     gpBtn.onclick = () => recordPayment(inv, bal);
   }
-  $('ip-download').hidden = draft;
-  $('ip-pdf-state').hidden = !draft;
-  if (draft) {
-    $('ip-pdf-state').textContent =
-      'Draft — issuing the invoice archives its PDF document. Nothing is locked or sent yet.';
-  } else {
-    // Embed the actual invoice PDF, the way the expense receipt preview
-    // frames a stored receipt: fetch the archived bytes, mint a blob URL,
-    // let the browser's own viewer render it.
-    const host = $('ip-doc');
-    host.appendChild(el('p', { text: 'Loading the invoice document…' }));
-    try {
-      const blob = await api.getBlob(`/invoices/${inv.id}/pdf`);
-      if (!invoicePreview || invoicePreview.id !== inv.id) return; // superseded
-      host.textContent = '';
-      const url = URL.createObjectURL(blob);
-      ipDocUrl = url;
-      host.appendChild(
-        el('iframe', {
-          attrs: { id: 'ip-pdf-frame', src: url, title: `Invoice ${inv.number} document` },
-        }),
-      );
-    } catch (err) {
-      if (!invoicePreview || invoicePreview.id !== inv.id) return; // superseded
-      host.textContent = `Document preview unavailable: ${err.message}. Download PDF still offers the archived file.`;
-    }
-  }
+  // The preview region frames the rendered PDF (this batch, #349): the
+  // endpoint renders on demand, so a draft has a real render and the old
+  // "no archived PDF for a draft" dead end is gone; #ip-pdf-state is the
+  // loading/failure line only.
+  $('ip-pdf-state').hidden = false;
+  $('ip-pdf-state').textContent = 'Rendering preview…';
+  // Download still means the *archived* document (#113), which a draft does not
+  // have yet, so it stays hidden for a draft while the live render is framed.
+  $('ip-download').hidden = inv.status === 'draft';
   card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-  announce(`Previewing invoice ${inv.number}.`);
+  if (!reopening) announce(`Previewing invoice ${inv.number}.`);
+  await Promise.all([renderPreviewPdf(inv), renderTimeline(inv)]);
 }
 
 export function closeInvoicePreview() {
   if (!invoicePreview) return;
   const { opener } = invoicePreview;
   invoicePreview = null;
-  releaseIpDoc();
+  previewTimeline = [];
+  releasePreviewPdfUrl();
+  $('ip-pdf').textContent = '';
+  $('ip-pdf-state').hidden = true;
+  $('ip-pdf-state').textContent = '';
+  $('ip-timeline').textContent = '';
+  $('ip-timeline-state').hidden = true;
+  $('ip-timeline-state').textContent = '';
   $('invoice-preview').hidden = true;
   if (opener && document.contains(opener)) opener.focus();
 }
@@ -645,6 +947,48 @@ export async function focusInvoice(id) {
     announce(err.message);
   }
 }
+
+/// `Send email` in the detail panel: POST /invoices/{id}/email. The transport is
+/// reported honestly (#130) -- a disabled transport is a logged no-op, so the
+/// announcement says NOT sent rather than claiming the customer got it -- and
+/// the panel is re-rendered so the new `email_sent` entry and the SENT
+/// watermark appear without a reload.
+export async function sendInvoiceEmail(inv) {
+  try {
+    const res = await api.post(`/invoices/${inv.id}/email`);
+    announce(emailOutcome(res, `Invoice emailed to ${res.sent_to} (PDF attached).`));
+  } catch (err) {
+    announce(`Email failed: ${err.message}`);
+    return;
+  }
+  await refreshInvoices();
+}
+
+/// `Mark as sent`: POST /invoices/{id}/sent. A **409** (a draft) is reported as
+/// the plain refusal it is, and the transition is **idempotent** -- when the
+/// refreshed history gains no entry the repeat is announced as already sent,
+/// never as a failure and never as a duplicate.
+export async function markInvoiceSent(inv) {
+  const tracked = Boolean(invoicePreview && invoicePreview.id === inv.id);
+  const before = tracked ? previewTimeline.length : -1;
+  let sentAt;
+  try {
+    const res = await api.post(`/invoices/${inv.id}/sent`);
+    sentAt = res.sent_at;
+  } catch (err) {
+    announce(err.status === 409
+      ? `Cannot mark as sent: ${err.message}.`
+      : `Mark as sent failed: ${err.message}`);
+    return;
+  }
+  await refreshInvoices();
+  const after = tracked ? previewTimeline.length : -1;
+  const stamp = formatTimelineStamp(sentAt);
+  announce(tracked && after === before
+    ? `Already marked as sent ${stamp} — no duplicate history entry.`
+    : `Invoice marked as sent ${stamp}.`);
+}
+
 
 export async function removeInvoice(id) {
   if (!(await askConfirm('Delete this draft invoice?'))) return;
@@ -701,13 +1045,17 @@ export function edLineRow(line = null) {
   if (line && line.item_kind === 'service') kind.value = 'service';
   const qty = el('input', {
     cls: 'num',
-    attrs: { type: 'number', min: '0.01', step: '0.01', inputmode: 'decimal', style: 'width:7ch', 'aria-label': 'Quantity',
-      value: line && line.quantity_hundredths ? (line.quantity_hundredths / 100).toFixed(2) : '1.00' },
+    attrs: {
+      type: 'number', min: '0.01', step: '0.01', inputmode: 'decimal', style: 'width:7ch', 'aria-label': 'Quantity',
+      value: line && line.quantity_hundredths ? (line.quantity_hundredths / 100).toFixed(2) : '1.00'
+    },
   });
   const price = el('input', {
     cls: 'num',
-    attrs: { type: 'number', min: '0', step: '0.01', inputmode: 'decimal', style: 'width:9ch', 'aria-label': 'Unit price',
-      value: line && line.unit_price_minor != null ? (line.unit_price_minor / 100).toFixed(2) : '0.00' },
+    attrs: {
+      type: 'number', min: '0', step: '0.01', inputmode: 'decimal', style: 'width:9ch', 'aria-label': 'Unit price',
+      value: line && line.unit_price_minor != null ? (line.unit_price_minor / 100).toFixed(2) : '0.00'
+    },
   });
   const amount = el('td', { cls: 'num' });
   const row = el('tr', {}, [
@@ -808,16 +1156,31 @@ export function edOpen(draft) {
   $('ed-tax').value = draft ? (draft.tax_hundredths / 100).toFixed(2) : '0';
   $('ed-discount').value = draft ? (draft.discount_hundredths / 100).toFixed(2) : '0';
   clearFormError($('ed-error'));
-  $('invoice-editor').hidden = false;
+  // #349: the editor is a native <dialog class="p-modal"> popup; jsdom has no
+  // modal support, so fall back to the [open] attribute the harness asserts on.
+  const dlg = $('invoice-editor');
+  if (typeof dlg.showModal === 'function') dlg.showModal();
+  else dlg.setAttribute('open', '');
   edRecalc();
-  $('invoice-editor').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   $('ed-lines').querySelector('tbody input')?.focus();
   announce(draft ? `Editing draft ${draft.number}.` : 'Manual invoice editor open.');
 }
 
 export function edClose() {
   ed.id = null;
-  $('invoice-editor').hidden = true;
+  const dlg = $('invoice-editor');
+  if (typeof dlg.close === 'function') dlg.close();
+  else dlg.removeAttribute('open');
+}
+
+// #349: Cancel is the explicit way out of the manual editor. The editor only
+// ever mutates its own DOM, so closing it discards the draft with no request at
+// all — there is nothing half-saved to undo (the repo's "no partial
+// persistence" rule). The native <dialog> closes and initDialogFocusReturn
+// (web/js/dom.js) hands focus back to the + Manual Invoice button that opened it.
+export function edCancel() {
+  edClose();
+  announce('Manual invoice cancelled — nothing was saved.');
 }
 
 export async function edSave() {

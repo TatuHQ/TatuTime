@@ -432,8 +432,10 @@ async fn invoice_email_carries_the_archived_pdf_attachment() {
         msgs[0].text
     );
 
-    // The MIME builder labels the part as a PDF.
-    let mime = tucano_time::email::build_mime(&msgs[0]);
+    // The MIME builder labels the part as a PDF. `build_mime` now returns a
+    // Result -- it refuses a header-bound control character at the sink (#S1)
+    // -- so the same two assertions run on the unwrapped body.
+    let mime = tucano_time::email::build_mime(&msgs[0]).expect("the message builds");
     assert!(mime.contains("Content-Type: application/pdf"));
     assert!(mime.contains("base64"));
 }
@@ -1135,4 +1137,627 @@ async fn invoice_issue_empty_period_conflicts_and_double_issue_is_refused() {
     let (s_again, again_body) =
         json_req(&app, "POST", &format!("/api/invoices/{iid}/issue"), None).await;
     assert_eq!(s_again, StatusCode::CONFLICT, "{again_body}");
+}
+
+// ------------------------------------------- invoice timeline (Subtask A) --
+
+/// Read `GET /api/invoices/{id}/timeline` and return its `events` array.
+async fn timeline(app: &Client, iid: &str) -> Value {
+    let (s, body) = json_req(app, "GET", &format!("/api/invoices/{iid}/timeline"), None).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    body["events"].clone()
+}
+
+#[tokio::test]
+async fn invoice_timeline_records_create_issue_and_email_newest_first() {
+    let (app, _d) = app().await;
+    // seed_issued_invoice generates a tracked draft, then issues it.
+    let (issued, iid) = seed_issued_invoice(&app).await;
+
+    let events = timeline(&app, &iid).await;
+    assert_eq!(events.as_array().unwrap().len(), 2, "{events}");
+    // Newest first: issued precedes created.
+    assert_eq!(events[0]["kind"], "issued");
+    assert_eq!(events[0]["description"], "Invoice issued.");
+    assert_eq!(events[0]["actor_name"], "Admin");
+    assert_eq!(events[1]["kind"], "created");
+    assert_eq!(events[1]["description"], "Invoice created.");
+    assert_eq!(events[1]["actor_name"], "Admin");
+    // A stable, unambiguous timestamp for the GUI to format later.
+    assert!(events[0]["at"].as_str().unwrap().contains('T'));
+    // `created`/`issued` carry no meta, so the field is omitted.
+    assert!(events[0].get("meta").is_none(), "{events}");
+
+    // The email route appends `email_sent` with recipient + From + transport.
+    let (se, body) = json_req(&app, "POST", &format!("/api/invoices/{iid}/email"), None).await;
+    assert_eq!(se, StatusCode::OK, "{body}");
+    let events = timeline(&app, &iid).await;
+    assert_eq!(events.as_array().unwrap().len(), 3, "{events}");
+    assert_eq!(events[0]["kind"], "email_sent");
+    assert_eq!(events[0]["actor_name"], "Admin");
+    assert_eq!(events[0]["meta"]["to"], "billing@acme.test");
+    assert_eq!(events[0]["meta"]["transport"], "recording");
+    assert!(events[0]["meta"]["subject"].is_string());
+    assert!(events[0]["meta"]["from_name"].is_string());
+    assert_eq!(events[1]["kind"], "issued");
+    assert_eq!(events[2]["kind"], "created");
+
+    // A timeline event never changes invoice semantics.
+    let (_, inv) = json_req(&app, "GET", &format!("/api/invoices/{iid}"), None).await;
+    assert_eq!(inv["status"], "issued");
+    assert_eq!(inv["number"], issued["number"]);
+}
+
+#[tokio::test]
+async fn invoice_timeline_records_manual_create_and_draft_edit() {
+    let (app, _d) = app().await;
+    let c = new_customer(&app, "SHOP", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap();
+    let (s, inv) = json_req(
+        &app,
+        "POST",
+        "/api/invoices/manual",
+        Some(json!({"customer_id":cid,
+          "lines":[{"description":"Seat","item_kind":"product","quantity_hundredths":100,"unit_price_minor":4000}]})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{inv}");
+    let iid = inv["id"].as_str().unwrap();
+
+    let events = timeline(&app, iid).await;
+    assert_eq!(events.as_array().unwrap().len(), 1, "{events}");
+    assert_eq!(events[0]["kind"], "created");
+    assert_eq!(events[0]["actor_name"], "Admin");
+
+    // A draft edit appends `updated`; still newest first.
+    let (se, edited) = json_req(
+        &app,
+        "PUT",
+        &format!("/api/invoices/{iid}"),
+        Some(
+            json!({"lines":[{"kind":"fixed","date":"2026-10-02","note":"Seat",
+            "item_kind":"product","quantity_hundredths":200,"unit_price_minor":4000}],
+            "tax_hundredths":0,"discount_hundredths":0}),
+        ),
+    )
+    .await;
+    assert_eq!(se, StatusCode::OK, "{edited}");
+    let events = timeline(&app, iid).await;
+    assert_eq!(events.as_array().unwrap().len(), 2, "{events}");
+    assert_eq!(events[0]["kind"], "updated");
+    assert!(
+        events[0]["description"].as_str().unwrap().contains("lines"),
+        "{events}"
+    );
+    assert_eq!(events[0]["actor_name"], "Admin");
+    assert_eq!(events[1]["kind"], "created");
+
+    // An invalid shape is rejected and appends nothing (rejection without
+    // persistence is part of the contract).
+    let (sbad, _) = json_req(
+        &app,
+        "PUT",
+        &format!("/api/invoices/{iid}"),
+        Some(
+            json!({"lines":[{"kind":"fixed","date":"2026-10-02","note":"X",
+            "item_kind":"product","quantity_hundredths":100,"unit_price_minor":100,"evil":1}],
+            "tax_hundredths":0,"discount_hundredths":0}),
+        ),
+    )
+    .await;
+    assert_eq!(sbad, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(
+        timeline(&app, iid).await.as_array().unwrap().len(),
+        2,
+        "a rejected edit appends no event"
+    );
+}
+
+#[tokio::test]
+async fn invoice_timeline_unknown_id_and_access_control() {
+    let (app, _d) = app().await;
+    let unknown = uuid::Uuid::new_v4();
+    let (s, body) = json_req(
+        &app,
+        "GET",
+        &format!("/api/invoices/{unknown}/timeline"),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::NOT_FOUND, "{body}");
+
+    let (_issued, iid) = seed_issued_invoice(&app).await;
+
+    // Unauthenticated: rejected like the rest of the invoice surface.
+    let (sa, _) = anon_req(&app, "GET", &format!("/api/invoices/{iid}/timeline"), None).await;
+    assert_eq!(sa, StatusCode::UNAUTHORIZED);
+
+    // A member is forbidden (invoices are the admin tier, #51).
+    json_req(
+        &app,
+        "POST",
+        "/api/users",
+        Some(
+            json!({"name":"Eve","email":"eve@test.local","password":"evepass123","role":"member"}),
+        ),
+    )
+    .await;
+    let cookie = login_cookie(&app.router, "eve@test.local", "evepass123").await;
+    let (sm, _, _) = raw(
+        &app.router,
+        "GET",
+        &format!("/api/invoices/{iid}/timeline"),
+        None,
+        Some(&cookie),
+    )
+    .await;
+    assert_eq!(sm, StatusCode::FORBIDDEN);
+
+    // Read-only: another verb is a 405 and appends no event.
+    let before = timeline(&app, &iid).await.as_array().unwrap().len();
+    let (sp, _) = json_req(&app, "POST", &format!("/api/invoices/{iid}/timeline"), None).await;
+    assert_eq!(sp, StatusCode::METHOD_NOT_ALLOWED);
+    assert_eq!(
+        timeline(&app, &iid).await.as_array().unwrap().len(),
+        before,
+        "a rejected verb appends no event"
+    );
+}
+
+#[tokio::test]
+async fn invoice_timeline_sidecar_is_a_lenient_dot_file() {
+    let (app, d) = app().await;
+    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap();
+    new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
+    json_req(
+        &app,
+        "POST",
+        "/api/entries",
+        Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":3})),
+    )
+    .await;
+    let (_s, inv) = json_req(
+        &app,
+        "POST",
+        "/api/invoices",
+        Some(json!({"customer_id":cid,"from":"2026-10-01","to":"2026-10-07"})),
+    )
+    .await;
+    let iid = inv["id"].as_str().unwrap().to_string();
+
+    // The sidecar exists on disk but is a dot file: never an invoice document.
+    let sidecar = d
+        .path()
+        .join("data")
+        .join("invoices")
+        .join(format!(".timeline.{iid}.json"));
+    assert!(sidecar.exists(), "creation wrote a timeline sidecar");
+    let (_, list) = json_req(&app, "GET", "/api/invoices", None).await;
+    assert_eq!(
+        list["invoices"].as_array().unwrap().len(),
+        1,
+        "the .timeline sidecar must not appear as an invoice (dot-file rule)"
+    );
+
+    // A malformed sidecar never breaks the invoice read paths.
+    std::fs::write(&sidecar, b"{not json").unwrap();
+    let (s_read, _) = json_req(&app, "GET", &format!("/api/invoices/{iid}"), None).await;
+    assert_eq!(s_read, StatusCode::OK);
+    let (s_list, list2) = json_req(&app, "GET", "/api/invoices", None).await;
+    assert_eq!(s_list, StatusCode::OK);
+    assert_eq!(list2["invoices"].as_array().unwrap().len(), 1);
+    assert!(
+        timeline(&app, &iid).await.as_array().unwrap().is_empty(),
+        "a malformed sidecar reads as an empty timeline, never an error"
+    );
+
+    // Recording again self-heals the malformed file.
+    json_req(&app, "POST", &format!("/api/invoices/{iid}/issue"), None).await;
+    let events = timeline(&app, &iid).await;
+    assert_eq!(events.as_array().unwrap().len(), 1, "{events}");
+    assert_eq!(events[0]["kind"], "issued");
+}
+
+// ------------------------------- invoice sent / paid / write-off (Subtask B) --
+
+#[tokio::test]
+async fn invoice_sent_marks_the_transition_and_is_idempotent() {
+    let (app, _d) = app().await;
+    let (issued, iid) = seed_issued_invoice(&app).await;
+    assert_eq!(issued["status"], "issued");
+
+    let (s, body) = json_req(&app, "POST", &format!("/api/invoices/{iid}/sent"), None).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    let first = body["sent_at"].as_str().expect("sent_at").to_string();
+    assert!(first.contains('T'), "an RFC 3339 timestamp: {first}");
+
+    let events = timeline(&app, &iid).await;
+    assert_eq!(events.as_array().unwrap().len(), 3, "{events}");
+    assert_eq!(events[0]["kind"], "sent");
+    assert_eq!(events[0]["description"], "Invoice marked as sent.");
+    assert_eq!(events[0]["actor_name"], "Admin");
+    // The reported `sent_at` IS the recorded event's timestamp.
+    assert_eq!(events[0]["at"], first.as_str(), "{events}");
+    // A manual mark-as-sent knows no recipient, so none is fabricated.
+    assert!(events[0].get("meta").is_none(), "{events}");
+
+    // Idempotent: the same earliest `sent_at`, no duplicate event appended.
+    let (s2, body2) = json_req(&app, "POST", &format!("/api/invoices/{iid}/sent"), None).await;
+    assert_eq!(s2, StatusCode::OK, "{body2}");
+    assert_eq!(body2["sent_at"], first.as_str());
+    assert_eq!(
+        timeline(&app, &iid).await.as_array().unwrap().len(),
+        3,
+        "re-marking appends no second event"
+    );
+
+    // `sent_at` stays derived: the closed Invoice schema gains no field and the
+    // invoice's own status semantics are unchanged.
+    let (_, inv) = json_req(&app, "GET", &format!("/api/invoices/{iid}"), None).await;
+    assert_eq!(inv["status"], "issued");
+    assert!(inv.get("sent_at").is_none(), "{inv}");
+}
+
+#[tokio::test]
+async fn invoice_sent_on_a_draft_is_conflict_and_records_nothing() {
+    let (app, _d) = app().await;
+    let c = new_customer(&app, "SHOP", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap();
+    let (sc, inv) = json_req(
+        &app,
+        "POST",
+        "/api/invoices/manual",
+        Some(json!({"customer_id":cid,
+          "lines":[{"description":"Seat","item_kind":"product","quantity_hundredths":100,"unit_price_minor":4000}]})),
+    )
+    .await;
+    assert_eq!(sc, StatusCode::CREATED, "{inv}");
+    let iid = inv["id"].as_str().unwrap();
+
+    // A draft has no archived PDF and nothing has been delivered: 409.
+    let (s, body) = json_req(&app, "POST", &format!("/api/invoices/{iid}/sent"), None).await;
+    assert_eq!(s, StatusCode::CONFLICT, "{body}");
+    let events = timeline(&app, iid).await;
+    assert_eq!(events.as_array().unwrap().len(), 1, "{events}");
+    assert_eq!(events[0]["kind"], "created", "the refusal appended nothing");
+}
+
+#[tokio::test]
+async fn invoice_sent_unknown_id_and_access_control() {
+    let (app, _d) = app().await;
+    let unknown = uuid::Uuid::new_v4();
+    let (s, body) = json_req(&app, "POST", &format!("/api/invoices/{unknown}/sent"), None).await;
+    assert_eq!(s, StatusCode::NOT_FOUND, "{body}");
+
+    let (_issued, iid) = seed_issued_invoice(&app).await;
+
+    // Unauthenticated: rejected like the rest of the invoice surface.
+    let (sa, _) = anon_req(&app, "POST", &format!("/api/invoices/{iid}/sent"), None).await;
+    assert_eq!(sa, StatusCode::UNAUTHORIZED);
+
+    // A member is forbidden (invoices are the admin tier, #51).
+    let cookie = member_cookie(&app, "eve@test.local", "evepass123").await;
+    let (sm, _, _) = raw(
+        &app.router,
+        "POST",
+        &format!("/api/invoices/{iid}/sent"),
+        None,
+        Some(&cookie),
+    )
+    .await;
+    assert_eq!(sm, StatusCode::FORBIDDEN);
+
+    // POST-only: another verb is a 405 and records nothing.
+    let before = timeline(&app, &iid).await.as_array().unwrap().len();
+    let (sg, _) = json_req(&app, "GET", &format!("/api/invoices/{iid}/sent"), None).await;
+    assert_eq!(sg, StatusCode::METHOD_NOT_ALLOWED);
+    assert_eq!(
+        timeline(&app, &iid).await.as_array().unwrap().len(),
+        before,
+        "a rejected verb appends no event"
+    );
+}
+
+#[tokio::test]
+async fn invoice_email_implies_sent_with_a_single_event() {
+    let (app, _d) = app().await;
+    let (_issued, iid) = seed_issued_invoice(&app).await;
+
+    // `/email` records `email_sent`, which already implies "sent".
+    let (se, body) = json_req(&app, "POST", &format!("/api/invoices/{iid}/email"), None).await;
+    assert_eq!(se, StatusCode::OK, "{body}");
+    let events = timeline(&app, &iid).await;
+    assert_eq!(events[0]["kind"], "email_sent", "{events}");
+    let emailed_at = events[0]["at"].as_str().unwrap().to_string();
+
+    // A manual mark afterwards is a no-op: the earliest delivery wins and no
+    // second send event is recorded.
+    let (ss, sent) = json_req(&app, "POST", &format!("/api/invoices/{iid}/sent"), None).await;
+    assert_eq!(ss, StatusCode::OK, "{sent}");
+    assert_eq!(sent["sent_at"], emailed_at.as_str());
+    let events = timeline(&app, &iid).await;
+    let sends = events
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|e| matches!(e["kind"].as_str(), Some("sent" | "email_sent")))
+        .count();
+    assert_eq!(sends, 1, "one send event, not an email_sent + sent pair");
+}
+
+#[tokio::test]
+async fn invoice_pay_and_write_off_retain_the_status_change() {
+    let (app, _d) = app().await;
+
+    // Fully paid: the settlement is retained, the invoice keeps its meaning.
+    let (issued, paid_id) = seed_issued_invoice(&app).await;
+    let total = issued["total_minor"].as_u64().unwrap();
+    let (sp, paid) = json_req(
+        &app,
+        "POST",
+        &format!("/api/invoices/{paid_id}/pay"),
+        Some(json!({"reference":"BANK-77"})),
+    )
+    .await;
+    assert_eq!(sp, StatusCode::OK, "{paid}");
+    assert_eq!(paid["status"], "paid");
+    let events = timeline(&app, &paid_id).await;
+    assert_eq!(events[0]["kind"], "paid");
+    assert_eq!(events[0]["actor_name"], "Admin");
+    assert_eq!(events[0]["meta"]["amount_minor"], total);
+    assert_eq!(events[0]["meta"]["method"], "manual");
+    assert_eq!(events[0]["meta"]["reference"], "BANK-77");
+    assert_eq!(events[0]["meta"]["status"], "paid");
+
+    // Partly paid: money received, the remainder still open.
+    let c = new_customer(&app, "PARTIAL", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap();
+    new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
+    json_req(
+        &app,
+        "POST",
+        "/api/entries",
+        Some(entry_body(cid, "P1", json!(4), "2026-11-02")),
+    )
+    .await;
+    let (_, inv) = json_req(
+        &app,
+        "POST",
+        "/api/invoices",
+        Some(json!({"customer_id":cid,"from":"2026-11-01","to":"2026-11-07"})),
+    )
+    .await;
+    let pid = inv["id"].as_str().unwrap();
+    json_req(&app, "POST", &format!("/api/invoices/{pid}/issue"), None).await;
+    let (spp, partial) = json_req(
+        &app,
+        "POST",
+        &format!("/api/invoices/{pid}/pay"),
+        Some(json!({"amount_minor":10000})),
+    )
+    .await;
+    assert_eq!(spp, StatusCode::OK, "{partial}");
+    assert_eq!(partial["status"], "partly_paid");
+    let events = timeline(&app, pid).await;
+    assert_eq!(events[0]["kind"], "paid");
+    assert_eq!(events[0]["meta"]["amount_minor"], 10000);
+    assert_eq!(events[0]["meta"]["status"], "partly_paid");
+
+    // Written off: the forgiven balance and its reason are retained.
+    let c2 = new_customer(&app, "GOODWILL", "EUR", 6000).await;
+    let cid2 = c2["id"].as_str().unwrap();
+    new_project(&app, cid2, "P1", json!({"rate_minor": 6000})).await;
+    json_req(
+        &app,
+        "POST",
+        "/api/entries",
+        Some(entry_body(cid2, "P1", json!(2), "2026-12-02")),
+    )
+    .await;
+    let (_, inv2) = json_req(
+        &app,
+        "POST",
+        "/api/invoices",
+        Some(json!({"customer_id":cid2,"from":"2026-12-01","to":"2026-12-07"})),
+    )
+    .await;
+    let wid = inv2["id"].as_str().unwrap();
+    let (_si, iss2) = json_req(&app, "POST", &format!("/api/invoices/{wid}/issue"), None).await;
+    let wtotal = iss2["total_minor"].as_u64().unwrap();
+    let (sw, wo) = json_req(
+        &app,
+        "POST",
+        &format!("/api/invoices/{wid}/write-off"),
+        Some(json!({"reason":"goodwill"})),
+    )
+    .await;
+    assert_eq!(sw, StatusCode::OK, "{wo}");
+    assert_eq!(wo["status"], "written_off");
+    let events = timeline(&app, wid).await;
+    assert_eq!(events[0]["kind"], "write_off");
+    assert_eq!(events[0]["meta"]["reason"], "goodwill");
+    assert_eq!(events[0]["meta"]["balance_minor"], wtotal);
+
+    // Recording history changes no invoice semantics, and the sidecar stays
+    // invisible to the listing: one document per invoice, none gaining a
+    // timeline-derived field.
+    let (sl, list) = json_req(&app, "GET", "/api/invoices", None).await;
+    assert_eq!(sl, StatusCode::OK);
+    let invoices = list["invoices"].as_array().unwrap();
+    assert_eq!(
+        invoices.len(),
+        3,
+        "one document per invoice, no sidecar rows"
+    );
+    assert!(
+        invoices.iter().all(|i| i.get("sent_at").is_none()),
+        "sent_at stays derived, never persisted on the invoice: {list}"
+    );
+    let (_, stored) = json_req(&app, "GET", &format!("/api/invoices/{wid}"), None).await;
+    assert_eq!(stored["status"], "written_off");
+    assert_eq!(stored["write_off_reason"], "goodwill");
+    let (_, stored_paid) = json_req(&app, "GET", &format!("/api/invoices/{paid_id}"), None).await;
+    assert_eq!(stored_paid["status"], "paid");
+}
+
+// ---------------------------------------- invoice PDF preview (Subtask C) --
+
+/// Whether the (uncompressed) PDF bytes carry the `(STAMP)` literal — the same
+/// greppable-literal trick the org-profile test uses, since the layout emits
+/// one text-showing op per word and never compresses the content stream.
+fn has_stamp(bytes: &[u8], stamp: &str) -> bool {
+    let needle = format!("({stamp})");
+    bytes.windows(needle.len()).any(|w| w == needle.as_bytes())
+}
+
+#[tokio::test]
+async fn invoice_pdf_preview_renders_a_draft_and_never_archives() {
+    let (app, d) = app().await;
+    // A DRAFT with billable work: `/pdf` refuses it, the preview must not.
+    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap();
+    new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
+    json_req(
+        &app,
+        "POST",
+        "/api/entries",
+        Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":3})),
+    )
+    .await;
+    let (_s, inv) = json_req(
+        &app,
+        "POST",
+        "/api/invoices",
+        Some(json!({"customer_id":cid,"from":"2026-10-01","to":"2026-10-07"})),
+    )
+    .await;
+    let iid = inv["id"].as_str().unwrap().to_string();
+    assert_eq!(inv["status"], "draft");
+
+    let (status, headers, body) =
+        raw_req(&app, "GET", &format!("/api/invoices/{iid}/pdf/preview")).await;
+    assert_eq!(status, StatusCode::OK, "a draft previews");
+    assert_eq!(headers[header::CONTENT_TYPE], "application/pdf");
+    assert_eq!(headers[header::CONTENT_DISPOSITION], "inline");
+    assert!(body.starts_with(b"%PDF"), "a real PDF");
+    assert!(has_stamp(&body, "DRAFT"), "the draft stamp is present");
+
+    // Computed, never archived: no `invoices/<id>.pdf`, no pdf hint on the doc.
+    let pdf_path = d
+        .path()
+        .join("data")
+        .join("invoices")
+        .join(format!("{iid}.pdf"));
+    assert!(!pdf_path.exists(), "the preview must not write an archive");
+    let (_si, inv2) = json_req(&app, "GET", &format!("/api/invoices/{iid}"), None).await;
+    assert!(inv2["pdf"].is_null(), "no pdf hint attached");
+    assert_eq!(inv2["status"], "draft", "the preview changes no state");
+
+    // The deliberate asymmetry: /pdf still refuses the same draft.
+    let (sd, _hd, _bd) = raw_req(&app, "GET", &format!("/api/invoices/{iid}/pdf")).await;
+    assert_eq!(sd, StatusCode::CONFLICT, "/pdf still 409s a draft");
+}
+
+#[tokio::test]
+async fn invoice_pdf_preview_tracks_the_watermark_stage() {
+    let (app, _d) = app().await;
+    let (issued, iid) = seed_issued_invoice(&app).await;
+    assert_eq!(issued["status"], "issued");
+    let url = format!("/api/invoices/{iid}/pdf/preview");
+
+    // The archived bytes, for the "unchanged" assertion at the end.
+    let (_sa, _ha, archived_before) =
+        raw_req(&app, "GET", &format!("/api/invoices/{iid}/pdf")).await;
+
+    // Issued but never delivered: the live stage is Draft.
+    let (s1, h1, p1) = raw_req(&app, "GET", &url).await;
+    assert_eq!(s1, StatusCode::OK);
+    assert_eq!(h1[header::CONTENT_TYPE], "application/pdf");
+    assert!(p1.starts_with(b"%PDF"));
+    assert!(has_stamp(&p1, "DRAFT"), "issued-never-sent reads DRAFT");
+    assert!(!has_stamp(&p1, "SENT"));
+    let etag_draft = h1[header::ETAG].to_str().unwrap().to_string();
+    // Deterministic render: a second call is byte-identical with the same ETag.
+    let (_s1b, h1b, p1b) = raw_req(&app, "GET", &url).await;
+    assert_eq!(p1, p1b, "the preview render is deterministic");
+    assert_eq!(h1b[header::ETAG], h1[header::ETAG]);
+
+    // Mark as sent -> SENT (the stage, and so the ETag, moves).
+    let (ss, sent) = json_req(&app, "POST", &format!("/api/invoices/{iid}/sent"), None).await;
+    assert_eq!(ss, StatusCode::OK, "{sent}");
+    let (_s2, h2, p2) = raw_req(&app, "GET", &url).await;
+    assert!(has_stamp(&p2, "SENT"), "the sent stamp is present");
+    assert!(!has_stamp(&p2, "DRAFT"));
+    assert_ne!(
+        etag_draft,
+        h2[header::ETAG].to_str().unwrap(),
+        "a stage change rotates the ETag"
+    );
+
+    // Paid -> PAID beats SENT.
+    let (sp, paid) = json_req(
+        &app,
+        "POST",
+        &format!("/api/invoices/{iid}/pay"),
+        Some(json!({"reference":"BANK-77"})),
+    )
+    .await;
+    assert_eq!(sp, StatusCode::OK, "{paid}");
+    assert_eq!(paid["status"], "paid");
+    let (_s3, _h3, p3) = raw_req(&app, "GET", &url).await;
+    assert!(has_stamp(&p3, "PAID"), "the paid stamp is present");
+
+    // The archive never changed (write-once, byte-stable) and keeps its
+    // issue-time Draft stamp; the listing is one document, unaffected.
+    let (_s4, _h4, archived_after) =
+        raw_req(&app, "GET", &format!("/api/invoices/{iid}/pdf")).await;
+    assert_eq!(
+        archived_before, archived_after,
+        "the archive stays byte-stable"
+    );
+    assert!(
+        has_stamp(&archived_before, "DRAFT"),
+        "the archive keeps its issue-time stamp"
+    );
+    let (_sl, list) = json_req(&app, "GET", "/api/invoices", None).await;
+    assert_eq!(list["invoices"].as_array().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn invoice_pdf_preview_unknown_id_and_access_control() {
+    let (app, _d) = app().await;
+    let (_issued, iid) = seed_issued_invoice(&app).await;
+    let url = format!("/api/invoices/{iid}/pdf/preview");
+
+    // Unknown id: 404.
+    let (s404, _, _) = raw_req(
+        &app,
+        "GET",
+        "/api/invoices/00000000-0000-0000-0000-000000000000/pdf/preview",
+    )
+    .await;
+    assert_eq!(s404, StatusCode::NOT_FOUND);
+
+    // Anonymous: 401.
+    let (sa, _) = anon_req(&app, "GET", &url, None).await;
+    assert_eq!(sa, StatusCode::UNAUTHORIZED);
+
+    // Member: 403 (the whole invoice surface is admin tier, #51).
+    json_req(
+        &app,
+        "POST",
+        "/api/users",
+        Some(
+            json!({"name":"Eve","email":"eve@test.local","password":"evepass123","role":"member"}),
+        ),
+    )
+    .await;
+    let cookie = login_cookie(&app.router, "eve@test.local", "evepass123").await;
+    let (sm, _, _) = raw(&app.router, "GET", &url, None, Some(&cookie)).await;
+    assert_eq!(sm, StatusCode::FORBIDDEN);
+
+    // GET-only: another verb is a 405.
+    let (st, _) = json_req(&app, "POST", &url, None).await;
+    assert_eq!(st, StatusCode::METHOD_NOT_ALLOWED);
 }

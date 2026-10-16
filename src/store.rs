@@ -20,8 +20,8 @@ use uuid::Uuid;
 
 use crate::auth::User;
 use crate::domain::{
-    Category, Customer, Entry, Expense, ExpenseClaim, Invoice, InvoiceStatus, Notification,
-    PdfHint, Project, RecurringSchedule, Submission, Task, Timer,
+    Category, Customer, Entry, Expense, ExpenseClaim, Invoice, InvoiceStatus, InvoiceTimelineEvent,
+    Notification, PdfHint, Project, RecurringSchedule, Submission, Task, Timer,
 };
 
 /// Hard cap on a range scan so a malformed or adversarial query cannot spin
@@ -37,6 +37,11 @@ pub const MAX_PDF_BYTES: u64 = 8 * 1024 * 1024;
 /// timesheet is far below this; it bounds a pathological/corrupted tree so no
 /// request does an unbounded directory walk.
 pub const MAX_DOCS: usize = 100_000;
+
+/// Cap on retained per-invoice timeline events. The sidecar is a display aid,
+/// not a record of authority, so once this many entries exist the oldest are
+/// dropped and only the newest [`MAX_TIMELINE_EVENTS`] are kept.
+pub const MAX_TIMELINE_EVENTS: usize = 200;
 
 /// Default cross-process writer-lock acquisition deadline (#62).
 const DEFAULT_LOCK_TIMEOUT: Duration = Duration::from_millis(5000);
@@ -1299,6 +1304,54 @@ impl Store {
         write_json(&path, &updated)?;
         self.index_invoice_locked(&updated)?;
         Ok(updated)
+    }
+
+    // ----------------------------------------------------- invoice timeline --
+    //
+    // A per-invoice activity timeline (Subtask A) kept in a dot-file sidecar
+    // beside the invoice document, exactly like the other side artefacts:
+    // `write_json` (tmp + rename), skipped by `dir_entries` so it is never a
+    // document and never counts toward `MAX_DOCS`. It is a display aid only —
+    // never the source of truth — so reads are lenient (a missing or malformed
+    // sidecar is an empty timeline) and writes are best-effort, with the caller
+    // logging rather than failing the invoice operation that triggered them.
+
+    /// `invoices/.timeline.<id>.json` — a dot file, so the collection reader
+    /// skips it.
+    fn invoice_timeline_path(&self, id: Uuid) -> PathBuf {
+        self.doc_dir::<Invoice>()
+            .join(format!(".timeline.{id}.json"))
+    }
+
+    /// Read one invoice's timeline, oldest first. A missing or malformed
+    /// sidecar is an **empty** timeline, never an error: the timeline is a
+    /// display aid and a corrupt file must not break an invoice read.
+    pub fn invoice_timeline(&self, id: Uuid) -> Vec<InvoiceTimelineEvent> {
+        read_json::<Vec<InvoiceTimelineEvent>>(&self.invoice_timeline_path(id))
+            .ok()
+            .flatten()
+            .unwrap_or_default()
+    }
+
+    /// Append one event to an invoice's timeline, retaining at most
+    /// [`MAX_TIMELINE_EVENTS`] (oldest dropped). Lenient on read so a malformed
+    /// sidecar is replaced rather than wedging every later append.
+    pub fn append_invoice_timeline(
+        &self,
+        id: Uuid,
+        event: InvoiceTimelineEvent,
+    ) -> Result<(), StoreError> {
+        let _guard = self.write_lock()?;
+        let path = self.invoice_timeline_path(id);
+        let mut events: Vec<InvoiceTimelineEvent> =
+            read_json(&path).ok().flatten().unwrap_or_default();
+        events.push(event);
+        if events.len() > MAX_TIMELINE_EVENTS {
+            let excess = events.len() - MAX_TIMELINE_EVENTS;
+            events.drain(0..excess);
+        }
+        std::fs::create_dir_all(self.doc_dir::<Invoice>())?;
+        write_json(&path, &events)
     }
 
     /// Atomically assign the next invoice number and persist under one writer

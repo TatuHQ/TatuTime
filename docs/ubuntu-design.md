@@ -349,7 +349,10 @@ mistaken for debt:
 - **The segmented control (`.seg` / `.seg-btn`).** The Invoices Open|All control
   is a `role="group"` of `aria-pressed` toggle buttons, **not** a tablist, so it
   keeps the app's segmented skin rather than moving onto `p-tabs` (the plan's
-  earlier "tablist" naming was corrected in increment 5).
+  earlier "tablist" naming was corrected in increment 5). #349 kept that same
+  `.seg` group and gave it the standard Ubuntu segmented shell (one border,
+  segments divided by the app line colour); the skin changed, never the
+  `aria-pressed` button semantics.
 - **The tab / list rails' geometry.** The sidebar rail is a *vertical* tablist
   and the two in-view strips keep their heading-slot widths and #145 uniform
   segment widths; Vanilla's `.p-tabs` container is deliberately unused (it boxes

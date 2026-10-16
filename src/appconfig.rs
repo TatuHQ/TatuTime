@@ -39,6 +39,10 @@ pub enum Kind {
     OptionalStr,
     /// Comma-separated list in both env and file.
     Csv,
+    /// ISO 4217 shaped currency code: exactly three ASCII letters, stored in
+    /// canonical uppercase so `eur` and `EUR` cannot both exist. Optional:
+    /// unset means "no base currency configured" (never guessed from data).
+    Currency,
 }
 
 pub struct KeyDef {
@@ -125,6 +129,18 @@ pub const KEYS: &[KeyDef] = &[
         },
         description: "Per-collection document cap before writes are refused",
     },
+    // Display-only preference, NOT a secret: it lives in config.json so it is
+    // never masked and never fail-closed the way a vault entry is. It only
+    // opts the invoice Trends chart into mixed-currency display through the FX
+    // seam; it never rewrites a persisted customer/project/invoice currency.
+    // Unset means "no base currency configured": mixed-currency display stays
+    // off and nothing is converted — the value is never guessed from the data.
+    KeyDef {
+        name: "base_currency",
+        env: "TUCANO_BASE_CURRENCY",
+        kind: Kind::Currency,
+        description: "Optional base currency for mixed-currency invoice Trends (ISO 4217, e.g. EUR); unset disables the conversion",
+    },
 ];
 
 pub fn key_def(name: &str) -> Option<&'static KeyDef> {
@@ -186,6 +202,13 @@ impl AppConfig {
                         Value::Null
                     }),
                 Kind::Csv | Kind::Str { .. } | Kind::OptionalStr => Value::String(raw),
+                Kind::Currency => match validate_currency(&raw) {
+                    Ok(norm) => Value::String(norm),
+                    Err(_) => {
+                        tracing::warn!(key = def.name, value = %raw, "invalid currency from env, ignoring");
+                        Value::Null
+                    }
+                },
             };
             if v.is_null() {
                 // fall through to file/default on a parse failure
@@ -199,7 +222,7 @@ impl AppConfig {
         let d = match def.kind {
             Kind::Int { default, .. } => Value::from(default),
             Kind::Str { default } => Value::String(default.to_string()),
-            Kind::OptionalStr | Kind::Csv => Value::Null,
+            Kind::OptionalStr | Kind::Csv | Kind::Currency => Value::Null,
         };
         (d, Source::Default)
     }
@@ -279,13 +302,17 @@ impl AppConfig {
                 }
                 Ok(Value::String(s.clone()))
             }
-            (Kind::OptionalStr, Value::Null) => Ok(Value::Null),
+            // ISO 4217 shaped: exactly three ASCII letters, stored canonical
+            // uppercase so `eur` and `EUR` cannot both exist. `null` clears it.
+            (Kind::Currency, Value::String(s)) => validate_currency(s).map(Value::String),
+            (Kind::Currency, Value::Null) => Ok(Value::Null),
             _ => Err(format!(
                 "{} expects {}",
                 def.name,
                 match def.kind {
                     Kind::Int { .. } => "an integer",
                     Kind::Csv | Kind::Str { .. } | Kind::OptionalStr => "a string",
+                    Kind::Currency => "a three-letter currency code",
                 }
             )),
         }
@@ -329,7 +356,7 @@ impl AppConfig {
                 let default = match def.kind {
                     Kind::Int { default, .. } => Value::from(default),
                     Kind::Str { default } => Value::String(default.to_string()),
-                    Kind::OptionalStr | Kind::Csv => Value::Null,
+                    Kind::OptionalStr | Kind::Csv | Kind::Currency => Value::Null,
                 };
                 serde_json::json!({
                     "key": def.name,
@@ -342,6 +369,19 @@ impl AppConfig {
                 })
             })
             .collect()
+    }
+}
+
+/// Validate and normalise an ISO 4217 shaped currency code: exactly three
+/// ASCII letters. Returns the canonical uppercase form (so `eur` and `EUR`
+/// collapse to one stored value) or an error message for the API's 422 shape.
+/// This is a shape check only — the code is not resolved to a symbol or rate.
+pub fn validate_currency(code: &str) -> Result<String, String> {
+    let bytes = code.as_bytes();
+    if bytes.len() == 3 && bytes.iter().all(u8::is_ascii_alphabetic) {
+        Ok(code.to_ascii_uppercase())
+    } else {
+        Err("must be exactly three ASCII letters (ISO 4217)".into())
     }
 }
 
@@ -433,6 +473,52 @@ mod tests {
         assert_eq!(
             AppConfig::empty().get_csv("sso_allowed_domains", &env),
             vec!["acme.test".to_string(), "other.test".to_string()]
+        );
+    }
+
+    #[test]
+    fn base_currency_shape_normalises_and_rejects() {
+        // Uppercase canonical form; lowercase is normalised, not rejected.
+        assert_eq!(validate_currency("eur").unwrap(), "EUR");
+        assert_eq!(validate_currency("USD").unwrap(), "USD");
+        // Wrong shape is refused: too short, too long, digit, empty, non-ASCII.
+        assert!(validate_currency("US").is_err());
+        assert!(validate_currency("USDD").is_err());
+        assert!(validate_currency("12A").is_err());
+        assert!(validate_currency("").is_err());
+        assert!(validate_currency("€UR").is_err());
+
+        // The whitelisted key is absent (unset) by default: no base currency,
+        // so nothing is fabricated and the Trends conversion stays off.
+        let cfg = AppConfig::empty();
+        let env = env_from(&[]);
+        let def = key_def("base_currency").unwrap();
+        let (value, source) = cfg.resolve(def, &env);
+        assert_eq!(value, Value::Null);
+        assert_eq!(source, Source::Default);
+
+        // A valid code round-trips and is stored uppercase; a bad one is
+        // refused by validate() and never reaches the store.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("config.json"), "{}").unwrap();
+        let mut cfg = AppConfig::load(dir.path()).unwrap();
+        let mut good = Map::new();
+        good.insert("base_currency".into(), Value::String("gbp".into()));
+        cfg.update(good).unwrap();
+        let reloaded = AppConfig::load(dir.path()).unwrap();
+        assert_eq!(
+            reloaded.get_optional_str("base_currency", &env),
+            Some("GBP".to_string())
+        );
+        let mut bad = Map::new();
+        bad.insert("base_currency".into(), Value::String("USDD".into()));
+        assert!(cfg.update(bad).is_err());
+        assert_eq!(
+            AppConfig::load(dir.path())
+                .unwrap()
+                .get_optional_str("base_currency", &env),
+            Some("GBP".to_string()),
+            "a refused patch must persist nothing"
         );
     }
 }

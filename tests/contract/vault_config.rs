@@ -195,6 +195,113 @@ async fn admin_config_roundtrip_precedence_and_guards() {
     assert_eq!(sm, StatusCode::FORBIDDEN);
 }
 
+/// Subtask D: the `base_currency` display preference lives in the appconfig
+/// whitelist (config.json, not the vault). It is ISO 4217 shaped (exactly three
+/// ASCII letters), normalised to canonical uppercase on write, unset by
+/// default, and never masked like a secret.
+#[tokio::test]
+async fn base_currency_validation_normalisation_and_unset() {
+    let (app, d) = app().await;
+
+    // Absent by default: the key is present in the effective table but unset
+    // (null / default source), so no base currency is configured and nothing
+    // is fabricated for the Trends conversion.
+    let (_s, eff) = json_req(&app, "GET", "/api/admin/config", None).await;
+    let bc = eff["config"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["key"] == "base_currency")
+        .unwrap();
+    assert_eq!(bc["value"], serde_json::Value::Null, "unset by default");
+    assert_eq!(bc["source"], "default");
+
+    // A valid code round-trips and is returned in plain text (never masked as
+    // a secret: the whole value is visible, not a 2-char hint).
+    let (s, body) = json_req(
+        &app,
+        "PUT",
+        "/api/admin/config",
+        Some(json!({"base_currency": "EUR"})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    let cfg_file = d.path().join("data").join("config.json");
+    let persisted = std::fs::read_to_string(&cfg_file).unwrap();
+    assert!(persisted.contains("base_currency"), "{persisted}");
+    assert!(persisted.contains("EUR"), "{persisted}");
+    let (_s2, eff2) = json_req(&app, "GET", "/api/admin/config", None).await;
+    let bc2 = eff2["config"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["key"] == "base_currency")
+        .unwrap();
+    assert_eq!(bc2["value"], "EUR");
+    assert_eq!(bc2["source"], "file");
+
+    // Lowercase is normalised to canonical uppercase, not rejected: `eur` and
+    // `EUR` cannot both exist in the store.
+    let (s3, _) = json_req(
+        &app,
+        "PUT",
+        "/api/admin/config",
+        Some(json!({"base_currency": "gbp"})),
+    )
+    .await;
+    assert_eq!(s3, StatusCode::OK);
+    let (_s4, eff3) = json_req(&app, "GET", "/api/admin/config", None).await;
+    let bc3 = eff3["config"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["key"] == "base_currency")
+        .unwrap();
+    assert_eq!(bc3["value"], "GBP", "lowercase normalised to uppercase");
+
+    // Invalid shapes are 422 and persist nothing: the store still holds GBP.
+    for bad in ["US", "USDD", "12A", ""] {
+        let (s, body) = json_req(
+            &app,
+            "PUT",
+            "/api/admin/config",
+            Some(json!({ "base_currency": bad })),
+        )
+        .await;
+        assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY, "{bad:?}: {body}");
+    }
+    let (_s5, eff4) = json_req(&app, "GET", "/api/admin/config", None).await;
+    let bc4 = eff4["config"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["key"] == "base_currency")
+        .unwrap();
+    assert_eq!(bc4["value"], "GBP", "rejected writes persist nothing");
+
+    // An unknown field in the same payload is still refused, and the valid
+    // sibling key in that payload is not persisted either.
+    let (s6, body6) = json_req(
+        &app,
+        "PUT",
+        "/api/admin/config",
+        Some(json!({"base_currency": "USD", "not_a_knob": 1})),
+    )
+    .await;
+    assert_eq!(s6, StatusCode::UNPROCESSABLE_ENTITY, "{body6}");
+    let (_s7, eff5) = json_req(&app, "GET", "/api/admin/config", None).await;
+    let bc5 = eff5["config"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["key"] == "base_currency")
+        .unwrap();
+    assert_eq!(
+        bc5["value"], "GBP",
+        "unknown-field payload persists nothing"
+    );
+}
+
 #[tokio::test]
 async fn config_file_changes_request_time_behaviour_without_restart() {
     // #94: request-time knobs (SSO admin group) read the live config.

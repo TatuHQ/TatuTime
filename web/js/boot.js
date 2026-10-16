@@ -2,13 +2,13 @@
 // Moved from the original monolithic app.js; behaviour is unchanged.
 
 
-import { addRecurring, createRetainer, iwInit, refreshCatalog, refreshRetainers, refreshSchedules, saveCatalogItem } from './billing.js';
+import { addRecurring, createRetainer, iwInit, iwOpen, refreshCatalog, refreshRetainers, refreshSchedules, saveCatalogItem } from './billing.js';
 import { calState, refreshTimeCal, shiftMonth } from './calendar.js';
 import { $, addDays, announce, clearFormError, decorateUbuntuButton, isoDate, mondayOf } from './dom.js';
 import { ADD_CATEGORY_VALUE, addCategory, addExpenseCategory, fillCategorySelect, refreshCategories, refreshExpenses, refreshSubmissions, resetCategoryForm, resetExpenseForm, saveExpense, submitWeek } from './expenses.js';
 import { refreshExpenseConversion, resetExpenseConversion, showConverted } from './fx.js';
 import { cancelCustomerEdit, cancelProjectEdit, cancelTaskEdit, contactRow, fillParentCustomers, fillTaskParents, prefillProjectParent, refreshCustomerPickers, refreshCustomerTable, refreshProjectTable, refreshTaskTable, runReport, saveCustomer, saveProject, saveTask } from './hierarchy.js';
-import { closeInvoicePreview, dash, dashApplyColumns, downloadInvoicePdf, ed, edClose, edLineRow, edOpen, edRecalc, edSave, generateInvoice, invoicePreview, refreshInvoiceSummary, refreshInvoices } from './invoices.js';
+import { closeDeliveryRecord, closeInvoicePreview, dash, dashApplyColumns, downloadInvoicePdf, ed, edCancel, edLineRow, edOpen, edRecalc, edSave, generateInvoice, invoicePreview, markInvoiceSent, refreshInvoiceSummary, refreshInvoices, sendInvoiceEmail } from './invoices.js';
 import { markNotificationsRead, refreshNotifications } from './notifications.js';
 import { initReceiptPreview } from './receipt.js';
 import { initRouter, initSegTabs, initSettingsTabs, initTabs, refreshTimesheetView, segActiveId, showTimesheet } from './route.js';
@@ -265,14 +265,56 @@ export function wireWeekGrid() {
   $('ip-download').addEventListener('click', () => {
     if (invoicePreview) downloadInvoicePdf(invoicePreview.inv.id, invoicePreview.inv.number);
   });
+  // #349: the delivery actions act on the invoice the detail panel is showing.
+  // Send email re-renders the panel (emailInvoice does), so the SENT watermark
+  // and the new history entry appear without a reload, and it reports the
+  // transport honestly (a disabled transport is announced as NOT sent).
+  $('ip-send').addEventListener('click', () => {
+    if (invoicePreview) sendInvoiceEmail(invoicePreview.inv);
+  });
+  // Mark as sent is idempotent server-side and 409s on a draft; both answers are
+  // reported plainly, never as a silent success and never as a duplicate entry.
+  $('ip-mark-sent').addEventListener('click', () => {
+    if (invoicePreview) markInvoiceSent(invoicePreview.inv);
+  });
+  // The `View message` popup: the delivery record of an `email_sent` entry.
+  $('message-close').addEventListener('click', closeDeliveryRecord);
+  $('message-dialog').addEventListener('cancel', (event) => {
+    // native Escape on a real browser: dismiss it, never leave it half-open.
+    event.preventDefault();
+    closeDeliveryRecord();
+  });
+  $('message-dialog').addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      // jsdom never fires 'cancel'; emulate it here (browsers do both).
+      event.preventDefault();
+      closeDeliveryRecord();
+    }
+  });
   $('invoice-preview').addEventListener('keydown', (e) => {
     if (e.key === 'Escape') closeInvoicePreview();
   });
   $('org-form').addEventListener('submit', saveOrgProfile);
   $('org-accent').addEventListener('input', paintAccent);
+  // #349: the two creation actions lead the section — `+ Invoice` reveals the
+  // tracked-work wizard (#134), `+ Manual Invoice` opens the manual editor
+  // (#143) as a p-modal popup.
+  $('invoice-new').addEventListener('click', iwOpen);
   $('manual-new').addEventListener('click', () => edOpen(null));
   iwInit(); // #134 staged invoice wizard
-  $('ed-close').addEventListener('click', edClose);
+  $('ed-cancel').addEventListener('click', edCancel);
+  $('invoice-editor').addEventListener('cancel', (event) => {
+    // native Escape on a real browser: cancel, never a half-open popup.
+    event.preventDefault();
+    edCancel();
+  });
+  $('invoice-editor').addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      // jsdom never fires 'cancel'; emulate it here (browsers do both).
+      event.preventDefault();
+      edCancel();
+    }
+  });
   $('ed-add').addEventListener('click', () => {
     const row = edLineRow();
     $('ed-lines').querySelector('tbody').appendChild(row);

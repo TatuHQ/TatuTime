@@ -428,28 +428,57 @@
 
     <!-- INVOICES -->
     <section id="panel-invoices" role="tabpanel" aria-labelledby="tab-invoices" tabindex="0" hidden>
-      <div id="inv-overview" class="inv-overview">
-        <div id="inv-tiles">
-          <div class="inv-tile"><span class="inv-tile-label">Total open</span><span id="inv-tile-open" class="inv-tile-value">—</span></div>
-          <div class="inv-tile"><span class="inv-tile-label">Paid in <span id="inv-year-label"></span></span><span id="inv-tile-paid" class="inv-tile-value">—</span></div>
+      <!-- The creation actions lead the section, the same heading slot the
+           Timesheets section gives Track time (#230) and Setup gives
+           + Customer (#182). Both open a flow that used to render open at boot:
+           `+ Invoice` reveals the tracked-work wizard (#134), `+ Manual Invoice`
+           opens the manual editor (#143) as a p-modal popup. The glyphs come
+           from data-icon="plus" (decorateUbuntuButton), never from a "+" in the
+           accessible label. -->
+      <div class="ts-head">
+        <div class="hierarchy-actions" role="group" aria-label="Invoice actions">
+          <button type="button" id="invoice-new" data-icon="plus" data-positive="1">Invoice</button>
+          <button type="button" id="manual-new" class="secondary" data-icon="plus">Manual Invoice</button>
         </div>
-          <details id="invoice-trends" class="invoice-trends">
-            <summary>Invoice trends by year</summary>
-          <div id="inv-chart-wrap">
-          <div class="chart-nav">
-            <button type="button" id="inv-year-prev" aria-label="Previous year">&larr;</button>
-            <span id="inv-chart-title">Open vs paid by month</span>
-            <button type="button" id="inv-year-next" aria-label="Next year">&rarr;</button>
-          </div>
-            <div id="inv-chart" role="img" aria-label="Monthly open versus paid amounts"></div>
-          </div>
-        </details>
       </div>
+      <!-- Invoice trends promoted to the page's top content section (#135): the
+           Total open / Paid in tiles are retired, and the year label that lived
+           inside the paid tile moves into this header, so the year stays visible
+           and the year navigation keeps working. -->
+      <section id="invoice-trends" class="invoice-trends" aria-labelledby="invoice-trends-title">
+        <div class="p-card">
+          <div class="p-card__header ip-head">
+            <h2 id="invoice-trends-title">Invoice trends by year</h2>
+            <span class="invoice-trends-year">Year <span id="inv-year-label"></span></span>
+          </div>
+          <div id="inv-chart-wrap">
+            <!-- The period stepper is the app's own date bar (`.day-nav` +
+                 `.p-icon--chevron-*`), the same markup the Day, Week and
+                 Calendar bars use, so the year navigation looks and behaves
+                 like every other period picker on the site. The handlers stay
+                 `#inv-year-prev` / `#inv-year-next` (web/js/boot.js). -->
+            <nav class="day-nav" aria-label="Change year">
+              <button type="button" id="inv-year-prev" aria-label="Previous year" title="Previous year"><i class="p-icon--chevron-left" aria-hidden="true"></i></button>
+              <span id="inv-chart-title" class="day-label">Open vs paid by month</span>
+              <button type="button" id="inv-year-next" aria-label="Next year" title="Next year"><i class="p-icon--chevron-right" aria-hidden="true"></i></button>
+            </nav>
+            <div id="inv-chart" role="img" aria-label="Monthly open versus paid amounts"></div>
+            <!-- One honest line about the numbers: the exchange rate used when
+                 currencies are combined, or why they are not. Announced politely
+                 the way the rest of the page announces derived state. -->
+            <p id="inv-chart-note" class="p-form-help-text" role="status" aria-live="polite"></p>
+          </div>
+        </div>
+      </section>
       <div class="invoice-workspace">
       <section class="invoice-create-column" aria-label="Create invoice">
       <p id="invoice-summary" class="p-form-help-text" role="status" aria-live="polite"></p>
-      <!-- #134: tracked-work path only; manual lines are a separate path below. -->
-      <div id="invoice-wizard" class="p-card" role="group" aria-label="Invoice wizard">
+      <!-- #134: tracked-work path only; manual lines are a separate path below.
+           Hidden until `+ Invoice` reveals it (iwOpen, web/js/billing.js): the
+           wizard is no longer the create column's always-open boot state, but it
+           stays in place, so every id, label, aria-live announcement and the
+           1-of-3 sequence are unchanged. -->
+      <div id="invoice-wizard" class="p-card" role="group" aria-label="Invoice wizard" hidden>
         <div class="p-card__header">
           <h3 id="iw-title">Create from tracked work — 1 of 3: customer and source</h3>
         </div>
@@ -489,30 +518,6 @@
           <button type="button" id="iw-save" class="primary" data-positive="1" hidden>Save draft</button>
         </div>
       </div>
-      <div class="invoice-secondary-actions">
-        <button type="button" id="manual-new" class="secondary">New manual invoice</button>
-      </div>
-      <!-- #143: manual lines + draft editing editor. -->
-      <div id="invoice-editor" class="p-card" role="region" aria-label="Invoice line editor" hidden>
-        <div class="p-card__header ip-head"><h3 id="ed-title">Manual invoice</h3>
-          <button type="button" id="ed-close" class="link secondary">Close editor</button></div>
-        <div class="p-form__group"><label class="p-form__label" for="ed-customer">Customer</label><select class="p-form__control" id="ed-customer"></select></div>
-        <div class="table-scroll"><table id="ed-lines">
-          <caption class="sr-only">Invoice lines</caption>
-          <thead><tr><th scope="col">Description</th><th scope="col">Type</th><th scope="col">Qty</th><th scope="col">Unit price</th><th scope="col" class="num">Amount</th><th scope="col" class="actions-col"></th></tr></thead>
-          <tbody></tbody>
-        </table></div>
-        <div class="buttons"><button type="button" id="ed-add" class="secondary" data-icon="plus">Add line</button></div>
-        <div class="invoice-editor-adjustments">
-          <div class="p-form__group"><label class="p-form__label" for="ed-discount">Discount %</label><input class="p-form__control" id="ed-discount" type="number" min="0" max="100" step="0.01" value="0" inputmode="decimal"></div>
-          <div class="p-form__group"><label class="p-form__label" for="ed-tax">VAT %</label><input class="p-form__control" id="ed-tax" type="number" min="0" max="100" step="0.01" value="0" inputmode="decimal"></div>
-        </div>
-        <dl id="ed-totals" class="ip-facts"></dl>
-        <div class="p-form-validation is-error">
-          <p class="p-form-validation__message" id="ed-error" role="alert" hidden></p>
-        </div>
-        <div class="buttons"><button type="button" id="ed-save" class="primary" data-positive="1">Save draft</button></div>
-      </div>
       </section>
       <section class="invoice-register-column" aria-label="Invoice register">
       <div id="inv-list-head">
@@ -551,13 +556,25 @@
         <tbody></tbody>
       </table></div>
       <p id="invoice-empty" hidden>No invoices yet.</p>
-      <!-- #133: row selection opens the live document preview. -->
+      <!-- #133/#349: row selection opens the invoice detail view. The preview
+           region shows ONLY the invoice's rendered document -- the live,
+           stage-stamped render from GET /api/invoices/{id}/pdf/preview,
+           fetched with the app's own credentialed request and framed from a
+           client-side blob: URL. The endpoint renders on demand, so a draft has
+           a real preview too (the old "no PDF for a draft" dead end is gone),
+           and the frame is re-rendered -- never cached -- after a send or a
+           payment so the DRAFT/SENT/PAID stamp tracks the invoice. The global
+           X-Frame-Options: DENY stays as it is (no CSP exemption): the blob URL
+           is same-origin by construction, which is what frame-src 'self' blob:
+           already allows. The document is never inserted as markup. The
+           panel carries no facts readout by design (#349): the invoice's
+           identity travels on the framed document's own accessible name, so
+           the region is the PDF plus the history and nothing else. -->
       <div id="invoice-preview" class="p-card" role="region" aria-label="Invoice document preview" hidden>
         <div class="p-card__header ip-head">
           <h2 class="ip-title">Invoice document</h2>
           <button type="button" id="ip-close" class="link secondary">Close preview</button>
         </div>
-        <dl id="ip-facts" class="ip-facts"></dl>
         <section id="ip-getpaid" role="group" aria-labelledby="ip-getpaid-title" hidden>
           <h3 id="ip-getpaid-title">Get paid</h3>
           <dl id="ip-getpaid-facts" class="ip-facts"></dl>
@@ -568,9 +585,23 @@
           <div id="ip-getpaid-history"></div>
           <div class="buttons"><button type="button" id="ip-record-payment" class="p-button--positive" hidden>Record payment</button></div>
         </section>
-        <div id="ip-doc" class="ip-doc"></div>
-        <p id="ip-pdf-state" class="p-form-help-text" hidden></p>
-        <div class="buttons"><button data-positive="1" type="button" id="ip-download" class="primary">Download PDF</button></div>
+        <div id="ip-pdf" class="ip-pdf" role="region" aria-label="Rendered invoice PDF"></div>
+        <p id="ip-pdf-state" class="p-form-help-text" role="status" aria-live="polite" hidden></p>
+        <div class="buttons" id="ip-actions">
+          <button data-positive="1" type="button" id="ip-download" class="primary">Download PDF</button>
+          <button type="button" id="ip-send" class="secondary">Send email</button>
+          <button type="button" id="ip-mark-sent" class="secondary">Mark as sent</button>
+        </div>
+        <!-- #349: the activity history (Subtask A), rendered newest-first from
+             GET /api/invoices/{id}/timeline. Descriptions, actor names and the
+             email metadata are plain text: they enter the DOM through
+             textContent only. Each timestamp keeps its machine-readable RFC
+             3339 value on <time datetime>. -->
+        <section id="ip-history" class="ip-history" aria-labelledby="ip-history-title">
+          <h3 id="ip-history-title">History</h3>
+          <ol id="ip-timeline" class="ip-timeline"></ol>
+          <p id="ip-timeline-state" class="p-form-help-text" role="status" aria-live="polite" hidden></p>
+        </section>
       </div>
       </section>
       </div>
@@ -646,6 +677,57 @@
       </section>
       </div>
       </details>
+      <!-- #143: the manual-lines / draft-editing editor, now a p-modal popup
+           (#232 increment 4) instead of an inline p-card: it keeps the existing
+           POST /invoices/manual + PUT /invoices/{id} behaviour behind an
+           explicit Save, and an explicit Cancel that discards with no request.
+           Escape-to-cancel, the focus trap and the return of focus to the
+           opener come from the native <dialog> plus dom.js initDialogFocusReturn. -->
+      <dialog id="invoice-editor" class="p-modal" aria-modal="true" aria-labelledby="ed-title">
+        <div class="p-modal__dialog">
+          <header class="p-modal__header">
+            <h2 class="p-modal__title" id="ed-title">Manual invoice</h2>
+          </header>
+          <div class="p-form__group"><label class="p-form__label" for="ed-customer">Customer</label><select class="p-form__control" id="ed-customer"></select></div>
+          <div class="table-scroll"><table id="ed-lines">
+            <caption class="sr-only">Invoice lines</caption>
+            <thead><tr><th scope="col">Description</th><th scope="col">Type</th><th scope="col">Qty</th><th scope="col">Unit price</th><th scope="col" class="num">Amount</th><th scope="col" class="actions-col"></th></tr></thead>
+            <tbody></tbody>
+          </table></div>
+          <div class="buttons"><button type="button" id="ed-add" class="secondary" data-icon="plus">Add line</button></div>
+          <div class="invoice-editor-adjustments">
+            <div class="p-form__group"><label class="p-form__label" for="ed-discount">Discount %</label><input class="p-form__control" id="ed-discount" type="number" min="0" max="100" step="0.01" value="0" inputmode="decimal"></div>
+            <div class="p-form__group"><label class="p-form__label" for="ed-tax">VAT %</label><input class="p-form__control" id="ed-tax" type="number" min="0" max="100" step="0.01" value="0" inputmode="decimal"></div>
+          </div>
+          <dl id="ed-totals" class="ip-facts"></dl>
+          <div class="p-form-validation is-error">
+            <p class="p-form-validation__message" id="ed-error" role="alert" hidden></p>
+          </div>
+          <footer class="buttons p-modal__footer">
+            <button type="button" id="ed-save" class="primary" data-positive="1">Save draft</button>
+            <button type="button" id="ed-cancel" class="secondary">Cancel</button>
+          </footer>
+        </div>
+      </dialog>
+      <!-- #349: the `View message` target. An email send retains the delivery
+           record -- recipient, subject and From identity -- but the message body
+           was deliberately never persisted, so the popup presents itself as the
+           delivery record (and says the body is not kept) instead of pretending
+           to be the message. It reuses the app's p-modal pattern, so Escape, the
+           focus trap and the return of focus to the button that opened it all
+           come from the native <dialog> plus dom.js initDialogFocusReturn. -->
+      <dialog id="message-dialog" class="p-modal" aria-modal="true" aria-labelledby="message-dialog-title">
+        <div class="p-modal__dialog">
+          <header class="p-modal__header">
+            <h2 class="p-modal__title" id="message-dialog-title">Email delivery record</h2>
+          </header>
+          <dl id="message-fields" class="ip-facts"></dl>
+          <p id="message-note" class="p-form-help-text"></p>
+          <footer class="buttons p-modal__footer">
+            <button type="button" class="secondary" id="message-close">Close</button>
+          </footer>
+        </div>
+      </dialog>
     </section>
 
     <!-- EXPENSES -->
