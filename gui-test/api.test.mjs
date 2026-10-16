@@ -72,6 +72,24 @@ test('a field the server does not know is named as a stale server, not a typo', 
     window.close();
 });
 
+// serde cannot always tie a failure to a key (a wrong-typed value, a body that
+// is not JSON): the API leaves the field empty and puts its own sentence in the
+// reason, so the dialog must not print a dangling "field: " in front of it.
+test('a failure without a field reads as its reason alone', () => {
+    const window = load();
+    const el = window.document.getElementById('expense-error');
+    window.showFormError(el, {
+        payload: {
+            error: {
+                code: 'validation_failed',
+                fields: [{ field: '', message: 'invalid type: integer `42`, expected a string at line 1 column 10' }],
+            },
+        },
+    });
+    assert.equal(el.textContent, 'invalid type: integer `42`, expected a string at line 1 column 10');
+    window.close();
+});
+
 test('an ordinary field error keeps the server\'s own wording', () => {
     const window = load();
     const el = window.document.getElementById('expense-error');

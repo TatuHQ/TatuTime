@@ -248,7 +248,12 @@ export function showFormError(el, err) {
   const fields = err.payload?.error?.fields;
   let text = err.message || 'The request failed.';
   if (Array.isArray(fields) && fields.length) {
-    text = fields.map((f) => `${f.field}: ${f.message}`).join(' · ');
+    // A failure serde could not tie to a key (a body that is not JSON, or a
+    // value of the wrong type — see api::deser_error) has an empty field: the
+    // reason stands alone rather than after a dangling colon.
+    text = fields
+      .map((f) => (f.field ? `${f.field}: ${f.message}` : f.message))
+      .join(' · ');
     if (fields.some((f) => f.message === UNKNOWN_FIELD)) {
       text += ' — the running server is older than this page: restart or rebuild it.';
     }

@@ -76,32 +76,45 @@ impl FromRequestParts<AppState> for AuthUser {
     }
 }
 
-/// Turn a serde failure into the shared 422 shape, naming the field when the
-/// message carries one (`unknown field \`x\`` / `invalid type ... for field \`y\``).
+/// Turn a serde failure into the shared 422 shape, naming the field it is about.
+///
+/// serde quotes the *value* in backticks as readily as the key — `invalid type:
+/// integer \`42\`, expected a string` — so a field is only ever the token after one
+/// of serde's field markers. Reading "the first backticked token" instead reported
+/// the value (`"field": "42"`), i.e. a field nobody has, on the one path that
+/// tells a caller what to fix. When no marker is present the field stays empty and
+/// the *reason* becomes serde's own sentence rather than a generic line that hides
+/// it; `unknown field` keeps its exact wording, which the GUI keys on to spot a
+/// server older than the page.
 fn deser_error(e: serde_json::Error) -> ApiError {
     let msg = e.to_string();
-    let field = msg
-        .split('`')
-        .nth(1)
-        .filter(|s| !s.is_empty())
-        .unwrap_or("")
-        .to_owned();
-    let (code, fields) = if msg.contains("unknown field") {
-        (
-            "validation_failed",
-            vec![FieldError::new(field, "unknown field")],
-        )
-    } else {
-        (
-            "validation_failed",
-            vec![FieldError::new(field, "wrong type or format")],
-        )
+    let after = |marker: &str| -> Option<String> {
+        msg.split(marker)
+            .nth(1)
+            .and_then(|rest| rest.split('`').next())
+            .filter(|token| !token.is_empty())
+            .map(str::to_owned)
     };
+    if msg.contains("unknown field") {
+        return ApiError {
+            status: StatusCode::UNPROCESSABLE_ENTITY,
+            code: "validation_failed",
+            message: "payload failed validation".into(),
+            fields: vec![FieldError::new(
+                after("unknown field `").unwrap_or_default(),
+                "unknown field",
+            )],
+        };
+    }
+    let field = after("for field `")
+        .or_else(|| after("missing field `"))
+        .or_else(|| after("duplicate field `"))
+        .unwrap_or_default();
     ApiError {
         status: StatusCode::UNPROCESSABLE_ENTITY,
-        code,
+        code: "validation_failed",
         message: "payload failed validation".into(),
-        fields,
+        fields: vec![FieldError::new(field, msg)],
     }
 }
 
@@ -564,3 +577,68 @@ pub use self::timer_calendar::{
 pub use self::vault_config::{
     SecretInput, admin_config, delete_secret, list_secrets, set_secret, update_config,
 };
+
+#[cfg(test)]
+mod deser_error_tests {
+    use super::*;
+
+    /// A payload shape small enough to provoke each serde failure by hand.
+    #[derive(Debug, serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Probe {
+        #[allow(dead_code)]
+        name: String,
+    }
+
+    fn failure(json: &str) -> (String, String) {
+        let err = serde_json::from_str::<Probe>(json).expect_err("the probe must be refused");
+        let mapped = deser_error(err);
+        assert_eq!(mapped.status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(mapped.code, "validation_failed");
+        let field = &mapped.fields[0];
+        (field.field.clone(), field.message.clone())
+    }
+
+    #[test]
+    fn a_wrong_typed_field_is_never_quoted_as_the_field() {
+        let (field, reason) = failure("{\"name\":42}");
+        // serde_json names no key for a struct type mismatch — it quotes the
+        // *value* and gives its position. Reporting that token as the field is the
+        // bug this guards: the field stays empty and the reason carries serde's
+        // sentence and the position, so the caller can find the value.
+        assert_eq!(field, "", "never the value serde quotes: {reason}");
+        assert!(reason.contains("invalid type"), "the reason: {reason}");
+        assert!(
+            reason.contains("column 10"),
+            "the position of the offending value survives: {reason}"
+        );
+    }
+
+    #[test]
+    fn an_unknown_field_keeps_its_exact_wording() {
+        let (field, reason) = failure("{\"evil\":1}");
+        assert_eq!(field, "evil");
+        assert_eq!(
+            reason, "unknown field",
+            "the GUI keys its stale-server hint on this wording"
+        );
+    }
+
+    #[test]
+    fn a_missing_field_is_named_and_a_broken_body_still_says_why() {
+        let (field, reason) = failure("{}");
+        assert_eq!(field, "name");
+        assert!(reason.contains("missing field"), "{reason}");
+
+        let err = serde_json::from_str::<Probe>("{\"name\":").expect_err("not JSON");
+        let mapped = deser_error(err);
+        assert_eq!(
+            mapped.fields[0].field, "",
+            "a body that is not JSON names no field"
+        );
+        assert!(
+            !mapped.fields[0].message.is_empty(),
+            "and still says what was wrong"
+        );
+    }
+}

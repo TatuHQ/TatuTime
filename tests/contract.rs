@@ -1119,6 +1119,14 @@ async fn wrong_type_is_validation_failure() {
     .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(body["error"]["code"], "validation_failed");
+    // Never the *value* serde quotes in backticks: that token used to be reported
+    // as the field (`"field": "42"`), naming a key nobody has. serde_json names no
+    // key for a struct type mismatch, so the field stays empty and the reason
+    // carries its sentence and the position of the offending value.
+    assert_eq!(body["error"]["fields"][0]["field"], "");
+    let reason = body["error"]["fields"][0]["message"].as_str().unwrap();
+    assert!(reason.contains("invalid type"), "reason: {reason}");
+    assert!(reason.contains("column"), "the position survives: {reason}");
 }
 
 #[tokio::test]
