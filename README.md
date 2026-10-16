@@ -171,6 +171,12 @@ The REST surface is defined by [`openapi.json`](openapi.json) and served at
 `/openapi.json`; change both together. See [`AGENTS.md`](AGENTS.md) for the
 rules AI agents follow in this repository.
 
+Code and documentation style is recorded in
+[`docs/coding-style.md`](docs/coding-style.md) — the Rust style bar this
+repository holds itself to, with
+[*Rust by Example*](https://doc.rust-lang.org/rust-by-example/) as its reference
+exemplar for idiomatic, example-led Rust.
+
 ## Architecture decision records
 
 - [ADR-001 — Filesystem storage, entity ownership, and integration seams](docs/architecture/adr-001-filesystem-and-seams.md)
