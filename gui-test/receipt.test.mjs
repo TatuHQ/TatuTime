@@ -60,8 +60,15 @@ api.get = async (path) => {
   return { dom, window, document: window.document, urls };
 }
 
-test('the Receipt column names the stored file, and says when there is none', async () => {
-  const { window, document } = await setup();
+/// A window left open keeps the runner's event loop alive, so every test closes
+/// on the way out whatever an assertion does.
+function harness(t, parts) {
+  t.after(() => parts.window.close());
+  return parts;
+}
+
+test('the Receipt column names the stored file, and says when there is none', async (t) => {
+  const { window, document } = harness(t, await setup());
   await window.f.refreshExpenses();
   const cells = [...document.querySelectorAll('#expense-table tbody tr td[data-heading="Receipt"]')];
   assert.equal(cells.length, 3, 'one receipt cell per row');
@@ -75,11 +82,10 @@ test('the Receipt column names the stored file, and says when there is none', as
   assert.equal(hollow.querySelector('button'), null, 'and it is not a link');
   assert.match(none.textContent, /No receipt attached/);
   assert.equal(none.querySelector('button'), null);
-  window.close();
 });
 
-test('an image receipt previews from its own bytes, and closing releases them', async () => {
-  const { window, document, urls } = await setup();
+test('an image receipt previews from its own bytes, and closing releases them', async (t) => {
+  const { window, document, urls } = harness(t, await setup());
   await window.f.refreshExpenses();
   const link = document.querySelector('#expense-table tbody td[data-heading="Receipt"] button');
   const createdBefore = urls.created.length;
@@ -96,13 +102,12 @@ test('an image receipt previews from its own bytes, and closing releases them', 
   document.getElementById('receipt-close').dispatchEvent(new window.Event('click', { bubbles: true }));
   assert.equal(document.getElementById('receipt-dialog').open, false);
   assert.equal(document.getElementById('receipt-preview').childNodes.length, 0, 'the document leaves with it');
-  window.close();
 });
 
-test('a PDF receipt is framed from a blob URL the preview revokes when it closes (#CSP frame-src)', async () => {
+test('a PDF receipt is framed from a blob URL the preview revokes when it closes (#CSP frame-src)', async (t) => {
   const pdf = { id: 'p1', date: '2026-10-04', customer_id: 'c1', amount_minor: 900, currency: 'EUR',
     billable: true, receipt_name: 'scan.pdf', receipt_b64: 'aGVsbG8=' };
-  const { window, document, urls } = await setup([pdf]);
+  const { window, document, urls } = harness(t, await setup([pdf]));
   await window.f.refreshExpenses();
   document.querySelector('#expense-table tbody td[data-heading="Receipt"] button')
     .dispatchEvent(new window.Event('click', { bubbles: true }));
@@ -115,12 +120,14 @@ test('a PDF receipt is framed from a blob URL the preview revokes when it closes
 
   document.getElementById('receipt-close').dispatchEvent(new window.Event('click', { bubbles: true }));
   assert.deepEqual(urls.revoked, own, 'the blob URL is released when the preview closes');
-  window.close();
 });
 
-test('the dialog refuses an empty file instead of storing a hollow receipt', async () => {
-  const { window, document } = await setup();
+test('the dialog refuses an empty file instead of storing a hollow receipt', async (t) => {
+  const { window, document } = harness(t, await setup());
   const input = document.getElementById('expense-receipt');
+  const error = document.getElementById('expense-error');
+  // The submit handler is async (it reads the file before it posts), so every
+  // assertion waits for the state it reads rather than a tick (#265).
   const attach = (file) => {
     Object.defineProperty(input, 'files', { value: [file], configurable: true });
     input.dispatchEvent(new window.Event('change', { bubbles: true }));
@@ -132,23 +139,26 @@ test('the dialog refuses an empty file instead of storing a hollow receipt', asy
   window.f.resetExpenseForm();
   document.getElementById('expense-amount').value = '12.50';
   document.getElementById('expense-currency').value = 'EUR';
+
   attach(new window.File([], 'empty.pdf', { type: 'application/pdf' }));
-  await Promise.resolve();
-  assert.match(document.getElementById('expense-error').textContent, /empty\.pdf is empty \(0 bytes\)/);
+  await waitFor(() => /empty\.pdf is empty \(0 bytes\)/.test(error.textContent), {
+    message: 'the empty file to be refused',
+  });
   assert.equal(window.posts.length, 0, 'nothing is sent, so no hollow receipt can be stored');
 
   // Over the 3 MB the dialog and the API both document.
   attach(new window.File([new window.Blob(['x'.repeat(3_000_001)])], 'huge.pdf'));
-  await Promise.resolve();
-  assert.match(document.getElementById('expense-error').textContent, /huge\.pdf is 2\.9 MB/);
+  await waitFor(() => /huge\.pdf is 2\.9 MB/.test(error.textContent), {
+    message: 'the oversized file to be refused',
+  });
   assert.equal(window.posts.length, 0, 'an oversized receipt is refused before the round trip');
 
   // A file that carries bytes still saves, receipt and all.
   attach(new window.File([new window.Blob(['hello'])], 'scan.png', { type: 'image/png' }));
-  await new Promise((resolve) => setTimeout(resolve, 0));
+  await waitFor(() => window.posts.some((p) => p.path === '/expenses'), {
+    message: 'the save to reach the API',
+  });
   const saved = window.posts.find((p) => p.path === '/expenses');
-  assert.ok(saved, 'the save reaches the API');
   assert.equal(saved.body.receipt_name, 'scan.png');
   assert.equal(saved.body.receipt_b64, 'aGVsbG8=');
-  window.close();
 });
