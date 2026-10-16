@@ -797,3 +797,131 @@ async fn claim_error_shapes_are_honest() {
     let (_, listed) = json_req(&app, "GET", "/api/claims", None).await;
     assert_eq!(listed["claims"][0]["state"], "submitted");
 }
+
+// ------------------------------------------------------- pagination (#334) --
+
+/// #334: the expense register is the view with no range filter, so it is the
+/// one that can outgrow a page. A page says whether more follow, and following
+/// the cursor reaches every expense exactly once, newest first.
+#[tokio::test]
+async fn expense_pages_report_more_and_the_cursor_walks_every_row_once() {
+    let (app, _d) = app().await;
+    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap();
+    new_project(&app, cid, "P1", json!({})).await;
+    let (sc, cat) = json_req(
+        &app,
+        "POST",
+        "/api/categories",
+        Some(json!({"name":"Travel"})),
+    )
+    .await;
+    assert_eq!(sc, StatusCode::CREATED, "{cat}");
+    let cat_id = cat["id"].as_str().unwrap();
+
+    // Five expenses over two days, two of them sharing a day.
+    for date in [
+        "2026-10-01",
+        "2026-10-01",
+        "2026-10-02",
+        "2026-10-02",
+        "2026-10-02",
+    ] {
+        let (s, body) = json_req(
+            &app,
+            "POST",
+            "/api/expenses",
+            Some(json!({
+                "date": date, "customer_id": cid, "project_code": "P1",
+                "category_id": cat_id, "amount_minor": 1000, "currency": "EUR"
+            })),
+        )
+        .await;
+        assert_eq!(s, StatusCode::CREATED, "{body}");
+    }
+
+    // The whole set in one page.
+    let (s, all) = json_req(&app, "GET", "/api/expenses?limit=100", None).await;
+    assert_eq!(s, StatusCode::OK, "{all}");
+    assert_eq!(
+        all["next_cursor"],
+        Value::Null,
+        "a page that ends the set reports no more"
+    );
+    let rows = all["expenses"].as_array().unwrap();
+    assert_eq!(rows.len(), 5);
+    let every: Vec<String> = rows
+        .iter()
+        .map(|e| e["id"].as_str().unwrap().to_string())
+        .collect();
+    let dates: Vec<&str> = rows.iter().map(|e| e["date"].as_str().unwrap()).collect();
+    assert!(
+        dates.windows(2).all(|w| w[0] >= w[1]),
+        "the register walks (date, id) descending; got {dates:?}"
+    );
+
+    let mut walked: Vec<String> = Vec::new();
+    let mut url = String::from("/api/expenses?limit=2");
+    let mut pages = 0;
+    loop {
+        let (s, body) = json_req(&app, "GET", &url, None).await;
+        assert_eq!(s, StatusCode::OK, "{body}");
+        let page = body["expenses"].as_array().unwrap();
+        assert!(page.len() <= 2, "a page never exceeds 'limit'");
+        walked.extend(page.iter().map(|e| e["id"].as_str().unwrap().to_string()));
+        pages += 1;
+        match body["next_cursor"].as_str() {
+            Some(cursor) => {
+                assert!(
+                    walked.len() < every.len(),
+                    "only a truncated page may name a next page"
+                );
+                assert_ne!(
+                    cursor,
+                    walked.last().unwrap(),
+                    "the cursor is a token, not the row id"
+                );
+                url = format!("/api/expenses?limit=2&cursor={cursor}");
+            }
+            None => {
+                assert_eq!(walked.len(), every.len(), "the last page ended the set");
+                break;
+            }
+        }
+    }
+    assert_eq!(
+        walked, every,
+        "the walk reaches every row exactly once, newest first"
+    );
+    assert_eq!(pages, 3, "five rows at two per page is three pages");
+}
+
+/// #334: the same field-named 422s as the entry list, on the endpoint a caller
+/// is most likely to reach for a whole-history read.
+#[tokio::test]
+async fn expense_limit_and_cursor_refusals_are_field_named_422s() {
+    let (app, _d) = app().await;
+
+    for bad in ["1001", "0", "abc", ""] {
+        let (s, body) = json_req(
+            &app,
+            "GET",
+            &format!("/api/expenses?from=2026-10-01&to=2026-10-02&limit={bad}"),
+            None,
+        )
+        .await;
+        assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY, "limit={bad}: {body}");
+        assert_eq!(body["error"]["code"], "validation_failed");
+        assert_eq!(body["error"]["fields"][0]["field"], "limit", "limit={bad}");
+    }
+
+    let (s, body) = json_req(&app, "GET", "/api/expenses?cursor=nonsense", None).await;
+    assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["error"]["fields"][0]["field"], "cursor");
+
+    // The ceiling is accepted, on an empty collection too.
+    let (ok, body) = json_req(&app, "GET", "/api/expenses?limit=1000", None).await;
+    assert_eq!(ok, StatusCode::OK, "{body}");
+    assert_eq!(body["next_cursor"], Value::Null);
+    assert_eq!(body["expenses"].as_array().unwrap().len(), 0);
+}

@@ -2717,16 +2717,16 @@
         }
       },
       "FxUnavailable": {
-      "description": "No exchange-rate reference table could be loaded - offline, an unreadable TUCANO_FX_RATES_FILE, or a document that does not parse. Fail-closed: the rate is never guessed (code fx_unavailable), so the caller can enter one by hand.",
-      "content": {
-        "application/json": {
-          "schema": {
-            "$ref": "#/components/schemas/Error"
+        "description": "No exchange-rate reference table could be loaded - offline, an unreadable TUCANO_FX_RATES_FILE, or a document that does not parse. Fail-closed: the rate is never guessed (code fx_unavailable), so the caller can enter one by hand.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
           }
         }
-      }
-    },
-    "InternalError": {
+      },
+      "InternalError": {
         "description": "Server-side failure (code internal). The body stays generic and never carries paths, stack traces or raw filesystem errors.",
         "content": {
           "application/json": {
@@ -2804,6 +2804,27 @@
           "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
         },
         "description": "Optional inclusive end of a range filter; pairs with from."
+      },
+      "LimitParam": {
+        "name": "limit",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000,
+          "default": 200
+        },
+        "description": "Page size (#334). Between 1 and 1000; anything else — including a larger value — is refused with 422 naming `limit`, never clamped, so a truncated page can never be mistaken for the whole set. The default is 200."
+      },
+      "CursorParam": {
+        "name": "cursor",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "type": "string"
+        },
+        "description": "Opaque keyset cursor (#334). Send back the previous page's `next_cursor` verbatim to continue the walk; never parse or construct one — its contents are an implementation detail. A value this service did not issue is refused with 422 naming `cursor`, never treated as a fresh first page."
       }
     }
   },
@@ -4034,7 +4055,7 @@
           "entries"
         ],
         "summary": "List entries for a day or an inclusive date range",
-        "description": "Exactly one form: ?date=YYYY-MM-DD or ?from=...&to=... (span at most 400 days).",
+        "description": "Exactly one form: ?date=YYYY-MM-DD or ?from=...&to=... (span at most 400 days). Paged (#334): the rows walk the total order `(date, id)` ascending, a response holds at most `limit` of them, and `next_cursor` is the opaque key of the page that follows — `null` when the page ended the set. Follow the cursor to see every row exactly once.",
         "parameters": [
           {
             "$ref": "#/components/parameters/DateParam"
@@ -4044,6 +4065,12 @@
           },
           {
             "$ref": "#/components/parameters/OptionalToParam"
+          },
+          {
+            "$ref": "#/components/parameters/LimitParam"
+          },
+          {
+            "$ref": "#/components/parameters/CursorParam"
           }
         ],
         "responses": {
@@ -4051,13 +4078,14 @@
             "$ref": "#/components/responses/Unauthorized"
           },
           "200": {
-            "description": "Matching entries, ordered by date then creation.",
+            "description": "One page of matching entries, in `(date, id)` order; `next_cursor` is null when there are no more.",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
                   "required": [
-                    "entries"
+                    "entries",
+                    "next_cursor"
                   ],
                   "properties": {
                     "entries": {
@@ -4065,6 +4093,17 @@
                       "items": {
                         "$ref": "#/components/schemas/Entry"
                       }
+                    },
+                    "next_cursor": {
+                      "description": "Opaque cursor for the next page (#334), or null when this page ended the matching set.",
+                      "oneOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     }
                   },
                   "additionalProperties": false
@@ -4074,6 +4113,9 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
           }
         }
       },
@@ -6546,6 +6588,7 @@
           "expenses"
         ],
         "summary": "List expenses (optional customer_id / from / to filters)",
+        "description": "Paged (#334): the rows walk the total order `(date, id)` descending — newest first, the order the register displays — a response holds at most `limit` of them, and `next_cursor` is the opaque key of the page that follows, `null` when the page ended the set. Follow the cursor to see every row exactly once.",
         "parameters": [
           {
             "name": "customer_id",
@@ -6561,6 +6604,12 @@
           },
           {
             "$ref": "#/components/parameters/OptionalToParam"
+          },
+          {
+            "$ref": "#/components/parameters/LimitParam"
+          },
+          {
+            "$ref": "#/components/parameters/CursorParam"
           }
         ],
         "responses": {
@@ -6568,13 +6617,14 @@
             "$ref": "#/components/responses/Unauthorized"
           },
           "200": {
-            "description": "Matching expenses.",
+            "description": "One page of matching expenses, newest first; `next_cursor` is null when there are no more.",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
                   "required": [
-                    "expenses"
+                    "expenses",
+                    "next_cursor"
                   ],
                   "properties": {
                     "expenses": {
@@ -6582,6 +6632,17 @@
                       "items": {
                         "$ref": "#/components/schemas/Expense"
                       }
+                    },
+                    "next_cursor": {
+                      "description": "Opaque cursor for the next page (#334), or null when this page ended the matching set.",
+                      "oneOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     }
                   },
                   "additionalProperties": false
@@ -6591,6 +6652,9 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
           }
         }
       },

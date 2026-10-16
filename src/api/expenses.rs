@@ -1,6 +1,7 @@
 //! Expenses: categories, expense records (#24) and the submission/claim
 //! approval workflows built on them.
 
+use super::pagination::{self, Order};
 use super::*;
 use chrono::{DateTime, Utc};
 
@@ -49,7 +50,8 @@ pub async fn delete_category(State(app): State<AppState>, Path(id): Path<Uuid>) 
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
-/// `GET /expenses` filters: all optional, unknown params tolerated (#100).
+/// `GET /expenses` filters plus the page (#334): all optional, unknown params
+/// tolerated (#100).
 #[derive(Debug, serde::Deserialize)]
 pub struct ExpenseQuery {
     #[serde(default)]
@@ -58,6 +60,19 @@ pub struct ExpenseQuery {
     from: Option<String>,
     #[serde(default)]
     to: Option<String>,
+    #[serde(default)]
+    limit: Option<String>,
+    #[serde(default)]
+    cursor: Option<String>,
+}
+
+/// Expense list body: the page plus its "is there more" answer (#334). Same
+/// `expenses` key as before, so an existing client keeps working; `next_cursor`
+/// is present and `null` when the page ended the set, never omitted.
+#[derive(serde::Serialize)]
+struct ExpenseList<'a> {
+    expenses: Vec<&'a Expense>,
+    next_cursor: Option<String>,
 }
 
 pub async fn list_expenses(
@@ -65,6 +80,8 @@ pub async fn list_expenses(
     actor: AuthUser,
     Query(q): Query<ExpenseQuery>,
 ) -> ApiResult {
+    // #334: resolve (and refuse) the page before the collection read.
+    let page = pagination::page_request(q.limit.as_ref(), q.cursor.as_ref())?;
     let mut expenses = store_blocking("expense list", &app.store, |s| s.list_expenses()).await?;
     if let Some(cid) = &q.customer_id {
         let cid = Uuid::parse_str(cid)
@@ -76,7 +93,23 @@ pub async fn list_expenses(
         expenses.retain(|e| e.date >= from && e.date <= to);
     }
     expenses.retain(|e| visible_to(&actor.0, e.user_id));
-    Ok(Json(serde_json::json!({ "expenses": expenses })).into_response())
+    // #334: the documented total order — `(date, id)` descending, so the
+    // register reads newest first — fixed here rather than inherited from the
+    // store, because the keyset cursor's soundness depends on it. The filters
+    // above run first: a page holds `limit` rows the caller may see, and the
+    // cursor only ever names a row the caller was shown.
+    expenses.sort_by(|a, b| b.date.cmp(&a.date).then(b.id.cmp(&a.id)));
+    let (expenses, next_cursor) = pagination::paginate(
+        expenses.iter().collect(),
+        |e| (e.date, e.id),
+        &page,
+        Order::Descending,
+    );
+    Ok(Json(ExpenseList {
+        expenses,
+        next_cursor,
+    })
+    .into_response())
 }
 
 /// The customer/project/category an expense points at must exist. Shared by the

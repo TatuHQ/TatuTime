@@ -2,7 +2,7 @@
 // Moved from the original monolithic app.js; behaviour is unchanged.
 
 
-import { api } from './api.js';
+import { api, fetchAll } from './api.js';
 import { $, addDays, announce, askConfirm, askPrompt, clearFormError, el, formatMoney, isoDate, mondayOf, rowAction, showFormError, statusChip } from './dom.js';
 import { ed, parseHundredths, refreshInvoices } from './invoices.js';
 import { customerName, state } from './state.js';
@@ -51,7 +51,9 @@ export async function iwLoadProjects() {
   }
   const [cust, entries, invoices] = await Promise.all([
     api.get(`/customers/${cid}`),
-    api.get(`/entries?from=${iw.from}&to=${iw.to}`),
+    // #334: the period's entries may be several pages; the unbilled totals the
+    // wizard offers must not depend on which page came first.
+    fetchAll(`/entries?from=${iw.from}&to=${iw.to}`, 'entries'),
     api.get('/invoices'),
   ]);
   const billed = new Set();
@@ -59,7 +61,7 @@ export async function iwLoadProjects() {
     if (inv.status !== 'draft') for (const l of inv.lines || []) if (l.entry_id) billed.add(l.entry_id);
   }
   const unbilledBy = new Map(); // project -> hundredths
-  for (const e of entries.entries || []) {
+  for (const e of entries.rows) {
     if (e.customer_id !== cid || !e.billable || billed.has(e.id) || !e.project_code) continue;
     const k = e.project_code;
     unbilledBy.set(k, (unbilledBy.get(k) || 0) + Math.round(Number(e.hours) * 100));
