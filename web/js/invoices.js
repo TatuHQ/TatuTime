@@ -480,13 +480,25 @@ export function dashApplyColumns() {
 
 // ------------------------------------------------ invoice document preview --
 //
-// #133: selecting an invoice row opens a live preview built from
-// GET /invoices/{id}/document (#116). The returned HTML is reduced to text
-// through the DOM (childNodes' textContent) — markup is NEVER injected, the
-// invariant holds; the full-format document remains the Download PDF action
-// (#113). Drafts have no archived PDF yet: the panel says so honestly.
+// #133: selecting an invoice row opens a live preview. Like the expense
+// receipt preview (#23), the document is shown as the ACTUAL PDF: the
+// archived bytes come from GET /invoices/{id}/pdf (#113) and are framed
+// from a blob URL the browser renders with its own viewer (the CSP allows
+// `frame-src 'self' blob:`). The blob URL is revoked whenever the preview
+// is replaced or closed. Drafts have no archived PDF yet: the panel says
+// so honestly.
 
 export let invoicePreview = null; // { id, inv, opener }
+
+/// The blob URL the open preview embeds, so re-opening and closing revoke
+/// it — a rendered PDF must not stay alive behind a dismissed panel.
+let ipDocUrl = '';
+
+function releaseIpDoc() {
+  if (ipDocUrl) URL.revokeObjectURL(ipDocUrl);
+  ipDocUrl = '';
+  $('ip-doc').textContent = '';
+}
 
 export function invoiceBalance(inv) {
   // #189: one balance semantic (the four copies had already drifted on the
@@ -514,9 +526,10 @@ export async function openInvoicePreview(inv, opener) {
   dl('Balance', bal ? `${inv.currency} ${formatMoney(bal)}` : 'Settled');
   if (inv.due_date) dl('Due', inv.due_date);
   if (inv.write_off_reason) dl('Written off', inv.write_off_reason);
-  $('ip-subject').textContent = '';
-  $('ip-letter').textContent = '';
   const draft = inv.status === 'draft';
+  // The document host: the real PDF for anything issued, empty for a draft
+  // (whose only honest state is the message below).
+  releaseIpDoc();
   // ---- Get paid: the collect-payment box on the invoice. No hosted
   // checkout exists by design, so this shows the customer's own payment
   // details, what has been settled and when, and offers manual
@@ -584,17 +597,25 @@ export async function openInvoicePreview(inv, opener) {
     $('ip-pdf-state').textContent =
       'Draft — issuing the invoice archives its PDF document. Nothing is locked or sent yet.';
   } else {
+    // Embed the actual invoice PDF, the way the expense receipt preview
+    // frames a stored receipt: fetch the archived bytes, mint a blob URL,
+    // let the browser's own viewer render it.
+    const host = $('ip-doc');
+    host.appendChild(el('p', { text: 'Loading the invoice document…' }));
     try {
-      const doc = await api.get(`/invoices/${inv.id}/document`);
+      const blob = await api.getBlob(`/invoices/${inv.id}/pdf`);
       if (!invoicePreview || invoicePreview.id !== inv.id) return; // superseded
-      $('ip-subject').textContent = doc.subject || '';
-      const parsed = new DOMParser().parseFromString(doc.html || '', 'text/html');
-      $('ip-letter').textContent = [...parsed.body.childNodes]
-        .map((n) => (n.textContent || '').trim())
-        .filter(Boolean)
-        .join('\n');
-    } catch {
-      $('ip-letter').textContent = 'Preview unavailable — the document could not be rendered.';
+      host.textContent = '';
+      const url = URL.createObjectURL(blob);
+      ipDocUrl = url;
+      host.appendChild(
+        el('iframe', {
+          attrs: { id: 'ip-pdf-frame', src: url, title: `Invoice ${inv.number} document` },
+        }),
+      );
+    } catch (err) {
+      if (!invoicePreview || invoicePreview.id !== inv.id) return; // superseded
+      host.textContent = `Document preview unavailable: ${err.message}. Download PDF still offers the archived file.`;
     }
   }
   card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -605,6 +626,7 @@ export function closeInvoicePreview() {
   if (!invoicePreview) return;
   const { opener } = invoicePreview;
   invoicePreview = null;
+  releaseIpDoc();
   $('invoice-preview').hidden = true;
   if (opener && document.contains(opener)) opener.focus();
 }

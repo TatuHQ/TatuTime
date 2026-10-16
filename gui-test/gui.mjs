@@ -924,19 +924,20 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
     .find((b) => b.textContent === 'Preview' && b.closest('tr').textContent.includes(acmeInv.number));
   check('invoice rows offer a Preview action (#133)', !!pvBtn);
   pvBtn.dispatchEvent(new window.Event('click', { bubbles: true }));
-  await waitFor(() => byId('invoice-preview').hidden === false && byId('ip-subject').textContent.includes(acmeInv.number), {
-    message: 'the preview panel to render the issued invoice document',
+  await waitFor(() => byId('invoice-preview').hidden === false && byId('ip-doc').querySelector('iframe'), {
+    message: 'the preview panel to embed the issued invoice PDF',
   });
   const panel = window.document.getElementById('invoice-preview');
   check('preview panel opens on selection (#133)', panel.hidden === false);
   const facts = window.document.getElementById('ip-facts').textContent;
   check('facts name number, total and balance (#133)',
     facts.includes(acmeInv.number) && facts.includes('Total') && facts.includes('Balance'));
-  check('subject resolves from /document (#133)',
-    window.document.getElementById('ip-subject').textContent.includes(acmeInv.number));
-  check('letter is textContent-only, never injected markup (#133)',
-    window.document.getElementById('ip-letter').children.length === 0);
-  check('issued invoice offers Download PDF from the preview (#133)',
+  const pdfFrame = window.document.getElementById('ip-doc').querySelector('iframe');
+  check('preview embeds the ACTUAL invoice PDF from a blob URL (like the expense receipt)',
+    pdfFrame === window.document.querySelector('#ip-doc iframe')
+      && pdfFrame.getAttribute('src').startsWith('blob:')
+      && pdfFrame.getAttribute('title').includes(acmeInv.number));
+  check('the embedded document is the archived bytes (same endpoint as Download)',
     window.document.getElementById('ip-download').hidden === false);
   const getpaid = window.document.getElementById('ip-getpaid');
   check('issued invoice preview shows the Get paid box',
