@@ -1,5 +1,7 @@
-//! Invoicing: draft/issue/pay lifecycle (#8, #27), email delivery (#35),
-//! online payments (#34) and accounting sync (#33).
+//! Invoicing: draft/issue/pay lifecycle (#8, #27), email delivery (#35)
+//! and accounting sync (#33). Getting paid is deliberate: the invoice shows
+//! the customer's own payment details and settlement is recorded manually —
+//! no hosted-checkout or payment-provider integration exists here.
 
 use super::*;
 
@@ -327,12 +329,6 @@ pub struct WriteOffInput {
     pub reason: String,
 }
 
-#[derive(serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct CheckoutInput {
-    pub provider: String,
-}
-
 /// Record a payment on an issued invoice (#27, #114): full balance by
 /// default, or a partial amount. A zero amount is a 422 (bad shape), an
 /// over-payment a 409 (bad state arithmetic) — both without persistence.
@@ -627,180 +623,6 @@ pub async fn send_invoice_email_copy(
             )
         }
         Err(e) => Err(e),
-    }
-}
-
-// ------------------------------------------------------------- payments #34 --
-
-/// Creates a hosted checkout link for an issued invoice (#34). The provider
-/// adapter builds the URL and a client reference that the webhook echoes back
-/// so the payment can be matched to the invoice.
-pub async fn create_checkout(
-    State(app): State<AppState>,
-    Path(id): Path<Uuid>,
-    ValidJson(input): ValidJson<CheckoutInput>,
-) -> ApiResult {
-    let invoice = get_invoice_or_404(&app, id)?;
-    match invoice.status {
-        crate::domain::InvoiceStatus::Draft => {
-            return Err(ApiError::conflict(
-                "issue the invoice before taking payment",
-            ));
-        }
-        crate::domain::InvoiceStatus::Paid => {
-            return Err(ApiError::conflict("this invoice is already paid"));
-        }
-        crate::domain::InvoiceStatus::WrittenOff => {
-            return Err(ApiError::conflict("this invoice is written off"));
-        }
-        crate::domain::InvoiceStatus::Issued | crate::domain::InvoiceStatus::PartlyPaid => {}
-    }
-    // A partly-paid checkout charges the BALANCE, never the total (#114).
-    let amount = invoice.balance_minor();
-    if amount == 0 {
-        return Err(ApiError::conflict("this invoice has no balance to collect"));
-    }
-    let provider = provider_or_400(app.payments.get(&input.provider), "payment")?;
-    let session = provider
-        .create_checkout(invoice.id, &invoice.number, amount, &invoice.currency.0)
-        .map_err(|e| ApiError::bad_request(e.to_string()))?;
-    app.audit.record(
-        "checkout_created",
-        &format!("{}:{id}", session.provider),
-        app.clock.now(),
-    );
-    Ok((StatusCode::CREATED, Json(session)).into_response())
-}
-
-/// Provider webhook receiver (#34, public route — authenticated by the
-/// provider signature, hence the CSRF exemption). A completed payment flips
-/// the invoice to `paid` through the #27 status model; unrelated or replayed
-/// events are accepted without effect so providers stop retrying.
-pub async fn payment_webhook(
-    State(app): State<AppState>,
-    Path(provider): Path<String>,
-    headers: axum::http::HeaderMap,
-    body: String,
-) -> ApiResult {
-    let Some(p) = app.payments.get(&provider) else {
-        return Err(ApiError::bad_request("unknown payment provider"));
-    };
-    let signature = headers
-        .get("x-webhook-signature")
-        .or_else(|| headers.get("stripe-signature"))
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or_default();
-    let event = p.parse_webhook(&body, signature).map_err(|e| match e {
-        crate::payments::PaymentError::BadSignature => ApiError::new(
-            StatusCode::UNAUTHORIZED,
-            "bad_signature",
-            "webhook signature verification failed",
-        ),
-        // Review A12: provider-facing messages stay generic; details are logged.
-        other => {
-            tracing::warn!(error = %other, "webhook payload rejected");
-            ApiError::bad_request("invalid webhook payload")
-        }
-    })?;
-    let Some(event) = event else {
-        return Ok(Json(serde_json::json!({ "ignored": true })).into_response());
-    };
-    let Some(invoice) = app.store.find_invoice_by_number(&event.invoice_number)? else {
-        return Err(ApiError::not_found("invoice"));
-    };
-    let reference = if event.event_id.is_empty() {
-        format!("{}:{}", event.provider, event.reference)
-    } else {
-        format!("{}:evt-{}", event.provider, event.event_id)
-    };
-    match invoice.status {
-        crate::domain::InvoiceStatus::Paid => {
-            if invoice.payments.iter().any(|p| p.reference == reference) {
-                return Ok(Json(serde_json::json!({ "status": "already_paid" })).into_response());
-            }
-            return Err(ApiError::conflict(
-                "payment event was not recorded; invoice has already been settled",
-            ));
-        }
-        crate::domain::InvoiceStatus::WrittenOff => {
-            // Unexpected money on a forgiven invoice: accepted so providers
-            // stop retrying, but it never reopens the document (#114).
-            app.audit
-                .record("payment_on_written_off", &invoice.number, app.clock.now());
-            return Ok(Json(serde_json::json!({ "ignored": "written_off" })).into_response());
-        }
-        crate::domain::InvoiceStatus::Draft => {
-            return Err(ApiError::conflict("invoice is not issued"));
-        }
-        crate::domain::InvoiceStatus::Issued | crate::domain::InvoiceStatus::PartlyPaid => {}
-    }
-    // Review A11: a signed event must carry what was ACTUALLY collected and
-    // match the invoice, so a refund/other-currency event never settles it.
-    if event.currency != invoice.currency.0.to_ascii_uppercase() {
-        app.audit.record(
-            "payment_currency_mismatch",
-            &format!("{}:{}", invoice.number, event.currency),
-            app.clock.now(),
-        );
-        return Err(ApiError::conflict("payment currency mismatch"));
-    }
-    // #114: the event records a LEDGER PAYMENT of its real amount. A partial
-    // lands on partly_paid; over-collection is refused (never a silent
-    // overpayment), and a replay of the same provider event is idempotent.
-    // #185: the replay/idempotency check no longer runs on this unlocked
-    // snapshot — it happens inside `record_payment_once`'s write lock, so two
-    // concurrent deliveries of the same event cannot both post.
-    let balance = invoice.balance_minor();
-    if event.amount_minor > balance {
-        app.audit.record(
-            "payment_over_balance",
-            &format!("{}:{}", invoice.number, event.amount_minor),
-            app.clock.now(),
-        );
-        return Err(ApiError::conflict(
-            "payment amount exceeds the remaining invoice balance",
-        ));
-    }
-    match app.store.record_payment_once(
-        invoice.id,
-        Some(event.amount_minor),
-        reference.clone(),
-        event.provider.clone(),
-        app.clock.now(),
-    ) {
-        Ok(None) => Ok(Json(
-            serde_json::json!({ "status": "already_processed", "invoice": invoice.number }),
-        )
-        .into_response()),
-        Ok(Some(settled)) => {
-            app.audit
-                .record("payment_received", &settled.number, app.clock.now());
-            let status = if settled.status == crate::domain::InvoiceStatus::Paid {
-                "paid"
-            } else {
-                "partly_paid"
-            };
-            Ok(
-                Json(serde_json::json!({ "status": status, "invoice": settled.number }))
-                    .into_response(),
-            )
-        }
-        // A competing event may have changed the balance after the unlocked
-        // preflight. Acknowledge only if this exact event is in the ledger.
-        Err(crate::store::StoreError::Conflict(_)) => {
-            let fresh = app.store.get_invoice(invoice.id)?;
-            match fresh {
-                Some(i) if i.payments.iter().any(|p| p.reference == reference) => Ok(Json(
-                    serde_json::json!({ "status": "already_processed", "invoice": i.number }),
-                )
-                .into_response()),
-                Some(_) => Err(ApiError::conflict(
-                    "payment event was not recorded; retry after reconciling invoice balance",
-                )),
-                None => Err(ApiError::conflict("invoice is not issued")),
-            }
-        }
-        Err(other) => Err(other.into()),
     }
 }
 

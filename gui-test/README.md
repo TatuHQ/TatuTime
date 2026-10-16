@@ -5,7 +5,7 @@ drives the real forms against a running server (default `http://localhost:8099`)
 
 ```sh
 cargo build --release
-TUCANO_DATA_DIR=$(mktemp -d) TUCANO_PORT=8099 TUCANO_STRIPE_FAKE=1 ./target/release/tucano-time &
+TUCANO_DATA_DIR=$(mktemp -d) TUCANO_PORT=8099 ./target/release/tucano-time &
 cd gui-test && npm install && npm test
 ```
 
@@ -185,7 +185,7 @@ review needs visual evidence, capture it manually against a local server:
 
 ```sh
 cargo build
-TUCANO_DATA_DIR=/tmp/tt-shots TUCANO_PORT=8080 TUCANO_STRIPE_FAKE=1 ./target/debug/tucano-time
+TUCANO_DATA_DIR=/tmp/tt-shots TUCANO_PORT=8080 ./target/debug/tucano-time
 # sign in as the bootstrapped admin in a browser at http://localhost:8080
 ```
 

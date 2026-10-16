@@ -864,7 +864,8 @@ pub fn safe_filename(s: &str) -> String {
 }
 
 /// One recorded payment against an invoice (#114). Amounts are minor units;
-/// `method` distinguishes manual/webhook/provider settlements.
+/// `method` names how the settlement arrived — `manual` for a payment recorded
+/// at the desk, or a free-text label (bank transfer, cheque) passed by the caller.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct InvoicePayment {
     pub id: Uuid,

@@ -25,7 +25,6 @@ pub mod email_reminders;
 pub mod error;
 pub mod fx;
 pub mod lock;
-pub mod payments;
 pub mod pdf;
 pub mod providers;
 pub mod ratelimit;
@@ -100,7 +99,6 @@ pub const API_ROUTES: &[(&str, &str, Tier)] = &[
     ("GET", "/api/auth/me", Tier::Open),
     ("GET", "/api/auth/sso/providers", Tier::Open),
     ("POST", "/api/auth/sso/assertion", Tier::Open),
-    ("POST", "/api/payments/webhook/{provider}", Tier::Open),
     // ---- the `protected` sub-router (Tier::Member) ----
     ("GET", "/api/customers", Tier::Member),
     ("POST", "/api/customers", Tier::Member),
@@ -199,7 +197,6 @@ pub const API_ROUTES: &[(&str, &str, Tier)] = &[
     ("POST", "/api/invoices/{id}/write-off", Tier::Admin),
     ("POST", "/api/invoices/{id}/email", Tier::Admin),
     ("POST", "/api/invoices/{id}/email-copy", Tier::Admin),
-    ("POST", "/api/invoices/{id}/checkout", Tier::Admin),
     ("POST", "/api/invoices/{id}/sync", Tier::Admin),
     ("GET", "/api/sync/accounting", Tier::Admin),
     ("GET", "/api/admin/invoice-template", Tier::Admin),
@@ -273,11 +270,6 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/auth/sso/assertion",
             axum::routing::post(api::sso_assertion),
-        )
-        // Provider webhooks: authenticated by signature, not session (#34).
-        .route(
-            "/payments/webhook/{provider}",
-            axum::routing::post(api::payment_webhook),
         );
 
     // Authenticated: all timesheet data.
@@ -441,10 +433,6 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/invoices/{id}/email-copy",
             axum::routing::post(api::send_invoice_email_copy),
-        )
-        .route(
-            "/invoices/{id}/checkout",
-            axum::routing::post(api::create_checkout),
         )
         .route(
             "/invoices/{id}/sync",
@@ -654,12 +642,10 @@ async fn csrf_guard(
         method,
         axum::http::Method::POST | axum::http::Method::PUT | axum::http::Method::DELETE
     );
-    // Login/bootstrap are pre-session; payment webhooks are authenticated by
-    // provider signature instead of the cookie+CSRF pair (#34).
+    // Login/bootstrap are pre-session; the assertion authenticates itself.
     let exempt = path == "/api/auth/login"
         || path == "/api/auth/bootstrap"
-        || path == "/api/auth/sso/assertion" // pre-session; the assertion is its own proof (review A6)
-        || path.starts_with("/api/payments/webhook/");
+        || path == "/api/auth/sso/assertion"; // pre-session; the assertion is its own proof (review A6)
     if mutating && !exempt {
         let ok = req
             .headers()

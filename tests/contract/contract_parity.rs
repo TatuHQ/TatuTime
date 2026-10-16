@@ -168,7 +168,6 @@ const PUBLIC_OPERATIONS: &[(&str, &str)] = &[
     ("GET", "/api/auth/status"),
     ("GET", "/api/auth/sso/providers"),
     ("POST", "/api/auth/sso/assertion"),
-    ("POST", "/api/payments/webhook/{provider}"),
 ];
 
 /// `(METHOD, path, kind, ticket)` gaps the contract is known to have, where
@@ -385,8 +384,7 @@ fn contract_documents_csrf_on_mutating_operations() {
     // exemptions) must document the X-CSRF-Protection header and a 403.
     let contract: Value =
         serde_json::from_str(include_str!("../../openapi.json")).expect("valid openapi.json");
-    // Mirrors the `exempt` set in csrf_guard (src/lib.rs) plus the payment
-    // webhook prefix check.
+    // Mirrors the `exempt` set in csrf_guard (src/lib.rs).
     let exempt = [
         "/api/auth/login",
         "/api/auth/bootstrap",
@@ -396,7 +394,7 @@ fn contract_documents_csrf_on_mutating_operations() {
     for (path, item) in paths {
         for method in ["post", "put", "delete", "patch"] {
             let Some(op) = item.get(method) else { continue };
-            if exempt.contains(&path.as_str()) || path.starts_with("/api/payments/webhook/") {
+            if exempt.contains(&path.as_str()) {
                 continue;
             }
             let empty = Vec::new();
@@ -418,7 +416,7 @@ fn contract_documents_csrf_on_mutating_operations() {
 // --------------------------- #252 contract document fidelity ----------------
 //
 // #252 replaced the document's `nullable` (3.0-only, silently ignored by 3.1
-// validators), corrected parameter requiredness/placement and the timer/webhook/
+// validators), corrected parameter requiredness/placement and the timer/
 // draft-line shapes, and declared every operation tag. These tests read the
 // checked-in document itself, so a regression in any of those fixes fails here.
 
@@ -713,11 +711,10 @@ fn contract_range_and_oauth_parameter_requiredness_matches_handlers() {
 
 #[test]
 fn contract_declares_problem_operation_shapes() {
-    // #252 (3, 4, 6, 7): the timer start returns the running Timer; the webhook
-    // documents the signature headers it reads; PUT /api/invoices/{id} declares
-    // its path `id` once; the draft edit references the input line shape (only
-    // kind+date mandatory) rather than the stored one; and GET /api/timer can be
-    // null through a 3.1 union.
+    // #252 (3, 4, 6, 7): the timer start returns the running Timer; PUT
+    // /api/invoices/{id} declares its path `id` once; the draft edit references
+    // the input line shape (only kind+date mandatory) rather than the stored
+    // one; and GET /api/timer can be null through a 3.1 union.
     let contract: Value =
         serde_json::from_str(include_str!("../../openapi.json")).expect("valid openapi.json");
     let started = &contract["paths"]["/api/timer"]["post"]["responses"]["201"];
@@ -736,14 +733,6 @@ fn contract_declares_problem_operation_shapes() {
         admits_null(listed),
         "GET /api/timer answers JSON null when no timer runs: {listed}"
     );
-
-    let webhook = declared_params(&contract, "POST", "/api/payments/webhook/{provider}");
-    for header in ["x-webhook-signature", "stripe-signature"] {
-        assert!(
-            webhook.iter().any(|p| p == header),
-            "the webhook reads {header}; declared params: {webhook:?}"
-        );
-    }
 
     let edit = declared_params(&contract, "PUT", "/api/invoices/{id}");
     assert_eq!(

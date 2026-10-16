@@ -1608,20 +1608,32 @@ if (copyBtn) {
 }
 }
 
-// ---- PAYMENTS (#34) + #129: Pay link / Sync buttons removed from rows; ----
-// ---- the checkout + webhook flow is covered via the API directly.      ----
+// ---- PAYMENTS: no hosted-checkout providers exist by design; settlement ----
+// ---- runs through the row's Record payment dialog, then via #129 trim. ----
 const rowBtns = () => [...window.document.querySelectorAll('#invoice-table tbody button')].map((b) => b.textContent);
 check('invoice rows no longer render a Pay link button (#129)', !rowBtns().includes('Pay link'));
 check('invoice rows no longer render a Sync button (#129)', !rowBtns().includes('Sync'));
+check('invoice rows offer no checkout/provider affordance', !rowBtns().some((t) => /pay now|checkout|card|stripe/i.test(t)));
 {
-  // A signed webhook (fake-mode Stripe, signature ignored) marks the invoice paid.
-  const chk = await (await fetch(`${BASE}/api/invoices/${acmeInv.id}/checkout`, { method: 'POST', headers: { 'content-type': 'application/json', Cookie: SESSION_COOKIE, 'X-CSRF-Protection': '1' }, body: JSON.stringify({ provider: 'stripe' }) })).json();
-  const whBody = JSON.stringify({ type: 'checkout.session.completed', payment_status: 'paid', amount_minor: 9500, currency: 'EUR', client_reference_id: chk.reference, metadata: { invoice_number: acmeInv.number } });
-  const whRes = await fetch(`${BASE}/api/payments/webhook/stripe`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: whBody });
-  const whJson = await whRes.json();
-  check('webhook marks the invoice paid', whRes.status === 200 && whJson.status === 'paid');
+  // The GUI drives the whole settlement: amount prompt, then reference prompt.
+  const payBtn = [...window.document.querySelectorAll('#invoice-table tbody button')].find((b) => b.textContent === 'Record payment');
+  check('issued invoice renders a Record payment action', !!payBtn);
+  payBtn.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await waitFor(() => /Amount to record/.test(byId('dlg-message').textContent), { message: 'the amount prompt to open' });
+  window.document.getElementById('dlg-input').value = '95.00';
+  window.document.getElementById('dlg-ok').dispatchEvent(new window.Event('click', { bubbles: true }));
+  await waitFor(() => /Payment reference/.test(byId('dlg-message').textContent), { message: 'the reference prompt to open' });
+  window.document.getElementById('dlg-input').value = 'wire-9001';
+  window.document.getElementById('dlg-ok').dispatchEvent(new window.Event('click', { bubbles: true }));
+  await waitFor(() => /Invoice marked paid/.test(byId('live-region').textContent), {
+    message: 'the record-payment announce',
+  });
+  check('Record payment announces the settlement', /Invoice marked paid/.test(window.document.getElementById('live-region').textContent));
   const afterInv = (await (await fetch(BASE + '/api/invoices', { headers: { Cookie: SESSION_COOKIE } })).json()).invoices.find((i) => i.id === acmeInv.id);
-  check('invoice now paid with a provider reference', afterInv.status === 'paid' && /stripe:/.test(afterInv.payment_reference));
+  check(
+    'invoice now paid via the manual ledger entry',
+    afterInv.status === 'paid' && afterInv.payments.some((p) => p.reference === 'wire-9001' && p.method === 'manual'),
+  );
 
   // ---- ACCOUNTING SYNC (#33): the status endpoint stays live (API-only now) ----
   const stRes = await fetch(BASE + '/api/sync/accounting', { headers: { Cookie: SESSION_COOKIE } });

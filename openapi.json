@@ -7,7 +7,7 @@
       "name": "AGPL-3.0-or-later",
       "identifier": "AGPL-3.0-or-later"
     },
-    "description": "Timesheet system: daily/weekly time entries, customers and project codes with per-entity currencies and hourly rates. File-backed (no database); the API is the only writer below TUCANO_DATA_DIR. Access is private-per-user (#51): a member sees and edits only their own entries/expenses/submissions; an administrator sees all data and owns invoicing, approvals and user management (the /api/users and /api/invoices routes return 403 for members). Mutating endpoints may return 503 (Retry-After) under write contention (#62). Mutating requests (POST/PUT/DELETE) must also carry the X-CSRF-Protection: 1 header (#46); without it the request is rejected 403 with code csrf. Exempt: POST /api/auth/login, /api/auth/bootstrap, /api/auth/sso/assertion and POST /api/payments/webhook/{provider}."
+    "description": "Timesheet system: daily/weekly time entries, customers and project codes with per-entity currencies and hourly rates. File-backed (no database); the API is the only writer below TUCANO_DATA_DIR. Access is private-per-user (#51): a member sees and edits only their own entries/expenses/submissions; an administrator sees all data and owns invoicing, approvals and user management (the /api/users and /api/invoices routes return 403 for members). Mutating endpoints may return 503 (Retry-After) under write contention (#62). Mutating requests (POST/PUT/DELETE) must also carry the X-CSRF-Protection: 1 header (#46); without it the request is rejected 403 with code csrf. Exempt: POST /api/auth/login, /api/auth/bootstrap, /api/auth/sso/assertion."
   },
   "servers": [
     {
@@ -2742,7 +2742,7 @@
         "name": "X-CSRF-Protection",
         "in": "header",
         "required": true,
-        "description": "CSRF guard (#46): mutating requests (POST/PUT/DELETE) must send this header with the literal value 1, otherwise the request is rejected 403 csrf. Exempt endpoints (no header required): POST /api/auth/login, /api/auth/bootstrap, /api/auth/sso/assertion and POST /api/payments/webhook/{provider}.",
+        "description": "CSRF guard (#46): mutating requests (POST/PUT/DELETE) must send this header with the literal value 1, otherwise the request is rejected 403 csrf. Exempt endpoints (no header required): POST /api/auth/login, /api/auth/bootstrap, /api/auth/sso/assertion.",
         "schema": {
           "type": "string",
           "enum": [
@@ -5882,191 +5882,6 @@
           }
         },
         "description": "amount_minor absent = the full remaining balance (legacy behaviour). 0 is a 422, over-balance a 409 \u2014 both without persistence. Settling the last cent flips to paid; anything less parks at partly_paid with a ledger entry."
-      }
-    },
-    "/api/invoices/{id}/checkout": {
-      "parameters": [
-        {
-          "name": "id",
-          "in": "path",
-          "required": true,
-          "schema": {
-            "type": "string",
-            "format": "uuid"
-          }
-        }
-      ],
-      "post": {
-        "operationId": "createCheckout",
-        "x-admin-only": true,
-        "tags": [
-          "invoices"
-        ],
-        "summary": "Create a hosted checkout link for an issued invoice (#34)",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "required": [
-                  "provider"
-                ],
-                "properties": {
-                  "provider": {
-                    "type": "string",
-                    "enum": [
-                      "stripe",
-                      "paypal"
-                    ]
-                  }
-                },
-                "additionalProperties": false
-              }
-            }
-          }
-        },
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/CsrfProtection"
-          }
-        ],
-        "responses": {
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "201": {
-            "description": "Checkout session.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": [
-                    "invoice_id",
-                    "provider",
-                    "reference",
-                    "url"
-                  ],
-                  "properties": {
-                    "invoice_id": {
-                      "type": "string",
-                      "format": "uuid"
-                    },
-                    "provider": {
-                      "type": "string"
-                    },
-                    "reference": {
-                      "type": "string"
-                    },
-                    "url": {
-                      "type": "string"
-                    }
-                  },
-                  "additionalProperties": false
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
-          },
-          "422": {
-            "$ref": "#/components/responses/ValidationError"
-          }
-        }
-      }
-    },
-    "/api/payments/webhook/{provider}": {
-      "parameters": [
-        {
-          "name": "provider",
-          "in": "path",
-          "required": true,
-          "schema": {
-            "type": "string",
-            "enum": [
-              "stripe",
-              "paypal"
-            ]
-          }
-        }
-      ],
-      "post": {
-        "operationId": "paymentWebhook",
-        "tags": [
-          "invoices"
-        ],
-        "summary": "Provider webhook (public; authenticated by HMAC signature) \u2014 verifies amount/currency against the invoice and marks it paid (#34, review A11)",
-        "parameters": [
-          {
-            "name": "x-webhook-signature",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Provider signature (HMAC) over the raw body. Optional at the transport layer: the provider verifier fails the request 401 bad_signature when it is missing or does not match."
-          },
-          {
-            "name": "stripe-signature",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Stripe's signature header, accepted in place of x-webhook-signature."
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "description": "Raw provider payload, forwarded to the provider verifier unparsed (the signature covers the exact bytes), which is why the body is read as a string rather than deserialized here.",
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object"
-              }
-            },
-            "text/plain": {
-              "schema": {
-                "type": "string"
-              }
-            }
-          }
-        },
-        "security": [],
-        "responses": {
-          "200": {
-            "description": "Processed (paid / already_paid / ignored).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
-          }
-        }
       }
     },
     "/api/invoices/{id}/sync": {

@@ -851,11 +851,11 @@
 
       <section id="settings-panel-security" class="settings-panel" role="tabpanel" aria-labelledby="settings-tab-security" tabindex="0">
         <h2>Integration credentials <span class="beta">Beta</span></h2>
-      <p class="p-form-help-text">Store provider secrets (Stripe, OAuth, SMTP, calendar feeds) encrypted at rest. The integrations that consume these are <strong>Beta</strong> — not yet wired to live providers.</p>
+      <p class="p-form-help-text">Store provider secrets (OAuth, SMTP, calendar feeds) encrypted at rest. The integrations that consume these are <strong>Beta</strong> — not yet wired to live providers.</p>
       <p id="vault-status" class="p-form-help-text"></p>
       <p id="email-status" class="p-form-help-text" role="status" aria-live="polite"></p>
       <form id="secret-form" class="p-card">
-        <div class="p-form__group"><label class="p-form__label" for="secret-key">Key (e.g. stripe.secret_key)</label><input type="text" class="p-form__control" id="secret-key" maxlength="100" required></div>
+        <div class="p-form__group"><label class="p-form__label" for="secret-key">Key (e.g. smtp.password)</label><input type="text" class="p-form__control" id="secret-key" maxlength="100" required></div>
         <div class="p-form__group"><label class="p-form__label" for="secret-value">Value</label><input class="p-form__control" id="secret-value" type="password" autocomplete="off" required></div>
         <div class="p-form-validation is-error">
           <p class="p-form-validation__message" id="secret-error" role="alert" hidden></p>

@@ -10,7 +10,7 @@
 //! adapter, `calendar.<provider>.access_token` (+ refresh credentials) drive
 //! it. Live HTTP goes through a small `HttpFetch` transport trait so all
 //! parsing/mapping logic is unit-tested against provider-shaped fixtures with
-//! no network calls, matching the payments/accounting pattern.
+//! no network calls, matching the accounting pattern.
 
 use base64::Engine as _;
 use serde_json::Value;

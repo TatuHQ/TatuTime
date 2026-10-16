@@ -671,7 +671,7 @@ mod tests {
         drop(posts);
         let paid_at = Utc.timestamp_opt(1, 0).unwrap();
         let pid = p
-            .push_payment(&remote, 18000, "EUR", "stripe:abc", paid_at)
+            .push_payment(&remote, 18000, "EUR", "wire:abc", paid_at)
             .unwrap();
         assert!(pid.starts_with("remote-payment"));
         assert_eq!(
