@@ -60,7 +60,11 @@ the upstream wording is an upstream change, not a local one.
   `schedules/`, `timers/`, `items/` and `notifications/` doc folders,
   `sync/accounting.json` (#33), archived
   `invoices/<id>.pdf` (#113), `invoices/.seq.json` (number ledger, B3) and
-  `*.idx.*` side indexes (D3). Atomic writes (tmp + rename).
+  the `*.idx.*` side indexes (D3): `invoices/.idx.numbers.json`,
+  `users/.idx.emails.json`, and the #335 per-user read indexes
+  `entries/.idx.users.json` + `expenses/.idx.users.json`. Dot files are never
+  documents — the collection reader skips them, so a side index stays out of
+  the `MAX_DOCS` count. Atomic writes (tmp + rename).
 - **Secret vault (#77):** admin-entered integration credentials are encrypted at
   rest with `TUCANO_SECRET_KEY` (32 bytes) and never returned to clients (masked
   hints only) or logged. Fail-closed: unset key ⇒ vault disabled.
