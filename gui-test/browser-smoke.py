@@ -42,6 +42,8 @@ not run (no Firefox, no binary, protocol error).
 
 import argparse
 import base64
+import struct
+import zlib
 import http.client
 import json
 import os
@@ -115,9 +117,6 @@ VIEWS = [
      " return !!t && !!t.tHead; })()"),
     ("/expenses", "tab-expenses", "panel-expenses",
      "(() => { const t = document.getElementById('expense-table');"
-     " return !!t && !!t.tHead; })()"),
-    ("/reports", "tab-reports", "panel-reports",
-     "(() => { const t = document.getElementById('report-table');"
      " return !!t && !!t.tHead; })()"),
     ("/settings/security", "tab-settings", "settings-panel-security",
      "(() => { const t = document.getElementById('secret-table');"
@@ -280,6 +279,27 @@ ACTION_TOP_ALIGNED = (
     "  : 'the action sits ' + Math.round(d) + 'px below the top of its slot';"
 )
 
+def one_pixel_png_b64() -> str:
+    """A real 1x1 PNG, so the receipt preview can decode what the gate seeds.
+
+    The seeded receipt used to be the literal string "hello" base64-encoded,
+    which is not an image at all: opening its preview would assert a broken
+    document. This encodes a valid 1x1 RGBA PNG with the stdlib only.
+    """
+    def chunk(tag: bytes, data: bytes) -> bytes:
+        body = tag + data
+        checksum = struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
+        return struct.pack(">I", len(data)) + body + checksum
+
+    header = struct.pack(">IIBBBBB", 1, 1, 8, 6, 0, 0, 0)
+    pixels = zlib.compress(bytes([0, 255, 0, 0, 255]))  # filter byte + one RGBA pixel
+    png = b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", pixels) + chunk(b"IEND", b"")
+    return base64.b64encode(png).decode()
+
+
+ONE_PIXEL_PNG = one_pixel_png_b64()
+
+
 # #16 is hidden for now (the approval process is not implemented): `hidden` on
 # the rail wrapper *and* on the tab takes the entry out of the rail without a
 # gap, and `route.js::applyRoute` refuses a hidden tab, so the stale /approvals
@@ -299,6 +319,28 @@ APPROVALS_HIDDEN = (
     " panelHeadings: document.querySelectorAll('#submission-table thead th').length,"
     " pathname: location.pathname,"
     " timesheetShown: !document.getElementById('panel-timesheet').hidden"
+    "});"
+)
+
+# Reports is hidden the same way (#16's precedent): the rail entry takes no gap,
+# the tab and its panel stay in the markup, and the router refuses a hidden tab so
+# the stale /reports deep link lands on the default view. Reimplementing the
+# reporting suite is a markup change.
+REPORTS_HIDDEN = (
+    "var t = document.getElementById('tab-reports');"
+    "var item = t && t.closest('.p-tabs__item');"
+    "var panel = document.getElementById('panel-reports');"
+    "return JSON.stringify({"
+    " tabHidden: !!t && t.hidden,"
+    " itemHidden: !!item && item.hidden,"
+    " itemHeight: item ? Math.round(item.getBoundingClientRect().height) : -1,"
+    " selected: t ? t.getAttribute('aria-selected') : null,"
+    " panelExists: !!panel,"
+    " panelHidden: !!panel && panel.hidden,"
+    " pathname: location.pathname,"
+    " timesheetShown: !document.getElementById('panel-timesheet').hidden,"
+    " rail: Array.prototype.filter.call(document.querySelectorAll('#tabs [role=tab]'),"
+    " function (tab) { return !tab.hidden; }).map(function (tab) { return tab.id; }).join(',')"
     "});"
 )
 
@@ -1067,7 +1109,7 @@ class Gate:
             "POST", "/api/expenses",
             {"date": "2026-01-31", "customer_id": cid, "amount_minor": 12500,
              "currency": "EUR", "billable": True, "note": "seeded for the register walk",
-             "receipt_name": "hotel.png", "receipt_b64": "aGVsbG8="},
+             "receipt_name": "hotel.png", "receipt_b64": ONE_PIXEL_PNG},
             cookie=cookie, extra_headers=csrf,
         )
         if status != 201:
@@ -1205,6 +1247,33 @@ class Gate:
             "/approvals falls back to the default view instead of a hidden tab (#16)",
             approvals["pathname"].rstrip("/") == "/timesheets/day" and approvals["timesheetShown"],
             f"pathname={approvals['pathname']!r} timesheet shown={approvals['timesheetShown']}",
+        )
+
+        # Reports is hidden the same way, and its deep link behaves the same:
+        # the rail drops it, the panel stays, and the URL lands on the default.
+        self.navigate("/reports")
+        self.wait_script(
+            "document.readyState === 'complete'"
+            " && document.getElementById('version').textContent === 'TucanoTime'",
+            "the app to boot at /reports",
+        )
+        reports = json.loads(self.marionette.script(REPORTS_HIDDEN))
+        self.check(
+            "the Reports rail entry is hidden and leaves no rail gap",
+            reports["tabHidden"] and reports["itemHidden"] and reports["itemHeight"] == 0
+            and reports["selected"] == "false"
+            and "tab-reports" not in reports["rail"].split(","),
+            f"reports={reports}",
+        )
+        self.check(
+            "the Reports panel keeps its markup for the day the tab returns",
+            reports["panelExists"] and reports["panelHidden"],
+            f"reports={reports}",
+        )
+        self.check(
+            "/reports falls back to the default view instead of a hidden tab",
+            reports["pathname"].rstrip("/") == "/timesheets/day" and reports["timesheetShown"],
+            f"pathname={reports['pathname']!r} timesheet shown={reports['timesheetShown']}",
         )
 
     # ------------------------------------------------ forms (#232 phase 2b) --
@@ -1559,6 +1628,43 @@ class Gate:
             and marked["rows"] >= 2 and "hotel.png" in marked["label"],
             f"register={marked}",
         )
+        # The link previews the document itself — not a download — and the
+        # download sits inside the preview, so the receipt is viewable and
+        # keepable from one place.
+        self.marionette.script(
+            "document.querySelector('#expense-table tbody button[data-icon=file]').click();"
+            "return true;"
+        )
+        self.wait_script(
+            "(function () { var d = document.getElementById('receipt-dialog');"
+            " return !!(d && (d.open === true || d.hasAttribute('open'))); })()",
+            "the receipt preview to open",
+        )
+        preview = json.loads(self.marionette.script(
+            "var img = document.getElementById('receipt-image');"
+            "return JSON.stringify({"
+            " title: document.getElementById('receipt-dialog-title').textContent,"
+            " isImage: !!img,"
+            " width: img ? img.naturalWidth : -1,"
+            " dataUrl: !!(img && /^data:image\\/png;base64,/.test(img.getAttribute('src'))),"
+            " download: document.getElementById('receipt-download').textContent.trim(),"
+            " close: document.getElementById('receipt-close').textContent.trim()"
+            "});"
+        ))
+        self.check(
+            "the receipt link previews the document, with a way to download it",
+            preview["title"] == "hotel.png" and preview["isImage"] and preview["width"] == 1
+            and preview["dataUrl"] and preview["download"] == "Download" and preview["close"] == "Close",
+            f"preview={preview}",
+        )
+        self.marionette.script("document.getElementById('receipt-close').click(); return true;")
+        self.check(
+            "closing the preview dismisses it",
+            self.marionette.script(
+                "return document.getElementById('receipt-dialog').open !== true"
+                " && document.getElementById('receipt-preview').childNodes.length === 0;"
+            ),
+        )
         self.marionette.script(
             "var t = document.getElementById('expense-table');"
             "var row = t.querySelector('tbody button[data-icon=file]').closest('tr');"
@@ -1612,7 +1718,7 @@ class Gate:
             and len(edited) == 1
             and edited[0]["amount_minor"] == 13100
             and edited[0]["receipt_name"] == "hotel.png"
-            and edited[0]["receipt_b64"] == "aGVsbG8=",
+            and edited[0]["receipt_b64"] == ONE_PIXEL_PNG,
             f"edited={edited}",
         )
         self.check(

@@ -231,11 +231,32 @@ export function announce(msg) {
   $('live-region').textContent = msg;
 }
 
+/// The reason the API gives for a key it does not know at all — the
+/// `deny_unknown_fields` rejection in `api::deser_error`, `FieldError::new(field,
+/// "unknown field")`. serde only refuses a key that was *actually sent*, so this
+/// is never a bad field name in the payload: it means the process answering
+/// predates the field the page just sent. The modules and the binary can drift
+/// apart because the sheets are served from disk while the Rust is fixed at
+/// compile time — `TUCANO_WEB_DIR` does that in any profile (the dev asset path,
+/// src/lib.rs) and rust-embed does it in a debug build — so a long-running
+/// server hands out today's GUI over yesterday's contract. Naming that is the
+/// difference between "original_amount_minor: unknown field" sending the reader
+/// hunting for a typo in the dialog and a restart.
+const UNKNOWN_FIELD = 'unknown field';
+
 export function showFormError(el, err) {
   const fields = err.payload?.error?.fields;
   let text = err.message || 'The request failed.';
   if (Array.isArray(fields) && fields.length) {
-    text = fields.map((f) => `${f.field}: ${f.message}`).join(' · ');
+    // A failure serde could not tie to a key (a body that is not JSON, or a
+    // value of the wrong type — see api::deser_error) has an empty field: the
+    // reason stands alone rather than after a dangling colon.
+    text = fields
+      .map((f) => (f.field ? `${f.field}: ${f.message}` : f.message))
+      .join(' · ');
+    if (fields.some((f) => f.message === UNKNOWN_FIELD)) {
+      text += ' — the running server is older than this page: restart or rebuild it.';
+    }
   }
   el.textContent = text;
   el.hidden = false;

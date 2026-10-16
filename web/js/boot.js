@@ -5,7 +5,7 @@
 import { addRecurring, createRetainer, iwInit, refreshCatalog, refreshRetainers, refreshSchedules, saveCatalogItem } from './billing.js';
 import { calState, refreshTimeCal, shiftMonth } from './calendar.js';
 import { $, addDays, announce, clearFormError, decorateUbuntuButton, isoDate, mondayOf } from './dom.js';
-import { ADD_CATEGORY_VALUE, addCategory, addExpenseCategory, fillCategorySelect, refreshCategories, refreshExpenses, refreshSubmissions, resetCategoryForm, resetExpenseForm, saveExpense, submitWeek } from './expenses.js';
+import { ADD_CATEGORY_VALUE, addCategory, addExpenseCategory, fillCategorySelect, initReceiptPreview, refreshCategories, refreshExpenses, refreshSubmissions, resetCategoryForm, resetExpenseForm, saveExpense, submitWeek } from './expenses.js';
 import { refreshExpenseConversion, resetExpenseConversion, showConverted } from './fx.js';
 import { cancelCustomerEdit, cancelProjectEdit, cancelTaskEdit, contactRow, fillParentCustomers, fillTaskParents, prefillProjectParent, refreshCustomerPickers, refreshCustomerTable, refreshProjectTable, refreshTaskTable, runReport, saveCustomer, saveProject, saveTask } from './hierarchy.js';
 import { closeInvoicePreview, dash, dashApplyColumns, downloadInvoicePdf, ed, edClose, edLineRow, edOpen, edRecalc, edSave, generateInvoice, invoicePreview, refreshInvoiceSummary, refreshInvoices } from './invoices.js';
@@ -412,6 +412,9 @@ export function wireSetupPanels(today) {
       ? `${file.name} (${Math.max(1, Math.round(file.size / 1024))} KB) — saved with the expense.`
       : 'Images and PDFs up to 3 MB, stored with the expense.';
   });
+  // Receipt preview (#23): the register's receipt link opens the stored document
+  // in its own dialog, from the bytes the record already carries.
+  initReceiptPreview();
   // Currency conversion: the rate the dialog carries comes from GET /api/fx and
   // is re-derived whenever a pick can change the billed currency. Every failure
   // is announced — a lookup that quietly did nothing would leave a field that

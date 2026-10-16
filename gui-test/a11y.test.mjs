@@ -134,8 +134,10 @@ test('every dialog ships a visible cancel button (#141)', () => {
   const dialogs = [...document.querySelectorAll('dialog')];
   assert.ok(dialogs.length >= 10, `expected the full dialog set, got ${dialogs.length}`);
   for (const dlg of dialogs) {
+    // Close is the same affordance: a document preview says Close (the receipt
+    // dialog), and the rule is a visible way out, not a particular word.
     const cancels = [...dlg.querySelectorAll('button')]
-      .filter((b) => /cancel/i.test(`${b.id} ${b.textContent}`));
+      .filter((b) => /cancel|close/i.test(`${b.id} ${b.textContent}`));
     assert.ok(cancels.length > 0, `${dlg.id} has no cancel button`);
     assert.ok(
       cancels.some((b) => !b.hasAttribute('hidden')),

@@ -530,9 +530,25 @@ pub fn build_router(state: AppState) -> Router {
         .fallback(static_assets)
         .layer(axum::middleware::from_fn(csrf_guard))
         .layer(axum::middleware::from_fn(security_headers))
-        .layer(RequestBodyLimitLayer::new(256 * 1024))
+        // Two caps, one number: axum's own body limit is what `Bytes` (and so
+        // `ValidJson`) extracts under — its 2 MB default has to be lifted too, or
+        // the extractor answers `400 failed to read the request body` before the
+        // handler can name the field — and the tower layer caps the raw stream in
+        // front of the router.
+        .layer(axum::extract::DefaultBodyLimit::max(MAX_REQUEST_BODY_BYTES))
+        .layer(RequestBodyLimitLayer::new(MAX_REQUEST_BODY_BYTES))
         .with_state(state)
 }
+
+/// The largest request body the API reads. It has to sit above the *field*
+/// rule, not beside it: an expense carries its receipt inline as base64 (#23)
+/// and `validate_expense_input` accepts up to 4 MB of it, so a smaller
+/// transport cap answers first — before any handler, as a bare
+/// `413 length limit exceeded` outside the app's error shape, which is how a
+/// scanned receipt could never be stored. 4 MB of base64 is ~3 MB of file, so
+/// 6 MiB holds the whole body with room for JSON quoting; the field-level rule
+/// keeps refusing over-long receipts in the app's own 422 shape.
+const MAX_REQUEST_BODY_BYTES: usize = 6 * 1024 * 1024;
 
 /// The methods `API_ROUTES` mounts on `path` (the full path, `/api/...`), in
 /// registry order. An entry whose template is the path itself always wins — a
@@ -616,7 +632,8 @@ async fn security_headers(
         "default-src 'self'; script-src 'self'; \
          style-src 'self' 'unsafe-inline'; img-src 'self' data:; \
          font-src 'self'; connect-src 'self'; frame-ancestors 'none'; \
-         base-uri 'self'; form-action 'self'"
+         base-uri 'self'; form-action 'self'; \
+         frame-src 'self' blob:"
             .parse()
             .expect("static"),
     );
