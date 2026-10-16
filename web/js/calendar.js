@@ -6,7 +6,7 @@ import { api, fetchAll } from './api.js';
 import { $, announce, el, isoDate, ubuntuIcon } from './dom.js';
 import { activateSeg } from './route.js';
 import { createSeqGuard } from './seq.js';
-import { MONTH_NAMES, fmtHM, refreshDay, showEntryForm } from './timesheet.js';
+import { MONTH_NAMES, fmtHM, refreshDay, showEntryForm, weekLockIndex } from './timesheet.js';
 
 const calSeq = createSeqGuard();
 
@@ -54,6 +54,10 @@ export async function refreshTimeCal() {
   // The displayed month already names itself in the bar's centre label, so the
   // readout is just the labelled number ("Total hours 26:01").
   $('cal-total').textContent = fmtHM(totalHundredths);
+  // Days holding invoiced time wear the lock: the freeze is permanent, and
+  // the Day view (one click away) carries the link to the invoice.
+  const locks = await weekLockIndex();
+  if (!isCalCurrent()) return; // #188: the lock round-trip may have been beaten
   const tbody = $('cal-grid').querySelector('tbody');
   tbody.textContent = '';
   const lead = (new Date(`${monthStart}T00:00:00Z`).getUTCDay() + 6) % 7;
@@ -63,6 +67,7 @@ export async function refreshTimeCal() {
     const date = `${month}-${String(d).padStart(2, '0')}`;
     const dayEntries = byDate.get(date) || [];
     const daySum = dayEntries.reduce((a, e) => a + e.hundredths, 0);
+    const invoicedHere = dayEntries.some((e) => locks.invoiced.has(e.id));
     // The cell carries the DAY TOTAL only — never a per-entry list (#140), so a
     // busy day stays legible at a glance and the detail stays in the Day view.
     // The top row mirrors the Day view's day box (#12/#108): the date number
@@ -72,7 +77,7 @@ export async function refreshTimeCal() {
       el('span', { cls: 'cal-head' }, [
         el('span', { cls: 'cal-num', text: String(d) }),
         el('span', { cls: 'cal-status', attrs: { 'aria-hidden': 'true' } }, [
-          ubuntuIcon(dayEntries.length ? 'success' : 'history'),
+          ubuntuIcon(invoicedHere ? 'lock-locked' : dayEntries.length ? 'success' : 'history'),
         ]),
       ]),
     ];
@@ -98,7 +103,9 @@ export async function refreshTimeCal() {
               attrs: {
                 'aria-label': `${d} ${monthName(month)}: ${fmtHM(daySum)} across ${
                   dayEntries.length
-                } entr${dayEntries.length === 1 ? 'y' : 'ies'} — open Day view`,
+                } entr${dayEntries.length === 1 ? 'y' : 'ies'}${
+                  invoicedHere ? ' — invoiced time is locked' : ''
+                } — open Day view`,
               },
             }, kids)
           : el('div', { cls: 'cal-day cal-plain' }, kids),

@@ -874,6 +874,93 @@ const editRes = await fetch(`${BASE}/api/entries/${invoicedEntryId}`, {
 });
 check('issuing locks the invoiced entry (edit -> 409)', editRes.status === 409);
 
+// ---- INVOICED TIME IN THE TIMESHEET VIEWS: the row loses its actions and
+// carries a lock that links to the invoice (permanent freeze). The lock
+// index has a 5s TTL and the issue happened over fetch, so the predicate
+// keeps bouncing renders until the fresh locks arrive. ----
+{
+  window.document.getElementById('tab-timesheet').dispatchEvent(new window.Event('click', { bubbles: true }));
+  window.document.getElementById('ts-day').dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle('the day view to render');
+  // Walk the hidden day cursor to the invoiced date by real button clicks
+  // (date arithmetic on the inputs' own values — no wall-clock races).
+  const diffDays = Math.round(
+    (Date.parse('2026-12-01T00:00:00Z') - Date.parse(`${byId('day-date').value}T00:00:00Z`)) / 86400000,
+  );
+  const fwd = diffDays >= 0;
+  const btn = window.document.getElementById(fwd ? 'day-next' : 'day-prev');
+  const back = window.document.getElementById(fwd ? 'day-prev' : 'day-next');
+  for (let i = 0; i < Math.abs(diffDays); i += 1) btn.dispatchEvent(new window.Event('click', { bubbles: true }));
+  let lockLink = null;
+  await waitFor(() => {
+    // bounce one render per poll so the expiring lock TTL gets re-read
+    btn.dispatchEvent(new window.Event('click', { bubbles: true }));
+    back.dispatchEvent(new window.Event('click', { bubbles: true }));
+    const row = [...window.document.querySelectorAll('#day-table tbody tr')]
+      .find((r) => (r.querySelector('.entry-project') || {}).textContent?.includes('MKT-2'));
+    lockLink = row && [...row.querySelectorAll('button')]
+      .find((b) => b.textContent === acmeInv.number && b.getAttribute('data-icon') === 'lock-locked');
+    return !!lockLink;
+  }, { timeoutMs: 15000, message: 'the invoiced day row to swap its actions for the invoice lock link' });
+  const dayRow = lockLink.closest('tr');
+  check('invoiced day row hides Edit/Delete',
+    ![...dayRow.querySelectorAll('button')].some((b) => ['Edit', 'Delete'].includes(b.textContent)));
+  check('invoiced day row shows a lock naming its invoice',
+    lockLink.getAttribute('title').includes(acmeInv.number));
+  check('week strip day box wears the lock',
+    !!window.document.querySelector('#week-strip .ws-day[data-date="2026-12-01"] .p-icon--lock-locked'));
+  // The lock jumps to the Invoices panel and opens exactly that invoice.
+  lockLink.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await waitFor(() => byId('invoice-preview').hidden === false
+    && byId('ip-facts').textContent.includes(acmeInv.number), {
+    timeoutMs: 15000, message: 'the lock link to open the invoice preview',
+  });
+  check('the lock opens its invoice (#133 preview)',
+    byId('ip-facts').textContent.includes(acmeInv.number));
+  window.document.getElementById('ip-close').dispatchEvent(new window.Event('click', { bubbles: true }));
+  // Week grid: the invoiced row carries the same invoice link by its total.
+  // week-date has a real change listener (boot.js), so aim it at the week.
+  window.document.getElementById('ts-week').dispatchEvent(new window.Event('click', { bubbles: true }));
+  let weekLock = null;
+  await waitFor(() => {
+    const wd = byId('week-date');
+    wd.value = '2026-12-01';
+    wd.dispatchEvent(new window.Event('change', { bubbles: true }));
+    const row = [...window.document.querySelectorAll('#week-table tbody tr')]
+      .find((r) => (r.querySelector('.entry-project') || {}).textContent?.includes('MKT-2'));
+    weekLock = row && [...row.querySelectorAll('button')].find((b) => b.textContent === acmeInv.number);
+    return !!weekLock;
+  }, { timeoutMs: 15000, message: 'the week grid to link its invoiced row' });
+  check('week grid invoiced row links its lock to the invoice', !!weekLock);
+  // Calendar: step toward December 2026 from whatever month is shown (the
+  // first click initialises from the day cursor, so walk by comparison).
+  window.document.getElementById('ts-cal').dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle('the calendar to render');
+  const monthIdx = (label) => {
+    const m = /([A-Za-z]{3}) (\d{4})/.exec(label || '');
+    if (!m) return null;
+    const i = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+      .indexOf(m[1]);
+    return i < 0 ? null : i + 1 + 12 * Number(m[2]);
+  };
+  const wantMonth = 12 + 12 * 2026;
+  for (let i = 0; i < 30; i += 1) {
+    const cur = monthIdx(byId('cal-label').textContent);
+    if (cur === wantMonth) break;
+    const back = cur !== null && cur > wantMonth;
+    window.document.getElementById(back ? 'cal-prev' : 'cal-next')
+      .dispatchEvent(new window.Event('click', { bubbles: true }));
+    await settle('the calendar to step a month');
+  }
+  check('calendar reached Dec 2026', /Dec 2026/.test(byId('cal-label').textContent));
+  await waitFor(() => !!window.document.querySelector('#cal-grid .p-icon--lock-locked'), {
+    timeoutMs: 15000, message: 'the invoiced calendar day to wear the lock',
+  });
+  check('calendar day cell shows the lock for invoiced time',
+    !!window.document.querySelector('#cal-grid .p-icon--lock-locked'));
+  window.document.getElementById('ts-day').dispatchEvent(new window.Event('click', { bubbles: true }));
+}
+
 // ---- INVOICE PDF (#113): archived at issue, downloadable, hinted in JSON ----
 const issuedBody = await issueRes.clone().json();
 check('issue persists the pdf hint', issuedBody.pdf && /^INV-\d+\.pdf$/.test(issuedBody.pdf.filename) && issuedBody.pdf.sha256.length === 64 && issuedBody.pdf.bytes > 100);

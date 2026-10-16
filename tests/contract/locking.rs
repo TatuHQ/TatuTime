@@ -139,11 +139,11 @@ async fn expense_on_partly_paid_invoice_stays_locked() {
         b_del["error"]["message"]
             .as_str()
             .unwrap_or_default()
-            .contains("open invoice"),
+            .contains("issued invoice"),
         "{b_del}"
     );
-    // Settle it: only then may the (no longer part of any receivable) expense
-    // be removed — matching the entry-lock lifecycle documented in #216.
+    // Invoiced records are PERMANENT: settling the invoice no longer
+    // releases its expense — the document is the record of what was billed.
     json_req(
         &app,
         "POST",
@@ -152,5 +152,87 @@ async fn expense_on_partly_paid_invoice_stays_locked() {
     )
     .await;
     let (s_after, b_after) = json_req(&app, "DELETE", &format!("/api/expenses/{xid}"), None).await;
-    assert_eq!(s_after, StatusCode::NO_CONTENT, "paid releases: {b_after}");
+    assert_eq!(
+        s_after,
+        StatusCode::CONFLICT,
+        "paid keeps the lock: {b_after}"
+    );
+}
+
+#[tokio::test]
+async fn invoiced_time_is_permanently_locked() {
+    // The lifecycle rule: once an entry sits on an ISSUED invoice it can
+    // never be edited or deleted again — not while open, not after the
+    // invoice is settled. Only drafts leave lines free.
+    let (app, _d) = app().await;
+    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap().to_string();
+    new_project(&app, &cid, "P1", json!({"rate_minor": 6000})).await;
+    let (_s0, e) = json_req(
+        &app,
+        "POST",
+        "/api/entries",
+        Some(json!({"date":"2026-10-02","customer_id":cid.clone(),"project_code":"P1","hours":3})),
+    )
+    .await;
+    let eid = e["id"].as_str().unwrap().to_string();
+    let (_s2, inv) = json_req(
+        &app,
+        "POST",
+        "/api/invoices",
+        Some(json!({"customer_id":cid,"from":"2026-10-01","to":"2026-10-07"})),
+    )
+    .await;
+    let iid = inv["id"].as_str().unwrap().to_string();
+    // A draft locks nothing.
+    let (s_draft, _) = json_req(
+        &app,
+        "PUT",
+        &format!("/api/entries/{eid}"),
+        Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":4})),
+    )
+    .await;
+    assert_eq!(s_draft, StatusCode::OK, "draft invoices must not lock");
+    json_req(&app, "POST", &format!("/api/invoices/{iid}/issue"), None).await;
+    let (s_open, b_open) = json_req(
+        &app,
+        "PUT",
+        &format!("/api/entries/{eid}"),
+        Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":5})),
+    )
+    .await;
+    assert_eq!(s_open, StatusCode::CONFLICT, "issued locks: {b_open}");
+    assert!(
+        b_open["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("permanent")
+    );
+    // Settle it in full: the lock SURVIVES settlement (this is the change —
+    // previously paying released the entry for editing).
+    json_req(
+        &app,
+        "POST",
+        &format!("/api/invoices/{iid}/pay"),
+        Some(json!({"amount_minor": 18000, "reference": "wire-full"})),
+    )
+    .await;
+    let (s_paid, _) = json_req(
+        &app,
+        "PUT",
+        &format!("/api/entries/{eid}"),
+        Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":6})),
+    )
+    .await;
+    assert_eq!(s_paid, StatusCode::CONFLICT, "paid keeps the entry locked");
+    let (s_del, _) = json_req(&app, "DELETE", &format!("/api/entries/{eid}"), None).await;
+    assert_eq!(
+        s_del,
+        StatusCode::CONFLICT,
+        "paid keeps the entry undeletable"
+    );
+    // And the stored hours are exactly what was invoiced (3h at PUT-to-4h
+    // was allowed pre-issue; the last write before issue won).
+    let (_s3, got) = json_req(&app, "GET", &format!("/api/entries/{eid}"), None).await;
+    assert_eq!(got["hours"], 4.0);
 }

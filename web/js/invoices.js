@@ -4,11 +4,11 @@
 
 import { api } from './api.js';
 import { catalogItems } from './billing.js';
-import { startApp } from './boot.js';
+import { startApp, switchTab } from './boot.js';
 import { $, announce, askConfirm, askPrompt, clearFormError, el, formatMoney, rowAction, showFormError, statusChip } from './dom.js';
 import { createSeqGuard } from './seq.js';
 import { customerName, state } from './state.js';
-import { invalidateLockCache, weekLockIds } from './timesheet.js';
+import { invalidateLockCache } from './timesheet.js';
 
 const invoiceSeq = createSeqGuard();
 
@@ -345,12 +345,12 @@ export const dash = {
   currency: '',
 };
 
-// The server locks entry edits/deletes while an invoice is OPEN —
-// InvoiceStatus::is_open() == issued | partly_paid (src/domain.rs); settled
-// and written-off invoices release their entries (#114 lifecycle, #216).
-// #217: one predicate, previously four ad-hoc copies that had drifted —
-// weekLockIds checked only 'issued', so partly-paid invoices showed their
-// entries as editable while the server answered every save with 409.
+// "Collectable right now": issued or partly paid — drives the Open dashboard
+// filter, the ageing columns and the Record-payment affordance. NOT the lock
+// predicate: entry/expense locks are permanent for ANY non-draft invoice
+// (settling no longer releases them — see weekLockIndex in timesheet.js and
+// the InvoiceLock provider in src/lock.rs). #217 heritage: this one predicate
+// replaced four ad-hoc copies that had drifted.
 export function isOpenInvoice(inv) {
   return inv.status === 'issued' || inv.status === 'partly_paid';
 }
@@ -629,6 +629,21 @@ export function closeInvoicePreview() {
   releaseIpDoc();
   $('invoice-preview').hidden = true;
   if (opener && document.contains(opener)) opener.focus();
+}
+
+// Open a specific invoice's preview from another view — the Timesheets lock
+// links call this: show the Invoices panel, refresh the register, then
+// preview exactly that invoice. Admin-tier like every invoice surface; the
+// lock links only render for users whose lock index saw the invoice.
+export async function focusInvoice(id) {
+  try {
+    switchTab('tab-invoices');
+    await refreshInvoices();
+    const inv = await api.get(`/invoices/${id}`);
+    await openInvoicePreview(inv, null);
+  } catch (err) {
+    announce(err.message);
+  }
 }
 
 export async function removeInvoice(id) {

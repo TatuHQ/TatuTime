@@ -6621,7 +6621,7 @@
           "expenses"
         ],
         "summary": "Full replacement of an expense",
-        "description": "An edit replaces the record the way the entries PUT does: a field the payload omits is cleared. The record keeps its id, its author and its creation time, and `updated_at` moves. An expense frozen by an open invoice (issued or partly paid) or by a submitted/approved claim is refused with 409, and an unverifiable lock state with 503.",
+        "description": "An edit replaces the record the way the entries PUT does: a field the payload omits is cleared. The record keeps its id, its author and its creation time, and `updated_at` moves. An expense frozen by an issued invoice (any non-draft status — invoiced records are permanent) or by a submitted/approved claim is refused with 409, and an unverifiable lock state with 503.",
         "requestBody": {
           "required": true,
           "content": {

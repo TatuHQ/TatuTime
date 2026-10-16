@@ -32,13 +32,13 @@ impl LockReason {
     pub fn message(&self) -> String {
         match self {
             LockReason::Invoiced { id } => {
-                format!("entry is invoiced ({id}); unlock the invoice first")
+                format!("entry is invoiced ({id}); invoiced time is permanent and cannot be changed")
             }
             LockReason::Submitted { id } => {
                 format!("entry is in a submitted timesheet ({id}); reject/withdraw it first")
             }
             LockReason::ExpenseInvoiced => {
-                "expense is on an open invoice; delete the invoice draft or void it first".into()
+                "expense is on an issued invoice; invoiced expenses are permanent and cannot be deleted".into()
             }
             LockReason::ExpenseClaimed => {
                 "expense is on a submitted/approved claim; reject it first".into()
@@ -148,11 +148,13 @@ fn snapshot(
         .map_err(|e| LockUnavailable(e.to_string()))
 }
 
-/// Lock provider backed by *open* invoices (`InvoiceStatus::is_open()` =
-/// `issued | partly_paid`, #8/#114): an entry or expense referenced by one is
-/// frozen. Settled (`paid`) and written-off invoices deliberately release their
-/// records — the issued document can no longer change (rate snapshots), and the
-/// timesheet stays correctable (decision recorded in AGENTS.md / adr-001).
+/// Lock provider backed by **issued (non-draft) invoices**: an entry or
+/// expense referenced by an `issued | partly_paid | paid | written_off`
+/// invoice is frozen **permanently**. Settling or writing off an invoice no
+/// longer releases its records — the archived document can never change
+/// (rates/hours are snapshotted at issue), so the underlying timesheet lines
+/// must not drift from it either. The only way back to editable is before
+/// issue: a draft locks nothing and can be deleted.
 /// Reads are unaffected; only edit/delete consult this.
 pub struct InvoiceLock {
     store: std::sync::Arc<crate::store::Store>,
@@ -377,7 +379,7 @@ mod bulk_tests {
         for entry in [e_issued, e_partly, e_paid] {
             store.put_entry(&entry_ref(entry)).unwrap();
         }
-        // An open invoice freezes both its entry and its expense line.
+        // An issued invoice freezes both its entry and its expense line.
         let inv_issued = invoice(
             "INV-1",
             InvoiceStatus::Issued,
@@ -434,11 +436,17 @@ mod bulk_tests {
             assert_eq!(
                 bulk.contains(&id),
                 per_entry,
-                "bulk vs per-entry disagree for {id} (issued/partly/submitted lock; paid/free do not)"
+                "bulk vs per-entry disagree for {id} (every issued invoice locks, paid included; free never does)"
             );
         }
-        assert!(bulk.contains(&e_issued) && bulk.contains(&e_partly) && bulk.contains(&e_sub));
-        assert!(!bulk.contains(&e_paid) && !bulk.contains(&e_free));
+        assert!(
+            bulk.contains(&e_issued)
+                && bulk.contains(&e_partly)
+                && bulk.contains(&e_paid)
+                && bulk.contains(&e_sub),
+            "invoiced time is permanent: issued, partly-paid AND paid invoices lock"
+        );
+        assert!(!bulk.contains(&e_free));
 
         // Expense side, including the folded claim provider (#190 follow-up).
         let x_ids = [x_issued, x_claim, x_free];
@@ -455,7 +463,7 @@ mod bulk_tests {
         assert!(!bulk_x.contains(&x_free), "a draft claim does not lock");
 
         // #255 cache invalidation: the snapshot built above must not survive a
-        // write that releases its records. Deleting the open invoice drops both
+        // write that changes its records. Deleting the invoice drops both
         // its entry and its expense on the very next call — the changed
         // directory stamp forces one re-scan, never a stale answer.
         store.delete_invoice(inv_issued_id).unwrap();

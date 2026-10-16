@@ -20,7 +20,7 @@ function makeDom(prelude = '', url = 'http://localhost/') {
 ${prelude}
 window.bootTest = {
   dashRenderOverview, refreshInvoices, refreshCustomerPickers,
-  writeOffInvoice, navigateDay, weekLockIds, state,
+  writeOffInvoice, navigateDay, weekLockIndex, state,
   refreshWeek, openWeekRowForm, saveWeekRow, fillProjectSelect, refreshTimeCal, calState,
   peekLockCache: () => weekLockCache,
   liveText: () => document.getElementById('live-region').textContent,
@@ -124,44 +124,52 @@ refreshInvoices = async () => {};
     if (path === '/invoices') return { invoices: [] };
     return {};
   };
-  const ids = await context.weekLockIds();
-  assert.ok(ids.has('e1'), 'lock cache warm from a submitted week');
-  assert.ok(context.peekLockCache().ids === ids, 'weekLockIds populated the TTL cache');
+  const index = await context.weekLockIndex();
+  assert.ok(index.ids.has('e1'), 'lock cache warm from a submitted week');
+  assert.ok(context.peekLockCache().ids === index.ids, 'weekLockIndex populated the TTL cache');
   context.api.post = async () => ({});
   await context.writeOffInvoice({ id: 'i1', number: 'INV-0001', currency: 'EUR' }, 6000);
   assert.equal(
     context.peekLockCache().ids,
     null,
-    'write-off changes is_open() (src/lock.rs), so the cache must be invalidated',
+    'write-off changes the invoice set (src/lock.rs), so the cache must be invalidated',
   );
   dom.window.close();
 });
 
-test('partly-paid invoices lock entries in the preview, paid ones do not (#217)', async () => {
-  // The GUI's optimistic lock preview must agree with InvoiceLock's
-  // is_open() == issued | partly_paid, or saves fail with surprise 409s.
+test('every issued invoice locks its entries — invoiced is permanent (#217)', async () => {
+  // The GUI's optimistic lock preview must agree with InvoiceLock: ANY
+  // non-draft invoice freezes its lines forever (settling no longer
+  // releases them), or the register would offer actions the server 409s.
   const { dom, context } = makeDom();
   context.api.get = async (path) => {
     if (path === '/submissions') return { submissions: [] };
     if (path === '/invoices') {
       return {
         invoices: [
-          { id: 'a', status: 'issued', lines: [{ entry_id: 'e-issued' }] },
-          { id: 'b', status: 'partly_paid', lines: [{ entry_id: 'e-partly' }] },
-          { id: 'c', status: 'paid', lines: [{ entry_id: 'e-paid' }] },
-          { id: 'd', status: 'written_off', lines: [{ entry_id: 'e-off' }] },
-          { id: 'e', status: 'draft', lines: [{ entry_id: 'e-draft' }] },
+          { id: 'a', number: 'INV-1', status: 'issued', lines: [{ entry_id: 'e-issued' }] },
+          { id: 'b', number: 'INV-2', status: 'partly_paid', lines: [{ entry_id: 'e-partly' }] },
+          { id: 'c', number: 'INV-3', status: 'paid', lines: [{ entry_id: 'e-paid' }] },
+          { id: 'd', number: 'INV-4', status: 'written_off', lines: [{ entry_id: 'e-off' }] },
+          { id: 'e', number: 'INV-5', status: 'draft', lines: [{ entry_id: 'e-draft' }] },
         ]
       };
     }
     return {};
   };
-  const ids = await context.weekLockIds();
-  assert.ok(ids.has('e-issued'), 'issued locks');
-  assert.ok(ids.has('e-partly'), 'partly_paid locks (was missing before #217)');
-  assert.ok(!ids.has('e-paid'), 'paid releases');
-  assert.ok(!ids.has('e-off'), 'written_off releases');
-  assert.ok(!ids.has('e-draft'), 'draft never locks');
+  const index = await context.weekLockIndex();
+  assert.ok(index.ids.has('e-issued'), 'issued locks');
+  assert.ok(index.ids.has('e-partly'), 'partly_paid locks (was missing before #217)');
+  assert.ok(index.ids.has('e-paid'), 'paid keeps the lock — invoiced is permanent');
+  assert.ok(index.ids.has('e-off'), 'written_off keeps the lock');
+  assert.ok(!index.ids.has('e-draft'), 'draft never locks');
+  // The invoice map names the freeze's owner for the lock link, first
+  // invoice wins when several reference one entry. (Field compares, not
+  // deepEqual: the object was built inside the jsdom realm.)
+  const paidRef = index.invoiced.get('e-paid');
+  assert.equal(paidRef.id, 'c');
+  assert.equal(paidRef.number, 'INV-3');
+  assert.equal(index.invoiced.has('e-draft'), false, 'drafts never get a link');
   dom.window.close();
 });
 

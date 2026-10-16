@@ -87,8 +87,9 @@ impl From<std::io::Error> for StoreError {
 /// The frozen-reference snapshot the #18 lock seam answers from (#255).
 ///
 /// One pass over the lock-source collections yields every locked entry id
-/// (open invoices #8/#114 and submitted/approved submissions #16) and every
-/// locked expense id (open invoices and submitted/approved reimbursement
+/// (issued invoices — any non-draft status — #8/#114 and submitted/approved
+/// submissions #16) and every
+/// locked expense id (issued invoices and submitted/approved reimbursement
 /// claims #24). The maps carry the human handle used in the 409 message
 /// (invoice number / submission week). The snapshot is memoized on a cheap
 /// directory-mtime stamp — see [`Store::lock_snapshot`].
@@ -1496,9 +1497,11 @@ impl Store {
     fn scan_lock_state(&self) -> Result<LockSnapshot, StoreError> {
         let mut snap = LockSnapshot::default();
         for inv in self.list_invoices()? {
-            // Only *open* invoices freeze their records: settling (paid) or
-            // writing off releases them (#8/#114).
-            if !inv.status.is_open() {
+            // Any ISSUED invoice freezes its records for good: the invoice
+            // document is the record of what was billed, so the underlying
+            // lines must not drift from it. Only a draft (nothing billed
+            // yet) leaves its lines editable.
+            if inv.status == crate::domain::InvoiceStatus::Draft {
                 continue;
             }
             for line in &inv.lines {
@@ -2269,7 +2272,7 @@ impl Store {
     }
 
     /// `put_expense` with the invoice/claim lock check executed in the same
-    /// transaction (#18/#218): an expense referenced by an open invoice or a
+    /// transaction (#18/#218): an expense referenced by an issued invoice or a
     /// submitted/approved claim is frozen against edits exactly as it is against
     /// deletes, and an unverifiable lock state refuses the write (#185).
     pub fn update_expense_guarded<F, E>(

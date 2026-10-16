@@ -1,0 +1,10 @@
+{
+  "id": "36e70fc9-3a0e-4238-b1f8-b8cee01dcca4",
+  "name": "Globex",
+  "currency": "USD",
+  "default_rate_minor": 4550,
+  "active": true,
+  "email": "",
+  "invoice_notes": "",
+  "invoice_subject": ""
+}
