@@ -517,3 +517,530 @@ mod storage_layout {
         );
     }
 }
+
+/// #349: `archive_entries_before`, the retention primitive ADR-003 names as its
+/// precondition 1 — the lock/invoice refusal rule, the byte-identical move into
+/// the cold tree, the per-run sha256 manifest, the #335 index shrink, and the dry
+/// run that writes nothing.
+///
+/// WHAT THESE PIN
+/// * a day holding an entry frozen by the lock seam, or one on a *non-draft*
+///   invoice, is refused whole: nothing moves, the data dir is byte-identical
+///   and the refusal is reported with its reason (a lock state that cannot be
+///   verified refuses every candidate, fail closed, #185);
+/// * a clean day moves byte for byte into `archive/entries/<YYYY-MM>/<day>/`, the
+///   manifest verifies against the moved bytes, and the #335 index stops naming
+///   the relocated day while keeping every hot day;
+/// * the cutoff is strict (`date < cutoff`), a cold copy is never overwritten,
+///   anything under `entries/` that is not a well-formed day folder is refused,
+///   a dry run writes nothing at all, and a second pass relocates nothing.
+mod entries_archive {
+    use std::collections::HashSet;
+    use std::path::{Path, PathBuf};
+
+    use axum::http::StatusCode;
+    use serde_json::{Value, json};
+    use sha2::{Digest, Sha256};
+    use tucano_time::lock::{EntryLock, LockReason, LockUnavailable, NoLocks};
+    use tucano_time::store::{ArchiveRefusal, Store};
+    use uuid::Uuid;
+
+    use crate::support::{Client, LockOne, app, entry_body, json_req, new_customer, new_project};
+
+    /// The two seeded days: one old enough to be a candidate, one newer than the
+    /// cutoff that must never be touched.
+    const DAY: &str = "2026-08-03";
+    const LATER: &str = "2026-10-09";
+    const CUTOFF: &str = "2026-09-01";
+
+    fn cutoff() -> chrono::NaiveDate {
+        chrono::NaiveDate::parse_from_str(CUTOFF, "%Y-%m-%d").expect("cutoff")
+    }
+
+    /// The data root below the temp dir the harness hands out.
+    fn data_root(dir: &tempfile::TempDir) -> PathBuf {
+        dir.path().join("data")
+    }
+
+    fn entry_dir(data: &Path, date: &str) -> PathBuf {
+        data.join("entries").join(date)
+    }
+
+    fn index_path(data: &Path) -> PathBuf {
+        data.join("entries").join(".idx.users.json")
+    }
+
+    /// Lowercase hex of a sha256 — the encoding the store's manifest rows carry,
+    /// re-derived here so the test verifies them independently of the store.
+    fn sha256_hex(bytes: &[u8]) -> String {
+        const HEX: &[u8; 16] = b"0123456789abcdef";
+        let digest = Sha256::digest(bytes);
+        let mut out = String::with_capacity(digest.len() * 2);
+        for byte in digest {
+            out.push(HEX[(byte >> 4) as usize] as char);
+            out.push(HEX[(byte & 0x0f) as usize] as char);
+        }
+        out
+    }
+
+    /// Every file under `dir` as (relative path, bytes), sorted — the strongest
+    /// "nothing was written" assertion available to a test.
+    fn snapshot(dir: &Path) -> Vec<(String, Vec<u8>)> {
+        fn walk(dir: &Path, base: &Path, out: &mut Vec<(String, Vec<u8>)>) {
+            let Ok(children) = std::fs::read_dir(dir) else {
+                return;
+            };
+            for child in children.filter_map(|c| c.ok()) {
+                let path = child.path();
+                if path.is_dir() {
+                    walk(&path, base, out);
+                } else {
+                    let rel = path
+                        .strip_prefix(base)
+                        .map(|p| p.to_string_lossy().replace('\\', "/"))
+                        .unwrap_or_default();
+                    out.push((rel, std::fs::read(&path).expect("read file")));
+                }
+            }
+        }
+        let mut out = Vec::new();
+        walk(dir, dir, &mut out);
+        out.sort();
+        out
+    }
+
+    /// The shared fixture: a customer with project `P1`, returned as the customer
+    /// token the entry and invoice payloads need.
+    async fn fixture(client: &Client) -> String {
+        let customer = new_customer(client, "ACME", "EUR", 6000).await;
+        let token = customer["id"].as_str().expect("customer id").to_string();
+        new_project(client, &token, "P1", json!({})).await;
+        token
+    }
+
+    /// One billable entry on `date`; returns its id.
+    async fn entry_on(client: &Client, token: &str, date: &str, hours: u32) -> String {
+        let (status, created) = json_req(
+            client,
+            "POST",
+            "/api/entries",
+            Some(entry_body(token, "P1", json!(hours), date)),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "create entry: {created}");
+        created["id"].as_str().expect("entry id").to_string()
+    }
+
+    /// A lock seam that cannot answer (#185): every candidate day must be refused
+    /// rather than archived behind an unverified check.
+    struct Unverifiable;
+
+    impl EntryLock for Unverifiable {
+        fn entry_lock(&self, _entry_id: Uuid) -> Result<Option<LockReason>, LockUnavailable> {
+            Err(LockUnavailable("lock state unreadable".into()))
+        }
+
+        fn locked_entries(&self) -> Result<HashSet<Uuid>, LockUnavailable> {
+            Err(LockUnavailable("lock state unreadable".into()))
+        }
+    }
+
+    #[tokio::test]
+    async fn a_clean_day_moves_byte_identically_and_its_manifest_verifies() {
+        let (client, d) = app().await;
+        let token = fixture(&client).await;
+        let first = entry_on(&client, &token, DAY, 3).await;
+        let second = entry_on(&client, &token, DAY, 4).await;
+        entry_on(&client, &token, LATER, 1).await;
+
+        let data = data_root(&d);
+        let store = Store::open(&data).expect("store");
+        let moved = snapshot(&entry_dir(&data, DAY));
+        assert_eq!(moved.len(), 2, "the day holds both documents");
+
+        let report = store
+            .archive_entries_before(cutoff(), false, &NoLocks)
+            .expect("the pass runs");
+
+        assert!(!report.dry_run);
+        assert!(report.skipped.is_empty(), "{:?}", report.skipped);
+        assert_eq!(report.skipped_entries, 0);
+        assert_eq!(report.days.len(), 1, "{:?}", report.days);
+        assert_eq!(report.days[0].day, DAY);
+        assert_eq!(report.days[0].documents, 2);
+        assert_eq!(report.documents, 2);
+        let bytes: u64 = moved.iter().map(|(_, b)| b.len() as u64).sum();
+        assert_eq!(report.bytes, bytes);
+        assert_eq!(report.days[0].bytes, bytes);
+
+        // The candidate left the hot tree, the newer day stayed, and every
+        // document is in the cold tree byte for byte.
+        let cold = data.join("archive/entries/2026-08").join(DAY);
+        assert!(
+            !entry_dir(&data, DAY).exists(),
+            "a moved day leaves the hot tree"
+        );
+        assert!(
+            entry_dir(&data, LATER).is_dir(),
+            "a day after the cutoff stays"
+        );
+        for (name, original) in &moved {
+            assert_eq!(
+                &std::fs::read(cold.join(name)).expect("cold copy"),
+                original,
+                "{name} moved byte-identically"
+            );
+        }
+        for id in [&first, &second] {
+            assert!(cold.join(format!("{id}.json")).is_file());
+            assert!(!entry_dir(&data, DAY).join(format!("{id}.json")).exists());
+        }
+
+        // The per-run manifest verifies against the bytes that were moved, and
+        // lives inside the cold tree (so a `--backup` carries it).
+        let rel = report
+            .manifest
+            .clone()
+            .expect("a pass that moved a day writes a manifest");
+        assert!(rel.starts_with("archive/entries/.manifest."), "{rel}");
+        let manifest: Value =
+            serde_json::from_slice(&std::fs::read(data.join(&rel)).expect("manifest file"))
+                .expect("manifest json");
+        assert_eq!(manifest["app"], "tucano-time");
+        assert_eq!(manifest["cutoff"], CUTOFF);
+        let rows = manifest["files"].as_array().expect("files").clone();
+        assert_eq!(rows.len(), 2, "{manifest}");
+        for row in &rows {
+            let path = row["path"].as_str().expect("path");
+            assert!(
+                path.starts_with(&format!("archive/entries/2026-08/{DAY}/")),
+                "the manifest names the cold path: {path}"
+            );
+            let archived = std::fs::read(data.join(path)).expect("a manifest path is a real file");
+            assert_eq!(row["size"].as_u64(), Some(archived.len() as u64), "{row}");
+            let digest = sha256_hex(&archived);
+            assert_eq!(row["sha256"].as_str(), Some(digest.as_str()), "{row}");
+        }
+
+        // The #335 index may only name days that are on disk: the relocated day's
+        // key is gone, the hot day's slice survives.
+        let index: Value =
+            serde_json::from_slice(&std::fs::read(index_path(&data)).expect("index"))
+                .expect("index json");
+        assert!(
+            index["days"].get(DAY).is_none(),
+            "the index must not name a cold day: {index}"
+        );
+        assert!(
+            index["days"].get(LATER).is_some(),
+            "a hot day keeps its slice: {index}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_day_with_a_locked_entry_is_refused_and_nothing_moves() {
+        let (client, d) = app().await;
+        let token = fixture(&client).await;
+        let frozen = entry_on(&client, &token, DAY, 3).await;
+        entry_on(&client, &token, LATER, 1).await;
+
+        let data = data_root(&d);
+        let store = Store::open(&data).expect("store");
+        // Snapshot after opening the store, so the comparison isolates the pass.
+        let before = snapshot(&data);
+        let locks = LockOne(Some(Uuid::parse_str(&frozen).expect("uuid")));
+        let report = store
+            .archive_entries_before(cutoff(), false, &locks)
+            .expect("the pass runs");
+
+        assert!(report.days.is_empty(), "{:?}", report.days);
+        assert!(report.manifest.is_none(), "nothing moved, so no manifest");
+        assert_eq!(report.documents, 0);
+        assert_eq!(report.bytes, 0);
+        assert_eq!(report.skipped.len(), 1, "{:?}", report.skipped);
+        assert_eq!(report.skipped[0].day, DAY);
+        assert_eq!(report.skipped[0].entries, 1);
+        assert_eq!(report.skipped[0].reason, ArchiveRefusal::Locked);
+        assert_eq!(report.skipped_entries, 1);
+
+        // A refused pass writes nothing at all: not the day, not the index, not
+        // even the cold tree.
+        assert_eq!(snapshot(&data), before);
+        assert!(
+            !data.join("archive").exists(),
+            "a refused pass creates no cold tree"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_day_on_a_non_draft_invoice_is_refused_and_a_draft_alone_is_not() {
+        let (client, d) = app().await;
+        let token = fixture(&client).await;
+        entry_on(&client, &token, DAY, 3).await;
+
+        let data = data_root(&d);
+        let store = Store::open(&data).expect("store");
+        let (status, draft) = json_req(
+            &client,
+            "POST",
+            "/api/invoices",
+            Some(json!({"customer_id": token, "from": "2026-08-01", "to": "2026-08-07"})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{draft}");
+        assert_eq!(draft["status"], "draft");
+
+        // `already_invoiced` excludes only *non-draft* invoices (#248), so a draft
+        // referencing the day does not refuse it — and a dry run still writes
+        // nothing.
+        let before = snapshot(&data);
+        let planned = store
+            .archive_entries_before(cutoff(), true, &NoLocks)
+            .expect("dry run");
+        assert!(planned.skipped.is_empty(), "{:?}", planned.skipped);
+        assert_eq!(planned.days.len(), 1, "{:?}", planned.days);
+        assert_eq!(planned.days[0].day, DAY);
+        assert_eq!(snapshot(&data), before, "a dry run writes nothing");
+
+        // Issue the invoice: the day is now referenced by a non-draft document,
+        // which is the permanent refusal (settling releases the edit *lock*, never
+        // the billing evidence).
+        let id = draft["id"].as_str().expect("invoice id");
+        let (status, issued) =
+            json_req(&client, "POST", &format!("/api/invoices/{id}/issue"), None).await;
+        assert_eq!(status, StatusCode::OK, "{issued}");
+        assert_eq!(issued["status"], "issued");
+
+        let before = snapshot(&data);
+        let report = store
+            .archive_entries_before(cutoff(), false, &NoLocks)
+            .expect("the pass runs");
+        assert!(report.days.is_empty(), "{:?}", report.days);
+        assert!(report.manifest.is_none());
+        assert_eq!(report.skipped.len(), 1, "{:?}", report.skipped);
+        assert_eq!(report.skipped[0].day, DAY);
+        assert_eq!(report.skipped[0].reason, ArchiveRefusal::AlreadyInvoiced);
+        assert_eq!(report.skipped_entries, 1);
+        assert_eq!(snapshot(&data), before);
+    }
+
+    #[tokio::test]
+    async fn a_dry_run_reports_the_plan_and_writes_nothing_at_all() {
+        let (client, d) = app().await;
+        let token = fixture(&client).await;
+        let frozen = entry_on(&client, &token, DAY, 3).await;
+        entry_on(&client, &token, "2026-08-05", 2).await;
+
+        let data = data_root(&d);
+        let store = Store::open(&data).expect("store");
+        let before = snapshot(&data);
+
+        // A frozen day is reported, a clean one is planned, and not one byte is
+        // written: no cold tree, no manifest, no index rewrite, no temp file.
+        let locks = LockOne(Some(Uuid::parse_str(&frozen).expect("uuid")));
+        let report = store
+            .archive_entries_before(cutoff(), true, &locks)
+            .expect("dry run");
+
+        assert!(report.dry_run);
+        assert_eq!(report.cutoff, CUTOFF);
+        assert_eq!(report.days.len(), 1, "{:?}", report.days);
+        assert_eq!(report.days[0].day, "2026-08-05");
+        assert_eq!(report.days[0].documents, 1);
+        assert!(report.days[0].bytes > 0);
+        assert_eq!(report.documents, 1);
+        assert_eq!(report.skipped.len(), 1, "{:?}", report.skipped);
+        assert_eq!(report.skipped[0].reason, ArchiveRefusal::Locked);
+        assert_eq!(report.skipped_entries, 1);
+        assert!(report.manifest.is_none());
+
+        assert_eq!(snapshot(&data), before, "a dry run writes nothing at all");
+        assert!(
+            !data.join("archive").exists(),
+            "a dry run creates no cold tree"
+        );
+    }
+
+    #[tokio::test]
+    async fn only_days_strictly_before_the_cutoff_are_candidates() {
+        let (client, d) = app().await;
+        let token = fixture(&client).await;
+        entry_on(&client, &token, "2026-08-31", 1).await;
+        entry_on(&client, &token, CUTOFF, 1).await;
+        entry_on(&client, &token, LATER, 1).await;
+
+        let data = data_root(&d);
+        let store = Store::open(&data).expect("store");
+        let report = store
+            .archive_entries_before(cutoff(), false, &NoLocks)
+            .expect("the pass runs");
+
+        assert_eq!(report.days.len(), 1, "{:?}", report.days);
+        assert_eq!(report.days[0].day, "2026-08-31");
+        assert!(
+            report.skipped.is_empty(),
+            "a day on or after the cutoff is out of scope, not refused: {:?}",
+            report.skipped
+        );
+        assert!(!entry_dir(&data, "2026-08-31").exists());
+        assert!(
+            entry_dir(&data, CUTOFF).is_dir(),
+            "the cutoff day itself is untouched"
+        );
+        assert!(entry_dir(&data, LATER).is_dir());
+    }
+
+    #[tokio::test]
+    async fn an_existing_cold_day_is_refused_rather_than_overwritten() {
+        let (client, d) = app().await;
+        let token = fixture(&client).await;
+        entry_on(&client, &token, DAY, 3).await;
+
+        let data = data_root(&d);
+        // A previous run already published this day (or an operator put it there).
+        let cold = data.join("archive/entries/2026-08").join(DAY);
+        std::fs::create_dir_all(&cold).expect("cold day");
+        std::fs::write(cold.join("keep-me.json"), b"{\"kept\":true}").expect("cold document");
+
+        let store = Store::open(&data).expect("store");
+        let before = snapshot(&data);
+        let report = store
+            .archive_entries_before(cutoff(), false, &NoLocks)
+            .expect("the pass runs");
+
+        assert!(report.days.is_empty(), "{:?}", report.days);
+        assert!(report.manifest.is_none());
+        assert_eq!(report.skipped.len(), 1, "{:?}", report.skipped);
+        assert_eq!(report.skipped[0].reason, ArchiveRefusal::ColdDayExists);
+        assert_eq!(report.skipped_entries, 1);
+        assert_eq!(
+            snapshot(&data),
+            before,
+            "neither the cold copy nor the hot day is touched"
+        );
+        assert!(entry_dir(&data, DAY).is_dir());
+    }
+
+    #[tokio::test]
+    async fn a_day_that_is_not_a_well_formed_day_folder_is_refused() {
+        let (client, d) = app().await;
+        let token = fixture(&client).await;
+        entry_on(&client, &token, DAY, 3).await;
+
+        let data = data_root(&d);
+        std::fs::write(entry_dir(&data, DAY).join("readme.txt"), b"not an entry")
+            .expect("foreign document");
+        let store = Store::open(&data).expect("store");
+        let before = snapshot(&data);
+        let report = store
+            .archive_entries_before(cutoff(), false, &NoLocks)
+            .expect("the pass runs");
+
+        assert!(report.days.is_empty(), "{:?}", report.days);
+        assert_eq!(report.skipped.len(), 1, "{:?}", report.skipped);
+        assert_eq!(report.skipped[0].reason, ArchiveRefusal::Unrecognised);
+        assert_eq!(
+            report.skipped[0].entries, 2,
+            "the entry and the foreign document"
+        );
+        assert_eq!(snapshot(&data), before);
+
+        // A directory under `entries/` that is not a day folder at all is reported
+        // too, and never moved.
+        std::fs::create_dir_all(data.join("entries/misc")).expect("stray directory");
+        let report = store
+            .archive_entries_before(cutoff(), false, &NoLocks)
+            .expect("the pass runs");
+        assert!(report.days.is_empty(), "{:?}", report.days);
+        assert_eq!(report.skipped.len(), 2, "{:?}", report.skipped);
+        assert!(
+            report
+                .skipped
+                .iter()
+                .all(|s| s.reason == ArchiveRefusal::Unrecognised),
+            "{:?}",
+            report.skipped
+        );
+        assert!(data.join("entries/misc").is_dir());
+    }
+
+    #[tokio::test]
+    async fn an_unverifiable_lock_state_refuses_every_candidate_day() {
+        let (client, d) = app().await;
+        let token = fixture(&client).await;
+        entry_on(&client, &token, DAY, 3).await;
+        entry_on(&client, &token, "2026-08-05", 2).await;
+
+        let data = data_root(&d);
+        let store = Store::open(&data).expect("store");
+        let before = snapshot(&data);
+        let report = store
+            .archive_entries_before(cutoff(), false, &Unverifiable)
+            .expect("the pass runs");
+
+        assert!(report.days.is_empty(), "{:?}", report.days);
+        assert!(report.manifest.is_none());
+        assert_eq!(report.skipped.len(), 2, "{:?}", report.skipped);
+        assert!(
+            report
+                .skipped
+                .iter()
+                .all(|s| s.reason == ArchiveRefusal::LockUnavailable),
+            "fail closed (#185): {:?}",
+            report.skipped
+        );
+        assert_eq!(report.skipped_entries, 2);
+        assert_eq!(
+            snapshot(&data),
+            before,
+            "an unverifiable pass writes nothing"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_second_pass_moves_nothing_and_leaves_the_cold_tree_alone() {
+        let (client, d) = app().await;
+        let token = fixture(&client).await;
+        entry_on(&client, &token, DAY, 3).await;
+
+        let data = data_root(&d);
+        let store = Store::open(&data).expect("store");
+        let first = store
+            .archive_entries_before(cutoff(), false, &NoLocks)
+            .expect("first pass");
+        assert_eq!(first.days.len(), 1, "{:?}", first.days);
+        let cold = snapshot(&data.join("archive"));
+
+        let before = snapshot(&data);
+        let again = store
+            .archive_entries_before(cutoff(), false, &NoLocks)
+            .expect("second pass");
+
+        assert!(again.days.is_empty(), "{:?}", again.days);
+        assert!(again.skipped.is_empty(), "{:?}", again.skipped);
+        assert_eq!(again.documents, 0);
+        assert_eq!(again.bytes, 0);
+        assert_eq!(again.skipped_entries, 0);
+        assert!(
+            again.manifest.is_none(),
+            "nothing moved, so no second manifest"
+        );
+        assert_eq!(snapshot(&data), before, "a re-run is idempotent");
+        assert_eq!(
+            snapshot(&data.join("archive")),
+            cold,
+            "the cold tree is untouched by a re-run"
+        );
+        let manifests = std::fs::read_dir(data.join("archive/entries"))
+            .expect("cold root")
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(".manifest.")
+            })
+            .count();
+        assert_eq!(manifests, 1, "exactly the manifest the first pass wrote");
+    }
+}
