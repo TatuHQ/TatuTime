@@ -1307,9 +1307,14 @@ class Gate:
             "the bespoke .field/.hint/.form-error markup is gone and the official "
             "form vocabulary is in place (#232 phase 2b)",
             counts["field"] == 0 and counts["hint"] == 0 and counts["formError"] == 0
-            and counts["groups"] == 128 and counts["labels"] == 123
-            and counts["controls"] == 123 and counts["help"] == 29
-            and counts["messages"] == counts["errorGroups"] == 23,
+            # 125/120/120 after #349 removed the legacy direct draft
+            # generator's three field rows (customer / from / to).
+            and counts["groups"] == 125 and counts["labels"] == 120
+            # 32 after the rebase: upstream's Get paid box (#357) plus the #349
+            # invoice detail panel's history state line and delivery-record note.
+            and counts["controls"] == 120 and counts["help"] == 32
+            # 22: the legacy direct draft generator's #invoice-error is gone.
+            and counts["messages"] == counts["errorGroups"] == 22,
             f"counts={counts}",
             info=f"{counts['groups']} groups, {counts['help']} help texts, "
                  f"{counts['messages']} validation messages",
@@ -1839,6 +1844,135 @@ class Gate:
         )
         self.drain_console("sortable register (#232 phase 2d)")
 
+    def invoice_preview_audit(self):
+        """#349: the invoice detail panel shows the invoice's *rendered* PDF --
+        fetched with the app's own credentialed request and framed from a
+        client-side blob: URL, because the global X-Frame-Options: DENY refuses
+        the API path itself -- plus the invoice's activity history. jsdom never
+        paints a frame, so this is the gate that proves the render really
+        reaches a browser."""
+        csrf = {"x-csrf-protection": "1"}
+        status, _, raw = self.http("GET", "/api/customers", cookie=self.cookie)
+        cid = json.loads(raw)["customers"][0]["id"]
+        status, _, raw = self.http("GET", f"/api/customers/{cid}/projects", cookie=self.cookie)
+        code = json.loads(raw)["projects"][0]["code"]
+        status, _, raw = self.http(
+            "POST", "/api/entries",
+            {"date": "2026-04-14", "customer_id": cid, "project_code": code, "hours": 2},
+            cookie=self.cookie, extra_headers=csrf,
+        )
+        if status != 201:
+            raise RuntimeError(f"seeding the preview entry failed: HTTP {status} {raw[:200]!r}")
+        status, _, raw = self.http(
+            "POST", "/api/invoices",
+            {"customer_id": cid, "from": "2026-04-01", "to": "2026-04-30"},
+            cookie=self.cookie, extra_headers=csrf,
+        )
+        if status != 201:
+            raise RuntimeError(f"seeding the preview invoice failed: HTTP {status} {raw[:200]!r}")
+        invoice = json.loads(raw)
+
+        self.navigate("/invoices")
+        self.wait_script(
+            "document.readyState === 'complete'"
+            " && document.getElementById('version').textContent === 'TucanoTime'",
+            "the app to boot at /invoices for the preview audit",
+        )
+        # The register opens on Open, which hides drafts.
+        self.marionette.script("document.getElementById('inv-tab-all').click(); return true;")
+        find = ("var rows = document.querySelectorAll('#invoice-table tbody tr');"
+                "var row = null;"
+                "for (var i = 0; i < rows.length; i += 1) {"
+                " if (rows[i].textContent.indexOf('2026-04-01') >= 0) { row = rows[i]; break; } }")
+        # The All tab re-pulls the register asynchronously: wait for the seeded
+        # row before clicking, never race the re-render (#265).
+        self.wait_script(
+            "(function () { var rows = document.querySelectorAll('#invoice-table tbody tr');"
+            " for (var i = 0; i < rows.length; i += 1) {"
+            "  if (rows[i].textContent.indexOf('2026-04-01') >= 0) return true; }"
+            " return false; })()",
+            "the seeded draft to appear in the All tab",
+        )
+        self.marionette.script(
+            find + "if (row) { Array.prototype.forEach.call(row.querySelectorAll('button'),"
+            " function (b) { if (b.textContent.trim() === 'Preview') b.click(); }); }"
+            "return true;"
+        )
+        self.wait_script(
+            "(function () { return document.getElementById('invoice-preview').hidden === false; })()",
+            "the invoice detail panel to open on Preview",
+        )
+        # The frame only exists once the app's own credentialed fetch of
+        # /pdf/preview has resolved and the blob URL it minted is framed.
+        self.wait_script(
+            "(function () { var f = document.getElementById('ip-frame');"
+            " return !!(f && /^blob:/.test(f.getAttribute('src'))); })()",
+            "the detail panel to frame the rendered PDF from a blob: URL",
+        )
+        framed = json.loads(self.marionette.script(
+            "var host = document.getElementById('ip-pdf');"
+            "var f = document.getElementById('ip-frame');"
+            "var t = document.querySelector('#ip-timeline li');"
+            "var when = t ? t.querySelector('.ip-tl-when time') : null;"
+            "return JSON.stringify({"
+            " tag: f ? f.tagName : '',"
+            " src: f ? String(f.getAttribute('src')) : '',"
+            " children: host ? host.querySelectorAll('*').length : -1,"
+            " stateHidden: document.getElementById('ip-pdf-state').hidden,"
+            " downloadHidden: document.getElementById('ip-download').hidden,"
+            " items: document.querySelectorAll('#ip-timeline li').length,"
+            " desc: t ? t.querySelector('.ip-tl-desc').textContent : '',"
+            " actor: t ? t.querySelector('.ip-tl-actor').textContent : '',"
+            " stamp: when ? when.textContent : '',"
+            " datetime: when ? String(when.getAttribute('datetime')) : ''"
+            "});"
+        ))
+        self.check(
+            "the detail panel frames the rendered PDF from a blob: URL (#349)",
+            framed["tag"] == "IFRAME" and framed["src"].startswith("blob:")
+            and framed["children"] == 1 and framed["stateHidden"] and framed["downloadHidden"],
+            f"framed={framed}",
+            info=f"frame src={framed['src'][:24]}...",
+        )
+        self.check(
+            "the panel renders the invoice history in the requested shape (#349)",
+            framed["items"] >= 1 and framed["desc"].strip() != "" and framed["actor"].strip() != ""
+            and re.match(r"^on [A-Z][a-z]{2} \d{1,2}, \d{4} at \d{1,2}:\d{2} (AM|PM)$", framed["stamp"])
+            and re.match(r"^\d{4}-\d{2}-\d{2}T", framed["datetime"] or ""),
+            f"history={framed}",
+            info=f"stamp={framed['stamp']!r}",
+        )
+        # The bytes behind that blob URL are the on-demand render, and a draft --
+        # which has no archived PDF at all -- now gets one: that is the point.
+        status, headers, raw = self.http(
+            "GET", f"/api/invoices/{invoice['id']}/pdf/preview", cookie=self.cookie
+        )
+        self.check(
+            "the preview endpoint renders a stage-stamped PDF on demand, a draft included (#349)",
+            status == 200 and raw[:5] == b"%PDF-"
+            and "application/pdf" in headers.get("content-type", ""),
+            f"HTTP {status} {headers.get('content-type')} first={raw[:5]!r}",
+        )
+        status, _, _ = self.http("GET", f"/api/invoices/{invoice['id']}/pdf", cookie=self.cookie)
+        self.check(
+            "the archived-PDF route still refuses a draft, so Download stays hidden (#349)",
+            status == 409,
+            f"HTTP {status}",
+        )
+        # Tear the panel down before the next section. The framed blob PDF is
+        # live app state: leaving the document open makes the *next*
+        # navigation (the dev-mode reload probe) emit a Firefox "Layout was
+        # forced before the page was fully loaded" warning, and the dev-mode
+        # console-clean check rightly counts it. Close it, as a user would.
+        self.marionette.script(
+            "var c = document.getElementById('ip-close'); if (c) c.click(); return true;"
+        )
+        self.wait_script(
+            "(function () { return document.getElementById('invoice-preview').hidden === true; })()",
+            "the detail panel to close after the preview audit (#349)",
+        )
+        self.drain_console("invoice detail panel (#349)")
+
     # ------------------------------------------------------------ lifecycle --
     def cleanup(self):
         for proc in (self.firefox_proc, self.server):
@@ -1926,6 +2060,7 @@ class Gate:
         self.forms_audit()
         self.expense_conversion_audit()
         self.invoice_sort_audit()
+        self.invoice_preview_audit()
         if self.web_dir:
             self.dev_live_reload()
 

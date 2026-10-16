@@ -33,6 +33,12 @@ pub enum EmailError {
     Transport(String),
     #[error("recipient address is invalid")]
     Recipient,
+    /// A header-bound value (or the recipient) carried a control character
+    /// (#S1). Refused outright rather than stripped: a mangled address a caller
+    /// could mistake for the real one is worse than a refusal. The field is
+    /// named in the message; the offending value never is.
+    #[error("message {0} contains a control character")]
+    Header(&'static str),
 }
 
 /// Delivers an `EmailMessage`. Adapters must never log message bodies or
@@ -53,6 +59,9 @@ pub struct DisabledEmailSender;
 
 impl EmailSender for DisabledEmailSender {
     fn send(&self, msg: &EmailMessage) -> Result<(), EmailError> {
+        // Refused on this transport too: the guarded values are the ones it
+        // logs, and a folded one must not forge a log line either.
+        guard_headers(msg)?;
         tracing::info!(to = %msg.to, subject = %msg.subject, "email (SMTP not configured, not sent)");
         Ok(())
     }
@@ -75,6 +84,7 @@ impl RecordingEmailSender {
 
 impl EmailSender for RecordingEmailSender {
     fn send(&self, msg: &EmailMessage) -> Result<(), EmailError> {
+        guard_headers(msg)?;
         if !valid_address(&msg.to) {
             return Err(EmailError::Recipient);
         }
@@ -86,9 +96,47 @@ impl EmailSender for RecordingEmailSender {
     }
 }
 
+/// True when `value` carries a control character: any C0 (U+0000-U+001F,
+/// CR, LF and NUL included), DEL or C1. None of them belongs in an address, a
+/// subject or a display name, and CR/LF are exactly what folds a header or
+/// injects a line into the SMTP dialogue (#S1).
+pub fn has_control_characters(value: &str) -> bool {
+    value.chars().any(char::is_control)
+}
+
+/// The sink guard (#S1): refuse a message whose header-bound values -- or its
+/// recipient -- carry a control character, before any of them can reach a
+/// header line (`From`/`To`/`Subject`/`Reply-To`), the attachment filename, or
+/// the `RCPT TO:<...>` command. Called by `build_mime` *and* by every
+/// transport, so a value that arrives by any route -- a resolved subject that
+/// never went through `valid_address`, say -- is still refused. Fail-closed and
+/// explicit: a hostile value is never silently stripped and shipped mangled.
+pub fn guard_headers(msg: &EmailMessage) -> Result<(), EmailError> {
+    let fields = [
+        ("recipient", Some(msg.to.as_str())),
+        ("subject", Some(msg.subject.as_str())),
+        ("reply-to", msg.reply_to.as_deref()),
+        ("sender name", msg.from_name.as_deref()),
+        (
+            "attachment filename",
+            msg.attachment.as_ref().map(|(name, _)| name.as_str()),
+        ),
+    ];
+    for (field, value) in fields {
+        if value.is_some_and(has_control_characters) {
+            return Err(EmailError::Header(field));
+        }
+    }
+    Ok(())
+}
+
 /// A deliberately small, conservative address check (not full RFC 5322):
-/// one `@`, no spaces, non-empty local, dotted domain.
+/// one `@`, no spaces, non-empty local, dotted domain. Control characters are
+/// refused on the raw value, before `trim()` could hide a trailing one.
 pub fn valid_address(addr: &str) -> bool {
+    if has_control_characters(addr) {
+        return false;
+    }
     let addr = addr.trim();
     if addr.is_empty() || addr.contains(' ') {
         return false;
@@ -163,6 +211,7 @@ impl SmtpEmailSender {
 
 impl EmailSender for SmtpEmailSender {
     fn send(&self, msg: &EmailMessage) -> Result<(), EmailError> {
+        guard_headers(msg)?;
         if !valid_address(&msg.to) {
             return Err(EmailError::Recipient);
         }
@@ -255,7 +304,7 @@ impl SmtpConn {
 
     fn write_message(&mut self, msg: &EmailMessage) -> Result<(), EmailError> {
         use std::io::Write;
-        let body = build_mime(msg);
+        let body = build_mime(msg)?;
         let stuffed: String = body
             .lines()
             .map(|l| {
@@ -301,7 +350,11 @@ pub fn encode_header(value: &str) -> String {
 }
 
 /// Serialises headers + body, multipart when an attachment is present.
-pub fn build_mime(msg: &EmailMessage) -> String {
+/// Refuses, before a single header is written, a message whose header-bound
+/// values carry a control character (`guard_headers`) -- the choke point every
+/// caller shares.
+pub fn build_mime(msg: &EmailMessage) -> Result<String, EmailError> {
+    guard_headers(msg)?;
     let from_display = msg
         .from_name
         .as_deref()
@@ -361,7 +414,7 @@ pub fn build_mime(msg: &EmailMessage) -> String {
             h.push_str("--tt--");
         }
     }
-    h
+    Ok(h)
 }
 
 // ------------------------------------------------------------- templates ---
@@ -482,6 +535,13 @@ mod tests {
         assert!(!valid_address("a@b"));
         assert!(!valid_address("a@b."));
         assert!(!valid_address(""));
+        // #S1: control characters are rejected on the raw value, before trim.
+        assert!(!valid_address(
+            "inv@corp.example\r\nBcc:attacker@evil.example"
+        ));
+        assert!(!valid_address("inv@corp.example\n"));
+        assert!(!valid_address("inv@corp.example\0"));
+        assert!(!valid_address("inv\tcorp@example.co"));
     }
 
     #[test]
@@ -589,7 +649,7 @@ mod tests {
             from_name: None,
             reply_to: None,
         };
-        let mime = build_mime(&m);
+        let mime = build_mime(&m).expect("a legitimate message builds");
         assert!(mime.contains("multipart/mixed"));
         assert!(mime.contains("attachment; filename=\"inv.csv\""));
         assert!(mime.contains("Content-Type: application/octet-stream"));
@@ -614,7 +674,7 @@ mod tests {
             from_name: None,
             reply_to: None,
         };
-        let mime = build_mime(&m);
+        let mime = build_mime(&m).expect("a legitimate message builds");
         assert!(mime.contains("Subject: =?UTF-8?B?"), "{mime}");
         assert!(!mime.contains("Café"), "no raw UTF-8 in headers");
         // Bodies keep their UTF-8, declared 8bit.
@@ -633,7 +693,7 @@ mod tests {
             from_name: None,
             reply_to: None,
         };
-        let mime = build_mime(&m);
+        let mime = build_mime(&m).expect("a legitimate message builds");
         assert!(mime.contains("From: TucanoTime\r\n"), "{mime}");
         assert!(!mime.contains("Reply-To"), "{mime}");
         // Configured (#146): display name RFC 2047 when non-ASCII + Reply-To.
@@ -642,7 +702,7 @@ mod tests {
             reply_to: Some("billing@tucano.test".into()),
             ..m
         };
-        let mime2 = build_mime(&m2);
+        let mime2 = build_mime(&m2).expect("a legitimate message builds");
         assert!(
             mime2.starts_with("From: =?UTF-8?B?") || mime2.contains("From: =?UTF-8?B?"),
             "{mime2}"
@@ -682,7 +742,147 @@ mod tests {
             from_name: None,
             reply_to: None,
         };
-        let mime = build_mime(&m);
+        let mime = build_mime(&m).expect("a legitimate message builds");
         assert!(mime.contains("Content-Type: application/pdf"), "{mime}");
+    }
+
+    #[test]
+    fn legitimate_display_names_and_recipients_still_build() {
+        // The guard rejects injections, not address shapes: a display-name
+        // recipient and an ASCII display name build exactly as they always did.
+        let m = EmailMessage {
+            to: "billing@acme.test".into(),
+            subject: "Invoice INV-0001 from Tucano".into(),
+            text: "b".into(),
+            html: None,
+            attachment: None,
+            from_name: Some("Capybara Solutions".into()),
+            reply_to: Some("billing@tucano.test".into()),
+        };
+        let mime = build_mime(&m).expect("a legitimate message builds");
+        assert!(mime.contains("From: Capybara Solutions\r\n"), "{mime}");
+        assert!(mime.contains("To: billing@acme.test\r\n"), "{mime}");
+        assert!(mime.contains("Reply-To: billing@tucano.test\r\n"), "{mime}");
+        let named = EmailMessage {
+            to: "Capybara Solutions <emanuele@tucano.test>".into(),
+            ..m.clone()
+        };
+        let mime = build_mime(&named).expect("a display-name recipient builds");
+        assert!(
+            mime.contains("To: Capybara Solutions <emanuele@tucano.test>\r\n"),
+            "{mime}"
+        );
+        // The recording transport takes it exactly as before.
+        let rec = RecordingEmailSender::default();
+        assert!(rec.send(&m).is_ok());
+        assert_eq!(rec.messages().len(), 1);
+    }
+
+    #[test]
+    fn control_characters_are_refused_at_the_sink() {
+        // Every header-bound value the builder writes is checked, including the
+        // ones that never pass through `valid_address` (a resolved subject, a
+        // display name). A refused message is refused outright -- never
+        // stripped-and-shipped -- and the value never reaches a header.
+        let base = EmailMessage {
+            to: "ok@x.co".into(),
+            subject: "S".into(),
+            text: "b".into(),
+            html: None,
+            attachment: None,
+            from_name: None,
+            reply_to: None,
+        };
+        for hostile in [
+            "inv@corp.example\r\nBcc: attacker@evil.example",
+            "inv@corp.example\nBcc: attacker@evil.example",
+            "inv@corp.example\0",
+        ] {
+            let m = EmailMessage {
+                to: hostile.into(),
+                ..base.clone()
+            };
+            assert!(matches!(
+                build_mime(&m),
+                Err(EmailError::Header("recipient"))
+            ));
+            assert!(!valid_address(hostile));
+        }
+        for hostile in ["S\r\nBcc: attacker@evil.example", "S\nX", "S\0"] {
+            let m = EmailMessage {
+                subject: hostile.into(),
+                ..base.clone()
+            };
+            assert!(matches!(build_mime(&m), Err(EmailError::Header("subject"))));
+        }
+        let m = EmailMessage {
+            reply_to: Some("billing@x.co\r\nBcc: attacker@evil.example".into()),
+            ..base.clone()
+        };
+        assert!(matches!(
+            build_mime(&m),
+            Err(EmailError::Header("reply-to"))
+        ));
+        let m = EmailMessage {
+            from_name: Some("Acme\r\nBcc: attacker@evil.example".into()),
+            ..base.clone()
+        };
+        assert!(matches!(
+            build_mime(&m),
+            Err(EmailError::Header("sender name"))
+        ));
+        let m = EmailMessage {
+            attachment: Some(("inv\r\nBcc: x.pdf".into(), b"%PDF-1.4".to_vec())),
+            ..base.clone()
+        };
+        assert!(matches!(
+            build_mime(&m),
+            Err(EmailError::Header("attachment filename"))
+        ));
+        // The refusal names the field and never leaks the offending value.
+        let err = build_mime(&EmailMessage {
+            subject: "S\r\nBcc: attacker@evil.example".into(),
+            ..base
+        })
+        .unwrap_err();
+        let text = err.to_string();
+        assert!(!text.contains("attacker@evil.example"), "{text}");
+        assert!(!text.contains('\r') && !text.contains('\n'), "{text}");
+    }
+
+    #[test]
+    fn transports_refuse_control_characters_without_recording() {
+        let m = EmailMessage {
+            to: "ok@x.co".into(),
+            subject: "S\r\nBcc: attacker@evil.example".into(),
+            text: "b".into(),
+            html: None,
+            attachment: None,
+            from_name: None,
+            reply_to: None,
+        };
+        let rec = RecordingEmailSender::default();
+        assert!(matches!(rec.send(&m), Err(EmailError::Header("subject"))));
+        assert_eq!(
+            rec.messages().len(),
+            0,
+            "a refused message is never recorded"
+        );
+        // The disabled transport logs the recipient/subject, so it refuses too
+        // rather than let a folded value forge a log line; it still reports.
+        assert!(matches!(
+            DisabledEmailSender.send(&m),
+            Err(EmailError::Header("subject"))
+        ));
+        assert_eq!(DisabledEmailSender.transport(), "disabled");
+        // The SMTP transport refuses before it opens a socket.
+        let smtp = SmtpEmailSender::new(SmtpConfig {
+            host: "127.0.0.1".into(),
+            port: 1,
+            from: "noreply@tucano.test".into(),
+            username: None,
+            password: None,
+        });
+        assert!(matches!(smtp.send(&m), Err(EmailError::Header("subject"))));
     }
 }

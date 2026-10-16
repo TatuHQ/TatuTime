@@ -1926,6 +1926,53 @@
         },
         "additionalProperties": false
       },
+      "InvoiceTimelineEventKind": {
+        "type": "string",
+        "enum": [
+          "created",
+          "issued",
+          "updated",
+          "email_sent",
+          "sent",
+          "paid",
+          "write_off",
+          "payment"
+        ],
+        "description": "Stable machine-readable timeline event kind. created/issued/updated/email_sent are emitted by Subtask A; sent (a manual mark-as-sent), paid (money received) and write_off by Subtask B. payment is reserved so a later subtask can add it without a contract change."
+      },
+      "InvoiceTimelineEvent": {
+        "type": "object",
+        "description": "One retained entry of an invoice's activity timeline (Subtask A), kept in the invoices/.timeline.<id>.json dot-file sidecar. A display aid, never a record of authority.",
+        "required": [
+          "kind",
+          "description",
+          "actor_name",
+          "at"
+        ],
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/InvoiceTimelineEventKind"
+          },
+          "description": {
+            "type": "string",
+            "description": "Human-readable sentence, e.g. 'Invoice created.'"
+          },
+          "actor_name": {
+            "type": "string",
+            "description": "Display name of the acting user; never a secret."
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "meta": {
+            "type": "object",
+            "description": "Optional per-kind structured extras (e.g. the recipient + From identity for email_sent).",
+            "additionalProperties": true
+          }
+        },
+        "additionalProperties": false
+      },
       "Cadence": {
         "type": "string",
         "enum": [
@@ -5691,6 +5738,61 @@
         }
       }
     },
+    "/api/invoices/{id}/pdf/preview": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "getInvoicePdfPreview",
+        "x-admin-only": true,
+        "tags": [
+          "invoices"
+        ],
+        "summary": "On-demand, stage-stamped invoice PDF preview (Subtask C); admin only",
+        "description": "Renders the invoice on demand and stamps it with the current watermark stage: DRAFT (a draft, or an issued invoice never delivered), SENT (a manual `sent` or an `email_sent` timeline event) or PAID (paid or partly paid), in that precedence (Paid > Sent > Draft). Unlike GET /api/invoices/{id}/pdf, which serves the frozen issue-time archive and refuses a draft with 409, this route always renders live, so **a draft is a normal 200**. The render is computed and never archived: it does not disturb the write-once invoices/<id>.pdf. The stage text is deliberately date-free, so the render is deterministic and the response carries an ETag.",
+        "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "200": {
+            "description": "Rendered PDF document carrying the current stage stamp.",
+            "headers": {
+              "ETag": {
+                "description": "SHA-256 of the rendered bytes, quoted."
+              },
+              "Content-Disposition": {
+                "description": "inline"
+              }
+            },
+            "content": {
+              "application/pdf": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
     "/api/invoices/{id}/email": {
       "parameters": [
         {
@@ -7515,6 +7617,123 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/api/invoices/{id}/timeline": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "getInvoiceTimeline",
+        "x-admin-only": true,
+        "tags": [
+          "invoices"
+        ],
+        "summary": "Per-invoice activity timeline (Subtask A); admin only",
+        "description": "Returns { events: [...] } newest first. Events are recorded when an invoice is created (tracked or manual), issued, edited as a draft, emailed to the customer, manually marked as sent, paid or partly paid (#114), and written off. Unknown invoice ids are 404. The timeline is a display aid stored in a dot-file sidecar: a missing one is an empty list, and no event ever changes invoice status or billing state. It is the single source of truth for whether an invoice counts as sent (the `sent`/`email_sent` kinds); `paid`/`write_off` merely retain the settlement history next to the audit log.",
+        "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "200": {
+            "description": "Timeline events, newest first.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "events"
+                  ],
+                  "properties": {
+                    "events": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/InvoiceTimelineEvent"
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/api/invoices/{id}/sent": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "post": {
+        "operationId": "markInvoiceSent",
+        "x-admin-only": true,
+        "tags": [
+          "invoices"
+        ],
+        "summary": "Mark an issued invoice as sent (Subtask B); idempotent",
+        "description": "Records the manual delivery transition as a `sent` timeline event and returns the derived `sent_at`. `sent_at` is the earliest delivery on file: the event just recorded, or an earlier `email_sent` (an email send marks the invoice sent automatically). It is derived from the timeline and deliberately NOT a field of the Invoice schema, so the closed schema stays closed. A draft is 409, because nothing has been delivered and a draft has no archived PDF. Re-marking an already-delivered invoice is a 200 carrying the earliest delivery timestamp, with no duplicate event appended. Recording history never changes invoice status, locking or billing.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
+        "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "200": {
+            "description": "The invoice's delivery state after the transition (idempotent).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "sent_at"
+                  ],
+                  "properties": {
+                    "sent_at": {
+                      "type": "string",
+                      "format": "date-time",
+                      "description": "Earliest delivery timestamp (RFC 3339): the `sent` event just recorded, or an earlier `email_sent`."
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
           }
         }
       }

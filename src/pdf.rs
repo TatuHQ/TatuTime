@@ -15,6 +15,13 @@
 //! first download. There is deliberately no `/Info` dictionary and no file
 //! ID, because those would carry timestamps.
 //!
+//! Watermark (Subtask C): a `Doc` may carry a `watermark` stage, rendered as a
+//! light-grey diagonal text stamp (`DRAFT`/`SENT`/`PAID`). The stamp is
+//! deliberately **text-only and date-free**: a date would vary between two
+//! renders of the same `Doc` and break the byte-stability/`ETag` contract on
+//! the on-demand preview path. It is emitted with a rotated text matrix (see
+//! `Op::TextRotated`), needs no `ExtGState`/alpha, and is stamped once per page.
+//!
 //! Money discipline: amounts are formatted from persisted minor units via
 //! `api::money_for_email` (integer division), and the totals section prints
 //! `invoice.total_minor` directly — layout arithmetic never re-sums printed
@@ -28,7 +35,7 @@
 
 use chrono::{DateTime, Utc};
 
-use crate::domain::{Currency, Customer, Invoice, InvoiceLine, LineKind};
+use crate::domain::{Currency, Customer, Invoice, InvoiceLine, InvoiceWatermarkStage, LineKind};
 
 // =============================================================== doc model ==
 
@@ -152,6 +159,10 @@ pub struct Doc {
     pub column_labels: [String; 3],
     /// Content accent for the totals section (#146); None = no color ops.
     pub accent: Option<[f32; 3]>,
+    /// On-demand watermark stage (Subtask C); `None` renders no stamp. Set by
+    /// the caller — the archive path passes the generation-time stage, the
+    /// preview the live one — never read from a global (see the module note).
+    pub watermark: Option<InvoiceWatermarkStage>,
     pub header: Vec<Block>,
     pub blocks: Vec<Block>,
     pub lines: Vec<LineRow>,
@@ -280,6 +291,8 @@ pub fn doc_for_labeled(
             labels.unit_price.clone(),
         ],
         accent: parse_accent(&org.accent),
+        // `doc_for` never stamps: the watermark is an explicit caller input.
+        watermark: None,
         header,
         blocks: vec![],
         lines,
@@ -423,7 +436,7 @@ impl Face {
 
 /// A laid-out drawing operation in integer points, top-left-origin page
 /// space; flipped to PDF's bottom-up space at emit time.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 enum Op {
     /// Set fill+stroke color (#146 accent); emitted raw for determinism.
     Color { rgb: [f32; 3] },
@@ -439,6 +452,17 @@ enum Op {
         face: Face,
         size: i32,
         x_right: i32,
+        y: i32,
+        bytes: Vec<u8>,
+    },
+    /// The watermark stamp (Subtask C): the same glyph run as `Text`, but
+    /// emitted with a rotated text matrix so it reads diagonally. `(x, y)` is
+    /// the baseline start in top-left-origin page space, chosen by the layout
+    /// so the run is centred on the page.
+    TextRotated {
+        face: Face,
+        size: i32,
+        x: i32,
         y: i32,
         bytes: Vec<u8>,
     },
@@ -687,6 +711,50 @@ impl Pager {
     }
 }
 
+// Watermark (Subtask C): a light-grey diagonal stage stamp. A single solid
+// grey needs no `ExtGState`/alpha (which this renderer never emits) and keeps
+// the op set closed; it stays legible over the invoice without obscuring the
+// black content.
+/// Watermark ink: a light solid grey (`1.0` = black, `0.0` = white). A
+/// DeviceGray fill, so it can never be confused with the RGB accent (#146).
+const WATERMARK_GREY: f32 = 0.75;
+/// Watermark glyph height in points — large enough to read across the page.
+const WATERMARK_SIZE: i32 = 60;
+/// `cos45 = sin45` in ten-thousandths, for the integer-only diagonal centring:
+/// the run advances `0.7071` point right and up per point of its width.
+const ROT_DIAGONAL: i32 = 7071;
+
+/// The stamp text for a stage. Deliberately **date-free** (`DRAFT`/`SENT`/
+/// `PAID`, never `DRAFT 2026-01-01`): a date would differ between two renders
+/// of the same `Doc` and break the byte-stability/`ETag` contract on the
+/// on-demand preview path (see the module determinism note).
+fn watermark_text(stage: InvoiceWatermarkStage) -> &'static str {
+    match stage {
+        InvoiceWatermarkStage::Draft => "DRAFT",
+        InvoiceWatermarkStage::Sent => "SENT",
+        InvoiceWatermarkStage::Paid => "PAID",
+    }
+}
+
+/// The watermark op for one page, drawn **first** so the invoice ink sits on
+/// top of the grey (no alpha: a light grey underneath reads as a background
+/// stamp). `put_text_rotated` sets and restores the grey ink itself, so the op
+/// set needs no extra colour ops. The run is centred on the page: the anchor
+/// is the baseline start, half the run's 45° diagonal extent down-left of the
+/// page centre — integer arithmetic only, like the rest of the layout.
+fn watermark_ops(stage: InvoiceWatermarkStage) -> Vec<Op> {
+    let bytes = winansi(watermark_text(stage));
+    let face = Face::Bold;
+    let dx = measure(face, WATERMARK_SIZE, &bytes) / 2 * ROT_DIAGONAL / 10_000;
+    vec![Op::TextRotated {
+        face,
+        size: WATERMARK_SIZE,
+        x: PAGE_W / 2 - dx,
+        y: PAGE_H / 2 + dx,
+        bytes,
+    }]
+}
+
 /// Lay the `Doc` out into per-page operation lists.
 fn layout(doc: &Doc) -> Vec<Vec<Op>> {
     let mut p = Pager::new();
@@ -749,7 +817,19 @@ fn layout(doc: &Doc) -> Vec<Vec<Op>> {
         emit_block(&mut p, b, 9, 0);
     }
 
-    p.finish()
+    let mut pages = p.finish();
+    // Watermark (Subtask C): stamp every page with the doc's stage, if any.
+    // Drawn first so the invoice ink sits on top of the grey; the stamp is
+    // per-page, so a multi-page invoice is stamped throughout.
+    if let Some(stage) = doc.watermark {
+        let ops = watermark_ops(stage);
+        for page in &mut pages {
+            let mut stamped = ops.clone();
+            stamped.append(page);
+            *page = stamped;
+        }
+    }
+    pages
 }
 
 fn emit_table_head(p: &mut Pager, doc: &Doc) {
@@ -1114,6 +1194,15 @@ fn emit(pages: &[Vec<Op>]) -> Vec<u8> {
                     let w = measure(*face, *size, bytes);
                     put_text(&mut content, *face, *size, *x_right - w, *y, bytes);
                 }
+                Op::TextRotated {
+                    face,
+                    size,
+                    x,
+                    y,
+                    bytes,
+                } => {
+                    put_text_rotated(&mut content, *face, *size, *x, *y, bytes);
+                }
                 Op::Line {
                     x1,
                     y1,
@@ -1154,6 +1243,34 @@ fn put_text(
     content.set_text_matrix([1.0, 0.0, 0.0, 1.0, x as f32, (PAGE_H - y) as f32]);
     content.show(Str(bytes));
     content.end_text();
+}
+
+/// One rotated text draw — the watermark stamp. Unlike [`put_text`], the text
+/// matrix carries a 45° anticlockwise rotation: `[cos45, sin45, -sin45, cos45,
+/// x, y]`. In PDF's bottom-up space the positive `b` (`sin45`) tilts the
+/// baseline up and to the right, so the run reads bottom-left to top-right on
+/// the page. Text-only, no date — the determinism contract.
+fn put_text_rotated(
+    content: &mut pdf_writer::Content,
+    face: Face,
+    size: i32,
+    x: i32,
+    y: i32,
+    bytes: &[u8],
+) {
+    use pdf_writer::{Name, Str};
+    let c = std::f32::consts::FRAC_1_SQRT_2;
+    // Light grey DeviceGray ink (`g`), restored to black (`0 g`) afterwards so
+    // the invoice content drawn on top stays black. DeviceGray is deliberate:
+    // one grey value needs no `ExtGState`/alpha, and it can never be mistaken
+    // for the RGB accent (#146) the money section may paint.
+    content.set_fill_gray(WATERMARK_GREY);
+    content.begin_text();
+    content.set_font(Name(face.name().as_bytes()), size as f32);
+    content.set_text_matrix([c, c, -c, c, x as f32, (PAGE_H - y) as f32]);
+    content.show(Str(bytes));
+    content.end_text();
+    content.set_fill_gray(0.0);
 }
 
 // ============================================================ unit tests ===
@@ -1428,6 +1545,7 @@ mod tests {
             title: "T".into(),
             column_labels: Default::default(),
             accent: None,
+            watermark: None,
             header: vec![],
             blocks: vec![Block::Paragraph(vec![
                 Span::bold("B"),
@@ -1443,12 +1561,81 @@ mod tests {
         let faces: Vec<Face> = pages[0]
             .iter()
             .filter_map(|op| match op {
-                Op::Text { face, .. } | Op::TextRight { face, .. } => Some(*face),
+                Op::Text { face, .. }
+                | Op::TextRight { face, .. }
+                | Op::TextRotated { face, .. } => Some(*face),
                 Op::Line { .. } | Op::Color { .. } => None,
             })
             .collect();
         assert!(faces.contains(&Face::Bold));
         assert!(faces.contains(&Face::Oblique));
         assert!(faces.contains(&Face::Regular));
+    }
+
+    /// Whether the (uncompressed) content stream carries the `(STAMP)` literal.
+    fn has_stamp(bytes: &[u8], stamp: &str) -> bool {
+        let needle = format!("({stamp})");
+        bytes.windows(needle.len()).any(|w| w == needle.as_bytes())
+    }
+
+    #[test]
+    fn watermark_stamp_is_present_per_stage_and_deterministic() {
+        // The determinism contract in use: the same staged `Doc` renders
+        // byte-identically, and the stamp glyphs are in the re-parsed content.
+        for (stage, text) in [
+            (InvoiceWatermarkStage::Draft, "DRAFT"),
+            (InvoiceWatermarkStage::Sent, "SENT"),
+            (InvoiceWatermarkStage::Paid, "PAID"),
+        ] {
+            let mut doc = doc_for(&sample_invoice(), &customer(), &org());
+            doc.watermark = Some(stage);
+            let a = render_invoice_pdf(&doc);
+            let b = render_invoice_pdf(&doc);
+            assert_eq!(a, b, "{text}: same Doc renders byte-identically");
+            let _ = lopdf::Document::load_mem(&a).expect("re-parse stamped pdf");
+            assert!(has_stamp(&a, text), "the {text} stamp is in the content");
+        }
+    }
+
+    #[test]
+    fn no_stage_leaves_the_document_unstamped() {
+        let bytes = render_invoice_pdf(&doc_for(&sample_invoice(), &customer(), &org()));
+        for text in ["DRAFT", "SENT", "PAID"] {
+            assert!(!has_stamp(&bytes, text), "no {text} stamp without a stage");
+        }
+    }
+
+    #[test]
+    fn watermark_is_a_rotated_grey_run_on_every_page() {
+        let mut inv = sample_invoice();
+        inv.lines = (0..80)
+            .map(|i| InvoiceLine {
+                kind: LineKind::Fixed,
+                date: inv.period_from,
+                entry_id: None,
+                expense_id: None,
+                project_code: None,
+                task_code: None,
+                hours: None,
+                rate_minor: None,
+                amount_minor: i as u64 * 100,
+                note: format!("Recurring charge {i}"),
+                quantity_hundredths: None,
+                unit_price_minor: None,
+                item_kind: None,
+            })
+            .collect();
+        let mut doc = doc_for(&inv, &customer(), &org());
+        doc.watermark = Some(InvoiceWatermarkStage::Draft);
+        let pages = layout(&doc);
+        assert!(pages.len() > 1, "the fixture spans pages");
+        for page in &pages {
+            // The stamp is the first op on the page, so the invoice ink that
+            // follows is drawn on top of the light grey run.
+            assert!(
+                matches!(page.first(), Some(Op::TextRotated { .. })),
+                "the stamp is drawn first"
+            );
+        }
     }
 }

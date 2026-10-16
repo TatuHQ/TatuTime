@@ -193,6 +193,7 @@ pub const API_ROUTES: &[(&str, &str, Tier)] = &[
     ("DELETE", "/api/invoices/{id}", Tier::Admin),
     ("POST", "/api/invoices/{id}/issue", Tier::Admin),
     ("GET", "/api/invoices/{id}/pdf", Tier::Admin),
+    ("GET", "/api/invoices/{id}/pdf/preview", Tier::Admin),
     ("POST", "/api/invoices/{id}/pay", Tier::Admin),
     ("POST", "/api/invoices/{id}/write-off", Tier::Admin),
     ("POST", "/api/invoices/{id}/email", Tier::Admin),
@@ -208,6 +209,8 @@ pub const API_ROUTES: &[(&str, &str, Tier)] = &[
     ("PUT", "/api/admin/item-types/{id}", Tier::Admin),
     ("DELETE", "/api/admin/item-types/{id}", Tier::Admin),
     ("GET", "/api/invoices/{id}/document", Tier::Admin),
+    ("GET", "/api/invoices/{id}/timeline", Tier::Admin),
+    ("POST", "/api/invoices/{id}/sent", Tier::Admin),
     ("GET", "/api/invoices/summary", Tier::Admin),
     ("GET", "/api/invoices/report", Tier::Admin),
     ("GET", "/api/invoices/export.csv", Tier::Admin),
@@ -421,6 +424,7 @@ pub fn build_router(state: AppState) -> Router {
             axum::routing::post(api::issue_invoice),
         )
         .route("/invoices/{id}/pdf", get(api::invoice_pdf))
+        .route("/invoices/{id}/pdf/preview", get(api::invoice_pdf_preview))
         .route("/invoices/{id}/pay", axum::routing::post(api::pay_invoice))
         .route(
             "/invoices/{id}/write-off",
@@ -456,6 +460,11 @@ pub fn build_router(state: AppState) -> Router {
             axum::routing::put(api::update_item_type).delete(api::delete_item_type),
         )
         .route("/invoices/{id}/document", get(api::invoice_document))
+        .route("/invoices/{id}/timeline", get(api::invoice_timeline))
+        .route(
+            "/invoices/{id}/sent",
+            axum::routing::post(api::mark_invoice_sent),
+        )
         .route("/invoices/summary", get(api::invoice_summary))
         .route("/invoices/report", get(api::invoice_report_handler))
         .route("/invoices/export.csv", get(api::invoice_export_csv))

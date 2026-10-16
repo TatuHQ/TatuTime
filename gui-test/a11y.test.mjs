@@ -39,7 +39,10 @@ test('invoice chart exposes its numbers through the accessible name (#191)', () 
   const chart = document.getElementById('inv-chart');
   assert.equal(chart.getAttribute('role'), 'img');
   const label = chart.getAttribute('aria-label') || '';
+  assert.match(label, /Monthly open versus closed amounts/,
+    `the accessible name states the Open/Closed pairing: ${label}`);
   assert.match(label, /open 1800\.00/, `summary must ride the name: ${label}`);
+  assert.match(label, /closed 0\.00/, `the settled series is Closed, never Paid: ${label}`);
   // Children of role="img" are presentational — the old sr-only child is gone.
   assert.equal(chart.querySelector('.sr-only'), null,
     'no DOM summary inside a role="img" subtree');
@@ -249,6 +252,27 @@ test('the bespoke tab skins are retired in favour of the p-tabs adapter (#232 in
   // role="group" of aria-pressed buttons — not a tablist.
   assert.match(stylesCss, /\.seg \{\n\s+display: inline-flex/, 'the .seg shell stays for the toggle group');
 });
+test('the Open|All filter keeps its .seg semantics under the Ubuntu skin (#F)', () => {
+  const { dom, document } = setup();
+  const group = document.querySelector('#inv-list-head .seg');
+  assert.ok(group, 'the segmented shell is still there (#F)');
+  assert.equal(group.getAttribute('role'), 'group', 'a group, never a tablist');
+  const buttons = [...group.querySelectorAll('button')];
+  assert.equal(buttons.length, 2, 'Open | All');
+  for (const button of buttons) {
+    assert.ok(button.classList.contains('seg-btn'), button.id + ' keeps the segment skin');
+    assert.ok(['true', 'false'].includes(button.getAttribute('aria-pressed')),
+      button.id + ' stays an aria-pressed toggle');
+  }
+  assert.equal(group.querySelector('[role="tab"]'), null, 'no tab pattern is introduced');
+  // The restyle is the app-owned skin over the same group: the pressed segment
+  // is filled with the accent tint in the rail's selected-tab ink, the pairing
+  // contrast.mjs pins for both themes.
+  assert.match(stylesCss, /\.seg \.seg-btn\[aria-pressed="true"\] \{ background: var\(--accent-soft\); color: var\(--brand-deep\)/,
+    'the pressed segment carries the Ubuntu skin on the app ink');
+  dom.window.close();
+});
+
 
 test('the selected tab is signalled by the text colour, not a faint tint, in both themes (#232 inc 5)', () => {
   // The classic tab contrast gap is an active state carried by a low-contrast

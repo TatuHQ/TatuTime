@@ -635,3 +635,54 @@ async fn customer_without_ever_having_projects_deletes_cleanly() {
             .all(|x| x["id"] != c["id"])
     );
 }
+
+#[tokio::test]
+async fn control_characters_are_refused_on_write_without_persisting() {
+    // #S1: the customer email, the billing contact's address and the
+    // invoice-subject override all end up in a header of an email the app
+    // sends. Refused at the write seam -- the standard 422 shape, persisting
+    // nothing -- never left to the sink alone.
+    let (app, _d) = app().await;
+    for (field, value) in [
+        ("email", "billing@acme.test\r\nBcc: attacker@evil.example"),
+        (
+            "invoice_subject",
+            "Inv %invoice_number%\nBcc: attacker@evil.example",
+        ),
+        ("email", "billing@acme.test\0"),
+    ] {
+        let mut body = json!({"name":"EVIL","currency":"EUR","default_rate_minor":6000});
+        body[field] = json!(value);
+        let (s, b) = json_req(&app, "POST", "/api/customers", Some(body)).await;
+        assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY, "{field}: {b}");
+        assert_eq!(b["error"]["code"], "validation_failed", "{field}: {b}");
+        assert_eq!(b["error"]["fields"][0]["field"], field, "{field}: {b}");
+        assert!(
+            !b.to_string().contains("attacker@evil.example"),
+            "{field} rejection echoes no hostile value: {b}"
+        );
+    }
+    // The flagged billing contact is the same seam (#139).
+    let (sc, cb) = json_req(
+        &app,
+        "POST",
+        "/api/customers",
+        Some(
+            json!({"name":"EVIL2","currency":"EUR","default_rate_minor":6000,
+                    "contacts":[{"name":"Billing","billing":true,
+                                 "email":"billing@acme.test\r\nBcc: attacker@evil.example"}]}),
+        ),
+    )
+    .await;
+    assert_eq!(sc, StatusCode::UNPROCESSABLE_ENTITY, "{cb}");
+    assert_eq!(
+        cb["error"]["fields"][0]["field"], "contacts[0].email",
+        "{cb}"
+    );
+
+    let (_s, list) = json_req(&app, "GET", "/api/customers", None).await;
+    assert!(
+        list["customers"].as_array().unwrap().is_empty(),
+        "nothing persisted: {list}"
+    );
+}

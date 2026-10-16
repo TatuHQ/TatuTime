@@ -57,6 +57,24 @@ export async function fetchRate(from, to) {
   }
 }
 
+/// The same quote, but keeping the rate as **the decimal string the server
+/// served** (and its reference date). Read-only addition: the invoice chart has
+/// to *show* the rate it converted with, and re-deriving it from a float would
+/// round the published figure. It throws instead of swallowing the failure —
+/// the chart reads a failed lookup as "no honest number", which is exactly the
+/// #F fail-closed path (never a fabricated 1:1). The rate is never written
+/// anywhere: it is parsed per `convertMinor` only to multiply.
+export async function fetchRateQuote(from, to) {
+  const answer = await api.get(`/fx?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+  const rate = answer.rate === null || answer.rate === undefined ? '' : String(answer.rate);
+  if (!Number.isFinite(Number.parseFloat(rate)) || Number.parseFloat(rate) <= 0) {
+    const err = new Error(`${from}/${to} has no usable rate`);
+    err.status = 503;
+    throw err;
+  }
+  return { from, to, rate, date: answer.date || '', source: answer.source || '' };
+}
+
 // ------------------------------------------------------- expense dialog ---
 
 /// The currency the picked customer/project bills in: the project's own

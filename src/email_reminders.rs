@@ -164,6 +164,10 @@ impl EmailReminderJob {
                 );
                 let content = crate::template::doc_content(&template, customer, &vars);
                 crate::template::apply_doc_content(&mut doc, &content);
+                // Subtask C: this path also archives a PDF (for an issued,
+                // undelivered invoice), so it carries the same generation-time
+                // `Draft` stage as the issue path.
+                doc.watermark = Some(crate::domain::InvoiceWatermarkStage::Draft);
                 let bytes = crate::pdf::render_invoice_pdf(&doc);
                 let filename = match self.store.attach_invoice_pdf(inv.id, &bytes, now) {
                     Ok(updated) => updated
@@ -214,6 +218,14 @@ impl Job for EmailReminderJob {
             // and archive on first sight. The reminder must carry the same
             // document the customer was issued, never a freshly derived one.
             let attachment = self.resolve_pdf(&inv, customer, now);
+            // Subtask B: a reminder chases an invoice that was ALREADY
+            // delivered, so this job deliberately appends no timeline event.
+            // `domain::invoice_watermark_stage` derives "sent" from the
+            // timeline, so a reminder stamped as `sent`/`email_sent` here would
+            // move the derived `sent_at` backwards-to-forwards and invent a
+            // second delivery. The reminder's own trace is the per-invoice
+            // last-reminded `state` below plus the failure log; this job holds
+            // no audit handle, and the timeline is not a substitute for one.
             let amount = crate::api::money_for_email(inv.balance_minor(), &inv.currency.0);
             let due = inv.due_date.map(|d| d.to_string()).unwrap_or_default();
             let payment = customer

@@ -351,3 +351,54 @@ async fn email_result_reports_disabled_transport_honestly() {
             .ends_with(":disabled")
     );
 }
+
+#[tokio::test]
+async fn invoice_email_refuses_control_characters_at_the_sink() {
+    // #S1: a header-bound value that passes every write-path check -- the org
+    // "email sender display name" is only length-validated -- must still be
+    // refused when the mail is assembled, so no customer-planted CRLF can fold
+    // a header into a message the app sends in the organisation's name, nor
+    // inject a line into the SMTP dialogue. Nothing is sent, nothing is
+    // recorded, and the refusal never echoes the hostile value.
+    let (app, _d) = app().await;
+    let (_issued, iid) = seed_issued_invoice(&app).await;
+    let (s, saved) = json_req(
+        &app,
+        "PUT",
+        "/api/admin/org",
+        Some(json!({"name":"Tucano BV","from_name":"Acme\r\nBcc: attacker@evil.example"})),
+    )
+    .await;
+    assert_eq!(
+        s,
+        StatusCode::OK,
+        "the write path is unchanged here: {saved}"
+    );
+
+    let (se, body) = json_req(&app, "POST", &format!("/api/invoices/{iid}/email"), None).await;
+    assert_eq!(se, StatusCode::BAD_GATEWAY, "{body}");
+    assert_eq!(body["error"]["code"], "email_failed", "{body}");
+    assert!(
+        body["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("control character"),
+        "the refusal names the reason: {body}"
+    );
+    assert!(
+        !body.to_string().contains("attacker@evil.example"),
+        "the refused value is never echoed: {body}"
+    );
+    // Refused before it was emitted: the recording transport holds nothing.
+    assert_eq!(app.email.messages().len(), 0, "refused, never emitted");
+    // And no delivery was recorded on the invoice timeline.
+    let (_st, tl) = json_req(&app, "GET", &format!("/api/invoices/{iid}/timeline"), None).await;
+    assert!(
+        tl["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|e| e["kind"] != "email_sent"),
+        "a refused send records no delivery: {tl}"
+    );
+}

@@ -413,3 +413,46 @@ async fn customer_invoice_fields_round_trip_and_validate() {
         u["payment_terms"]
     );
 }
+
+// ------------------------------------------------------------------ #S1 ---
+
+#[tokio::test]
+async fn template_subject_refuses_control_characters() {
+    // #S1: the org template subject is written into the email's Subject header,
+    // so a CR/LF/NUL is refused on write (422) and the previous template stays
+    // intact. The body keeps accepting newlines -- it is multi-line document
+    // text by design and never reaches a header.
+    let (app, _d) = app().await;
+    let (ok, saved) = json_req(
+        &app,
+        "PUT",
+        "/api/admin/invoice-template",
+        Some(json!({"subject":"October: %invoice_number%",
+                    "body":"Dear %customer_name%,\n\n- consulting\n- support",
+                    "footer":"Wire to IBAN XX","payment_terms":null})),
+    )
+    .await;
+    assert_eq!(ok, StatusCode::OK, "{saved}");
+    let (s, b) = json_req(
+        &app,
+        "PUT",
+        "/api/admin/invoice-template",
+        Some(
+            json!({"subject":"Inv %invoice_number%\r\nBcc: attacker@evil.example",
+                    "body":"x","footer":"","payment_terms":null}),
+        ),
+    )
+    .await;
+    assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY, "{b}");
+    assert_eq!(b["error"]["code"], "validation_failed", "{b}");
+    assert_eq!(b["error"]["fields"][0]["field"], "subject", "{b}");
+    assert!(
+        !b.to_string().contains("attacker@evil.example"),
+        "the refusal echoes no hostile value: {b}"
+    );
+    let (_sg, got) = json_req(&app, "GET", "/api/admin/invoice-template", None).await;
+    assert_eq!(
+        got["template"]["subject"], "October: %invoice_number%",
+        "the rejection persisted nothing: {got}"
+    );
+}
