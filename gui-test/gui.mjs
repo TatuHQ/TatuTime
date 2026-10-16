@@ -1881,7 +1881,12 @@ if (emailBtn) {
   // for the settled panel — a half-rendered panel is not evidence of anything.
   const sendSettled = () => sentCount() === emailsBefore + 1
     && !!byId('ip-frame') && String(byId('ip-frame').getAttribute('src')).startsWith('blob:');
+  // A send re-renders the panel through two concurrent fetches (the timeline
+  // and the PDF), so the settled state can legitimately outlast the default 5s
+  // poll budget: give it the same 15s the other multi-fetch waits here use
+  // instead of failing on one slow round trip.
   await waitFor(sendSettled, {
+    timeoutMs: 15000,
     message: 'the panel to re-render the history and refresh the framed PDF',
   });
   check('Send email from the panel refreshes the preview and the history (#349)', sendSettled());

@@ -123,8 +123,11 @@ export async function refreshInvoiceSummary(preloaded) {
   const outstanding = Object.entries(s.outstanding || {})
     .map(([cur, minor]) => `${cur} ${formatMoney(minor)}`)
     .join(', ');
+  // The count band speaks the same UK lifecycle vocabulary as the register
+  // chips (#359): the persisted `issued` status reads "Sent", so the band and
+  // the chips can never disagree.
   $('invoice-summary').textContent =
-    `Draft ${s.draft} · Issued ${s.issued}${s.overdue ? ` (${s.overdue} overdue)` : ''}` +
+    `Draft ${s.draft} · Sent ${s.issued}${s.overdue ? ` (${s.overdue} overdue)` : ''}` +
     (s.partly_paid ? ` · Partly paid ${s.partly_paid}` : '') +
     ` · Paid ${s.paid}` +
     (s.written_off ? ` · Written off ${s.written_off}` : '') +
