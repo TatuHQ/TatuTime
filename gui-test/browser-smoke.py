@@ -1307,8 +1307,8 @@ class Gate:
             "the bespoke .field/.hint/.form-error markup is gone and the official "
             "form vocabulary is in place (#232 phase 2b)",
             counts["field"] == 0 and counts["hint"] == 0 and counts["formError"] == 0
-            and counts["groups"] == 120 and counts["labels"] == 116
-            and counts["controls"] == 116 and counts["help"] == 28
+            and counts["groups"] == 128 and counts["labels"] == 123
+            and counts["controls"] == 123 and counts["help"] == 29
             and counts["messages"] == counts["errorGroups"] == 23,
             f"counts={counts}",
             info=f"{counts['groups']} groups, {counts['help']} help texts, "
