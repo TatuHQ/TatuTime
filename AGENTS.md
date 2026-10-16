@@ -91,17 +91,19 @@ the `v0.1.8` release notes is no longer needed.
   rest with `TUCANO_SECRET_KEY` (32 bytes) and never returned to clients (masked
   hints only) or logged. Fail-closed: unset key ⇒ vault disabled.
 - **Locking (#18 seam):** entry edits/deletes and expense deletes consult
-  `CombinedLocks`, which composes `InvoiceLock` (entries **and** expenses on an
-  *open* invoice — `status.is_open()` is exactly `issued | partly_paid`,
-  #8/#114 — so settling or writing off an invoice **releases** its records:
-  deliberate lifecycle, not an oversight. A closed invoice can never change
-  (rates/hours are snapshotted at issue), while the timesheet stays
-  correctable; a partly-paid invoice is still collectable and keeps its records
-  frozen), `SubmissionLock` (entries in a submitted/approved week, #16) and
-  `ClaimLock` (expenses on a submitted/approved reimbursement claim, #24 — the
-  #190 follow-up, no longer a direct scan in `api::expenses`). Reads are never
-  blocked. If the lock state cannot be verified the write is refused fail-closed
-  with 503 `lock_unavailable` (#185) — never allowed because the check was
+  `CombinedLocks`, which composes `InvoiceLock` (entries **and** expenses on
+  any **non-draft** invoice — #8/#114. **Invoiced records are permanent:**
+  issuing freezes them and settling (`paid`) or writing off (`written_off`)
+  does **not** release them, because the archived invoice document is the
+  record of what was billed and the timesheet must never drift from it. The
+  only way back to editable is before issue: drafts lock nothing and can be
+  deleted; the GUI reflects this by hiding the actions of invoiced rows and
+  showing a lock that links to the invoice), `SubmissionLock` (entries in a
+  submitted/approved week, #16) and `ClaimLock` (expenses on a
+  submitted/approved reimbursement claim, #24 — the #190 follow-up, no longer
+  a direct scan in `api::expenses`). Reads are never blocked. If the lock
+  state cannot be verified the write is refused fail-closed with 503
+  `lock_unavailable` (#185) — never allowed because the check was
   inconclusive. All three providers answer from one memoized
   `store::LockSnapshot` keyed on the source collections' directory mtimes
   (#255): a per-record check no longer re-reads every invoice/submission/claim

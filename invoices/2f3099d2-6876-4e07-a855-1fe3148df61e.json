@@ -1,0 +1,33 @@
+{
+  "id": "2f3099d2-6876-4e07-a855-1fe3148df61e",
+  "number": "INV-0001",
+  "customer_id": "f14e680b-dbe4-4877-94ec-c85d6f7d7c11",
+  "currency": "EUR",
+  "period_from": "2026-12-01",
+  "period_to": "2026-12-31",
+  "lines": [
+    {
+      "kind": "time",
+      "date": "2026-12-01",
+      "entry_id": "f5cc186c-c847-4184-910a-a15cd9d16d3d",
+      "project_code": "MKT-2",
+      "task_code": "T1",
+      "hours": 1,
+      "rate_minor": 9500,
+      "amount_minor": 9500,
+      "note": ""
+    }
+  ],
+  "total_minor": 9500,
+  "status": "issued",
+  "created_at": "2026-10-16T15:24:08.478223455Z",
+  "issued_at": "2026-10-16T15:24:08.499042797Z",
+  "due_date": "2027-01-14",
+  "payment_reference": "",
+  "pdf": {
+    "filename": "INV-0001.pdf",
+    "bytes": 6516,
+    "sha256": "695aee25575675ebffe7a1f950469c2a83bca56b417a6b9691da9d1804839797",
+    "archived_at": "2026-10-16T15:24:08.499042797Z"
+  }
+}

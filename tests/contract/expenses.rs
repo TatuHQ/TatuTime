@@ -462,7 +462,8 @@ async fn expense_update_replaces_the_record_and_keeps_its_identity() {
 
 /// The update path answers like the create and the delete: an unowned record is
 /// a 404 (never a 403 — that would leak its existence, #51), a bad shape is a
-/// 422 that changes nothing, and an expense frozen by an open invoice is a 409.
+/// 422 that changes nothing, and an expense frozen by an issued invoice is a
+/// 409 — permanently: settlement does not release it.
 #[tokio::test]
 async fn expense_update_refuses_unowned_bad_and_locked_expenses() {
     let (app, _d) = app().await;
@@ -518,7 +519,8 @@ async fn expense_update_refuses_unowned_bad_and_locked_expenses() {
     assert_eq!(unchanged["project_code"], "P1");
 
     // Issued invoice → the expense is frozen against edits, exactly as it is
-    // against deletes (#18/#218), and settling it releases the record again.
+    // against deletes (#18/#218) — and INVOICED IS PERMANENT: settling the
+    // invoice no longer releases the record.
     let (_, inv) = json_req(
         &app,
         "POST",
@@ -534,7 +536,7 @@ async fn expense_update_refuses_unowned_bad_and_locked_expenses() {
         locked["error"]["message"]
             .as_str()
             .unwrap_or_default()
-            .contains("open invoice"),
+            .contains("issued invoice"),
         "{locked}"
     );
     json_req(
@@ -544,13 +546,12 @@ async fn expense_update_refuses_unowned_bad_and_locked_expenses() {
         Some(json!({"amount_minor": 5000, "reference": "wire-1"})),
     )
     .await;
-    let (s_free, freed) = json_req(&app, "PUT", &path, Some(body)).await;
+    let (s_after, after) = json_req(&app, "PUT", &path, Some(body)).await;
     assert_eq!(
-        s_free,
-        StatusCode::OK,
-        "a settled invoice releases its expense for correction: {freed}"
+        s_after,
+        StatusCode::CONFLICT,
+        "a settled invoice keeps its expense locked: {after}"
     );
-    assert_eq!(freed["note"], "tampered");
 }
 
 #[tokio::test]

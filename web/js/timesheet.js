@@ -5,7 +5,7 @@
 import { api, fetchAll } from './api.js';
 import { refreshCalendar } from './calendar.js';
 import { $, addDays, announce, askAlert, askConfirm, askPrompt, clearFormError, el, isoDate, mondayOf, rowAction, showFormError, statusChip, ubuntuIcon } from './dom.js';
-import { isOpenInvoice } from './invoices.js';
+import { focusInvoice } from './invoices.js';
 import { refreshNotifications } from './notifications.js';
 import { showTimesheet } from './route.js';
 import { createSeqGuard } from './seq.js';
@@ -66,6 +66,12 @@ export async function refreshWeekStrip() {
   }
   const totals = {};
   for (const e of entries) totals[e.date] = (totals[e.date] || 0) + Math.round(e.hours * 100);
+  // A day whose time has been invoiced wears the lock instead of the success
+  // tick — the freeze is permanent; the Day view carries the invoice link.
+  const stripLocks = await weekLockIndex();
+  const invoicedDates = new Set(
+    entries.filter((e) => stripLocks.invoiced.has(e.id)).map((e) => e.date),
+  );
   const strip = $('week-strip');
   strip.textContent = '';
   for (let i = 0; i < 7; i += 1) {
@@ -88,7 +94,7 @@ export async function refreshWeekStrip() {
           }),
           el('span', { cls: 'ws-date', text: String(dd) }),
           el('span', { cls: 'ws-total num', text: fmtHM(totals[date] || 0) }),
-          el('span', { cls: 'ws-clock', attrs: { 'aria-hidden': 'true' } }, [ubuntuIcon(totals[date] ? 'success' : 'history')]),
+          el('span', { cls: 'ws-clock', attrs: { 'aria-hidden': 'true' } }, [ubuntuIcon(invoicedDates.has(date) ? 'lock-locked' : totals[date] ? 'success' : 'history')]),
         ],
       ),
     );
@@ -119,28 +125,23 @@ export async function refreshDay() {
   rows.sort(byCreatedAt); // the diary's own order — see byCreatedAt
   // #108: rows carry a lock indicator when the entry sits on an issued
   // invoice or a submitted/approved week (same lookup the grid uses, cached).
-  const locked = await weekLockIds();
+  // #invoiced-permanent: an INVOICED row loses its Edit/Delete actions
+  // entirely — the freeze is permanent — and its lock links to the invoice
+  // it belongs to. A submitted-week lock has no invoice to name.
+  const locks = await weekLockIndex();
   if (!isDayCurrent()) return; // #188: same, after the lock round-trip
   const tbody = $('day-table').querySelector('tbody');
   tbody.textContent = '';
   let total = 0;
   for (const e of rows) {
     total += Math.round(e.hours * 100);
+    const locked = locks.ids.has(e.id);
+    const inv = locks.invoiced.get(e.id);
     const projName = (state.projectsByCustomer[e.customer_id] || []).find((p) => p.code === e.project_code);
     const custLine =
       customerName(e.customer_id) + (e.task_code ? ` · ${e.task_code}` : '');
     const hoursCell = el('td', { cls: 'num entry-hours' }, [
       el('span', { text: fmtHM(Math.round(e.hours * 100)) }),
-      locked.has(e.id)
-        ? el('span', {
-            cls: 'lock',
-            attrs: {
-              role: 'img',
-              'aria-label': 'locked',
-              title: 'On an issued invoice or submitted week — editing is blocked',
-            },
-          }, [ubuntuIcon('lock-locked')])
-        : null,
     ]);
     const tr = el(
       'tr',
@@ -165,11 +166,25 @@ export async function refreshDay() {
         // registers); the bespoke 'pill' treatment was the odd one out and
         // read as a boxed button inside a boxed row (design policy: neutral
         // text actions in tables, positive/negative reserved for primary
-        // and destructive page-level actions).
-        el('td', { cls: 'actions-col' }, [
-          rowAction('link', 'Edit', () => startEdit(e), undefined, 'edit'),
-          rowAction('danger', 'Delete', () => removeEntry(e), undefined, 'delete'),
-        ]),
+        // and destructive page-level actions). Invoiced rows have none: the
+        // record is frozen for good, so the cell carries the lock and its
+        // invoice instead.
+        el('td', { cls: 'actions-col' }, locked
+          ? [inv
+              ? rowAction('link', inv.number, () => focusInvoice(inv.id),
+                  `Invoiced on ${inv.number} — locked; activate to open the invoice`, 'lock-locked')
+              : el('span', {
+                  cls: 'lock',
+                  attrs: {
+                    role: 'img',
+                    'aria-label': 'locked',
+                    title: 'In a submitted week — editing is blocked until it is rejected or withdrawn',
+                  },
+                }, [ubuntuIcon('lock-locked')])]
+          : [
+              rowAction('link', 'Edit', () => startEdit(e), undefined, 'edit'),
+              rowAction('danger', 'Delete', () => removeEntry(e), undefined, 'delete'),
+            ]),
       ],
     );
     tbody.appendChild(tr);
@@ -386,14 +401,21 @@ export const weekState = {
   seq: 0, // render guard: only the newest fetch may touch the DOM
 };
 
-// Entry ids locked by submitted weeks or issued invoices. Fetched fresh on
-// every grid render — locks can appear while the grid is open (#8/#16).
-export let weekLockCache = { at: 0, ids: null }; // D2: 5s TTL — one commit reuses it
+// Entry ids locked by submitted weeks or issued invoices, plus the entry ->
+// invoice refs behind the invoice locks. Fetched fresh on every grid render —
+// locks can appear while the grid is open (#8/#16). Any ISSUED invoice locks
+// its records permanently (settling does not release them), so the invoice
+// map covers paid/written-off invoices too; the GUI hides the actions of
+// those rows and links the lock to the invoice. Members cannot read
+// /invoices (admin tier), so their index carries submission locks only — the
+// server still refuses their edits to invoiced entries (409).
+export let weekLockCache = { at: 0, ids: null, invoiced: null }; // D2: 5s TTL — one commit reuses it
 
-export async function weekLockIds() {
+export async function weekLockIndex() {
   const nowMs = Date.now();
-  if (weekLockCache.ids && nowMs - weekLockCache.at < 5000) return weekLockCache.ids;
+  if (weekLockCache.ids && nowMs - weekLockCache.at < 5000) return weekLockCache;
   const locked = new Set();
+  const invoiced = new Map(); // entryId -> { id, number }
   // #189: the two reads are independent — overlap them (was sequential).
   const [subsRes, invsRes] = await Promise.allSettled([
     api.get('/submissions'),
@@ -408,11 +430,16 @@ export async function weekLockIds() {
   }
   if (invsRes.status === 'fulfilled') {
     for (const i of invsRes.value.invoices || []) {
-      if (isOpenInvoice(i)) for (const l of i.lines || []) if (l.entry_id) locked.add(l.entry_id);
+      if (i.status === 'draft') continue; // only drafts leave lines free
+      for (const l of i.lines || []) {
+        if (!l.entry_id) continue;
+        locked.add(l.entry_id);
+        if (!invoiced.has(l.entry_id)) invoiced.set(l.entry_id, { id: i.id, number: i.number });
+      }
     }
   }
-  weekLockCache = { at: Date.now(), ids: locked };
-  return locked;
+  weekLockCache = { at: Date.now(), ids: locked, invoiced };
+  return weekLockCache;
 }
 
 // #108: the day view now shares this cache, so a mutation that changes lock
@@ -448,7 +475,12 @@ export async function refreshWeek() {
   // Days in the displayed week that carry at least one entry — drives the
   // per-column status icon (mirrors the Day view's week strip).
   const entryDates = new Set(entries.map((e) => e.date));
-  const locked = await weekLockIds();
+  const locks = await weekLockIndex();
+  const locked = locks.ids;
+  // Columns whose day carries invoiced time wear the lock (permanent freeze).
+  const invoicedDates = new Set(
+    entries.filter((e) => locks.invoiced.has(e.id)).map((e) => e.date),
+  );
   if (seq !== weekState.seq) return; // a newer render superseded this one
 
   // #137: a line is identified by customer + project + TASK (empty task =
@@ -497,7 +529,7 @@ export async function refreshWeek() {
             el('span', { cls: 'wk-date', text: `${dd} ${MONTH_NAMES[mm - 1]}` }),
             el('span', { cls: 'wk-dow', text: new Date(d).toUTCString().slice(0, 3) }),
             el('span', { cls: 'wk-clock', attrs: { 'aria-hidden': 'true' } }, [
-              ubuntuIcon(hasEntry ? 'success' : 'history'),
+              ubuntuIcon(invoicedDates.has(d) ? 'lock-locked' : hasEntry ? 'success' : 'history'),
             ]),
           ]),
         ],
@@ -592,10 +624,25 @@ export async function refreshWeek() {
         el('td', { cls: 'num row-total' }, [
           el('span', { text: fmtHM(weekTotal) }),
           anyLocked
-            ? el('span', {
-                cls: 'lock',
-                attrs: { role: 'img', 'aria-label': 'locked', title: 'This row holds locked entries' },
-              }, [ubuntuIcon('lock-locked')])
+            ? (() => {
+                // The row's first invoiced entry names the lock's target; a
+                // submitted-week-only row keeps the plain (unlinked) lock.
+                let ref = null;
+                for (const ids of Object.values(row.ids)) {
+                  for (const id of ids) {
+                    ref = locks.invoiced.get(id);
+                    if (ref) break;
+                  }
+                  if (ref) break;
+                }
+                return ref
+                  ? rowAction('link', ref.number, () => focusInvoice(ref.id),
+                      `Invoiced on ${ref.number} — locked; activate to open the invoice`, 'lock-locked')
+                  : el('span', {
+                      cls: 'lock',
+                      attrs: { role: 'img', 'aria-label': 'locked', title: 'This row holds locked entries' },
+                    }, [ubuntuIcon('lock-locked')]);
+              })()
             : null,
         ]),
       ],
