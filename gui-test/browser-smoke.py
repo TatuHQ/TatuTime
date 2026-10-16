@@ -503,8 +503,13 @@ class Marionette:
 # boot exception or a CSP violation cannot slip through a race.  console.error
 # /warn calls, uncaught content exceptions, failed subresource loads and CSP
 # violations all surface here as nsIScriptError/nsIConsoleMessage.
-# Never a failure: only the browser's own internals, never the app's.
-IGNORED_CONSOLE = ("resource://gre/", "chrome://")
+# Never a failure: only the browser's own internals, never the app's. That
+# includes Firefox's built-in PDF viewer (`resource://pdf.js/`,
+# PdfStreamConverter): tearing a blob-URL PDF frame down while it is still
+# streaming -- exactly what closing the invoice preview does -- makes the
+# viewer's own stream listener abort, and the error is raised inside the
+# viewer's resource rather than in app code.
+IGNORED_CONSOLE = ("resource://gre/", "chrome://", "resource://pdf.js/")
 
 INSTALL_CONSOLE_LISTENER = r"""
 if (typeof globalThis.__ttConsole === 'undefined') {
@@ -762,12 +767,14 @@ class Gate:
         """Fail on any console message emitted since the last drain.
 
         The only exclusion is `IGNORED_CONSOLE`: messages whose source is a
-        browser-internal resource (`resource://gre/`, `chrome://`). Those are
-        Firefox's own JSWindowActor teardown races — reproducible with any page
-        that holds form fields and is navigated programmatically, unrelated to
-        the app, and unfixable from this repository. Every app-origin message
-        (a module MIME refusal, a boot exception, a CSP violation, a failed
-        subresource) carries the app URL and is never excluded.
+        browser-internal resource (`resource://gre/`, `chrome://`,
+        `resource://pdf.js/`). Those are Firefox's own teardown races — its
+        JSWindowActor on a navigated form page, or its PDF viewer when a
+        blob-URL PDF frame is torn down mid-stream — reproducible with any page
+        doing the equivalent, unrelated to the app, and unfixable from this
+        repository. Every app-origin message (a module MIME refusal, a boot
+        exception, a CSP violation, a failed subresource) carries the app URL and
+        is never excluded.
         """
         new, mark = self.console_since(self.console_seen)
         self.console_seen = mark
