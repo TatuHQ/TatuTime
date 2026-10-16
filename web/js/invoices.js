@@ -90,11 +90,10 @@ export async function refreshInvoices() {
         el('td', { cls: 'num', text: open ? `${inv.currency} ${formatMoney(balance)}` : '\u2014' }),
         el('td', {}, [
           // The chip's second argument is the emphasis flag, and `open` here is
-          // isOpenInvoice (collectable now): issued and partly paid read
-          // positive while draft, paid and written off stay neutral. Every chip
-          // still spells out the stored status, so a draft is never mistaken for
-          // a settled one and a draft legitimately appears under the Open filter.
-          statusChip(inv.status.replace('_', ' '), open),
+          // isOpenInvoice (collectable now): sent and partly paid read positive
+          // while draft, paid and written off stay neutral. The label is the
+          // ratified lifecycle vocabulary (#349) -- presentation only.
+          statusChip(statusLabel(inv.status), open),
         ]),
         el('td', { cls: 'actions-col' }, actions),
       ]),
@@ -362,6 +361,26 @@ export function isOpenInvoice(inv) {
 // never offers "Record payment".
 export function isClosedInvoice(inv) {
   return inv.status === 'paid' || inv.status === 'written_off';
+}
+
+// #349: the register's Status chip presents the ratified lifecycle vocabulary.
+// The owner names the state of a delivered invoice **Sent**, while the persisted
+// status (and the API enum) stays `issued`; `partly_paid` keeps its own wording.
+// This is a presentation map only -- nothing here is persisted or sent to the
+// API -- and an unknown status still degrades to a readable word rather than an
+// empty chip.
+const STATUS_LABELS = {
+  draft: 'Draft',
+  issued: 'Sent',
+  partly_paid: 'Partly paid',
+  paid: 'Paid',
+  written_off: 'Written off',
+};
+
+/** The Status chip's label for a persisted invoice status (#349). */
+export function statusLabel(status) {
+  const key = String(status);
+  return STATUS_LABELS[key] ?? key.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
 }
 
 export function invBalance(inv) {
