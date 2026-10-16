@@ -143,18 +143,23 @@ check('the rail folds its tools into a disclosure, collapsed by default',
 check('core MVP navigation comes first, Setup split into three (#142/#182)',
   [...window.document.querySelectorAll('#tabs [role="tab"]')].slice(0, 5).map((t) => t.id).join(',') ===
     'tab-timesheet,tab-customers,tab-projects,tab-tasks,tab-invoices');
-// #16 is hidden for now (the approval process is not implemented), so the rail
-// lists only the tools that are really available: hidden entries drop out of the
-// visible order and must not be offering themselves to the user.
+// #16 and Reports are hidden for now (the approval process and the reporting
+// suite are not implemented), so the rail lists only the tools that are really
+// available: hidden entries drop out of the visible order and must not be
+// offering themselves to the user.
 const railTabs = [...window.document.querySelectorAll('#tabs [role="tab"]')]
   .filter((t) => !t.hidden).map((t) => t.id);
 check('implemented secondary tools are grouped after the MVP destinations',
-  railTabs.slice(5).join(',') === 'tab-expenses,tab-reports,tab-settings' // after MVP + Setup tabs (#182)
+  railTabs.slice(5).join(',') === 'tab-expenses,tab-settings' // after MVP + Setup tabs (#182)
   && [...window.document.querySelectorAll('#tabs .nav-label')].map((n) => n.textContent).join(',') ===
     'Track time,Setup,Billing,More tools');
 check('the Approvals rail entry is hidden until its process exists (#16)',
   window.document.getElementById('tab-submissions').hidden === true
   && !railTabs.includes('tab-submissions'));
+check('the Reports rail entry is hidden until its suite is reimplemented',
+  window.document.getElementById('tab-reports').hidden === true
+  && window.document.getElementById('tab-reports').closest('.p-tabs__item').hidden === true
+  && !railTabs.includes('tab-reports'));
 check('Expenses is a Billing destination, not a separate tool',
   window.document.getElementById('tab-expenses').closest('.nav-group')
     ?.querySelector('.nav-label')?.textContent.trim() === 'Billing'
@@ -1769,10 +1774,30 @@ await waitFor(() => [...window.document.querySelectorAll('#expense-table tbody t
   .some((r) => r.querySelector('button[data-icon="file"]') && r.textContent.includes('EUR 40.00')), {
   message: 'the receipt mark to appear in the register row',
 });
-check('the register marks the row that carries a receipt', true);
-// Edit that row: the dialog loads it, and an untouched receipt survives the save.
 const receiptRow = [...window.document.querySelectorAll('#expense-table tbody tr')]
   .find((r) => r.querySelector('button[data-icon="file"]') && r.textContent.includes('EUR 40.00'));
+const receiptLink = receiptRow.querySelector('button[data-icon="file"]');
+check('the register names the stored receipt, and only that row links to one',
+  receiptLink.textContent.trim() === 'taxi.png'
+  && /Preview the receipt for/.test(receiptLink.getAttribute('aria-label') || '')
+  && [...window.document.querySelectorAll('#expense-table tbody tr')]
+    .filter((r) => r.querySelector('button[data-icon="file"]')).length === 1
+  && [...window.document.querySelectorAll('#expense-table tbody tr')]
+    .some((r) => !r.querySelector('td[data-heading="Receipt"] button')
+      && /No receipt attached/.test(r.querySelector('td[data-heading="Receipt"]').textContent)));
+// The link opens the document itself (not a download), with the file's own name
+// as the title, and the download lives inside the preview.
+receiptLink.dispatchEvent(new window.Event('click', { bubbles: true }));
+check('the receipt link opens the preview with the document and a Download',
+  byId('receipt-dialog').open === true
+  && byId('receipt-dialog-title').textContent === 'taxi.png'
+  && !!byId('receipt-image') && /^data:image\/png;base64,/.test(byId('receipt-image').getAttribute('src'))
+  && byId('receipt-download').textContent.trim() === 'Download'
+  && byId('receipt-close').textContent.trim() === 'Close');
+byId('receipt-close').dispatchEvent(new window.Event('click', { bubbles: true }));
+check('closing the preview dismisses it and drops the document',
+  byId('receipt-dialog').open === false && byId('receipt-preview').childNodes.length === 0);
+// Edit that row: the dialog loads it, and an untouched receipt survives the save.
 receiptRow.querySelectorAll('button').forEach((b) => {
   if (b.textContent.trim() === 'Edit') b.dispatchEvent(new window.Event('click', { bubbles: true }));
 });

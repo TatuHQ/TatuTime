@@ -140,10 +140,38 @@ export async function addExpenseCategory(evt) {
 
 let draftReceipt = null;
 
+/// The record the open preview is showing, so its Download button saves exactly
+/// what the dialog displays.
+let previewRecord = null;
+
 const RECEIPT_NOTE = 'Images and PDFs up to 3 MB, stored with the expense.';
 
-/// A picked file, shaped the way the API stores it.
+/// The largest receipt the API stores, in *file* bytes: the server refuses more
+/// than 4,000,000 characters of base64 (`domain::validate_expense_input`), which
+/// is a 3 MB file once encoded. Checking here names the file and its size instead
+/// of spending a round trip to be told the payload was too large.
+export const MAX_RECEIPT_BYTES = 3_000_000;
+
+/// `bytes` as a short human size, for the two refusals below.
+function receiptSize(bytes) {
+  return bytes >= 1024 * 1024
+    ? `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+    : `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
+
+/// A picked file, shaped the way the API stores it. Two shapes are refused here
+/// rather than stored: an empty file (a name with no bytes is a receipt the
+/// register cannot open and the user cannot tell from a missing one — storing it
+/// silently is how a hollow record gets written) and one over the server's cap.
 async function readReceipt(file) {
+  if (!file.size) {
+    throw new Error(`${file.name} is empty (0 bytes) — attach a file with content.`);
+  }
+  if (file.size > MAX_RECEIPT_BYTES) {
+    throw new Error(
+      `${file.name} is ${receiptSize(file.size)} — the largest receipt is 3 MB.`,
+    );
+  }
   const data = await new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onerror = () => reject(new Error('That file could not be read.'));
@@ -151,19 +179,138 @@ async function readReceipt(file) {
     reader.readAsDataURL(file);
   });
   const comma = data.indexOf(',');
-  return { name: file.name, b64: comma >= 0 ? data.slice(comma + 1) : '' };
+  const b64 = comma >= 0 ? data.slice(comma + 1) : '';
+  if (!b64) throw new Error(`${file.name} could not be read — attach it again.`);
+  return { name: file.name, b64 };
 }
 
 /// Hand a stored receipt to the browser as a download under its own name.
 export function downloadReceipt(x) {
   if (!x || !x.receipt_b64) return;
   const link = document.createElement('a');
-  link.href = `data:application/octet-stream;base64,${x.receipt_b64}`;
+  link.href = `data:${receiptMime(x.receipt_name)};base64,${x.receipt_b64}`;
   link.download = x.receipt_name || `receipt-${x.date}`;
   link.rel = 'noopener';
   document.body.appendChild(link);
   link.click();
   link.remove();
+}
+
+/// The type a stored receipt is handed back under, so the browser picks its own
+/// viewer. Storage keeps the file name (#23) and nothing else, so the extension
+/// is the only hint there is; anything unknown stays opaque and downloads.
+function receiptMime(name) {
+  const ext = String(name || '').toLowerCase().split('.').pop();
+  return {
+    png: 'image/png',
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    gif: 'image/gif',
+    webp: 'image/webp',
+    bmp: 'image/bmp',
+    svg: 'image/svg+xml',
+    tif: 'image/tiff',
+    tiff: 'image/tiff',
+    heic: 'image/heic',
+    pdf: 'application/pdf',
+  }[ext] || 'application/octet-stream';
+}
+
+/// The stored base64 as the bytes a blob can carry.
+function receiptBlob(b64, mime) {
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  return new Blob([bytes], { type: mime });
+}
+
+/// The blob URL the open preview is showing, so closing revokes it: a receipt of
+/// a few megabytes must not be held alive by a dialog the user has dismissed.
+let previewUrl = '';
+
+function releasePreviewUrl() {
+  if (previewUrl) URL.revokeObjectURL(previewUrl);
+  previewUrl = '';
+}
+
+/// Open a stored receipt in its preview: an image as an image (a data: URL, which
+/// the CSP already allows for images), anything else — a PDF — framed from a blob
+/// URL the browser renders with its own viewer (`frame-src 'self' blob:`). The
+/// bytes already travel with the record, so the preview costs no request, and the
+/// dialog's Download button saves the very bytes it is showing.
+export function previewReceipt(x) {
+  if (!x || !x.receipt_b64) return;
+  const name = x.receipt_name || `receipt-${x.date}`;
+  const mime = receiptMime(name);
+  const host = $('receipt-preview');
+  host.textContent = '';
+  releasePreviewUrl();
+  previewRecord = x;
+  $('receipt-dialog-title').textContent = name;
+  host.appendChild(
+    mime.startsWith('image/')
+      ? el('img', {
+        attrs: { id: 'receipt-image', src: `data:${mime};base64,${x.receipt_b64}`, alt: `Receipt ${name}` },
+      })
+      : el('iframe', {
+        attrs: { id: 'receipt-frame', src: previewUrl = URL.createObjectURL(receiptBlob(x.receipt_b64, mime)), title: `Receipt ${name}` },
+      }),
+  );
+  $('receipt-dialog').showModal();
+  $('receipt-close').focus();
+}
+
+/// Let go of what the open preview holds: the blob URL it minted, the record it
+/// would download, and the document element in the dialog.
+function clearReceiptPreview() {
+  releasePreviewUrl();
+  previewRecord = null;
+  $('receipt-preview').textContent = '';
+}
+
+/// Dismiss the preview. The Close button runs this directly rather than leaning on
+/// the dialog's `close` event, so the teardown happens on the path the user takes
+/// — and the event keeps Escape and any other native dismissal just as clean.
+export function closeReceiptPreview() {
+  $('receipt-dialog').close();
+  clearReceiptPreview();
+}
+
+/// Wire the preview dialog once, at boot: Download saves what is open, Close
+/// dismisses it, and every close path releases the bytes.
+export function initReceiptPreview() {
+  $('receipt-close').addEventListener('click', closeReceiptPreview);
+  $('receipt-download').addEventListener('click', () => downloadReceipt(previewRecord));
+  $('receipt-dialog').addEventListener('close', clearReceiptPreview);
+}
+
+/// The register's receipt cell: the stored file's own name as the link that
+/// opens the preview when the record carries bytes, and a dash when it does not
+/// — announced, because "no receipt" is an answer, not an empty cell. A record
+/// whose name was stored with no bytes (an empty file, before the dialog refused
+/// them) says so rather than offering a preview of nothing.
+function receiptCell(x) {
+  const name = x.receipt_name || `receipt-${x.date}`;
+  if (x.receipt_b64) {
+    return el('button', {
+      cls: 'link',
+      type: 'button',
+      data: { icon: 'file' },
+      text: name,
+      attrs: {
+        'aria-label': `Preview the receipt for ${x.date} (${name})`,
+        title: `Preview ${name}`,
+      },
+      on: { click: () => previewReceipt(x) },
+    });
+  }
+  return el('span', {}, [
+    el('span', { attrs: { 'aria-hidden': 'true' }, text: '\u2014' }),
+    el('span', {
+      cls: 'sr-only',
+      text: x.receipt_name ? 'The attached receipt is empty' : 'No receipt attached',
+    }),
+  ]);
 }
 
 /// A fresh draft: no id, no receipt, and the dialog back to its create wording.
@@ -264,22 +411,9 @@ export async function refreshExpenses() {
             : null,
         ]),
         el('td', { attrs: { 'data-heading': 'Billable' }, text: x.billable ? 'yes' : 'no' }),
-        // A file icon marks an expense that carries a receipt; the icon is the
-        // download, named by the file it stores.
-        el('td', { attrs: { 'data-heading': 'Receipt' } }, [
-          x.receipt_b64
-            ? el('button', {
-              cls: 'link',
-              type: 'button',
-              data: { icon: 'file' },
-              attrs: {
-                'aria-label': `Download the receipt for ${x.date} (${x.receipt_name || 'attachment'})`,
-                title: x.receipt_name || 'Download receipt',
-              },
-              on: { click: () => downloadReceipt(x) },
-            })
-            : null,
-        ]),
+        // The stored file's own name, as the link that opens its preview — the
+        // column answers "is there a receipt?" without opening the record.
+        el('td', { attrs: { 'data-heading': 'Receipt' } }, [receiptCell(x)]),
         el('td', { cls: 'actions-col', attrs: { 'data-heading': 'Actions' } }, [
           el('button', {
             cls: 'link',
@@ -357,11 +491,20 @@ export async function saveExpense(evt) {
   }
   // The receipt: a file picked now replaces whatever was stored, an untouched
   // field sends the record's own receipt back (a PUT replaces the whole record),
-  // and the Remove box clears it.
+  // and the Remove box clears it. Reading the file can refuse it (empty, or over
+  // the size the API stores) — that is the dialog's answer to the user, not a
+  // rejected save, so it surfaces on the form and stops here.
   const picked = $('expense-receipt').files && $('expense-receipt').files[0];
-  const receipt = picked
-    ? await readReceipt(picked)
-    : $('expense-receipt-clear').checked ? null : draftReceipt;
+  let receipt = null;
+  try {
+    receipt = picked
+      ? await readReceipt(picked)
+      : $('expense-receipt-clear').checked ? null : draftReceipt;
+  } catch (err) {
+    showFormError($('expense-error'), err);
+    $('expense-receipt').focus();
+    return;
+  }
   if (receipt) {
     body.receipt_name = receipt.name;
     body.receipt_b64 = receipt.b64;

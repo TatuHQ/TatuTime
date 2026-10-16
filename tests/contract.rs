@@ -2855,6 +2855,58 @@ async fn expense_receipt_roundtrips() {
     assert_eq!(got["receipt_b64"], "aGVsbG8=");
 }
 
+/// A receipt rides inline (#23), so the transport cap has to clear the field
+/// cap: a scanned page is megabytes of base64, and while the body limit sat
+/// below the field rule it answered `413 length limit exceeded` before any
+/// handler saw the payload — the receipt could never be stored at all. This
+/// pins both rules: what the dialog promises (up to ~3 MB of file) is accepted
+/// whole, and what the API refuses comes back as the app's own 422 naming
+/// `receipt_b64`, never as a bare 413 from the transport.
+#[tokio::test]
+async fn a_megabyte_receipt_is_stored_and_an_over_long_one_is_the_apps_own_422() {
+    let (app, _d) = app().await;
+    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap();
+    // ~1 MB of base64: the order of magnitude of a scanned receipt.
+    let stored = "A".repeat(1_000_000);
+    let (s, e) = json_req(
+        &app,
+        "POST",
+        "/api/expenses",
+        Some(json!({
+            "date":"2026-10-02","customer_id":cid,"amount_minor":500,"currency":"EUR",
+            "receipt_name":"scan.pdf","receipt_b64":stored
+        })),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{e}");
+    let eid = e["id"].as_str().unwrap();
+    let (_, got) = json_req(&app, "GET", &format!("/api/expenses/{eid}"), None).await;
+    assert_eq!(
+        got["receipt_b64"].as_str().map(str::len),
+        Some(1_000_000),
+        "the bytes travel whole"
+    );
+
+    // Past the field rule the answer is the app's error shape, and nothing is
+    // written: the caller learns which field was wrong, not that a body limit
+    // tripped somewhere in front of the router.
+    let too_big = "A".repeat(4_000_001);
+    let (s, body) = json_req(
+        &app,
+        "POST",
+        "/api/expenses",
+        Some(json!({
+            "date":"2026-10-02","customer_id":cid,"amount_minor":500,"currency":"EUR",
+            "receipt_name":"huge.pdf","receipt_b64":too_big
+        })),
+    )
+    .await;
+    assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["error"]["fields"][0]["field"], "receipt_b64");
+    assert_eq!(body["error"]["fields"][0]["message"], "receipt too large");
+}
+
 /// A converted expense keeps the amount as entered, its currency and the rate
 /// that produced the billed pair, and the billed pair stays authoritative.
 #[tokio::test]
@@ -3585,6 +3637,13 @@ async fn security_headers_present() {
         .unwrap_or("");
     assert!(csp.contains("default-src 'self'"), "CSP present: {csp}");
     assert!(csp.contains("frame-ancestors 'none'"));
+    // The receipt preview (#23) renders a PDF from a blob URL this origin minted
+    // itself, so framing is opened to 'self' and blob: and nothing else — script,
+    // style and connect stay strictly 'self' (review A9).
+    assert!(
+        csp.contains("frame-src 'self' blob:"),
+        "the receipt preview needs its own frame source: {csp}"
+    );
 }
 
 #[tokio::test]
@@ -8220,24 +8279,44 @@ fn server_lock_refuses_a_second_instance() {
     assert!(third.is_ok(), "the lock must be reacquirable after release");
 }
 
-/// #262(5): the request-body cap (256 KiB, `RequestBodyLimitLayer` in
-/// src/lib.rs). An oversized payload is bounded and rejected without
-/// persistence. NOTE (defect found while closing #262): it surfaces as the
-/// documented `bad_request` 400 — the `ValidJson` extractor turns the
-/// length-limit read error into the shared 400 shape (`src/api/mod.rs`) — not
-/// the conventional `413 Payload Too Large` the issue specified, and
-/// `openapi.json` declares no 413 anywhere. Behaviour is intentionally
-/// unchanged by this test-only PR; the intent is pinned by the `#[ignore]`d
-/// test below and reported on the PR.
+/// #262(5): the request-body cap (`MAX_REQUEST_BODY_BYTES`, src/lib.rs). Two
+/// rules bound a write, and they answer differently on purpose:
+///
+/// * a body *under* the transport cap but over a **field** rule is validated like
+///   any other payload — 422 in the app's own shape, naming the field; the cap
+///   was raised to 6 MiB so an inline receipt (~3 MB of file) is never refused by
+///   the transport before a handler can say what was wrong (the bug that made a
+///   scanned receipt unstorable);
+/// * a body *over* the cap is bounded before any handler, and still answers the
+///   documented `bad_request` 400 rather than 413 — the #262(5) gap the ignored
+///   test below tracks (the `ValidJson` extractor collapses the length-limit read
+///   error; `openapi.json` declares no 413).
+///
+/// Neither path persists a byte.
 #[tokio::test]
 async fn oversized_body_is_rejected_without_persistence() {
     let (app, _d) = app().await;
-    let huge = "x".repeat(300 * 1024);
+
+    // Past the field rule, well inside the cap: the handler answers, in the app's
+    // shape, with the field that was wrong.
+    let long = "x".repeat(300 * 1024);
     let (status, body) =
-        json_req(&app, "POST", "/api/categories", Some(json!({"name": huge}))).await;
-    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
-    assert_eq!(body["error"]["code"], "bad_request");
-    // The oversized body persisted nothing.
+        json_req(&app, "POST", "/api/categories", Some(json!({"name": long}))).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["error"]["code"], "validation_failed");
+    assert_eq!(body["error"]["fields"][0]["field"], "name");
+
+    // Past the cap itself: refused by the transport, whatever status the gap
+    // above gives it.
+    let over = "x".repeat(7 * 1024 * 1024);
+    let (status, body) =
+        json_req(&app, "POST", "/api/categories", Some(json!({"name": over}))).await;
+    assert!(
+        status == StatusCode::BAD_REQUEST || status == StatusCode::PAYLOAD_TOO_LARGE,
+        "an over-cap body must be refused: {status} {body}"
+    );
+
+    // Neither one persisted anything.
     let (_, list) = json_req(&app, "GET", "/api/categories", None).await;
     assert!(
         list["categories"]
@@ -8255,11 +8334,12 @@ async fn oversized_body_is_rejected_without_persistence() {
 /// its generic 400, so this cannot pass without a production change —
 /// deliberately out of scope for this test-only PR. Follow-up: give the body
 /// limit a 413 code in the router/extractor and declare it in `openapi.json`.
-#[ignore = "defect: oversized bodies surface as 400, not 413 (needs a production follow-up)"]
+/// The sample is the cap itself, which the inline receipt moved to 6 MiB.
+#[ignore = "defect: over-cap bodies surface as 400, not 413 (needs a production follow-up)"]
 #[tokio::test]
 async fn oversized_body_should_surface_as_413() {
     let (app, _d) = app().await;
-    let huge = "x".repeat(300 * 1024);
+    let huge = "x".repeat(7 * 1024 * 1024);
     let (status, _) = json_req(&app, "POST", "/api/categories", Some(json!({"name": huge}))).await;
     assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
 }

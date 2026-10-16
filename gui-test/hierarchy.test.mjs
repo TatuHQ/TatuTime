@@ -74,7 +74,7 @@ test('Setup exposes three sibling sections with tab/panel wiring (#182)', () => 
     [...document.querySelectorAll('#tabs [role="tab"]')]
       .filter((t) => !t.hidden).map((t) => t.id),
     ['tab-timesheet', 'tab-customers', 'tab-projects', 'tab-tasks',
-      'tab-invoices', 'tab-expenses', 'tab-reports', 'tab-settings'],
+      'tab-invoices', 'tab-expenses', 'tab-settings'],
     'Customers/Projects/Tasks sit together in the Setup group',
   );
   assert.ok(document.getElementById('tab-reports').closest('details'),
@@ -83,6 +83,8 @@ test('Setup exposes three sibling sections with tab/panel wiring (#182)', () => 
     'Settings is a destination, not a tool');
   assert.equal(document.getElementById('tab-submissions').hidden, true,
     'Approvals stays on the rail, hidden, until its process exists (#16)');
+  assert.equal(document.getElementById('tab-reports').hidden, true,
+    'Reports stays on the rail, hidden, until its suite is reimplemented');
   dom.window.close();
 });
 

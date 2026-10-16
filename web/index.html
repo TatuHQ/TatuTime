@@ -76,7 +76,14 @@
                  one of them is activated, so the rail always shows where you are. -->
             <details class="more-tools-group" id="more-tools">
               <summary class="nav-label">More tools</summary>
-              <div class="p-tabs__item"><button class="p-tabs__link" role="tab" id="tab-reports" aria-controls="panel-reports" aria-selected="false" tabindex="-1"><i class="p-icon--history" aria-hidden="true"></i>Reports</button></div>
+              <!-- Reports is hidden until the reporting suite is reimplemented
+                   (the #16 precedent: the Approvals entry). The item *and* the
+                   button carry `hidden` so the rail keeps no gap, the route stays
+                   in TAB_ROUTES so page routing and the route-parity guard are
+                   untouched, and `applyRoute` refuses a hidden tab - a stale
+                   /reports link therefore lands on the default view instead of a
+                   panel the rail no longer offers. -->
+              <div class="p-tabs__item" hidden><button class="p-tabs__link" role="tab" id="tab-reports" aria-controls="panel-reports" aria-selected="false" tabindex="-1" hidden><i class="p-icon--history" aria-hidden="true"></i>Reports</button></div>
               <!-- Approvals (#16) is hidden for now: the approval process is not
                  implemented. The rail entry keeps its markup so the tab and its
                  panel return with one attribute, and `applyRoute` refuses the
@@ -703,6 +710,26 @@
         <footer class="buttons p-modal__footer"><button data-positive="1" type="submit" id="expense-save">Save expense</button><button type="button" id="expense-cancel" class="secondary">Cancel</button></footer>
       </form>
       </div>
+      </dialog>
+      <!-- Receipt preview (#23): opened from the register's receipt link. The
+           receipt already travels with the expense as base64, so the preview
+           costs no second request: an image renders straight from a data: URL
+           (allowed by img-src 'self' data:) and anything else - a PDF - is
+           framed from a blob URL this dialog mints and revokes, which is what
+           the CSP's frame-src 'self' blob: is for. Download saves the same
+           bytes under the stored file name, so the preview never traps the user
+           in a document they cannot keep. -->
+      <dialog id="receipt-dialog" class="p-modal" aria-modal="true" aria-labelledby="receipt-dialog-title">
+        <div class="p-modal__dialog">
+          <header class="p-modal__header">
+            <h2 class="p-modal__title" id="receipt-dialog-title">Receipt</h2>
+          </header>
+          <div class="receipt-preview" id="receipt-preview"></div>
+          <footer class="buttons p-modal__footer">
+            <button type="button" data-positive="1" id="receipt-download">Download</button>
+            <button type="button" class="secondary" id="receipt-close">Close</button>
+          </footer>
+        </div>
       </dialog>
       <dialog id="expense-category-dialog" class="p-modal" aria-modal="true" aria-labelledby="expense-category-title">
         <div class="p-modal__dialog">
