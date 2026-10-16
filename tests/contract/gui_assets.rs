@@ -156,8 +156,9 @@ async fn gui_module_graph_is_served_with_js_mime() {
         }
     }
     assert!(
-        seen.len() >= 18,
-        "expected the entry point plus its 17 modules (#264), walked {}: {:?}",
+        seen.len() >= 20,
+        "expected the entry point plus its 19 modules (#264; receipt.js joined in #332), \
+         walked {}: {:?}",
         seen.len(),
         seen
     );
