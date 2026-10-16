@@ -83,6 +83,45 @@ the browser's depth-first post-order) and
 [`dialog-display.test.mjs`](./dialog-display.test.mjs) (the closed-dialog
 cascade guard) — and the *behavioural* coverage is the real-browser gate below.
 
+## GUI failure surfaces — reuse, don't reinvent (#333)
+
+Three deliberate explainers live in the app's failure path (review §3). A new
+dialog or form **reuses** them instead of hand-rolling wording, and **never hides
+the server's own reason**:
+
+1. **A refusal without the app's error shape** — [`requestFailure()`](../web/js/api.js:14).
+   Names the method, the path and the verbs the endpoint takes (from the `Allow`
+   header): `PUT /api/expenses/abc failed: HTTP 405 (this endpoint accepts GET,
+   DELETE)`. The server's own message wins whenever it sent one; the fallback is
+   for a proxy page or a build too old to know the route, where a bare `HTTP 405`
+   would leave a developer guessing between a wrong verb, a stale server and a
+   proxy in the middle.
+2. **A field the server does not know** — [`showFormError()`](../web/js/dom.js:247).
+   An `unknown field` reason (the `deny_unknown_fields` rejection in
+   `api::deser_error`) appends one note: `— the running server is older than this
+   page: restart or rebuild it.` serde only refuses a key that was actually sent,
+   so this is never a bad name in the payload.
+3. **A failure with no field** — same function. When serde cannot tie the refusal
+   to a key, `field` is empty and the reason is printed alone; never `": reason"`
+   with a dangling colon.
+
+**Why a page can be newer than the server answering it.** `TUCANO_WEB_DIR` serves
+the working tree from disk while the binary's Rust is fixed at compile time (and a
+debug build embeds `web/` from disk per request — rust-embed), so a long-running
+process hands out today's GUI over yesterday's contract. That drift is exactly the
+failure mode (1) and (2) name. `showFormError` adds only the stale-server note on
+top of the server's field text — its reason is never replaced with GUI wording.
+
+**What pins each surface:**
+
+- [`api.test.mjs`](./api.test.mjs) — the wording of (1) and of (2)/(3), offline in
+  jsdom (drives `requestFailure` and `showFormError` directly).
+- [`gui.mjs`](./gui.mjs) — the live half: *"a verb the endpoint refuses names the
+  request and the allowed verbs"* (`DELETE /api/expenses` → 405 with the JSON
+  `method_not_allowed` shape and `Allow: GET, POST`).
+- `tests/contract.rs::a_wrong_method_answers_the_error_shape_and_the_allow_header`
+  — the server's half of the contract (shape, `Allow`, a templated path).
+
 ## Real-browser gate (`browser-smoke.py`) — the three shipped defects
 
 Three user-visible defects reached production through a fully green CI because
