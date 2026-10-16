@@ -20,7 +20,7 @@ suite — file-based (no database), one container, browser GUI.
 - **Appearance & messages** — invoice document accent (printed into the archived PDF) and sender display name / Reply-To, all honored by the real transports — no inert settings; credentials stay in the vault (#146).
 - **Catalog & labels** — reusable Product/Service line types prefill manual invoice lines (archive keeps history); field labels rename the document's wording without touching API names (#147).
 - **Invoice templates** — org-wide subject/body/footer with `%variable%` placeholders (markdown subset), per-customer notes, subject overrides and payment terms (Upon Receipt / NET 15–45 / custom) driving the due date at issue (#116).
-- **API-level integrations** — hosted checkout links (#34) and accounting sync (#33) remain available on the API and background retry job, but are no longer surfaced as per-row invoice buttons (#129).
+- **Getting paid** — no hosted-checkout or payment-provider integration: each invoice shows the customer's own payment details, and settlement is recorded manually (full or partial) on the invoice ledger. Accounting sync (#33) remains available on the API and a background retry job, but is no longer surfaced as per-row invoice buttons (#129).
 - **Expenses** — record costs per project with categories, billable flags, and optional attached receipts; billable expenses roll into invoices (#25).
 - **Timesheet submissions** — submit a week for approval; submitted/approved weeks **lock** their entries (shared lock seam); rejecting releases them.
 - **Also shipped** — running **timer** and month calendar of logged time (#14/#140); imported **calendar events** with Google OAuth (#15/#36); **SSO sign-in** (OIDC/signed-token, JIT provisioning — Beta adapters, #32) with a **fail-closed allowed-domains list** (#260); per-user **notifications** (#22/#52); **recurring invoice schedules** (weekly/monthly/quarterly, drafts still need an explicit issue, #26); **expense reimbursement claims** (#24); **budgets** burn alerts + per-project budget vs actual (#30) and **profitability** reporting (revenue vs labour cost, admin-only, #29); **email delivery** of invoices with the archived PDF attached (#35/#130); role-based access — members see only their own time (#51); an **audit log** (#52) and an operator **backup/restore CLI** on the same image (#94).
@@ -130,7 +130,7 @@ vault `sso.allowed_domains` are trusted. An **empty allow-list is fail-closed**
 (#260): the server logs a loud boot error, registers no identity provider and
 just-in-time provisions nobody until a domain is configured.
 
-**Integration credentials (#77):** admins store provider secrets (Stripe, OAuth,
+**Integration credentials (#77):** admins store provider secrets (OAuth,
 SMTP, ICS feed URLs) in the **Settings** tab; they are encrypted at rest with
 AES-256-GCM under `TUCANO_SECRET_KEY` (a 32-byte env var) and never returned or
 logged. Without `TUCANO_SECRET_KEY` the vault is disabled (fail-closed).

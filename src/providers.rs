@@ -1,9 +1,9 @@
 //! Shared plumbing for the integration providers (#101).
 //!
-//! Before this module, `payments`, `sso`, `accounting` and `calendar_oauth`
+//! Before this module, `sso`, `accounting` and `calendar_oauth`
 //! each re-implemented the `vault.get(k).or_else(env)` ladder — with drifted
 //! precedence — and each kept a near-identical name-keyed registry. The
-//! ladders live here once, and `Registry<T>` replaces the three copies.
+//! ladders live here once, and `Registry<T>` replaces the copies.
 //!
 //! Two resolution lanes exist *by design* and must not be collapsed:
 //! - **secrets** (#77): admin-entered vault values win; env is only the
@@ -44,8 +44,8 @@ impl<T: NamedProvider + ?Sized> Registry<T> {
     }
 
     /// Look a provider up by name. Case-insensitive: SSO historically
-    /// tolerated casing drift in IdP names, and payments/accounting names are
-    /// lowercase constants, so widening the other two cannot change any
+    /// tolerated casing drift in IdP names, and accounting names are
+    /// lowercase constants, so widening the other cannot change any
     /// existing resolution.
     #[must_use]
     pub fn get(&self, name: &str) -> Option<Arc<T>> {

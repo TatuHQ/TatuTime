@@ -267,8 +267,6 @@ pub struct AppState {
     /// Email transport (#35). Disabled unless SMTP is configured; tests inject
     /// a recording sender.
     pub email: Arc<dyn crate::email::EmailSender>,
-    /// Payment providers (#34). Empty registry disables the endpoints.
-    pub payments: Arc<crate::payments::PaymentRegistry>,
     /// Accounting sync providers (#33). Empty registry disables the endpoints.
     pub accounting: Arc<crate::accounting::AccountingRegistry>,
     /// Identity providers for SSO (#32). Empty registry disables SSO.
@@ -331,8 +329,6 @@ impl AppState {
                 Some(cfg) => Arc::new(crate::email::SmtpEmailSender::new(cfg)),
                 None => Arc::new(crate::email::DisabledEmailSender),
             };
-        // Payment providers (#34): enabled when their webhook secrets exist.
-        let payments = crate::payments::registry_from_vault(vault.as_deref());
         // Accounting providers (#33): enabled when an OAuth token exists.
         let accounting = crate::accounting::registry_from_vault(vault.as_deref(), &cfg);
         // SSO identity providers (#32): enabled when OIDC/SAML config exists.
@@ -350,7 +346,6 @@ impl AppState {
             revocations,
             vault,
             email,
-            payments,
             accounting,
             sso,
             oauth_flows: Arc::new(crate::calendar_oauth::OAuthFlows::new()),
@@ -380,13 +375,6 @@ impl AppState {
     #[must_use]
     pub fn with_email(mut self, sender: Arc<dyn crate::email::EmailSender>) -> Self {
         self.email = sender;
-        self
-    }
-
-    /// Swaps the payment registry (tests inject providers with known secrets).
-    #[must_use]
-    pub fn with_payments(mut self, registry: Arc<crate::payments::PaymentRegistry>) -> Self {
-        self.payments = registry;
         self
     }
 
@@ -590,9 +578,8 @@ pub(crate) async fn record_audit(app: &AppState, event: &str, subject: &str) {
     .await;
 }
 
-/// The payments/accounting/sso provider lookup shape: a disabled or unknown
-/// provider is a 400 naming the kind, byte-identical to the three copies this
-/// replaces.
+/// The accounting/sso provider lookup shape: a disabled or unknown provider
+/// is a 400 naming the kind, byte-identical to the copies this replaces.
 pub(crate) fn provider_or_400<T>(found: Option<T>, kind: &str) -> Result<T, ApiError> {
     found.ok_or_else(|| ApiError::bad_request(format!("unknown or disabled {kind} provider")))
 }
@@ -686,13 +673,13 @@ pub use self::expenses::{
 };
 pub use self::fx::{FxQuery, fx_rate};
 pub use self::invoicing::{
-    CheckoutInput, InvoiceEditInput, InvoiceInput, ManualInvoiceInput, PayInput, SyncInput,
-    create_checkout, create_invoice, create_item_type, create_manual_invoice, delete_invoice,
-    delete_item_type, get_invoice_handler, invoice_document, invoice_export_csv, invoice_pdf,
-    invoice_report_handler, invoice_summary, invoice_template_get, invoice_template_put,
-    issue_invoice, list_invoices, list_item_types, money_for_email, org_get, org_put, pay_invoice,
-    payment_webhook, preview_invoice, send_invoice_email, send_invoice_email_copy, sync_invoice,
-    sync_status, update_invoice_draft, update_item_type, write_off_invoice,
+    InvoiceEditInput, InvoiceInput, ManualInvoiceInput, PayInput, SyncInput, create_invoice,
+    create_item_type, create_manual_invoice, delete_invoice, delete_item_type, get_invoice_handler,
+    invoice_document, invoice_export_csv, invoice_pdf, invoice_report_handler, invoice_summary,
+    invoice_template_get, invoice_template_put, issue_invoice, list_invoices, list_item_types,
+    money_for_email, org_get, org_put, pay_invoice, preview_invoice, send_invoice_email,
+    send_invoice_email_copy, sync_invoice, sync_status, update_invoice_draft, update_item_type,
+    write_off_invoice,
 };
 pub use self::people::{
     UserInput, UserPasswordInput, UserUpdateInput, change_user_password, create_customer,

@@ -887,6 +887,30 @@ check(
 );
 check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/.test(pdfRes.headers.get('content-disposition') || ''));
 
+// ---- GET PAID: the customer's own payment details, set through the
+// ---- customer edit dialog, drive the invoice's Get paid box. No
+// ---- hosted-checkout provider exists anywhere by design. ----
+{
+  window.document.getElementById('tab-customers').dispatchEvent(new window.Event('click', { bubbles: true }));
+  await waitFor(() => [...window.document.querySelectorAll('#customer-table tbody button')]
+    .some((b) => b.textContent === 'Edit' && b.closest('tr').textContent.includes('ACME')), {
+    message: 'the customer table to render ACME with its Edit button',
+  });
+  const acmeEdit = [...window.document.querySelectorAll('#customer-table tbody button')]
+    .find((b) => b.textContent === 'Edit' && b.closest('tr').textContent.includes('ACME'));
+  acmeEdit.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await waitFor(() => dialogOpen(byId('customer-dialog')), { message: 'the customer edit dialog to open' });
+  window.document.getElementById('pay-bank-name').value = 'Tucano Bank';
+  window.document.getElementById('pay-iban').value = 'DE89371314000000000000';
+  window.document.getElementById('pay-reference').value = 'Invoice number';
+  window.document.getElementById('pay-instructions').value = 'Bank transfer in EUR, please.';
+  window.document.getElementById('customer-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+  await settle('the payment details on ACME to save');
+  const acmeAfter = (await (await fetch(BASE + '/api/customers', { headers: { Cookie: SESSION_COOKIE } })).json()).customers.find((c) => c.name === 'ACME');
+  check('customer form saved payment details',
+    !!acmeAfter && !!acmeAfter.payment_details && acmeAfter.payment_details.iban === 'DE89371314000000000000');
+}
+
 // ---- INVOICE PREVIEW (#133): row selection shows the live document ----
 {
   // Re-pull the table so the rows reflect the API-side issue (the invoice was
@@ -914,6 +938,19 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
     window.document.getElementById('ip-letter').children.length === 0);
   check('issued invoice offers Download PDF from the preview (#133)',
     window.document.getElementById('ip-download').hidden === false);
+  const getpaid = window.document.getElementById('ip-getpaid');
+  check('issued invoice preview shows the Get paid box',
+    getpaid.hidden === false && getpaid.textContent.includes('Get paid'));
+  check('Get paid box states the outstanding balance',
+    window.document.getElementById('ip-getpaid-facts').textContent.includes('Outstanding'));
+  const payBox = window.document.getElementById('ip-getpaid-pay').textContent;
+  check('Get paid box pulls in the customer payment details',
+    payBox.includes('Tucano Bank') && payBox.includes('IBAN') && payBox.includes('DE89371314000000000000')
+      && window.document.getElementById('ip-getpaid-instr').textContent.includes('Bank transfer in EUR'));
+  check('Get paid box offers manual settlement, never a provider button',
+    window.document.getElementById('ip-record-payment').hidden === false
+      && window.document.getElementById('ip-record-payment').textContent === 'Record payment'
+      && !/stripe|paypal|pay now|checkout/i.test(getpaid.textContent));
   panel.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
   await waitFor(() => panel.hidden === true, { message: 'Escape to close the preview' });
   check('Escape closes the preview (#133)', panel.hidden === true);
@@ -944,7 +981,8 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
     window.document.getElementById('ip-download').hidden === true
     && window.document.getElementById('ip-pdf-state').hidden === false
     && /Draft/.test(window.document.getElementById('ip-pdf-state').textContent));
-  // cleanup: delete the draft so later checks see the expected list
+
+  check('draft invoice hides the Get paid box', window.document.getElementById('ip-getpaid').hidden === true);  // cleanup: delete the draft so later checks see the expected list
   await fetch(BASE + `/api/invoices/${draft.id}`, { method: 'DELETE', headers: { Cookie: SESSION_COOKIE, 'X-CSRF-Protection': '1' } });
 }
 
@@ -1608,20 +1646,34 @@ if (copyBtn) {
 }
 }
 
-// ---- PAYMENTS (#34) + #129: Pay link / Sync buttons removed from rows; ----
-// ---- the checkout + webhook flow is covered via the API directly.      ----
+// ---- PAYMENTS: no hosted-checkout providers exist by design; settlement ----
+// ---- runs through the row's Record payment dialog, then via #129 trim. ----
 const rowBtns = () => [...window.document.querySelectorAll('#invoice-table tbody button')].map((b) => b.textContent);
 check('invoice rows no longer render a Pay link button (#129)', !rowBtns().includes('Pay link'));
 check('invoice rows no longer render a Sync button (#129)', !rowBtns().includes('Sync'));
+check('invoice rows offer no checkout/provider affordance', !rowBtns().some((t) => /pay now|checkout|card|stripe/i.test(t)));
 {
-  // A signed webhook (fake-mode Stripe, signature ignored) marks the invoice paid.
-  const chk = await (await fetch(`${BASE}/api/invoices/${acmeInv.id}/checkout`, { method: 'POST', headers: { 'content-type': 'application/json', Cookie: SESSION_COOKIE, 'X-CSRF-Protection': '1' }, body: JSON.stringify({ provider: 'stripe' }) })).json();
-  const whBody = JSON.stringify({ type: 'checkout.session.completed', payment_status: 'paid', amount_minor: 9500, currency: 'EUR', client_reference_id: chk.reference, metadata: { invoice_number: acmeInv.number } });
-  const whRes = await fetch(`${BASE}/api/payments/webhook/stripe`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: whBody });
-  const whJson = await whRes.json();
-  check('webhook marks the invoice paid', whRes.status === 200 && whJson.status === 'paid');
+  // The GUI drives the whole settlement: amount prompt, then reference prompt.
+  const payBtn = [...window.document.querySelectorAll('#invoice-table tbody button')].find((b) => b.textContent === 'Record payment');
+  check('issued invoice renders a Record payment action', !!payBtn);
+  payBtn.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await waitFor(() => /Amount to record/.test(byId('dlg-message').textContent), { message: 'the amount prompt to open' });
+  window.document.getElementById('dlg-input').value = '95.00';
+  window.document.getElementById('dlg-ok').dispatchEvent(new window.Event('click', { bubbles: true }));
+  await waitFor(() => /Payment reference/.test(byId('dlg-message').textContent), { message: 'the reference prompt to open' });
+  window.document.getElementById('dlg-input').value = 'wire-9001';
+  window.document.getElementById('dlg-ok').dispatchEvent(new window.Event('click', { bubbles: true }));
+  await waitFor(() => /Invoice marked paid/.test(byId('live-region').textContent), {
+    message: 'the record-payment announce',
+  });
+  check('Record payment announces the settlement', /Invoice marked paid/.test(window.document.getElementById('live-region').textContent));
   const afterInv = (await (await fetch(BASE + '/api/invoices', { headers: { Cookie: SESSION_COOKIE } })).json()).invoices.find((i) => i.id === acmeInv.id);
-  check('invoice now paid with a provider reference', afterInv.status === 'paid' && /stripe:/.test(afterInv.payment_reference));
+  check(
+    'invoice now paid via the manual ledger entry',
+    afterInv.status === 'paid' && afterInv.payments.some((p) => p.reference === 'wire-9001' && p.method === 'manual'),
+  );
+  check('the GUI never renders a provider/checkout affordance',
+    !/\bstripe\b|\bpaypal\b|pay now|\bcheckout\b/i.test(window.document.body.textContent));
 
   // ---- ACCOUNTING SYNC (#33): the status endpoint stays live (API-only now) ----
   const stRes = await fetch(BASE + '/api/sync/accounting', { headers: { Cookie: SESSION_COOKIE } });

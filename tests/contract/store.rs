@@ -66,6 +66,8 @@ fn concurrent_writer_times_out_with_lock_busy() {
         contacts: vec![],
         tax_hundredths: 0,
         discount_hundredths: 0,
+
+        payment_details: None,
     };
     let err = store.put_customer(&cust).expect_err("should time out");
     assert!(
@@ -336,6 +338,8 @@ mod storage_layout {
             contacts: vec![],
             tax_hundredths: 0,
             discount_hundredths: 0,
+
+            payment_details: None,
         };
         store.put_customer(&customer).unwrap();
 

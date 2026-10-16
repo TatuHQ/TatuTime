@@ -1,5 +1,5 @@
 //! Encrypted credential vault (#77). Admin-entered integration secrets
-//! (Stripe keys, OAuth client secrets, SMTP password, ICS feed URLs, …) are
+//! (SMTP passwords, OAuth client secrets, calendar feed URLs, …) are
 //! stored **encrypted at rest** with AES-256-GCM under a master key supplied
 //! out-of-band via `TUCANO_SECRET_KEY`. Values are never returned to any client
 //! (only a masked hint) and never logged. If the master key is absent the vault
@@ -145,7 +145,7 @@ impl SecretVault {
             .map_err(|_| VaultError::Io)
     }
 
-    /// Store/overwrite a secret. `key` is a provider path e.g. `stripe.secret_key`.
+    /// Store/overwrite a secret. `key` is a provider path e.g. `acme.api_token`.
     pub fn put(&self, key: &str, value: &str) -> Result<(), VaultError> {
         let mut map = lock(&self.data);
         map.insert(key.to_string(), value.to_string());
@@ -216,14 +216,14 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let vault = SecretVault::open(dir.path(), Some(KEY)).unwrap().unwrap();
         vault
-            .put("stripe.secret_key", "unit-test-secret-value-abcdef")
+            .put("acme.api_token", "unit-test-secret-value-abcdef")
             .unwrap();
         assert_eq!(
-            vault.get("stripe.secret_key").as_deref(),
+            vault.get("acme.api_token").as_deref(),
             Some("unit-test-secret-value-abcdef")
         );
-        assert_eq!(vault.hint("stripe.secret_key"), "••••ef");
-        assert_eq!(vault.keys(), vec!["stripe.secret_key".to_string()]);
+        assert_eq!(vault.hint("acme.api_token"), "••••ef");
+        assert_eq!(vault.keys(), vec!["acme.api_token".to_string()]);
 
         // On-disk blob must not contain the plaintext.
         let blob = fs::read(dir.path().join("secrets.bin")).unwrap();
@@ -235,7 +235,7 @@ mod tests {
         // Reopen: value survives (decrypted with the same key).
         let v2 = SecretVault::open(dir.path(), Some(KEY)).unwrap().unwrap();
         assert_eq!(
-            v2.get("stripe.secret_key").as_deref(),
+            v2.get("acme.api_token").as_deref(),
             Some("unit-test-secret-value-abcdef")
         );
     }

@@ -422,6 +422,138 @@ async fn customer_billing_details_round_trip_and_validate() {
 }
 
 #[tokio::test]
+async fn payment_details_round_trip_validate_and_email() {
+    let (app, _d) = app().await;
+    // Round trip through POST, with the "Get paid" block a customer carries.
+    let (s, c) = json_req(
+        &app,
+        "POST",
+        "/api/customers",
+        Some(
+            json!({"name":"PAYME","currency":"EUR","default_rate_minor":6000,
+            "email":"pay@payme.test",
+            "payment_details":{"bank_name":"Tucano Bank","iban":"DE89371314000000000000",
+                "bic":"GENODED1XXX","reference":"Invoice number",
+                "instructions":"Please pay by bank transfer in EUR."}}),
+        ),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{c}");
+    assert_eq!(c["payment_details"]["iban"], "DE89371314000000000000");
+    assert_eq!(c["payment_details"]["bank_name"], "Tucano Bank");
+    let cid = c["id"].as_str().unwrap().to_string();
+
+    // An all-blank block normalises to absent on update (never persisted).
+    let (s2, c2) = json_req(
+        &app,
+        "PUT",
+        &format!("/api/customers/{cid}"),
+        Some(
+            json!({"name":"PAYME","currency":"EUR","default_rate_minor":6000,
+            "email":"pay@payme.test",
+            "payment_details":{"bank_name":"  ","instructions":"   "}}),
+        ),
+    )
+    .await;
+    assert_eq!(s2, StatusCode::OK, "{c2}");
+    assert!(
+        c2.get("payment_details").is_none(),
+        "blank block must not persist: {c2}"
+    );
+
+    // Restore, then the rejection matrix: every bad shape is a 422.
+    let pay = json!({"bank_name":"Tucano Bank","iban":"DE89371314000000000000",
+        "bic":"GENODED1XXX","reference":"Invoice number",
+        "instructions":"Please pay by bank transfer in EUR."});
+    json_req(
+        &app,
+        "PUT",
+        &format!("/api/customers/{cid}"),
+        Some(
+            json!({"name":"PAYME","currency":"EUR","default_rate_minor":6000,
+            "email":"pay@payme.test","payment_details":pay}),
+        ),
+    )
+    .await;
+    for bad in [
+        json!({"iban":"DE89 3713 1400 0000 0000 00!"}), // not letters/digits
+        json!({"bic":"SHORT"}),                         // 5 chars — wrong length
+        json!({"iban":"AB"}),                           // below the 5-char floor
+        json!({"routing":"99"}),                        // unknown field
+        json!({"instructions":"x".repeat(501)}),        // over the 500 cap
+    ] {
+        let (sb, bb) = json_req(
+            &app,
+            "PUT",
+            &format!("/api/customers/{cid}"),
+            Some(
+                json!({"name":"PAYME","currency":"EUR","default_rate_minor":6000,
+                "email":"pay@payme.test","payment_details":bad}),
+            ),
+        )
+        .await;
+        assert_eq!(sb, StatusCode::UNPROCESSABLE_ENTITY, "{bb}");
+    }
+    let (_sg, got) = json_req(&app, "GET", &format!("/api/customers/{cid}"), None).await;
+    assert_eq!(
+        got["payment_details"]["bank_name"], "Tucano Bank",
+        "rejections must not touch the stored block"
+    );
+
+    // The invoice email carries a "How to pay" section, rows + instructions.
+    new_project(
+        &app,
+        &cid,
+        "P1",
+        json!({"currency":"EUR","rate_minor":6000}),
+    )
+    .await;
+    json_req(
+        &app,
+        "POST",
+        "/api/entries",
+        Some(json!({"date":"2026-10-02","customer_id":cid.clone(),"project_code":"P1","hours":2})),
+    )
+    .await;
+    let (_s3, inv) = json_req(
+        &app,
+        "POST",
+        "/api/invoices",
+        Some(json!({"customer_id":cid,"from":"2026-10-01","to":"2026-10-07"})),
+    )
+    .await;
+    let iid = inv["id"].as_str().unwrap();
+    json_req(&app, "POST", &format!("/api/invoices/{iid}/issue"), None).await;
+    let (se, body) = json_req(&app, "POST", &format!("/api/invoices/{iid}/email"), None).await;
+    assert_eq!(se, StatusCode::OK, "{body}");
+    let mail = &app.email.messages()[0].text;
+    for fragment in [
+        "How to pay:",
+        "Bank: Tucano Bank",
+        "IBAN: DE89371314000000000000",
+        "BIC/SWIFT: GENODED1XXX",
+        "Reference: Invoice number",
+        "Please pay by bank transfer in EUR.",
+    ] {
+        assert!(mail.contains(fragment), "email missing {fragment}: {mail}");
+    }
+
+    // The %payment_details% document variable resolves through the template.
+    json_req(
+        &app,
+        "PUT",
+        "/api/admin/invoice-template",
+        Some(json!({"subject":"","body":"","footer":"Pay us: %payment_details%"})),
+    )
+    .await;
+    let (sd, doc) = json_req(&app, "GET", &format!("/api/invoices/{iid}/document"), None).await;
+    assert_eq!(sd, StatusCode::OK, "{doc}");
+    let html = doc["html"].as_str().unwrap();
+    assert!(html.contains("Pay us:"), "{html}");
+    assert!(html.contains("DE89371314000000000000"), "{html}");
+}
+
+#[tokio::test]
 async fn legacy_customer_keeps_working_and_new_fields_are_omitted_when_empty() {
     let (app, d) = app().await;
     let c = new_customer(&app, "OLDSTYLE", "EUR", 5000).await; // only the pre-#139 shape

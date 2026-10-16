@@ -558,6 +558,16 @@
           <button type="button" id="ip-close" class="link secondary">Close preview</button>
         </div>
         <dl id="ip-facts" class="ip-facts"></dl>
+        <section id="ip-getpaid" role="group" aria-labelledby="ip-getpaid-title" hidden>
+          <h3 id="ip-getpaid-title">Get paid</h3>
+          <dl id="ip-getpaid-facts" class="ip-facts"></dl>
+          <h4 id="ip-getpaid-paytitle" hidden>Payment details for this customer</h4>
+          <dl id="ip-getpaid-pay" class="ip-facts"></dl>
+          <p id="ip-getpaid-instr" class="ip-letter" hidden></p>
+          <p class="p-form-help-text" id="ip-getpaid-none" hidden>No payment details are configured for this customer yet. Add them on the customer form — the Get-paid panel, the invoice email and the document then carry them. Nothing here blocks payment: settle offline and record it below.</p>
+          <div id="ip-getpaid-history"></div>
+          <div class="buttons"><button type="button" id="ip-record-payment" class="p-button--positive" hidden>Record payment</button></div>
+        </section>
         <p id="ip-subject" class="ip-subject"></p>
         <div id="ip-letter" class="ip-letter"></div>
         <p id="ip-pdf-state" class="p-form-help-text" hidden></p>
@@ -851,11 +861,11 @@
 
       <section id="settings-panel-security" class="settings-panel" role="tabpanel" aria-labelledby="settings-tab-security" tabindex="0">
         <h2>Integration credentials <span class="beta">Beta</span></h2>
-      <p class="p-form-help-text">Store provider secrets (Stripe, OAuth, SMTP, calendar feeds) encrypted at rest. The integrations that consume these are <strong>Beta</strong> — not yet wired to live providers.</p>
+      <p class="p-form-help-text">Store provider secrets (OAuth, SMTP, calendar feeds) encrypted at rest. The integrations that consume these are <strong>Beta</strong> — not yet wired to live providers.</p>
       <p id="vault-status" class="p-form-help-text"></p>
       <p id="email-status" class="p-form-help-text" role="status" aria-live="polite"></p>
       <form id="secret-form" class="p-card">
-        <div class="p-form__group"><label class="p-form__label" for="secret-key">Key (e.g. stripe.secret_key)</label><input type="text" class="p-form__control" id="secret-key" maxlength="100" required></div>
+        <div class="p-form__group"><label class="p-form__label" for="secret-key">Key (e.g. smtp.password)</label><input type="text" class="p-form__control" id="secret-key" maxlength="100" required></div>
         <div class="p-form__group"><label class="p-form__label" for="secret-value">Value</label><input class="p-form__control" id="secret-value" type="password" autocomplete="off" required></div>
         <div class="p-form-validation is-error">
           <p class="p-form-validation__message" id="secret-error" role="alert" hidden></p>
@@ -1146,6 +1156,15 @@
             <input type="text" class="p-form__control" id="customer-subject" maxlength="120" autocomplete="off"></div>
           <div class="p-form__group"><label class="p-form__label" for="customer-notes">Invoice notes (markdown subset, appended after the footer)</label>
             <textarea class="p-form__control" id="customer-notes" maxlength="4000" rows="3"></textarea></div>
+        </fieldset>
+        <fieldset class="p-form__group"><legend>Payment details (the client's "how to pay"; shown in Get paid, emails and documents)</legend>
+          <div class="p-form__group"><label class="p-form__label" for="pay-bank-name">Bank name</label><input type="text" class="p-form__control" id="pay-bank-name" maxlength="120" autocomplete="off"></div>
+          <div class="p-form__group"><label class="p-form__label" for="pay-account-name">Account name</label><input type="text" class="p-form__control" id="pay-account-name" maxlength="120" autocomplete="off"></div>
+          <div class="p-form__group"><label class="p-form__label" for="pay-account-number">Account number</label><input type="text" class="p-form__control" id="pay-account-number" maxlength="64" autocomplete="off"></div>
+          <div class="p-form__group"><label class="p-form__label" for="pay-iban">IBAN</label><input type="text" class="p-form__control" id="pay-iban" maxlength="34" autocomplete="off" placeholder="DE89371314000000000000"></div>
+          <div class="p-form__group"><label class="p-form__label" for="pay-bic">BIC/SWIFT</label><input type="text" class="p-form__control" id="pay-bic" maxlength="11" autocomplete="off"></div>
+          <div class="p-form__group"><label class="p-form__label" for="pay-reference">Reference the payer should quote</label><input type="text" class="p-form__control" id="pay-reference" maxlength="60" autocomplete="off" placeholder="Invoice number"></div>
+          <div class="p-form__group"><label class="p-form__label" for="pay-instructions">Instructions (free text, shown last)</label><textarea class="p-form__control" id="pay-instructions" maxlength="500" rows="2"></textarea></div>
         </fieldset>
         </details>
         <div class="p-form__group"><label class="p-form__label" for="customer-active"><input class="p-form__control" type="checkbox" id="customer-active" checked> Active</label></div>

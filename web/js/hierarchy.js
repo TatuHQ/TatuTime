@@ -82,6 +82,16 @@ export function startCustomerEdit(c) {
   $('cust-country').value = a.country || '';
   $('cust-tax').value = c.tax_hundredths ? (c.tax_hundredths / 100).toFixed(2) : '0';
   $('cust-discount').value = c.discount_hundredths ? (c.discount_hundredths / 100).toFixed(2) : '0';
+  // Payment details: the customer's own "how to pay" block (no provider
+  // integration exists — these strings drive Get paid, emails, documents).
+  const pd = c.payment_details || {};
+  $('pay-bank-name').value = pd.bank_name || '';
+  $('pay-account-name').value = pd.account_name || '';
+  $('pay-account-number').value = pd.account_number || '';
+  $('pay-iban').value = pd.iban || '';
+  $('pay-bic').value = pd.bic || '';
+  $('pay-reference').value = pd.reference || '';
+  $('pay-instructions').value = pd.instructions || '';
   setContacts(c.contacts || []);
   $('customer-save').textContent = 'Update customer';
   $('customer-dialog-title').textContent = 'Edit customer';
@@ -140,6 +150,18 @@ export async function saveCustomer(evt) {
   const city = $('cust-city').value.trim();
   const postal = $('cust-postal').value.trim();
   const country = $('cust-country').value.trim();
+  // Payment details: blank everywhere = not configured (server normalises
+  // too; sending null clears a previously stored block).
+  const pay = {
+    bank_name: $('pay-bank-name').value.trim(),
+    account_name: $('pay-account-name').value.trim(),
+    account_number: $('pay-account-number').value.trim(),
+    iban: $('pay-iban').value.trim(),
+    bic: $('pay-bic').value.trim(),
+    reference: $('pay-reference').value.trim(),
+    instructions: $('pay-instructions').value.trim(),
+  };
+  const hasPay = Object.values(pay).some((v) => v);
   const body = {
     name: $('customer-name').value.trim(),
     currency: $('customer-currency').value.trim().toUpperCase(),
@@ -154,6 +176,7 @@ export async function saveCustomer(evt) {
     contacts: readContacts(),
     tax_hundredths: Math.round(Number($('cust-tax').value || 0) * 100),
     discount_hundredths: Math.round(Number($('cust-discount').value || 0) * 100),
+    payment_details: hasPay ? pay : null,
   };
   try {
     if (id) await api.put(`/customers/${id}`, body);

@@ -223,6 +223,8 @@ mod tests {
                 contacts: vec![],
                 tax_hundredths: 0,
                 discount_hundredths: 0,
+
+                payment_details: None,
             })
             .unwrap();
         store.put_project(&project).unwrap();
@@ -270,6 +272,8 @@ mod tests {
             contacts: vec![],
             tax_hundredths: 0,
             discount_hundredths: 0,
+
+            payment_details: None,
         };
         let entries = vec![Entry {
             id: uuid::Uuid::new_v4(),
@@ -312,6 +316,8 @@ mod tests {
             contacts: vec![],
             tax_hundredths: 0,
             discount_hundredths: 0,
+
+            payment_details: None,
         };
         let entries = vec![Entry {
             id: uuid::Uuid::new_v4(),

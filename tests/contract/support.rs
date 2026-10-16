@@ -77,7 +77,6 @@ impl Client {
         Self::build(
             store,
             locks,
-            tucano_time::payments::PaymentRegistry::default(),
             tucano_time::accounting::AccountingRegistry::default(),
         )
         .await
@@ -88,32 +87,12 @@ impl Client {
         store: Store,
         accounting: tucano_time::accounting::AccountingRegistry,
     ) -> Self {
-        Self::build(
-            store,
-            None,
-            tucano_time::payments::PaymentRegistry::default(),
-            accounting,
-        )
-        .await
-    }
-
-    pub(crate) async fn with_payments(
-        store: Store,
-        payments: tucano_time::payments::PaymentRegistry,
-    ) -> Self {
-        Self::build(
-            store,
-            None,
-            payments,
-            tucano_time::accounting::AccountingRegistry::default(),
-        )
-        .await
+        Self::build(store, None, accounting).await
     }
 
     pub(crate) async fn build(
         store: Store,
         locks: Option<Arc<dyn EntryLock>>,
-        payments: tucano_time::payments::PaymentRegistry,
         accounting: tucano_time::accounting::AccountingRegistry,
     ) -> Self {
         let session = Arc::new(Session::new(
@@ -122,7 +101,6 @@ impl Client {
             false,
         ));
         let recorder = Arc::new(tucano_time::email::RecordingEmailSender::default());
-        let payments = Arc::new(payments);
         let accounting = Arc::new(accounting);
         let state = match locks {
             Some(l) => {
@@ -142,7 +120,6 @@ impl Client {
                     revocations,
                     vault: None,
                     email: recorder.clone(),
-                    payments,
                     accounting,
                     sso: Arc::new(tucano_time::sso::SsoRegistry::default()),
                     oauth_flows: Arc::new(tucano_time::calendar_oauth::OAuthFlows::new()),
@@ -153,7 +130,6 @@ impl Client {
             }
             None => AppState::with_session(store, session)
                 .with_email(recorder.clone())
-                .with_payments(payments)
                 .with_accounting(accounting),
         };
         let router = tucano_time::build_router(state);

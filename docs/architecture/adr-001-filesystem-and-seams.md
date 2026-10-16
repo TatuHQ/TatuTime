@@ -69,7 +69,6 @@ their Phase 6 ticket is picked up:
 | Time source | `Clock` | timer #14, reminders #22, budgets #30 — **now** |
 | In-app/notify | `Store::push_notification` (direct; the `NotificationSender` trait was removed with the dead `notify.rs` seam in #101/C4) | reminders #22 |
 | Email | `EmailSender` | invoice email #35 — Phase 6 |
-| Payments | `PaymentProvider` | Stripe/PayPal #34 — Phase 6 |
 | Accounting | `AccountingSync` | QBO/Xero #33 — Phase 6 |
 | Identity | `IdentityProvider` | SSO #32 (local-password adapter first, #19) |
 | Calendar | `CalendarSource` | ICS #15 now; OAuth #36 Phase 6 |

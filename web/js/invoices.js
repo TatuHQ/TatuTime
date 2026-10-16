@@ -517,6 +517,67 @@ export async function openInvoicePreview(inv, opener) {
   $('ip-subject').textContent = '';
   $('ip-letter').textContent = '';
   const draft = inv.status === 'draft';
+  // ---- Get paid: the collect-payment box on the invoice. No hosted
+  // checkout exists by design, so this shows the customer's own payment
+  // details, what has been settled and when, and offers manual
+  // settlement. A draft gets no box: it is not collectable yet, and
+  // nothing here gates it.
+  const gp = $('ip-getpaid');
+  gp.hidden = draft;
+  const gpFacts = $('ip-getpaid-facts');
+  const gpPay = $('ip-getpaid-pay');
+  const gpHist = $('ip-getpaid-history');
+  gpFacts.textContent = '';
+  gpPay.textContent = '';
+  gpHist.textContent = '';
+  if (!draft) {
+    const pair = (list) => (label, value) => {
+      list.appendChild(el('dt', { text: label }));
+      list.appendChild(el('dd', { text: value }));
+    };
+    const gf = pair(gpFacts);
+    const gpr = pair(gpPay);
+    const bal = invoiceBalance(inv);
+    const settled = (inv.payments || []).reduce((a, p) => a + p.amount_minor, 0);
+    gf('Outstanding', bal ? `${inv.currency} ${formatMoney(bal)}` : 'Settled');
+    if (settled) gf('Recorded so far', `${inv.currency} ${formatMoney(settled)}`);
+    if (inv.status === 'written_off') gf('Balance', 'Written off — no further collection');
+    if (inv.due_date && bal) {
+      const today = new Date().toISOString().slice(0, 10);
+      gf('Due', `${inv.due_date}${inv.due_date < today ? ' (overdue)' : ''}`);
+    }
+    const cust = state.customers.find((x) => x.id === inv.customer_id);
+    const pd = cust && cust.payment_details;
+    const payRows = pd
+      ? [
+          ['Bank', pd.bank_name],
+          ['Account name', pd.account_name],
+          ['Account number', pd.account_number],
+          ['IBAN', pd.iban],
+          ['BIC/SWIFT', pd.bic],
+          ['Reference', pd.reference],
+        ].filter((r) => r[1] && String(r[1]).trim())
+      : [];
+    const instr = pd && pd.instructions ? String(pd.instructions).trim() : '';
+    const hasPay = payRows.length > 0 || !!instr;
+    $('ip-getpaid-paytitle').hidden = !hasPay;
+    $('ip-getpaid-none').hidden = hasPay;
+    for (const [label, value] of payRows) gpr(label, String(value).trim());
+    const gpInstr = $('ip-getpaid-instr');
+    gpInstr.hidden = !instr;
+    gpInstr.textContent = instr;
+    for (const p of inv.payments || []) {
+      gpHist.appendChild(
+        el('p', {
+          text: `${String(p.received_at).slice(0, 10)} — ${inv.currency} ${formatMoney(p.amount_minor)}`
+            + (p.reference ? ` (${p.reference})` : '') + ` · ${p.method}`,
+        }),
+      );
+    }
+    const gpBtn = $('ip-record-payment');
+    gpBtn.hidden = !(isOpenInvoice(inv) && bal > 0);
+    gpBtn.onclick = () => recordPayment(inv, bal);
+  }
   $('ip-download').hidden = draft;
   $('ip-pdf-state').hidden = !draft;
   if (draft) {

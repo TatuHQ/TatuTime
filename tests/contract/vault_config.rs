@@ -38,7 +38,6 @@ async fn secret_vault_endpoints_mask_and_authorize() {
         revocations: std::sync::Arc::new(tucano_time::revoke::Revocations::new(&root)),
         vault: Some(vault),
         email: std::sync::Arc::new(tucano_time::email::DisabledEmailSender),
-        payments: std::sync::Arc::new(tucano_time::payments::PaymentRegistry::default()),
         accounting: std::sync::Arc::new(tucano_time::accounting::AccountingRegistry::default()),
         sso: std::sync::Arc::new(tucano_time::sso::SsoRegistry::default()),
         oauth_flows: std::sync::Arc::new(tucano_time::calendar_oauth::OAuthFlows::new()),
@@ -72,7 +71,7 @@ async fn secret_vault_endpoints_mask_and_authorize() {
     let (s, _, _) = raw(
         &router,
         "PUT",
-        "/api/admin/secrets/stripe.secret_key",
+        "/api/admin/secrets/acme.api_token",
         Some(json!({"value":"dummy-secret-value-1234"})),
         Some(&admin),
     )
@@ -82,7 +81,7 @@ async fn secret_vault_endpoints_mask_and_authorize() {
     let (s2, list, _) = raw(&router, "GET", "/api/admin/secrets", None, Some(&admin)).await;
     assert_eq!(s2, StatusCode::OK);
     let text = serde_json::to_string(&list).unwrap();
-    assert!(text.contains("stripe.secret_key"), "{text}");
+    assert!(text.contains("acme.api_token"), "{text}");
     assert!(
         !text.contains("dummy-secret-value-1234"),
         "value leaked in list: {text}"
@@ -106,7 +105,7 @@ async fn secret_vault_endpoints_mask_and_authorize() {
     let (s4, _, _) = raw(
         &router,
         "DELETE",
-        "/api/admin/secrets/stripe.secret_key",
+        "/api/admin/secrets/acme.api_token",
         None,
         Some(&admin),
     )
@@ -228,9 +227,9 @@ async fn config_file_changes_request_time_behaviour_without_restart() {
 
 #[tokio::test]
 async fn demo_flags_cannot_be_persisted_via_config() {
-    // Review A3: webhook-bypass flags are env-only, never config.json.
+    // Review A3: demo/bypass flags stay env-only; config.json rejects unknown keys.
     let (app, _d) = app().await;
-    for key in ["stripe_demo", "paypal_demo"] {
+    for key in ["demo_mode", "insecure_demo"] {
         let (s, body) = json_req(&app, "PUT", "/api/admin/config", Some(json!({key: true}))).await;
         assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY, "{key}: {body}");
     }
@@ -263,7 +262,6 @@ async fn vault_router(dir: &std::path::Path) -> (Router, String) {
         revocations: Arc::new(tucano_time::revoke::Revocations::new(&root)),
         vault: Some(vault),
         email: Arc::new(tucano_time::email::DisabledEmailSender),
-        payments: Arc::new(tucano_time::payments::PaymentRegistry::default()),
         accounting: Arc::new(tucano_time::accounting::AccountingRegistry::default()),
         sso: Arc::new(tucano_time::sso::SsoRegistry::default()),
         oauth_flows: Arc::new(tucano_time::calendar_oauth::OAuthFlows::new()),

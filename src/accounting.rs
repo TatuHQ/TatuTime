@@ -604,6 +604,8 @@ mod tests {
             contacts: vec![],
             tax_hundredths: 0,
             discount_hundredths: 0,
+
+            payment_details: None,
         };
         let inv = Invoice {
             id: Uuid::new_v4(),
@@ -671,7 +673,7 @@ mod tests {
         drop(posts);
         let paid_at = Utc.timestamp_opt(1, 0).unwrap();
         let pid = p
-            .push_payment(&remote, 18000, "EUR", "stripe:abc", paid_at)
+            .push_payment(&remote, 18000, "EUR", "wire:abc", paid_at)
             .unwrap();
         assert!(pid.starts_with("remote-payment"));
         assert_eq!(

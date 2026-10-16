@@ -84,7 +84,6 @@ async fn calendar_events_from_configured_feed() {
         revocations: std::sync::Arc::new(tucano_time::revoke::Revocations::new(&root)),
         vault: Some(vault),
         email: std::sync::Arc::new(tucano_time::email::DisabledEmailSender),
-        payments: std::sync::Arc::new(tucano_time::payments::PaymentRegistry::default()),
         accounting: std::sync::Arc::new(tucano_time::accounting::AccountingRegistry::default()),
         sso: std::sync::Arc::new(tucano_time::sso::SsoRegistry::default()),
         oauth_flows: std::sync::Arc::new(tucano_time::calendar_oauth::OAuthFlows::new()),

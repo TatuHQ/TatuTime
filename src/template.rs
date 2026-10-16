@@ -40,6 +40,7 @@ pub const VARS: &[&str] = &[
     "currency",
     "total",
     "line_count",
+    "payment_details",
 ];
 
 /// Cheatsheet rows (name, example) — the GUI renders this table, so the
@@ -57,6 +58,7 @@ pub const VAR_HELP: &[(&str, &str)] = &[
     ("%currency%", "EUR"),
     ("%total%", "1,200.00"),
     ("%line_count%", "14"),
+    ("%payment_details%", "IBAN: DE89 3713 1400 ..."),
 ];
 
 /// Caps (validated at save; #50 bounds on free text).
@@ -156,7 +158,7 @@ pub type Vars = BTreeMap<String, String>;
 /// passed by the caller (the clock lives in the API layer, not here).
 pub fn vars_for(
     invoice: &Invoice,
-    customer_name: &str,
+    customer: &crate::domain::Customer,
     issue_day: Option<chrono::NaiveDate>,
 ) -> Vars {
     let mut v = Vars::new();
@@ -176,13 +178,23 @@ pub fn vars_for(
     );
     v.insert("period_from".into(), invoice.period_from.to_string());
     v.insert("period_to".into(), invoice.period_to.to_string());
-    v.insert("customer_name".into(), customer_name.to_string());
+    v.insert("customer_name".into(), customer.name.clone());
     v.insert("currency".into(), invoice.currency.0.clone());
     v.insert(
         "total".into(),
         crate::api::money_for_email(invoice.total_minor, &invoice.currency.0),
     );
     v.insert("line_count".into(), invoice.lines.len().to_string());
+    // The customer's configured payment details ("How to pay"), empty when
+    // not set — templates that reference the token simply print nothing.
+    v.insert(
+        "payment_details".into(),
+        customer
+            .payment_details
+            .as_ref()
+            .and_then(|p| p.email_block())
+            .unwrap_or_default(),
+    );
     v
 }
 
@@ -527,16 +539,37 @@ mod tests {
     fn vars() -> Vars {
         vars_for(
             &sample_invoice(),
-            "Capybara Solutions",
+            &customer_named("Capybara Solutions"),
             Some(NaiveDate::from_ymd_opt(2026, 10, 5).unwrap()),
         )
+    }
+
+    /// A customer with only a name — every other field default-ish. Built by
+    /// hand because `Customer` deliberately has no `Default` impl.
+    fn customer_named(name: &str) -> crate::domain::Customer {
+        crate::domain::Customer {
+            id: uuid::Uuid::nil(),
+            name: name.into(),
+            currency: crate::domain::Currency("EUR".into()),
+            default_rate_minor: 1,
+            active: true,
+            email: String::new(),
+            payment_terms: None,
+            invoice_notes: String::new(),
+            invoice_subject: String::new(),
+            address: None,
+            contacts: vec![],
+            tax_hundredths: 0,
+            discount_hundredths: 0,
+            payment_details: None,
+        }
     }
 
     #[test]
     fn variable_table_resolves_documented_examples() {
         let issue = Some(NaiveDate::from_ymd_opt(2026, 10, 5).unwrap());
         let inv = sample_invoice();
-        let built = vars_for(&inv, "Capybara Solutions", issue);
+        let built = vars_for(&inv, &customer_named("Capybara Solutions"), issue);
         assert_eq!(built["invoice_number"], "INV-0007");
         assert_eq!(built["invoice_issue_day"], "5");
         assert_eq!(built["invoice_issue_month"], "October");
@@ -651,6 +684,8 @@ mod tests {
             contacts: vec![],
             tax_hundredths: 0,
             discount_hundredths: 0,
+
+            payment_details: None,
         };
         let template = InvoiceTemplate {
             subject: "Invoice %invoice_number%".into(),
@@ -690,12 +725,14 @@ mod tests {
             contacts: vec![],
             tax_hundredths: 0,
             discount_hundredths: 0,
+
+            payment_details: None,
         };
         let template = InvoiceTemplate::default();
         let inv = sample_invoice();
         let mut doc = crate::pdf::doc_for(&inv, &customer, &crate::pdf::Org::named("Tucano"));
         let before = doc.clone();
-        let content = doc_content(&template, &customer, &vars_for(&inv, &customer.name, None));
+        let content = doc_content(&template, &customer, &vars_for(&inv, &customer, None));
         apply_doc_content(&mut doc, &content);
         assert_eq!(doc.blocks, before.blocks);
         assert_eq!(doc.footer, before.footer);
@@ -719,6 +756,8 @@ mod tests {
             contacts: vec![],
             tax_hundredths: 0,
             discount_hundredths: 0,
+
+            payment_details: None,
         };
         let template = InvoiceTemplate {
             body: "## Work for %invoice_issue_month%\n- consultancy".into(),
@@ -732,7 +771,7 @@ mod tests {
             &customer,
             &vars_for(
                 &inv,
-                &customer.name,
+                &customer,
                 Some(NaiveDate::from_ymd_opt(2026, 10, 5).unwrap()),
             ),
         );

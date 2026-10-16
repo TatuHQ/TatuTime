@@ -146,9 +146,19 @@ the `v0.1.8` release notes is no longer needed.
   returns 404, not 403, to avoid leaking existence). Customers/projects/tasks/
   categories are shared org-wide reference data (any authenticated user).
 - **Invoices (#8):** generated from a period's billable, not-yet-invoiced entries; each line snapshots the resolved rate at generation, so a later rate change never rewrites an issued invoice. Issuing sets `status=issued`, which the `InvoiceLock` (a `lock::EntryLock` provider wired in `AppState`) uses to reject edits/deletes of referenced entries with 409. Draft invoices do not lock. Every builder (the API draft/preview pipeline and the recurring scheduler) resolves already-invoiced lines through one shared predicate, `domain::already_invoiced`, which excludes **every non-draft** invoice: settling (`paid`/`partly_paid`) or writing off an invoice releases its entries from the edit lock but never re-bills them (#248). Invoice number is sequential (`INV-0001`).
+- **Getting paid is provider-free (by design):** there is **no** hosted-checkout
+  or payment-provider integration — no Stripe, no PayPal, no webhook receiver,
+  no demo-flag env vars. An invoice answers "how does this client pay us" from
+  `Customer::payment_details` (bank name, account name/number, IBAN, BIC,
+  reference, free-text instructions; `domain::PaymentDetails`), rendered into
+  the GUI's *Get paid* panel, the invoice/reminder emails ("How to pay") and
+  the document PDF, plus the `%payment_details%` template variable. Settlement
+  is recorded manually (`POST /invoices/{id}/pay`, ledger `method: "manual"`);
+  nothing in the invoice lifecycle prompts for, blocks on, or depends on an
+  external payment provider. Do not reintroduce one.
 - **HTTP status codes (C8):** a `POST` returns **201** when it mints a new,
   client-addressable resource (`POST /api/customers`, `/api/entries`,
-  `/api/invoices`, `/api/invoices/{id}/checkout` → a new payment session, …).
+  `/api/invoices`, `/api/claims` → a new reimbursement claim, …).
   It returns **200** when it is a *command or transition on an existing
   resource* and hands back that resource's new state (`/invoices/{id}/issue`,
   `/invoices/{id}/pay`, `/timer/stop` — which materialises the derived entry

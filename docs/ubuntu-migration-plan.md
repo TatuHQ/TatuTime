@@ -174,7 +174,7 @@ before #232 can be closed.
 4. Each PR ships: the page's Vanilla classes + any shared adapter it needs,
    jsdom/contrast updates, `docs/ubuntu-design.md` note, and a green gate:
    `cargo test --all-targets` + `node --test *.test.mjs` + `node contrast.mjs`
-   + `node gui.mjs` (server with `TUCANO_STRIPE_FAKE=1`, as in CI).
+   + `node gui.mjs` (plain server, as in CI).
 5. Both themes are reviewed per page (`.is-dark`/`is-light` tokens) and focus
    rings must stay visible inside `p-card`/`p-modal` overflow.
 6. The GUI is pure presentation: no route or contract change is ever needed

@@ -502,7 +502,7 @@ impl Store {
 
     // ---------------------------------------------------------- side indexes --
     //
-    // Two full scans had crept onto hot paths (review D3): payment webhooks
+    // Two full scans had crept onto hot paths (review D3): number lookups
     // resolve invoices by human number, and login/SSO resolve users by email.
     // Both are dot-file maps maintained under the same write lock as the
     // documents they index — crash-safe tmp+rename via `write_json`, skipped
@@ -2082,31 +2082,6 @@ impl Store {
         self.record_payment_locked(id, amount, reference, method, now)
     }
 
-    /// Webhook-safe payment record (#185): the reference-uniqueness check
-    /// runs **inside** the write lock, so two concurrent deliveries of the
-    /// same provider event serialize and exactly one posts. `Ok(None)` means
-    /// the reference was already recorded — callers treat that as success
-    /// (idempotent replay), not an error.
-    pub fn record_payment_once(
-        &self,
-        id: Uuid,
-        amount: Option<u64>,
-        reference: String,
-        method: String,
-        now: DateTime<Utc>,
-    ) -> Result<Option<Invoice>, StoreError> {
-        let _guard = self.write_lock()?;
-        let path = self.doc_path::<Invoice>(&id.to_string());
-        let Some(invoice) = read_json::<Invoice>(&path)? else {
-            return Err(StoreError::NotFound);
-        };
-        if invoice.payments.iter().any(|p| p.reference == reference) {
-            return Ok(None);
-        }
-        self.record_payment_locked(id, amount, reference, method, now)
-            .map(Some)
-    }
-
     fn record_payment_locked(
         &self,
         id: Uuid,
@@ -2557,6 +2532,7 @@ mod tests {
             contacts: vec![],
             tax_hundredths: 0,
             discount_hundredths: 0,
+            payment_details: None,
         }
     }
 
@@ -2745,10 +2721,10 @@ mod txn_tests {
             )
             .unwrap();
         let paid = store
-            .pay_invoice(inv.id, Utc::now(), "stripe:1".into())
+            .pay_invoice(inv.id, Utc::now(), "wire:1".into())
             .unwrap();
         assert_eq!(paid.status, InvoiceStatus::Paid);
-        assert_eq!(paid.payment_reference, "stripe:1");
+        assert_eq!(paid.payment_reference, "wire:1");
         // Double issue now conflicts.
         assert!(matches!(
             store.issue_invoice(

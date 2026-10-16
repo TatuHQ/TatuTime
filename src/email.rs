@@ -373,7 +373,11 @@ pub fn invoice_subject(number: &str, org: &str) -> String {
 
 /// Plain-text invoice cover email. `amount` is pre-formatted (e.g.
 /// "1,200.00 EUR") so this stays locale-agnostic. `pdf_attached` tells the
-/// customer the document rides along (#113).
+/// customer the document rides along (#113). `payment` is the customer's
+/// configured payment-details block — when set, the email carries a
+/// "How to pay" section (no hosted checkout exists by design: the client
+/// pays in on the bank, and settlement is recorded manually).
+#[allow(clippy::too_many_arguments)]
 pub fn render_invoice_email(
     customer: &str,
     number: &str,
@@ -381,6 +385,7 @@ pub fn render_invoice_email(
     due: Option<&str>,
     org: &str,
     pdf_attached: bool,
+    payment: Option<&str>,
 ) -> String {
     let mut s = format!("Hi {customer},\n\nPlease find invoice {number} for {amount}");
     if let Some(due) = due {
@@ -389,6 +394,9 @@ pub fn render_invoice_email(
     s.push('.');
     if pdf_attached {
         s.push_str(" The PDF document is attached.");
+    }
+    if let Some(block) = payment.map(str::trim).filter(|b| !b.is_empty()) {
+        s.push_str(&format!("\n\nHow to pay:\n{block}"));
     }
     s.push_str(&format!("\n\nThank you,\n{org}\n"));
     s
@@ -416,7 +424,9 @@ pub fn render_copy_email(
 }
 
 /// Plain-text overdue-payment reminder for a single invoice. `pdf_attached`
-/// names the archived document riding along (#113).
+/// names the archived document riding along (#113). `payment` re-sends the
+/// customer's payment details so an overdue client has the account handy.
+#[allow(clippy::too_many_arguments)]
 pub fn render_reminder_email(
     customer: &str,
     number: &str,
@@ -425,17 +435,23 @@ pub fn render_reminder_email(
     days_over: i64,
     org: &str,
     pdf_attached: bool,
+    payment: Option<&str>,
 ) -> String {
     let document = if pdf_attached {
         " A PDF copy of the invoice is attached."
     } else {
         ""
     };
-    format!(
+    let mut s = format!(
         "Hi {customer},\n\nThis is a reminder that invoice {number} for {amount} was due {due} \
          and is now {days_over} day(s) overdue.{document}\n\nIf you have already paid, please \
-         disregard this notice.\n\nThank you,\n{org}\n"
-    )
+         disregard this notice."
+    );
+    if let Some(block) = payment.map(str::trim).filter(|b| !b.is_empty()) {
+        s.push_str(&format!("\n\nHow to pay:\n{block}"));
+    }
+    s.push_str(&format!("\n\nThank you,\n{org}\n"));
+    s
 }
 
 /// Should an overdue invoice get a reminder now, given a cadence in days since
@@ -519,10 +535,24 @@ mod tests {
             Some("2026-10-19"),
             "Tucano",
             true,
+            None,
         );
         assert!(
             inv.contains("INV-1") && inv.contains("1,200.00 EUR") && inv.contains("2026-10-19")
         );
+        // No payment details configured: no "How to pay" section invented.
+        assert!(!inv.contains("How to pay"));
+        // Configured: the block rides along verbatim.
+        let with_pay = render_invoice_email(
+            "ACME",
+            "INV-1",
+            "1,200.00 EUR",
+            Some("2026-10-19"),
+            "Tucano",
+            true,
+            Some("IBAN: DE89 3713 1400 0000 0000 00"),
+        );
+        assert!(with_pay.contains("How to pay:") && with_pay.contains("IBAN: DE89"));
         let rem = render_reminder_email(
             "ACME",
             "INV-1",
@@ -531,6 +561,7 @@ mod tests {
             12,
             "Tucano",
             true,
+            None,
         );
         assert!(
             rem.contains("12 day(s) overdue") && rem.contains("INV-1") && rem.contains("PDF copy")
