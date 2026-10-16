@@ -211,10 +211,14 @@ jobs:
             else
               tag_message="${tag}"
             fi
-            # An annotated tag object, matching every existing tag here. The
-            # tagger is the Actions bot because the workflow token is the actor.
+            # An annotated tag object, matching every existing tag here. This
+            # endpoint takes the target as a plain `object` sha with a sibling
+            # `type`, not the nested object `POST /git/refs` takes -- the first
+            # run of this workflow proved it (run 38890780013: "For
+            # 'properties/object', {...} is not a string"). The tagger is the
+            # Actions bot because the workflow token is the actor.
             jq -n --arg tag "$tag" --arg msg "$tag_message" --arg sha "$COMMIT_SHA" \
-              '{tag: $tag, message: $msg, tagger: {name: "github-actions[bot]", email: "41898282+github-actions[bot]@users.noreply.github.com"}, object: {sha: $sha, type: "commit"}}' \
+              '{tag: $tag, message: $msg, object: $sha, type: "commit", tagger: {name: "github-actions[bot]", email: "41898282+github-actions[bot]@users.noreply.github.com"}}' \
               > /tmp/tt-payload.json
             post "$api/git/tags" /tmp/tt-payload.json
             if [ "$status" != "201" ]; then
