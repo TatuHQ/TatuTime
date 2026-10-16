@@ -4,8 +4,9 @@ use std::path::{Path, PathBuf};
 use chrono::NaiveDate;
 use uuid::Uuid;
 
+use super::cold::ColdIdIndex;
 use super::io::{dir_entries, json_stems, read_json, write_json};
-use super::{ARCHIVE_DIR, ColdIdIndex, ENTRIES_DIR, MAX_RANGE_DAYS, Store, StoreError};
+use super::{ARCHIVE_DIR, ENTRIES_DIR, MAX_RANGE_DAYS, Store, StoreError};
 use crate::auth::User;
 use crate::domain::{Entry, Expense, Invoice};
 
