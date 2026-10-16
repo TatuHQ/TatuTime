@@ -1888,15 +1888,22 @@ if (emailBtn) {
   // The re-render is two concurrent fetches (the timeline and the PDF). Wait for
   // each half explicitly: a composite predicate hides which of the two stalled,
   // and a half-rendered panel is not evidence of anything.
+  //
+  // The budget is deliberately large. Opening a panel re-renders the invoice PDF
+  // *on demand* (`GET /invoices/{id}/pdf/preview` is uncached and CPU-bound), and
+  // this suite opens a preview many times, so on a single-core CI runner a later
+  // render can queue behind earlier ones and outlast 15s. These waits assert the
+  // settled state, never latency; a render that genuinely fails still surfaces as
+  // "Preview unavailable" in `#ip-pdf-state`, which the messages below report.
   await waitFor(() => sentCount() === emailsBefore + 1, {
-    timeoutMs: 15000,
+    timeoutMs: 60000,
     message: 'the history to record the new delivery'
       + ` (entries=${sentCount()}, state=${byId('ip-pdf-state').textContent})`,
   });
   await waitFor(
     () => !!byId('ip-frame') && String(byId('ip-frame').getAttribute('src')).startsWith('blob:'),
     {
-      timeoutMs: 15000,
+      timeoutMs: 60000,
       message: 'the panel to re-frame the rendered PDF'
         + ` (frame=${!!byId('ip-frame')}, state=${byId('ip-pdf-state').textContent})`,
     },
