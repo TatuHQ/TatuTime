@@ -39,6 +39,28 @@ throughout. That divergence is deliberate and repository-specific — `AgentRule
 is auto-synced from TucanoAgentRules and must not be edited here, so reconciling
 the upstream wording is an upstream change, not a local one.
 
+### Releases
+
+The crate version in [`Cargo.toml`](Cargo.toml) **is** the release version: a
+PR bumps the patch inside the change that lands, and the merged commit is the
+one that gets tagged. **Bump the patch in your PR.**
+
+Releasing is no longer a manual step.
+[`.github/workflows/release.yml`](.github/workflows/release.yml) runs on every
+push to `main` and releases the commit it is given: it tags that commit
+`v<version>` (annotated, as every existing tag is) and creates the GitHub
+Release with generated notes.
+
+A version that is already tagged falls back to build metadata instead of
+colliding, so no commit can go unreleased: a merge that carries no bump — a
+Dependabot dependency bump, which cannot edit `Cargo.toml`, or any human PR that
+forgets the bump — is released as `v<version>+<short-sha>`, semver build metadata
+identifying the commit. The workflow never deletes, moves or rewrites an existing
+tag or release, and re-running it on a commit that already has its tag and
+release is a no-op. That is what makes the "a release on every commit that lands
+in `main`" rule hold by construction (#352); the carve-out recorded by hand on
+the `v0.1.8` release notes is no longer needed.
+
 ### Architecture invariants
 
 - Money is **minor units** (`u64` cents) and hours are **hundredths** (`u32`);
@@ -60,7 +82,11 @@ the upstream wording is an upstream change, not a local one.
   `schedules/`, `timers/`, `items/` and `notifications/` doc folders,
   `sync/accounting.json` (#33), archived
   `invoices/<id>.pdf` (#113), `invoices/.seq.json` (number ledger, B3) and
-  `*.idx.*` side indexes (D3). Atomic writes (tmp + rename).
+  the `*.idx.*` side indexes (D3): `invoices/.idx.numbers.json`,
+  `users/.idx.emails.json`, and the #335 per-user read indexes
+  `entries/.idx.users.json` + `expenses/.idx.users.json`. Dot files are never
+  documents — the collection reader skips them, so a side index stays out of
+  the `MAX_DOCS` count. Atomic writes (tmp + rename).
 - **Secret vault (#77):** admin-entered integration credentials are encrypted at
   rest with `TUCANO_SECRET_KEY` (32 bytes) and never returned to clients (masked
   hints only) or logged. Fail-closed: unset key ⇒ vault disabled.

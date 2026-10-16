@@ -374,3 +374,163 @@ async fn submissions_and_claims_lists_filter_by_owner() {
     assert_eq!(sc, StatusCode::OK);
     assert!(claims["claims"].as_array().unwrap().is_empty());
 }
+
+/// #335: a member's entry list reads through the per-user side index. The
+/// answer must be byte-for-byte what the old whole-collection scan produced for
+/// the member — own rows only, in the documented `(date, id)` ascending order,
+/// page boundaries intact — and losing the index on disk must not lose a row.
+#[tokio::test]
+async fn member_entries_read_the_index_and_survive_its_loss() {
+    let (app, d) = app().await;
+    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap().to_string();
+    new_project(&app, &cid, "P1", json!({})).await;
+
+    // The admin logs two entries (one per day).
+    for date in ["2026-10-02", "2026-10-03"] {
+        let (s, b) = json_req(
+            &app,
+            "POST",
+            "/api/entries",
+            Some(entry_body(&cid, "P1", json!(1), date)),
+        )
+        .await;
+        assert_eq!(s, StatusCode::CREATED, "{b}");
+    }
+    // Dana logs three, two of them on the first day.
+    let dana = member_cookie(&app, "dana@test.local", "danapass123").await;
+    for date in ["2026-10-02", "2026-10-02", "2026-10-03"] {
+        let (s, b, _) = raw(
+            &app.router,
+            "POST",
+            "/api/entries",
+            Some(entry_body(&cid, "P1", json!(2), date)),
+            Some(&dana),
+        )
+        .await;
+        assert_eq!(s, StatusCode::CREATED, "{b}");
+    }
+
+    // Dana's day read: only her two rows, and only hers.
+    let (s, day, _) = raw(
+        &app.router,
+        "GET",
+        "/api/entries?date=2026-10-02",
+        None,
+        Some(&dana),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(day["entries"].as_array().unwrap().len(), 2);
+
+    // Paging over the indexed path: limit=1 walks both rows, in order, with no
+    // foreign row and a cursor that ends the set.
+    let (s, p1, _) = raw(
+        &app.router,
+        "GET",
+        "/api/entries?date=2026-10-02&limit=1",
+        None,
+        Some(&dana),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    let first: Vec<String> = p1["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["id"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(first.len(), 1);
+    let cursor = p1["next_cursor"].as_str().unwrap().to_string();
+    let (s, p2, _) = raw(
+        &app.router,
+        "GET",
+        &format!("/api/entries?date=2026-10-02&limit=1&cursor={cursor}"),
+        None,
+        Some(&dana),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    let second: Vec<String> = p2["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["id"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(second.len(), 1);
+    assert!(p2["next_cursor"].is_null(), "the set ended after two rows");
+    assert_ne!(first[0], second[0]);
+
+    // Lose the index on disk: the member read falls back to the scan, stays
+    // complete, and every foreign row stays hidden.
+    std::fs::remove_file(d.path().join("data/entries/.idx.users.json")).unwrap();
+    let (s, range, _) = raw(
+        &app.router,
+        "GET",
+        "/api/entries?from=2026-10-02&to=2026-10-03",
+        None,
+        Some(&dana),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(
+        range["entries"].as_array().unwrap().len(),
+        3,
+        "all three of Dana's rows survive the index loss"
+    );
+
+    // The admin still sees everyone (5 rows).
+    let (_, admin) = json_req(
+        &app,
+        "GET",
+        "/api/entries?from=2026-10-02&to=2026-10-03",
+        None,
+    )
+    .await;
+    assert_eq!(admin["entries"].as_array().unwrap().len(), 5);
+}
+
+/// #335: the expense list is indexed the same way — a member sees only their
+/// own expenses, an admin sees all, and an index lost on disk changes nothing.
+#[tokio::test]
+async fn member_expenses_read_the_index_and_hide_others() {
+    let (app, d) = app().await;
+    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap().to_string();
+    new_project(&app, &cid, "P1", json!({})).await;
+
+    let (s, admin_exp) = json_req(
+        &app,
+        "POST",
+        "/api/expenses",
+        Some(json!({"date":"2026-10-02","customer_id":cid,"amount_minor":100,"currency":"EUR"})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{admin_exp}");
+
+    let dana = member_cookie(&app, "dana@test.local", "danapass123").await;
+    let (s, b, _) = raw(
+        &app.router,
+        "POST",
+        "/api/expenses",
+        Some(json!({"date":"2026-10-02","customer_id":cid,"amount_minor":250,"currency":"EUR"})),
+        Some(&dana),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{b}");
+
+    // Dana sees only her own expense.
+    let (s, mine, _) = raw(&app.router, "GET", "/api/expenses", None, Some(&dana)).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(mine["expenses"].as_array().unwrap().len(), 1);
+
+    // Lose the index: the answer is unchanged (the scan answers and heals).
+    std::fs::remove_file(d.path().join("data/expenses/.idx.users.json")).unwrap();
+    let (s, mine, _) = raw(&app.router, "GET", "/api/expenses", None, Some(&dana)).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(mine["expenses"].as_array().unwrap().len(), 1);
+
+    // The admin sees both.
+    let (_, all) = json_req(&app, "GET", "/api/expenses", None).await;
+    assert_eq!(all["expenses"].as_array().unwrap().len(), 2);
+}
