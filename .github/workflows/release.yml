@@ -1,0 +1,261 @@
+# Release on every push to `main` (#352).
+#
+# The scheme this workflow makes true by construction: the crate version in
+# `Cargo.toml` *is* the release version, bumped inside the PR that lands on
+# `main`. On every push to `main` this job tags the pushed commit `v<version>`
+# (annotated, as every existing tag in this repository is) and creates the
+# GitHub Release with generated notes. Doing that step by hand is what let the
+# gap below go unnoticed.
+#
+# The fallback, and why it exists: a merge that carries no version bump cannot
+# be released as `v<version>` -- that tag already exists on an earlier commit,
+# and a tag is never moved or rewritten. A Dependabot dependency bump is exactly
+# that case (it cannot edit `Cargo.toml`), and it is not alone: any human PR
+# that forgets the bump behaves identically. Two such merges (#285 `uuid`,
+# #347 `serde_json`) landed between `v0.1.6` and `v0.1.7` still carrying
+# `version = "0.1.6"`, which `v0.1.6` had already tagged, so they could carry no
+# release of their own and the gap had to be recorded by hand on the `v0.1.8`
+# release notes. When `v<version>` already exists at another commit, this job
+# tags the commit `v<version>+<short-sha>` instead -- semver build metadata,
+# which is precisely "same version, different build" in semver -- and releases
+# it the same way. Every commit that lands on `main` is therefore released by
+# construction, Dependabot merges included, and the carve-out on the `v0.1.8`
+# notes is no longer needed.
+#
+# Idempotence and safety: a re-run on a commit that already has its tag and
+# release is a no-op (it exits 0 after reporting the existing release), never a
+# duplicate or an error. An existing tag or release is never deleted, moved or
+# rewritten; a tag that exists on a *different* commit than the one being
+# released is a hard error, because silently reconciling it is the one thing
+# this job must not do.
+#
+# Mechanism: the GitHub REST API, called with the workflow token through the
+# runner's own `curl` + `jq`. These were verified present on the self-hosted
+# pool before choosing them (/usr/bin/curl, /usr/bin/jq, /usr/bin/git, and also
+# /usr/bin/gh at 2.45.0 -- `gh` was deliberately not used, so the job cannot
+# depend on which CLI version a runner happens to carry). The only action used
+# is the same pinned checkout as ci.yml, and the preflight below fails rather
+# than skips when a runner lacks the tools, so the job can never silently not
+# release.
+#
+# Runner choice: the self-hosted pool, as every other workflow here uses. This
+# job runs its steps on the runner host (as `gui-test` and `actionlint` do) and
+# deliberately declares no `container:` -- it needs the host's curl/jq, not the
+# pinned Rust toolchain image ci.yml's `lint-test`/`supply-chain` jobs carry.
+
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+# Least privilege: the workflow-scoped token is read-only. The only job needs to
+# write anything, so it grants itself `contents: write` at the job level -- the
+# minimum a tag ref and a release require.
+permissions:
+  contents: read
+
+# One group per ref, and never cancel: two release runs on `main` must be
+# serialised, not raced, and a run that is half-way through must not be killed
+# by the next push. (ci.yml cancels superseded runs; a release must not.)
+# `cancel-in-progress: false` makes the second run queue behind the first.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 10
+    permissions:
+      contents: write   # create the tag ref and the GitHub Release
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      # Fail, never skip (same discipline as the real-browser gate in ci.yml):
+      # the job releases through the REST API with curl+jq, so a runner without
+      # them must say so loudly instead of quietly not releasing.
+      - name: Preflight the tools this job needs
+        shell: bash
+        run: |
+          missing=""
+          for tool in curl jq awk git; do
+            command -v "$tool" >/dev/null 2>&1 || missing="$missing $tool"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error title=Release job cannot run::missing:$missing - this job tags the commit and creates the release through the GitHub REST API using curl, jq and awk. Install them on the self-hosted runner (apt-get install -y curl jq gawk) or change the mechanism in .github/workflows/release.yml."
+            exit 1
+          fi
+          curl --version | head -n 1
+          jq --version
+          awk --version 2>/dev/null | head -n 1 || true
+
+      - name: Tag the pushed commit and create its GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          api="${GITHUB_API_URL:-https://api.github.com}/repos/${REPO}"
+          api_headers=(
+            -H "Authorization: Bearer ${GH_TOKEN}"
+            -H "Accept: application/vnd.github+json"
+            -H "X-GitHub-Api-Version: 2022-11-28"
+          )
+
+          # GET <url>: response body in /tmp/tt-response.json, status in $status.
+          get() {
+            status="$(curl -sS "${api_headers[@]}" -o /tmp/tt-response.json -w '%{http_code}' "$1")"
+          }
+
+          # POST <url> <json file>: body in /tmp/tt-response.json, status in $status.
+          post() {
+            status="$(curl -sS "${api_headers[@]}" -X POST -H "Content-Type: application/json" \
+              --data-binary "@$2" -o /tmp/tt-response.json -w '%{http_code}' "$1")"
+          }
+
+          # A tag name goes into a URL path with '+' percent-encoded so it can
+          # never be read as anything but a literal plus.
+          tag_url() { printf '%s' "${1//+/%2B}"; }
+
+          # tag_commit <tag>: the commit the tag points to (an annotated tag is
+          # peeled to its object), or nothing when the tag does not exist.
+          tag_commit() {
+            local tag="$1" obj_type obj_sha
+            get "$api/git/ref/tags/$(tag_url "$tag")"
+            case "$status" in
+              404) return 0 ;;
+              200) ;;
+              *) echo "::error title=GitHub API error::GET git/ref/tags/$tag -> HTTP $status: $(cat /tmp/tt-response.json)"; exit 1 ;;
+            esac
+            obj_type="$(jq -r '.object.type' /tmp/tt-response.json)"
+            obj_sha="$(jq -r '.object.sha' /tmp/tt-response.json)"
+            if [ "$obj_type" = "tag" ]; then
+              get "$api/git/tags/$obj_sha"
+              jq -r '.object.sha' /tmp/tt-response.json
+            else
+              printf '%s\n' "$obj_sha"
+            fi
+          }
+
+          # ---- the version is the release: read it from [package] only -------
+          # Scoped to the [package] table so a dependency pin can never be
+          # mistaken for the package version. The program is double-quoted and
+          # \$2 is escaped: that is awk's field, not a shell expansion.
+          version="$(awk -F'"' "
+            /^\[package\]/ { in_package = 1; next }
+            /^\[/         { in_package = 0 }
+            in_package && /^[[:space:]]*version[[:space:]]*=/ { print \$2; exit }
+          " Cargo.toml)"
+
+          if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error title=Unreadable crate version::Cargo.toml [package].version is '${version}', which is not x.y.z"
+            exit 1
+          fi
+
+          # ---- resolve the tag for this commit -------------------------------
+          short_sha="${COMMIT_SHA:0:7}"
+          tag="v${version}"
+          version_tag_commit="$(tag_commit "$tag")"
+          mode="versioned"
+
+          if [ -n "$version_tag_commit" ] && [ "$version_tag_commit" != "$COMMIT_SHA" ]; then
+            # The version is already tagged on another commit: a merge that
+            # carried no bump (the Dependabot case). Never move that tag --
+            # identify this commit with semver build metadata instead.
+            mode="fallback"
+            tag="v${version}+${short_sha}"
+          fi
+
+          # "" = absent (create it), $COMMIT_SHA = already correct (leave it).
+          tag_commit_now="$(tag_commit "$tag")"
+          if [ -n "$tag_commit_now" ] && [ "$tag_commit_now" != "$COMMIT_SHA" ]; then
+            echo "::error title=Refusing to move an existing tag::$tag already points at $tag_commit_now, not at $COMMIT_SHA. Nothing was changed."
+            exit 1
+          fi
+
+          if [ "$mode" = "versioned" ]; then
+            case_note="**Release-coverage note.** The crate version at this commit is ${version} and no earlier commit has tagged it, so this commit is released as ${tag}."
+          else
+            case_note="**Release-coverage note - why this tag carries build metadata.** No version bump landed with this commit: \`Cargo.toml\` still reads version ${version}, and \`v${version}\` is already tagged on the earlier commit ${version_tag_commit}. A tag is never moved or rewritten here, so rather than leave this commit unreleased - the gap the v0.1.8 notes record by hand for the uuid (#285) and serde_json (#347) bumps - it is released as ${tag}, whose \`+${short_sha}\` suffix is semver build metadata identifying the commit."
+          fi
+          scheme_note="**Release scheme.** The crate version in \`Cargo.toml\` is the release version, bumped inside the PR that lands on \`main\`. \`.github/workflows/release.yml\` runs on every push to \`main\` and releases the commit it is given; when \`v<version>\` is already tagged at another commit, the commit is identified with semver build metadata, \`v<version>+<short-sha>\`, instead, so no commit that lands on \`main\` can go unreleased."
+
+          # ---- idempotence: a release for this tag already exists ------------
+          get "$api/releases/tags/$(tag_url "$tag")"
+          case "$status" in
+            200)
+              url="$(jq -r '.html_url' /tmp/tt-response.json)"
+              echo "Already released: ${tag} -> ${url}. No-op, nothing changed."
+              {
+                echo "### Release ${tag}: already released"
+                echo ""
+                echo "This commit already has its tag and release, so the run was a no-op."
+                echo ""
+                echo "- release: ${url}"
+              } >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+              ;;
+            404) ;;
+            *) echo "::error title=GitHub API error::GET releases/tags/$tag -> HTTP $status: $(cat /tmp/tt-response.json)"; exit 1 ;;
+          esac
+
+          # ---- create the tag (only when it is absent) ----------------------
+          if [ -z "$tag_commit_now" ]; then
+            subject="$(git log -1 --format=%s "$COMMIT_SHA" 2>/dev/null || true)"
+            if [ -n "$subject" ]; then
+              tag_message="${tag}: ${subject}"
+            else
+              tag_message="${tag}"
+            fi
+            # An annotated tag object, matching every existing tag here. The
+            # tagger is the Actions bot because the workflow token is the actor.
+            jq -n --arg tag "$tag" --arg msg "$tag_message" --arg sha "$COMMIT_SHA" \
+              '{tag: $tag, message: $msg, tagger: {name: "github-actions[bot]", email: "41898282+github-actions[bot]@users.noreply.github.com"}, object: {sha: $sha, type: "commit"}}' \
+              > /tmp/tt-payload.json
+            post "$api/git/tags" /tmp/tt-payload.json
+            if [ "$status" != "201" ]; then
+              echo "::error title=Could not create the tag object::HTTP $status: $(cat /tmp/tt-response.json)"
+              exit 1
+            fi
+            tag_object_sha="$(jq -r '.sha' /tmp/tt-response.json)"
+
+            jq -n --arg ref "refs/tags/$tag" --arg sha "$tag_object_sha" \
+              '{ref: $ref, sha: $sha}' > /tmp/tt-payload.json
+            post "$api/git/refs" /tmp/tt-payload.json
+            if [ "$status" != "201" ]; then
+              echo "::error title=Could not create the tag ref::HTTP $status: $(cat /tmp/tt-response.json)"
+              exit 1
+            fi
+            echo "Tagged ${COMMIT_SHA} as ${tag} (annotated)."
+          else
+            echo "Tag ${tag} already points at ${COMMIT_SHA}; leaving it untouched."
+          fi
+
+          # ---- create the release with generated notes ----------------------
+          # `generate_release_notes` is the API's `--generate-notes`: the body
+          # below is prepended to the generated notes.
+          printf '%s\n\n%s\n' "$case_note" "$scheme_note" > /tmp/tt-body.txt
+          jq -n --arg tag "$tag" --arg name "$tag" --arg body "$(cat /tmp/tt-body.txt)" \
+            '{tag_name: $tag, target_commitish: "main", name: $name, body: $body, generate_release_notes: true, draft: false, prerelease: false}' \
+            > /tmp/tt-payload.json
+          post "$api/releases" /tmp/tt-payload.json
+          if [ "$status" != "201" ]; then
+            echo "::error title=Could not create the release::HTTP $status: $(cat /tmp/tt-response.json)"
+            exit 1
+          fi
+
+          url="$(jq -r '.html_url' /tmp/tt-response.json)"
+          {
+            echo "### Released ${tag}"
+            echo ""
+            echo "The commit that just landed on ${REPO} is released."
+            echo ""
+            echo "- tag: ${tag}"
+            echo "- commit: ${COMMIT_SHA}"
+            echo "- release: ${url}"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::notice title=Released ${tag}::${url}"
