@@ -368,8 +368,8 @@ async fn json_method_not_allowed(
 }
 
 /// Baseline security response headers (#48). Swagger UI is vendored under
-/// web/ (review A9) so no third-party origin can ever execute in the admin
-/// GUI's cookie scope — the CSP is now strictly 'self'.
+/// web/ (review A9), so no third-party origin can execute in the admin GUI's
+/// cookie scope — the CSP is strictly 'self'.
 async fn security_headers(
     req: axum::extract::Request,
     next: axum::middleware::Next,

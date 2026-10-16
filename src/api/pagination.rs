@@ -1,42 +1,14 @@
 //! Keyset pagination for the list endpoints (#334).
 //!
-//! `GET /api/entries` and `GET /api/expenses` used to answer a whole request in
-//! one body: the range is capped at `MAX_RANGE_DAYS` (400 days) and a collection
-//! at `MAX_DOCS` (100 000), so a single response could serialise 100 000
-//! documents — the first thing multi-user growth breaks, and a silent cut would
-//! be worse, because a caller cannot tell "this is everything" from "there is
-//! more". A page is bounded by `limit`, and the response says which of the two
-//! it is: `next_cursor` is the opaque token for the following page, or `null`
-//! when the page ended the set.
-//!
-//! **Order.** A page walk is only meaningful over a *total* order, and this is
-//! the order the two endpoints walk:
-//!
-//! - `/api/entries`: `(date, id)` **ascending** — a timesheet reads forwards;
-//! - `/api/expenses`: `(date, id)` **descending** — the register reads newest
-//!   first.
-//!
-//! `id` breaks every tie, and it is exactly what makes the order total: it is
-//! unique and immutable, so no two rows can compare equal and no write can move
-//! a row to a position the walk has already passed. The direction is part of the
-//! contract (see `openapi.json`), not an implementation detail.
-//!
-//! **Keyset, not offset.** The cursor carries the last `(date, id)` the endpoint
-//! emitted, so the next page continues *after that record* — a write landing
-//! between two page requests can neither skip a row (as an offset would, when a
-//! row before the window is deleted) nor repeat one (when a row is inserted
-//! before it).
-//!
-//! **Opacity.** The cursor is `base64url_nopad("YYYY-MM-DD|<uuid>")`, and that
-//! encoding is genuinely opaque: a client sends a `next_cursor` back verbatim
-//! and never parses it, which leaves the shape free to change without a break.
-//! A cursor this service did not issue (or a hand-written one) is a 422 naming
-//! `cursor`, never a silent restart from the beginning of the set — answering a
-//! paging request with page one is how a caller loses rows without noticing.
-//!
-//! **No silent clamping.** A `limit` above [`MAX_LIMIT`] — or one that is not a
-//! positive integer — is a 422 naming `limit`. Clamping would answer a request
-//! for 5 000 rows with 1 000 and no signal that the other 4 000 were dropped.
+//! A page is bounded by `limit`; `next_cursor` is the opaque token for the next
+//! page, or `null` when the set ended — so a caller can always tell "this is
+//! everything" from "there is more". The walk is a *total* order, `(date, id)`:
+//! ascending for `/api/entries`, descending for `/api/expenses` (the register
+//! reads newest first). A keyset cursor continues *after* the last record, so a
+//! write landing between two page requests can neither skip nor repeat a row. A
+//! `cursor` or `limit` this service did not issue — or a `limit` above
+//! [`MAX_LIMIT`] — is a 422 naming the field, never a silent restart from page
+//! one or a silent clamp.
 
 use base64::Engine as _;
 use chrono::NaiveDate;

@@ -51,9 +51,9 @@ async fn record_sync_from(
     .await
 }
 
-/// Copies an issued invoice to the accounting provider (#33). Idempotent:
-/// a previously synced invoice is a no-op, and failures are recorded rather
-/// than thrown (sync must never block the invoice flow).
+/// Copies an issued invoice to the accounting provider (#33). Idempotent: an
+/// already-synced invoice is a no-op, and failures are recorded rather than
+/// thrown (sync never blocks the invoice flow).
 pub async fn sync_invoice(
     State(app): State<AppState>,
     Path(id): Path<Uuid>,

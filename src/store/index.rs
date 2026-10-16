@@ -106,11 +106,11 @@ impl Store {
 
     // ------------------------------------------- per-user read index (#335) --
     //
-    // A member's day/week read used to decode *every* user's entry documents
+    // A member's day/week read must not decode *every* user's entry documents
     // for those days (and every expense) and filter afterwards through
     // `visible_to` — an O(all rows) cost for an O(own rows) answer (review
     // §2.2). The information needed to skip that work is already on the
-    // documents (`user_id`, #51), so it is now indexed, in the shape of the two
+    // documents (`user_id`, #51), so it is indexed, in the shape of the two
     // dot-file side indexes above:
     //
     //   entries/.idx.users.json    { "<YYYY-MM-DD>": { "<user>": ["<id>", …] } }

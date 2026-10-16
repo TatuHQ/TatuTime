@@ -1,13 +1,13 @@
-// TucanoTime — timesheet server: one binary serves the REST API, the web
-// GUI, the machine-readable contract (openapi.json) and its docs UI.
-// Data lives in one folder tree below TUCANO_DATA_DIR (no database).
-//
-// The same binary doubles as the operator CLI (#94):
-//   tucano-time                 serve (default)
-//   tucano-time --backup FILE   archive the data dir to FILE (tar.gz + manifest)
-//   tucano-time --restore FILE  unpack a backup into the data dir (--force to overwrite)
-//   tucano-time --health        probe the local server's /healthz (container HEALTHCHECK)
-//   tucano-time --version       print the version
+//! TucanoTime — timesheet server: one binary serves the REST API, the web GUI,
+//! the machine-readable contract (openapi.json) and its docs UI. Data lives in
+//! one folder tree below `TUCANO_DATA_DIR` (no database).
+//!
+//! The same binary doubles as the operator CLI (#94):
+//!   tucano-time                 serve (default)
+//!   tucano-time --backup FILE   archive the data dir to FILE (tar.gz + manifest)
+//!   tucano-time --restore FILE  unpack a backup into the data dir (--force to overwrite)
+//!   tucano-time --health        probe the local server's /healthz (container HEALTHCHECK)
+//!   tucano-time --version       print the version
 
 use std::sync::Arc;
 

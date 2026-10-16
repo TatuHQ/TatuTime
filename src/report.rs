@@ -249,10 +249,9 @@ pub fn summarise_profit(
     let projects = ctx.projects;
     let users = ctx.users;
     use crate::domain::InvoiceStatus;
-    // #256: build the per-entry indexes ONCE, outside the per-customer loop
-    // (`project_for` used to be rebuilt for every customer), and group entries
-    // by customer so the pass is O(records + entries), not O(customers ×
-    // entries).
+    // #256: build the per-entry indexes ONCE, outside the per-customer loop,
+    // and group entries by customer, so the pass is O(records + entries) rather
+    // than O(customers × entries).
     let user_by_id: std::collections::HashMap<Uuid, &User> =
         users.iter().map(|u| (u.id, u)).collect();
     let project_by_key: std::collections::HashMap<(Uuid, &str), &crate::domain::Project> = projects

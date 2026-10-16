@@ -15,10 +15,10 @@ impl Store {
     }
 
     /// Whether any user document exists, without decoding the collection: a
-    /// `read_dir` + the same "is a document" filter as `dir_entries` (dot
-    /// files such as the email side index and `*.tmp` leftovers are not
-    /// documents). The public `GET /api/auth/status` probe no longer
-    /// deserialises every user to answer "is the dir empty" (#256).
+    /// `read_dir` + the same "is a document" filter as `dir_entries` (dot files
+    /// such as the email side index and `*.tmp` leftovers are not documents).
+    /// The public `GET /api/auth/status` probe answers "is the dir empty" this
+    /// way, never by deserialising every user (#256).
     pub fn has_users(&self) -> Result<bool, StoreError> {
         let dir = self.doc_dir::<User>();
         if !dir.exists() {

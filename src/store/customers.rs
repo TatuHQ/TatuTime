@@ -45,9 +45,8 @@ impl Store {
             return Err(StoreError::NotFound);
         }
         // The projects live in a sibling DIRECTORY (customers/<id>/projects),
-        // which only exists once a project was ever added; ENOENT here must
-        // not fail the deletion of a project-less customer (found by the
-        // #141 workflow teardown — previously a 500).
+        // which exists only once a project was ever added; ENOENT here must not
+        // fail the deletion of a project-less customer (#141).
         let dir = self.root.join("customers").join(id.to_string());
         match std::fs::remove_dir_all(&dir) {
             Ok(()) => {}

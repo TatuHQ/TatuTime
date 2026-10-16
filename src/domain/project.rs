@@ -4,9 +4,8 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// Reads go exclusively through `project_from_bytes`/`ProjectDoc` (the single
-/// legacy-aware disk path, #11); the redundant `Deserialize` derive that
-/// let a second, drift-prone disk shape exist was removed (#183 → #220 /
-/// old review item C3). The struct is still serialized on write.
+/// legacy-aware disk path, #11), so only one disk shape exists to keep in step
+/// (#183 → #220). The struct is serialized on write only.
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct Project {
     pub customer_id: Uuid,
@@ -200,7 +199,7 @@ pub fn validate_task_input(input: &TaskInput) -> Result<TaskDraft, Vec<FieldErro
 mod tests {
     use super::*;
 
-    // ---- #262 Tier 3: direct validator coverage (previously HTTP-only) ----
+    // ---- #262 Tier 3: direct validator coverage (validator paths the HTTP tier uses) ----
 
     #[test]
     fn validate_project_input_defaults_and_bounds() {

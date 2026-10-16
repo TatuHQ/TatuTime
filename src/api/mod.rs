@@ -1,13 +1,11 @@
-// The REST API: routing, extractors and handlers. Handlers validate, then
-// hand off to `store`; nothing touches the filesystem except through it, and
-// nothing returns internal detail to a client.
-//
-// This module owns the shared surface — `AppState`, the request extractors,
-// the route guards and the cross-cutting helpers the handlers reuse. The
-// endpoint bodies live in the feature submodules below, split along the
-// section banners this file carried until #100. `lib.rs` keeps the central
-// route table; the `pub use` re-exports at the bottom keep `api::<handler>`
-// paths stable.
+//! The REST API: routing, extractors and handlers (#100).
+//!
+//! Handlers validate, then hand off to `store`; nothing touches the filesystem
+//! except through it, and nothing returns internal detail to a client. This
+//! module owns the shared surface — `AppState`, the request extractors, the
+//! route guards and the cross-cutting helpers the handlers reuse. The endpoint
+//! bodies live in the feature submodules below; `lib.rs` keeps the central
+//! route table and the `pub use` re-exports keep `api::<handler>` paths stable.
 
 use axum::Json;
 use axum::body::Bytes;
@@ -79,25 +77,16 @@ impl FromRequestParts<AppState> for AuthUser {
 
 /// Turn a serde failure into the shared 422 shape, naming the field it is about.
 ///
-/// serde quotes the *value* in backticks as readily as the key — `invalid type:
-/// integer \`42\`, expected a string` — so a field is only ever the token after one
-/// of serde's field markers. Reading "the first backticked token" instead reported
-/// the value (`"field": "42"`), i.e. a field nobody has, on the one path that
-/// tells a caller what to fix. When no marker is present the field stays empty and
-/// the *reason* becomes serde's own sentence rather than a generic line that hides
-/// it; `unknown field` keeps its exact wording, which the GUI keys on to spot a
-/// server older than the page.
+/// serde quotes the *value* as readily as the key, so a field is only the token
+/// after one of its markers; a *type* mismatch carries none, so [`key_at`]
+/// recovers it from the raw body (#338). Otherwise the field stays empty and the
+/// reason is serde's own sentence — `unknown field` keeps its exact wording, which
+/// the GUI keys on to spot a server older than the page.
 ///
-/// A *type* mismatch (#338) carries no marker: serde names the value, not the
-/// key. The field is recovered from the raw body instead — [`key_at`] maps the
-/// error's position back to the object key whose value it was parsing, which is
-/// exact for the flat and single-level-nested shapes these endpoints accept
-/// (`{"name":42}` names `name`; `{"inner":{"name":42}}` names the leaf `name`).
-/// The mapping is attempted only for serde's *data* errors, so a syntax error's
-/// position (an unclosed brace, trailing characters) can never borrow a key from
-/// an unrelated byte. Where the body holds no enclosing key — a bare scalar, or a
-/// body that is not JSON — the field stays empty exactly as before and the reason
-/// remains serde's sentence.
+/// ```rust
+/// {"name": 42}            // field `name`, recovered from the body (#338)
+/// {"inner": {"name": 42}} // field `name`, the leaf
+/// ```
 fn deser_error(e: serde_json::Error, body: &[u8]) -> ApiError {
     let msg = e.to_string();
     let after = |marker: &str| -> Option<String> {
@@ -604,8 +593,7 @@ pub(crate) fn parse_range(
     Ok((from, to))
 }
 
-/// `?from=YYYY-MM-DD&to=YYYY-MM-DD` as a typed query (#100), replacing the
-/// hand-rolled `Query<HashMap>` + manual lookups. Unknown params stay
+/// `?from=YYYY-MM-DD&to=YYYY-MM-DD` as a typed query (#100). Unknown params are
 /// tolerated and missing ones keep the documented message.
 #[derive(Debug, serde::Deserialize)]
 pub struct RangeQuery {
@@ -616,7 +604,7 @@ pub struct RangeQuery {
 }
 
 impl RangeQuery {
-    /// Resolve both bounds; same errors as the map-based original.
+    /// Resolve both bounds, with the documented errors.
     pub(crate) fn dates(&self) -> Result<(chrono::NaiveDate, chrono::NaiveDate), ApiError> {
         parse_range(self.from.as_ref(), self.to.as_ref())
     }
@@ -655,8 +643,8 @@ pub async fn healthz() -> impl IntoResponse {
     Json(serde_json::json!({ "status": "ok" }))
 }
 
-// Re-exports keep the central route table in `lib.rs` (and `crate::api::…`
-// paths elsewhere in the crate) working unchanged after the #100 split.
+// Re-exports keep the central route table in `lib.rs` and `crate::api::…`
+// paths elsewhere in the crate stable (#100).
 pub use self::auth::{
     BootstrapInput, LoginInput, SsoAssertionInput, audit_log, auth_status, bootstrap, login,
     logout, me, sso_assertion, sso_providers,

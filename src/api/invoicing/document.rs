@@ -52,22 +52,15 @@ pub async fn invoice_pdf(State(app): State<AppState>, Path(id): Path<Uuid>) -> A
 }
 
 /// `GET /invoices/{id}/pdf/preview` — an on-demand, stage-stamped PDF render
-/// (Subtask C). **Works for a draft**: that is the point of a preview, and it
-/// is the deliberate asymmetry with `GET /invoices/{id}/pdf`, which answers
-/// **409** for a draft because there is no *archived* document to serve (a
-/// draft has never been issued, so no archive exists). This route always
-/// renders live, so a draft is a normal **200**.
-///
-/// The document is stamped with the invoice's *current*
-/// [`crate::domain::invoice_watermark_stage`] (`DRAFT`/`SENT`/`PAID`, Paid >
-/// Sent > Draft). The stamp is text-only and date-free, so the render is
-/// deterministic and the response carries an `ETag` like `/pdf` (which has no
-/// conditional handling either, so neither does this).
-///
-/// Purely computed: **never archived**, never written to the store, so it can
-/// not disturb the write-once `invoices/<id>.pdf`. **404** for an unknown id;
-/// admin tier (`x-admin-only`), so a member is **403** and an anonymous caller
-/// **401**, consistent with the rest of the invoice surface.
+/// (Subtask C). **Works for a draft**, the deliberate asymmetry with
+/// `GET /invoices/{id}/pdf`, which answers **409** for a draft: no *archived*
+/// document exists to serve. The document is stamped with the invoice's *current*
+/// [`crate::domain::invoice_watermark_stage`] (`DRAFT`/`SENT`/`PAID`); the stamp
+/// is text-only and date-free, so the render is deterministic and carries an
+/// `ETag` like `/pdf`. Purely computed — **never archived**, never written — so
+/// it cannot disturb the write-once `invoices/<id>.pdf`. **404** for an unknown
+/// id; admin tier (`x-admin-only`), so a member is **403** and an anonymous
+/// caller **401**.
 pub async fn invoice_pdf_preview(State(app): State<AppState>, Path(id): Path<Uuid>) -> ApiResult {
     let invoice = get_invoice_or_404(&app, id)?;
     let events = store_blocking("invoice timeline read", &app.store, move |s| {
@@ -147,15 +140,15 @@ pub(crate) fn content_for(
     crate::template::doc_content(template, customer, &vars)
 }
 
-/// Render + archive the PDF from the invoice as stored today, using the
-/// current template content (the legacy path of #113/#116). Deterministic in
+/// Render + archive the PDF from the invoice as stored today, using the current
+/// template content (the legacy path of #113/#116). Deterministic in
 /// (invoice, customer, template, org): a re-render while nothing was edited
 /// yields identical bytes.
 ///
-/// The archive/delivery path stamps the **generation-time stage**, which is
-/// `Draft`: an invoice cannot be sent before it is issued, so an archived PDF
-/// is only ever produced while the invoice is undelivered. It is captured here
-/// rather than resolved live because the archive is write-once (#113).
+/// The archive/delivery path stamps the **generation-time stage**, `Draft`: an
+/// invoice cannot be sent before it is issued, so an archived PDF is only ever
+/// produced while undelivered. It is captured here, not resolved live, because
+/// the archive is write-once (#113).
 pub(crate) fn render_pdf_now(app: &AppState, invoice: &Invoice) -> Result<Vec<u8>, ApiError> {
     render_pdf_with_stage(app, invoice, InvoiceWatermarkStage::Draft)
 }

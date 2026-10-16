@@ -1,12 +1,12 @@
-// File-based persistence. No database: every entity is one pretty-printed
-// JSON document on disk, mirroring the conceptual organisation of the data
-// (a customer is a folder that contains its projects; entries live in a
-// per-day folder). The API is the only actor that writes below the data dir.
-//
-// Path components are never taken raw from a request: customer files are
-// named by `Uuid`, project files by a validated `ProjectCode`, entry
-// directories by a validated `YYYY-MM-DD` date and entry files by `Uuid`.
-// Traversal input therefore cannot reach the filesystem.
+//! File-based persistence. No database: every entity is one pretty-printed
+//! JSON document on disk, mirroring the conceptual organisation of the data
+//! (a customer is a folder that contains its projects; entries live in a
+//! per-day folder). The API is the only actor that writes below the data dir.
+//!
+//! Path components are never taken raw from a request: customer files are
+//! named by `Uuid`, project files by a validated `ProjectCode`, entry
+//! directories by a validated `YYYY-MM-DD` date and entry files by `Uuid`.
+//! Traversal input therefore cannot reach the filesystem.
 
 use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
@@ -269,28 +269,16 @@ pub const NOTIFICATIONS_DIR: &str = "notifications";
 /// changes no number a caller or a user can see (ADR-003).
 pub const ARCHIVE_DIR: &str = "archive";
 
-/// The store's collection directories in one place: one row per [`Entity`]
-/// impl, plus the collections that are not flat `Entity` dirs — [`ENTRIES_DIR`],
-/// date-sharded; [`NOTIFICATIONS_DIR`], per-user; and the [`ARCHIVE_DIR`] cold
-/// tree the #349 retention primitive relocates whole day folders into (the
-/// operator-run pass writes it, every reader merges it back in, #350). Every row is the
-/// impl's own `DIR` constant or one of those named constants — never a re-typed
-/// literal — so this is the layout as the store derives it; the store's path
-/// builders below use the same constants for the non-`Entity` collections.
+/// The store's collection directories: one row per [`Entity`] impl plus the
+/// non-`Entity` dirs [`ENTRIES_DIR`] (date-sharded), [`NOTIFICATIONS_DIR`] and
+/// [`ARCHIVE_DIR`] (#349/#350), each row its own `DIR` constant.
 ///
-/// The storage-layout guard
-/// (`storage_layout::collections_match_agents_md`, tests/contract.rs) holds this
-/// list and `AGENTS.md`'s "Architecture invariants" storage bullet together, in
-/// both directions (#336): a collection added here with no sentence there, or a
-/// documented directory with no row here, fails the build named for the drift.
-/// Adding a collection therefore means editing this list and the docs in the
-/// same change.
-///
-/// Deliberately *not* here: the flat side-car files (`audit.log`,
+/// The guard (`tests/contract.rs`, `storage_layout`) holds this list and
+/// `AGENTS.md`'s storage bullet together both ways (#336); a collection lands
+/// in both in one change. Not here: the flat side-car files (`audit.log`,
 /// `revoked.json`, `scheduler.json`, `secrets.bin`, `config.json`,
-/// `session.key`, `.server.lock`, `sync/accounting.json`, `invoices/.seq.json`,
-/// the `*.idx.*` indexes). This list is about collection directories; those
-/// files belong to the module that owns them.
+/// `session.key`, `.server.lock`, `sync/accounting.json`, `invoices/.seq.json`
+/// and the `*.idx.*` indexes).
 pub const DOC_COLLECTIONS: &[&str] = &[
     User::DIR,
     Customer::DIR,

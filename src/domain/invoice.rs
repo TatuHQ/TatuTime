@@ -325,7 +325,7 @@ pub enum InvoiceTimelineEventKind {
 /// 1. [`InvoiceWatermarkStage::Paid`] — the invoice has been paid. Both
 ///    [`InvoiceStatus::Paid`] **and** [`InvoiceStatus::PartlyPaid`] count: a
 ///    partial settlement means money has already been received, so the
-///    document must no longer read as an unpaid one. `WrittenOff` does **not**
+///    document must not read as an unpaid one. `WrittenOff` does **not**
 ///    count: the balance was forgiven, never collected, so a written-off
 ///    invoice keeps whatever delivery stage it had.
 /// 2. [`InvoiceWatermarkStage::Sent`] — a delivery has happened: **any**

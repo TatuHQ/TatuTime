@@ -7,10 +7,9 @@ use super::*;
 /// Entry list body: serialised exactly once by `Json`, with no intermediate
 /// `serde_json::Value` per row (#256).
 ///
-/// `next_cursor` is a key of the payload with no `skip_serializing_if` (#334):
-/// `null` is the answer to "was that all of it?", and a response that dropped
-/// the key would put the caller back to guessing — the silent cut this endpoint
-/// used to be.
+/// `next_cursor` is always a key, with no `skip_serializing_if` (#334): `null`
+/// is the answer to "was that all of it?", and dropping the key would leave the
+/// caller guessing — the silent cut this endpoint must never be.
 #[derive(serde::Serialize)]
 struct EntryList<'a> {
     entries: Vec<&'a Entry>,
@@ -24,10 +23,10 @@ fn validate_entry_refs(
     store: &Store,
     draft: &crate::domain::EntryDraft,
 ) -> Result<Vec<FieldError>, crate::store::StoreError> {
-    // #187: `.ok().flatten()` used to answer store failures (corrupt customer
-    // doc, IO fault, oversized collection) with a 422 "customer does not
-    // exist" — an infrastructure outage masquerading as client input. Only a
-    // provable miss is a field error now; a genuine store error propagates.
+    // #187: a store failure (corrupt customer doc, IO fault, oversized
+    // collection) must never answer 422 "customer does not exist" — that would
+    // be an infrastructure outage masquerading as client input. Only a provable
+    // miss is a field error; a genuine store error propagates.
     let mut errors = Vec::new();
     let Some(customer) = store.get_customer(draft.customer_id)? else {
         // The whole reference tree is unreachable without its customer:
@@ -245,9 +244,9 @@ pub async fn update_entry(
         updated_at: app.clock.now(),
     };
     // Relocation across day folders is one store transaction (review B4):
-    // half-applying it would double-count the entry in every report. #218:
-    // the lock check now runs INSIDE that transaction — previously an
-    // issue_invoice landing between check and save let the edit through.
+    // half-applying it would double-count the entry in every report. #218: the
+    // lock check runs INSIDE that transaction, so an issue_invoice landing
+    // between check and save cannot let the edit through.
     app.store
         .save_entry_guarded(Some(existing.date), &updated, || {
             ensure_unlocked(&app, id, "edit")

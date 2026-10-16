@@ -191,14 +191,12 @@ impl Store {
 
         if !relocated.is_empty() {
             // The index may only name days that are on disk (#335): drop the
-            // relocated days' keys in the same pass, or the index keeps a slice
-            // for a folder that is no longer there.
+            // relocated days' keys in the same pass, or it keeps a slice for a
+            // folder that is gone.
             self.drop_archived_day_keys_locked(&relocated)?;
-            // #350: the cold id index is written here and nowhere else — no read
-            // ever writes it — and it is rebuilt from the whole cold tree, so it
-            // also describes the days earlier passes published. Read-side it is a
-            // hint: a read that finds it stale or missing walks the cold tree and
-            // is still correct.
+            // #350: the cold id index is written here and nowhere else, rebuilt
+            // from the whole cold tree; read-side it is a hint, so a read that
+            // finds it stale or missing walks the tree and is still correct.
             self.write_cold_index_locked()?;
             let rel = self.archive_manifest_rel();
             self.write_archive_manifest_locked(&rel, cutoff, &manifest)?;
@@ -289,9 +287,9 @@ impl Store {
     }
 
     /// Drop the relocated days from the #335 per-user index, so it never names a
-    /// day that is no longer on disk (the index's own trust rule compares exactly
-    /// that, #335). The caller holds the write lock. A missing or unreadable index
-    /// is "no index": nothing names the day, so nothing is rewritten.
+    /// day absent from disk (the index's own trust rule compares exactly that,
+    /// #335). The caller holds the write lock; a missing or unreadable index is
+    /// "no index", so nothing is rewritten.
     fn drop_archived_day_keys_locked(&self, days: &[NaiveDate]) -> Result<(), StoreError> {
         let Some(mut idx) = self.read_entry_index() else {
             return Ok(());

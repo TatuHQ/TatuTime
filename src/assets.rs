@@ -122,9 +122,8 @@ pub(crate) async fn static_assets(uri: axum::http::Uri) -> Response {
 ///
 /// This is the client half of [`dev_reload`]: it opens the `EventSource` and
 /// reloads the page when the server announces a change. It must be an external
-/// script because the app's CSP is `script-src 'self'` — as an inline snippet
-/// the browser refused to execute it, so dev edits required a manual refresh
-/// and every dev page logged a CSP violation (#dev live-reload).
+/// script because the app's CSP is `script-src 'self'` — an inline snippet would
+/// be refused and log a CSP violation.
 ///
 /// Dev-only, exactly like the SSE endpoint: without `TUCANO_WEB_DIR` it 404s
 /// with the standard error shape, and no copy exists in the embedded bundle.

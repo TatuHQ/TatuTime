@@ -344,20 +344,18 @@ impl Store {
     }
 
     /// Every entry document, across all day folders, without the
-    /// `MAX_RANGE_DAYS` window. Load-bearing scans (budget burn, review B1)
-    /// and the admin `budget_report` HTTP handler (#190 corrected the earlier
-    /// "not for HTTP handlers" claim — an admin request already calls this;
-    /// the full-tree scan is intended because budgets are lifetime totals).
+    /// `MAX_RANGE_DAYS` window. Load-bearing for budget burn (review B1) and the
+    /// admin `budget_report` handler (#190): budgets are lifetime totals, so the
+    /// full-tree scan is intended, not accidental.
     pub fn list_all_entries(&self) -> Result<Vec<Entry>, StoreError> {
         self.scan_all_entries()
     }
 
     fn scan_all_entries(&self) -> Result<Vec<Entry>, StoreError> {
-        // #350: the lifetime scan is hot ∪ cold. That is the whole point of the
-        // merge — a budget total, a deletion guard or any other lifetime count
-        // must not change when a day is relocated. An id present in both trees (a
-        // day a crash left half-published) counts **once**, and the `MAX_DOCS` cap
-        // is one budget over the union rather than one per tree.
+        // #350: the lifetime scan is hot ∪ cold, so a budget total, a deletion
+        // guard or any other lifetime count never changes when a day is relocated.
+        // An id in both trees (a day a crash left half-published) counts **once**,
+        // and the `MAX_DOCS` cap is one budget over the union, not one per tree.
         let mut out = Vec::new();
         let mut seen: std::collections::HashSet<Uuid> = std::collections::HashSet::new();
         let dir = self.root.join(ENTRIES_DIR);

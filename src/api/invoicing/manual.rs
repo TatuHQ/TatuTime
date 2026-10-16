@@ -244,8 +244,7 @@ pub async fn update_invoice_draft(
             out_lines.push((*orig).clone());
         } else {
             // Manual line: re-priced server-side. Uses the SAME bounds as
-            // POST /invoices/manual (#187) — previously a divergent inline
-            // copy that could drift.
+            // POST /invoices/manual (#187), so the two never diverge.
             let qty = l.quantity_hundredths.unwrap_or(0);
             let price = l.unit_price_minor.unwrap_or(0);
             if l.kind != crate::domain::LineKind::Fixed || l.item_kind.is_none() {

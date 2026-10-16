@@ -65,8 +65,8 @@ pub async fn create_invoice(
     Ok((StatusCode::CREATED, Json(invoice)).into_response())
 }
 
-/// The load-or-404 every invoice route starts with (#100: this block existed
-/// seven times). Reads only; state checks stay with each endpoint.
+/// The load-or-404 every invoice route starts with (#100). Reads only; state
+/// checks stay with each endpoint.
 pub(crate) fn get_invoice_or_404(app: &AppState, id: Uuid) -> Result<Invoice, ApiError> {
     app.store
         .get_invoice(id)?

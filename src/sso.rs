@@ -1,19 +1,14 @@
-//! Single sign-on (#32). An `IdentityProvider` port sits behind the #18 seam:
-//! it turns an externally-asserted identity (SAML assertion from Microsoft
-//! Entra / Okta, or a signed OIDC-style token) into a trusted `Identity`, and
-//! users are provisioned just-in-time with the role mapping from #19.
+//! Single sign-on (#32). An `IdentityProvider` port sits behind the #18 seam: it
+//! turns an externally-asserted identity (a SAML assertion from Microsoft Entra /
+//! Okta, or a signed OIDC-style token) into a trusted `Identity`, and users are
+//! provisioned just-in-time with the role mapping from #19.
 //!
 //! Local password login keeps working alongside — SSO is additive. Provider
-//! secrets (signing keys/certs, metadata) live in the vault (#77) or env,
-//! never in the repo and never in API responses. Contract tests run against a
-//! stub Idp whose keys are generated in-test, so no real credentials are used.
-//!
-//! Signature verification is real HMAC-SHA256 (shared secret — the Okta OIDC
-//! flow) for `SignedTokenIdp`; `SamlIdp` verifies the assertion payload's
-//! digest the same way a deployment would verify the XML signature against the
-//! IdP certificate fingerprint it pins in config. The full XML-DSig stack is
-//! deliberately not vendored (dependency diet + the seam is where a real
-//! `xmlsec` adapter would attach later).
+//! secrets (keys/certs, metadata) live in the vault (#77) or env, never in the
+//! repo or API responses. Signature verification is real HMAC-SHA256; `SamlIdp`
+//! checks the assertion digest the way a deployment would check the XML signature
+//! against the pinned certificate, with the full XML-DSig stack deliberately not
+//! vendored.
 
 use base64::Engine;
 use hmac::{Hmac, KeyInit, Mac};

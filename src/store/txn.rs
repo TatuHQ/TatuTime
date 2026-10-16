@@ -361,11 +361,10 @@ impl Store {
     /// Log the timer's entry and clear the timer under one lock: a failure
     /// leaves the timer intact rather than double-logging on retry.
     ///
-    /// #214: the timer's existence is verified INSIDE the same lock, before
-    /// the entry is written. Two concurrent `POST /api/timer/stop` calls both read
-    /// the timer earlier (that read is unlocked); the loser used to still write
-    /// its own entry and merely skip the timer delete, double-logging the
-    /// time. Now the loser finds no timer under the lock and 404s instead.
+    /// #214: the timer's existence is verified INSIDE the same lock, before the
+    /// entry is written. Two concurrent `POST /api/timer/stop` calls may both
+    /// read the unlocked timer, but only the winner sees it under the lock; the
+    /// loser finds none and 404s, so the time is never double-logged.
     pub fn finish_timer(&self, user_id: Uuid, entry: &Entry) -> Result<(), StoreError> {
         let _guard = self.write_lock()?;
         let path = self.doc_path::<Timer>(&user_id.to_string());

@@ -1,6 +1,6 @@
-// Library surface: everything `main.rs` wires up, exposed so integration
-// tests can build the router against a temp data dir without spawning a
-// process.
+//! Library surface: everything `main.rs` wires up, exposed so integration
+//! tests can build the router against a temp data dir without spawning a
+//! process.
 
 use rust_embed::RustEmbed;
 
