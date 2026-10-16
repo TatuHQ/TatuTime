@@ -194,9 +194,9 @@ carry the same version; bump all three in one intentional PR.
 
 ### Test policy beyond the shared rules
 
-- Behaviour changes ship with contract tests in `tests/contract.rs` (in-process
-  router, temp data dir); cover the invalid shapes too — rejection without
-  persistence is part of the contract.
+- Behaviour changes ship with contract tests in `tests/contract/` (entry point
+  `tests/contract/main.rs`; in-process router, temp data dir); cover the invalid
+  shapes too — rejection without persistence is part of the contract.
 - Accessibility: the GUI keeps keyboard-navigable tabs, labelled fields,
   `aria-live` announcements and passing contrast in light/dark themes; check
   new views against the same bar.

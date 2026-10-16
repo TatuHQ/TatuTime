@@ -76,7 +76,7 @@ module URL, enforce no MIME type, drive no CSS cascade and never evaluate in the
 browser's module order. A specifier that resolves to the wrong URL (the #264
 regression), a module cycle, a boot-time exception, a CSP violation or a cascade
 regression are therefore invisible here. Structural coverage lives in
-`tests/contract.rs::gui_module_graph_is_served_with_js_mime` (each specifier
+`tests/contract/gui_assets.rs::gui_module_graph_is_served_with_js_mime` (each specifier
 resolved against the URL of the module that declares it: 200 + JS MIME per hop),
 [`module-order.test.mjs`](./module-order.test.mjs) (the real graph evaluated in
 the browser's depth-first post-order) and
@@ -119,7 +119,7 @@ top of the server's field text — its reason is never replaced with GUI wording
 - [`gui.mjs`](./gui.mjs) — the live half: *"a verb the endpoint refuses names the
   request and the allowed verbs"* (`DELETE /api/expenses` → 405 with the JSON
   `method_not_allowed` shape and `Allow: GET, POST`).
-- `tests/contract.rs::a_wrong_method_answers_the_error_shape_and_the_allow_header`
+- `tests/contract/auth.rs::a_wrong_method_answers_the_error_shape_and_the_allow_header`
   — the server's half of the contract (shape, `Allow`, a templated path).
 
 ## Real-browser gate (`browser-smoke.py`) — the three shipped defects
