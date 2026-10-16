@@ -84,15 +84,18 @@ the `v0.1.8` release notes is no longer needed.
   `invoices/<id>.pdf` (#113), `invoices/.seq.json` (number ledger, B3),
   `invoices/.timeline.<id>.json` (#349 per-invoice timeline sidecar) and
   the `*.idx.*` side indexes (D3): `invoices/.idx.numbers.json`,
-  `users/.idx.emails.json`, and the #335 per-user read indexes
-  `entries/.idx.users.json` + `expenses/.idx.users.json`, plus the cold tree the
+  `users/.idx.emails.json`, the #335 per-user read indexes
+  `entries/.idx.users.json` + `expenses/.idx.users.json`, and the #350 cold id
+  index `archive/entries/.idx.ids.json` (written only by the archival pass; every
+  read treats it as a hint), plus the cold tree that
   #349 retention primitive relocates whole day folders to —
   `archive/entries/<YYYY-MM>/<YYYY-MM-DD>/<id>.json`, written by an
   operator-run `archive_entries_before` pass (same bytes, with a per-run sha256
-  manifest; nothing reads it yet, the cold-tree read story is #350). Dot files
-  are never documents — the collection reader skips them, so a side index — the
-  timeline sidecar included — stays out of the `MAX_DOCS` count. Atomic
-  writes (tmp + rename).
+  manifest; every reader merges it back in — a relocated day still reads by date,
+  range and id, and the lifetime scans count it exactly once, the #350 read story).
+  Dot files are never documents — the collection reader skips them, so a side
+  index — the timeline sidecar included — stays out of the `MAX_DOCS` count.
+  Atomic writes (tmp + rename).
 - **Secret vault (#77):** admin-entered integration credentials are encrypted at
   rest with `TUCANO_SECRET_KEY` (32 bytes) and never returned to clients (masked
   hints only) or logged. Fail-closed: unset key ⇒ vault disabled.

@@ -250,17 +250,17 @@ pub const NOTIFICATIONS_DIR: &str = "notifications";
 
 /// Cold-tree root below the data root (#349): [`Store::archive_entries_before`]
 /// relocates whole day folders to `archive/entries/<YYYY-MM>/<YYYY-MM-DD>/`, the
-/// same `<id>.json` bytes under the same tmp+rename discipline. No reader
-/// touches it yet — merging the cold tree into `get_entry`/`list_range` is the
-/// #350 read story — so a relocated day is deliberately invisible to queries
-/// until then (ADR-003).
+/// same `<id>.json` bytes under the same tmp+rename discipline. Every reader
+/// merges it back in (#350) — `list_by_date`, `list_range`, `get_entry` and the
+/// lifetime `scan_all_entries` all answer from hot ∪ cold — so a relocation
+/// changes no number a caller or a user can see (ADR-003).
 pub const ARCHIVE_DIR: &str = "archive";
 
 /// The store's collection directories in one place: one row per [`Entity`]
 /// impl, plus the collections that are not flat `Entity` dirs — [`ENTRIES_DIR`],
 /// date-sharded; [`NOTIFICATIONS_DIR`], per-user; and the [`ARCHIVE_DIR`] cold
-/// tree the #349 retention primitive relocates whole day folders into (an
-/// operator-run pass writes it; nothing reads it yet, #350). Every row is the
+/// tree the #349 retention primitive relocates whole day folders into (the
+/// operator-run pass writes it, every reader merges it back in, #350). Every row is the
 /// impl's own `DIR` constant or one of those named constants — never a re-typed
 /// literal — so this is the layout as the store derives it; the store's path
 /// builders below use the same constants for the non-`Entity` collections.
@@ -651,6 +651,26 @@ impl Store {
         self.root.join(ENTRIES_DIR).join(".idx.users.json")
     }
 
+    /// The cold id index (#350): `archive/entries/.idx.ids.json`, holding
+    /// `date -> ids` for the published cold days. Written **only** by
+    /// [`Store::archive_entries_before`] — never by a read — and read only as a
+    /// hint: a slice is believed when its id set equals the cold day folder's own
+    /// listing, and a missing, truncated or drifted index falls back to the
+    /// authoritative walk. Correctness never depends on it.
+    fn cold_index_path(&self) -> PathBuf {
+        self.root
+            .join(ARCHIVE_DIR)
+            .join(ENTRIES_DIR)
+            .join(".idx.ids.json")
+    }
+
+    /// Lenient read: a missing, truncated or corrupt cold index is simply "no
+    /// index", and the caller walks the cold tree instead.
+    fn read_cold_index(&self) -> Option<ColdIdIndex> {
+        let bytes = std::fs::read(self.cold_index_path()).ok()?;
+        serde_json::from_slice(&bytes).ok()
+    }
+
     fn expense_index_path(&self) -> PathBuf {
         self.root.join("expenses").join(".idx.users.json")
     }
@@ -710,8 +730,14 @@ impl Store {
     }
 
     /// The ids the entry index files under `<date>`, **iff** its id set equals
-    /// the day folder's. `None` means "not provably current" (absent, corrupt
-    /// or drifted) and the caller must scan.
+    /// the *merged* day's — hot ∪ cold (#350). `None` means "not provably
+    /// current" (absent, corrupt or drifted) and the caller must scan.
+    ///
+    /// The merged comparison is load-bearing, not a refinement. #349 prunes the
+    /// relocated day's key, so on a cold day the index's id set (empty) *equals*
+    /// the hot folder's id set (empty): comparing against the hot folder alone
+    /// would "validate" an empty read and show a member their own archived week
+    /// as zero hours, with no error.
     fn entry_index_day_ids(
         &self,
         idx: &EntryUserIndex,
@@ -720,7 +746,9 @@ impl Store {
         let key = date.format("%Y-%m-%d").to_string();
         let day = idx.days.get(&key).cloned().unwrap_or_default();
         let indexed: std::collections::BTreeSet<String> = day.values().flatten().cloned().collect();
-        if indexed == self.entry_day_disk_ids(date)? {
+        let mut merged = self.entry_day_disk_ids(date)?;
+        merged.extend(self.cold_day_ids(date)?);
+        if indexed == merged {
             Ok(Some(day))
         } else {
             Ok(None)
@@ -741,9 +769,10 @@ impl Store {
         }
     }
 
-    /// Read exactly `ids` from the day folder, refusing (returning `None`) if
-    /// any is missing or is not `user_id`'s — either means the index mis-filed
-    /// a row, so the caller must not trust it for this read.
+    /// Read exactly `ids` for `date` — the hot copy first, the cold copy on a
+    /// miss (#350) — refusing (returning `None`) if any is missing from both
+    /// trees or is not `user_id`'s: either means the index mis-filed a row, so
+    /// the caller must not trust it for this read.
     fn read_entries_by_ids(
         &self,
         date: NaiveDate,
@@ -755,7 +784,11 @@ impl Store {
             let Ok(id) = Uuid::parse_str(raw) else {
                 return Ok(None);
             };
-            match self.read_entry(&self.entry_path(date, id))? {
+            let doc = match self.read_entry(&self.entry_path(date, id))? {
+                Some(e) => Some(e),
+                None => self.read_entry(&self.cold_entry_path(date, id))?,
+            };
+            match doc {
                 Some(e) if e.user_id == Some(user_id) => out.push(e),
                 _ => return Ok(None),
             }
@@ -891,11 +924,19 @@ impl Store {
 
     /// Scan a day and rewrite its index slice in one locked step (the fallback
     /// path). Takes the write lock, so it must run on the blocking pool.
+    ///
+    /// The answer is the **merged** day (hot ∪ cold, #350) — a member read of an
+    /// archived day must still see their rows — but the heal files the **hot**
+    /// documents only. The #335 index may only name days that are on disk, so
+    /// handing it the cold rows would re-add a key naming the relocated day and
+    /// regress #349's invariant on the first member read of an archived week.
     fn scan_and_index_entry_day(&self, date: NaiveDate) -> Result<Vec<Entry>, StoreError> {
         let _guard = self.write_lock()?;
-        let docs = self.walk_docs(&self.day_dir(date), |p| self.read_entry(p))?;
-        self.write_entry_day_index_locked(date, &docs)?;
-        Ok(docs)
+        let hot = self.walk_docs(&self.day_dir(date), |p| self.read_entry(p))?;
+        let mut merged = hot.clone();
+        merge_cold_docs(&mut merged, self.cold_day_docs(date)?);
+        self.write_entry_day_index_locked(date, &hot)?;
+        Ok(merged)
     }
 
     /// Scan the expense collection and rewrite its index in one locked step.
@@ -1904,8 +1945,190 @@ impl Store {
         self.day_dir(date).join(format!("{id}.json"))
     }
 
-    pub fn list_by_date(&self, date: NaiveDate) -> Result<Vec<Entry>, StoreError> {
+    // -------------------------------------------------- cold-tree reads (#350) --
+    //
+    // ADR-003 option B keeps the cold tree as the *same documents in a different
+    // folder*, so the read story is a merge rather than a second store: every
+    // reader answers from hot ∪ cold, and no number a caller or a user can see
+    // changes when a day is relocated. The merge is by entry id with the **hot**
+    // copy winning — the #349 pass removes the hot day only after its cold copy
+    // is complete, so a crash can leave a day in both trees, and the hot copy is
+    // then the one the pass had not finished with.
+    //
+    // Enumeration always goes through `dir_entries`, never a raw `read_dir`, so
+    // the run manifests, the cold id index and a pass's `.<day>.staging` crash
+    // leftovers can never be mistaken for a day folder and never count toward
+    // `MAX_DOCS`.
+
+    /// The cold day folder for `date`: `archive/entries/<YYYY-MM>/<YYYY-MM-DD>/`
+    /// — [`Store::day_dir`]'s mirror on the cold side, and the one place the
+    /// cold layout is spelled (the #349 pass builds its paths through it too).
+    pub(crate) fn cold_day_dir(&self, date: NaiveDate) -> PathBuf {
+        self.root
+            .join(ARCHIVE_DIR)
+            .join(ENTRIES_DIR)
+            .join(date.format("%Y-%m").to_string())
+            .join(date.format("%Y-%m-%d").to_string())
+    }
+
+    /// The cold document path for one entry: the mirror of
+    /// [`Store::entry_path`].
+    fn cold_entry_path(&self, date: NaiveDate, id: Uuid) -> PathBuf {
+        self.cold_day_dir(date).join(format!("{id}.json"))
+    }
+
+    /// The cold month folders: `archive/entries/<YYYY-MM>/`.
+    fn cold_month_dirs(&self) -> Result<Vec<PathBuf>, StoreError> {
+        let root = self.root.join(ARCHIVE_DIR).join(ENTRIES_DIR);
+        if !root.exists() {
+            return Ok(Vec::new());
+        }
+        Ok(dir_entries(&root, self.max_docs)?
+            .into_iter()
+            .filter(|p| p.is_dir())
+            .collect())
+    }
+
+    /// Every published cold day folder as a date, ascending: the cold mirror of
+    /// the hot `<YYYY-MM-DD>` folders, reached month-first. A child whose name
+    /// is not a well-formed day is not a day folder.
+    fn cold_day_folders(&self) -> Result<Vec<NaiveDate>, StoreError> {
+        let mut out = Vec::new();
+        for month in self.cold_month_dirs()? {
+            for day in dir_entries(&month, self.max_docs)? {
+                if !day.is_dir() {
+                    continue;
+                }
+                let Some(name) = day.file_name().and_then(|n| n.to_str()) else {
+                    continue;
+                };
+                if let Ok(date) = NaiveDate::parse_from_str(name, "%Y-%m-%d") {
+                    out.push(date);
+                }
+            }
+        }
+        out.sort();
+        out.dedup();
+        Ok(out)
+    }
+
+    /// The ids a cold day folder holds, from its listing alone (no decode) —
+    /// [`Store::entry_day_disk_ids`]'s cold mirror, and the authority the merged
+    /// trust rule compares against (#335/#350). An absent cold day is empty.
+    fn cold_day_ids(
+        &self,
+        date: NaiveDate,
+    ) -> Result<std::collections::BTreeSet<String>, StoreError> {
+        let dir = self.cold_day_dir(date);
+        if !dir.exists() {
+            return Ok(std::collections::BTreeSet::new());
+        }
+        Ok(json_stems(&dir_entries(&dir, self.max_docs)?))
+    }
+
+    /// The cold copies of one day's documents, in `dir_entries` order.
+    fn cold_day_docs(&self, date: NaiveDate) -> Result<Vec<Entry>, StoreError> {
+        let dir = self.cold_day_dir(date);
+        if !dir.exists() {
+            return Ok(Vec::new());
+        }
+        let mut out = Vec::new();
+        for path in dir_entries(&dir, self.max_docs)? {
+            if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                continue;
+            }
+            if let Some(e) = self.read_entry(&path)? {
+                out.push(e);
+            }
+        }
+        Ok(out)
+    }
+
+    /// One day as a reader sees it: the hot documents plus the cold copies they
+    /// do not already hold, deduplicated by entry id with the hot copy winning
+    /// (#350). The union — not either tree — is what a day *is* after a
+    /// relocation. The `MAX_DOCS` cap is one budget over the union.
+    fn merged_day_docs(&self, date: NaiveDate) -> Result<Vec<Entry>, StoreError> {
         let mut out = self.walk_docs(&self.day_dir(date), |p| self.read_entry(p))?;
+        merge_cold_docs(&mut out, self.cold_day_docs(date)?);
+        if out.len() > self.max_docs {
+            return Err(StoreError::TooManyItems);
+        }
+        Ok(out)
+    }
+
+    /// Whether the cold id index's slice for `date` still describes the cold day
+    /// folder: the same exact set-equality rule as #335. A stale, truncated or
+    /// hand-edited index can only ever be *slower* (the caller walks), never
+    /// wrong.
+    fn cold_index_day_is_current(
+        &self,
+        idx: &ColdIdIndex,
+        date: NaiveDate,
+    ) -> Result<bool, StoreError> {
+        let key = date.format("%Y-%m-%d").to_string();
+        let listed: std::collections::BTreeSet<String> = idx
+            .get(&key)
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .collect();
+        Ok(listed == self.cold_day_ids(date)?)
+    }
+
+    /// Whether the entry document exists in **either** tree (#350).
+    fn entry_exists(&self, date: NaiveDate, id: Uuid) -> bool {
+        self.entry_path(date, id).is_file() || self.cold_entry_path(date, id).is_file()
+    }
+
+    /// Where `id`'s document lives: the hot tree first, then the cold tree
+    /// (#350). Hot wins because it is the copy the #349 pass has not finished
+    /// with, so a day a crash left in both trees resolves to the same document it
+    /// did before the pass.
+    ///
+    /// The hot probe is the pre-#350 lookup verbatim, minus the decode: it asks
+    /// whether the document is there, and the caller decodes the path it gets.
+    /// The cold side is reached through the id index while that index still
+    /// describes the cold day, and by walking the cold tree otherwise — the index
+    /// is a hint, never the source of truth.
+    fn find_entry_path(&self, id: Uuid) -> Result<Option<PathBuf>, StoreError> {
+        let dir = self.root.join(ENTRIES_DIR);
+        if dir.exists() {
+            for day in dir_entries(&dir, self.max_docs)? {
+                let path = day.join(format!("{id}.json"));
+                if path.is_file() {
+                    return Ok(Some(path));
+                }
+            }
+        }
+        let wanted = id.to_string();
+        if let Some(idx) = self.read_cold_index() {
+            let mut hints: Vec<NaiveDate> = idx
+                .iter()
+                .filter(|(_, ids)| ids.iter().any(|listed| listed == &wanted))
+                .filter_map(|(date, _)| NaiveDate::parse_from_str(date, "%Y-%m-%d").ok())
+                .collect();
+            hints.sort();
+            for date in hints {
+                if self.cold_index_day_is_current(&idx, date)? {
+                    let path = self.cold_entry_path(date, id);
+                    if path.is_file() {
+                        return Ok(Some(path));
+                    }
+                }
+            }
+        }
+        for date in self.cold_day_folders()? {
+            let path = self.cold_entry_path(date, id);
+            if path.is_file() {
+                return Ok(Some(path));
+            }
+        }
+        Ok(None)
+    }
+
+    pub fn list_by_date(&self, date: NaiveDate) -> Result<Vec<Entry>, StoreError> {
+        let mut out = self.merged_day_docs(date)?;
         sort_entries_by_created(&mut out);
         Ok(out)
     }
@@ -1926,39 +2149,82 @@ impl Store {
         Ok(out)
     }
 
-    /// Entries are addressable by id alone, but stored under their date, so
-    /// this walks every day folder. NOTE (#190): there is no `MAX_RANGE_DAYS`
-    /// bound here — the earlier comment claimed one but the body never
-    /// implemented it. Cost is O(days) directory probes, not O(entries).
+    /// Entries are addressable by id alone, but stored under their date, so this
+    /// walks the hot day folders and then the cold ones (#350). NOTE (#190):
+    /// there is no `MAX_RANGE_DAYS` bound here — the earlier comment claimed one
+    /// but the body never implemented it. Cost is O(days) directory probes, not
+    /// O(entries).
     pub fn get_entry(&self, id: Uuid) -> Result<Option<Entry>, StoreError> {
-        let dir = self.root.join(ENTRIES_DIR);
-        if !dir.exists() {
-            return Ok(None);
+        match self.find_entry_path(id)? {
+            Some(path) => read_json::<Entry>(&path),
+            None => Ok(None),
         }
-        for day in dir_entries(&dir, self.max_docs)? {
-            let path = day.join(format!("{id}.json"));
-            if let Some(e) = read_json::<Entry>(&path)? {
-                return Ok(Some(e));
-            }
-        }
-        Ok(None)
     }
 
     pub fn put_entry(&self, entry: &Entry) -> Result<(), StoreError> {
         let _guard = self.write_lock()?;
         std::fs::create_dir_all(self.day_dir(entry.date))?;
         write_json(&self.entry_path(entry.date, entry.id), entry)?;
+        // #350: a write leaves exactly one document. A cold entry is writable by
+        // construction (#349 refuses locked and invoiced days), so writing it
+        // back is a *rehydration* — the cold copy goes.
+        self.rehydrate_entry_locked(entry.date, entry.id)?;
         self.index_entry_locked(entry)
     }
 
     pub fn delete_entry(&self, entry: &Entry) -> Result<(), StoreError> {
         let _guard = self.write_lock()?;
-        let path = self.entry_path(entry.date, entry.id);
-        if !path.exists() {
+        // #350: the document may be in either tree — a cold entry is deletable
+        // and leaves through the same door — and the check spans both, so a
+        // successful `get_entry` can never be a 404 here.
+        if !self.entry_exists(entry.date, entry.id) {
             return Err(StoreError::NotFound);
         }
-        std::fs::remove_file(&path)?;
+        self.remove_entry_copies_locked(entry.date, entry.id)?;
         self.unindex_entry_locked(entry.date, entry.id)
+    }
+
+    /// Remove every copy of one entry document — hot and cold — and the cold day
+    /// folder along with it when it empties (#350). The caller holds the write
+    /// lock.
+    fn remove_entry_copies_locked(&self, date: NaiveDate, id: Uuid) -> Result<(), StoreError> {
+        for path in [self.entry_path(date, id), self.cold_entry_path(date, id)] {
+            match std::fs::remove_file(&path) {
+                Ok(()) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(e.into()),
+            }
+        }
+        self.prune_empty_cold_day(date);
+        Ok(())
+    }
+
+    /// Drop the cold copy of one entry, if there is one (#350). The caller holds
+    /// the write lock and has already written the hot document, so afterwards
+    /// exactly one document for `id` exists on disk.
+    fn rehydrate_entry_locked(&self, date: NaiveDate, id: Uuid) -> Result<(), StoreError> {
+        match std::fs::remove_file(self.cold_entry_path(date, id)) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e.into()),
+        }
+        self.prune_empty_cold_day(date);
+        Ok(())
+    }
+
+    /// Best-effort prune of an emptied cold day folder: a folder holding no
+    /// document is not a cold day any more, and leaving it behind would make a
+    /// later pass refuse the day (`ArchiveRefusal::ColdDayExists`) for a folder
+    /// with nothing in it. A failure here must never fail the write that emptied
+    /// it, so the result is dropped.
+    fn prune_empty_cold_day(&self, date: NaiveDate) {
+        let day = self.cold_day_dir(date);
+        if !day.is_dir() {
+            return;
+        }
+        if dir_entries(&day, self.max_docs).is_ok_and(|left| left.is_empty()) {
+            let _ = std::fs::remove_dir(&day);
+        }
     }
 
     fn has_entries_for_customer(&self, customer_id: Uuid) -> Result<bool, StoreError> {
@@ -1998,13 +2264,19 @@ impl Store {
     }
 
     fn scan_all_entries(&self) -> Result<Vec<Entry>, StoreError> {
-        let dir = self.root.join(ENTRIES_DIR);
+        // #350: the lifetime scan is hot ∪ cold. That is the whole point of the
+        // merge — a budget total, a deletion guard or any other lifetime count
+        // must not change when a day is relocated. An id present in both trees (a
+        // day a crash left half-published) counts **once**, and the `MAX_DOCS` cap
+        // is one budget over the union rather than one per tree.
         let mut out = Vec::new();
-        if !dir.exists() {
-            return Ok(out);
-        }
-        for day in dir_entries(&dir, self.max_docs)? {
-            if day.is_dir() {
+        let mut seen: std::collections::HashSet<Uuid> = std::collections::HashSet::new();
+        let dir = self.root.join(ENTRIES_DIR);
+        if dir.exists() {
+            for day in dir_entries(&dir, self.max_docs)? {
+                if !day.is_dir() {
+                    continue;
+                }
                 for path in dir_entries(&day, self.max_docs)? {
                     if path.extension().and_then(|e| e.to_str()) != Some("json") {
                         continue;
@@ -2012,9 +2284,26 @@ impl Store {
                     if out.len() >= self.max_docs {
                         return Err(StoreError::TooManyItems);
                     }
-                    if let Some(e) = read_json::<Entry>(&path)? {
+                    if let Some(e) = read_json::<Entry>(&path)?
+                        && seen.insert(e.id)
+                    {
                         out.push(e);
                     }
+                }
+            }
+        }
+        for date in self.cold_day_folders()? {
+            for path in dir_entries(&self.cold_day_dir(date), self.max_docs)? {
+                if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                    continue;
+                }
+                if out.len() >= self.max_docs {
+                    return Err(StoreError::TooManyItems);
+                }
+                if let Some(e) = read_json::<Entry>(&path)?
+                    && seen.insert(e.id)
+                {
+                    out.push(e);
                 }
             }
         }
@@ -2028,10 +2317,11 @@ impl Store {
     // precondition 1: an operator-run pass that relocates whole day folders out
     // of the hot tree (`entries/<YYYY-MM-DD>/`) into the cold tree
     // (`archive/entries/<YYYY-MM>/<YYYY-MM-DD>/`), writes a per-run sha256
-    // manifest, and drops the relocated days from the #335 per-user index. The
-    // cold tree's *read* story is #350 and is deliberately not here: this pass
-    // moves bytes and shrinks the index, nothing more — so a relocated day stops
-    // being visible to `get_entry`/`list_range`/`list_all_entries` until then.
+    // manifest, drops the relocated days from the #335 per-user index, and
+    // refreshes the cold id index (#350). Read-side it changes nothing: every
+    // reader merges the cold tree back in (the `cold-tree reads` block above), so
+    // a relocated day stays visible to `get_entry`/`list_range`/`list_all_entries`
+    // exactly as it was.
     //
     // What may move is not this module's decision (ADR-003: the lock seam and
     // `domain::already_invoiced` remain the sole authority). The `locks`
@@ -2167,7 +2457,7 @@ impl Store {
                         Some(ArchiveRefusal::AlreadyInvoiced)
                     }
                     // Already cold: fail closed rather than merge or overwrite.
-                    Ok(_) if self.archive_day_path(date).exists() => {
+                    Ok(_) if self.cold_day_dir(date).exists() => {
                         Some(ArchiveRefusal::ColdDayExists)
                     }
                     Ok(_) => None,
@@ -2205,6 +2495,12 @@ impl Store {
             // relocated days' keys in the same pass, or the index keeps a slice
             // for a folder that is no longer there.
             self.drop_archived_day_keys_locked(&relocated)?;
+            // #350: the cold id index is written here and nowhere else — no read
+            // ever writes it — and it is rebuilt from the whole cold tree, so it
+            // also describes the days earlier passes published. Read-side it is a
+            // hint: a read that finds it stale or missing walks the cold tree and
+            // is still correct.
+            self.write_cold_index_locked()?;
             let rel = self.archive_manifest_rel();
             self.write_archive_manifest_locked(&rel, cutoff, &manifest)?;
             report.manifest = Some(rel);
@@ -2213,13 +2509,33 @@ impl Store {
         Ok(report)
     }
 
-    /// The cold day folder for `date`: `archive/entries/<YYYY-MM>/<YYYY-MM-DD>/`.
-    fn archive_day_path(&self, date: NaiveDate) -> PathBuf {
-        self.root
-            .join(ARCHIVE_DIR)
-            .join(ENTRIES_DIR)
-            .join(date.format("%Y-%m").to_string())
-            .join(date.format("%Y-%m-%d").to_string())
+    /// Rebuild `archive/entries/.idx.ids.json` — `{ "<YYYY-MM-DD>": ["<id>", …] }`
+    /// — from the published cold tree (#350). The pass calls it once, in the same
+    /// end-of-run block that prunes the per-user index and writes the manifest; no
+    /// read ever writes it, and no read trusts a slice without checking it against
+    /// the cold day folder it describes.
+    ///
+    /// The index is derived from the tree rather than appended to, so it always
+    /// describes the days *every* pass has published. A rehydrated entry (#350)
+    /// leaves its row stale until the next pass, which the per-day check turns
+    /// into a walk rather than a wrong answer.
+    fn write_cold_index_locked(&self) -> Result<(), StoreError> {
+        let mut idx = ColdIdIndex::new();
+        for date in self.cold_day_folders()? {
+            let ids = self.cold_day_ids(date)?;
+            if !ids.is_empty() {
+                idx.insert(
+                    date.format("%Y-%m-%d").to_string(),
+                    ids.into_iter().collect(),
+                );
+            }
+        }
+        let path = self.cold_index_path();
+        let Some(parent) = path.parent() else {
+            return Err(StoreError::Io("cold index path has no parent".into()));
+        };
+        std::fs::create_dir_all(parent)?;
+        write_json(&path, &idx)
     }
 
     /// Publish one day into the cold tree byte for byte and return its manifest
@@ -2238,7 +2554,7 @@ impl Store {
         day: &Path,
         docs: &[PathBuf],
     ) -> Result<Vec<crate::backup::FileEntry>, StoreError> {
-        let cold = self.archive_day_path(date);
+        let cold = self.cold_day_dir(date);
         let month = cold
             .parent()
             .ok_or_else(|| StoreError::Io("archive day path has no parent".into()))?;
@@ -2739,11 +3055,14 @@ impl Store {
         E: From<StoreError>,
     {
         self.guarded_write(verify_unlocked, |s| {
-            let path = s.entry_path(entry.date, entry.id);
-            if !path.exists() {
+            // #350: a cold entry is an ordinary entry to every caller — the
+            // handler has already resolved it through `get_entry`, so the delete
+            // may not 404 because the document happens to be in the archive. The
+            // existence check and the removal span both trees.
+            if !s.entry_exists(entry.date, entry.id) {
                 return Err(StoreError::NotFound);
             }
-            std::fs::remove_file(&path).map_err(StoreError::from)?;
+            s.remove_entry_copies_locked(entry.date, entry.id)?;
             s.unindex_entry_locked(entry.date, entry.id)
         })
     }
@@ -2792,6 +3111,10 @@ impl Store {
     ) -> Result<(), StoreError> {
         std::fs::create_dir_all(self.day_dir(updated.date))?;
         write_json(&self.entry_path(updated.date, updated.id), updated)?;
+        // #350: the write is authoritative and leaves one document, hot. The cold
+        // copy under the new date goes (rehydration), and so does one left under
+        // the old date — moving out of, or between, cold days strands nothing.
+        self.rehydrate_entry_locked(updated.date, updated.id)?;
         if let Some(old_date) = existing_date
             && old_date != updated.date
         {
@@ -2799,6 +3122,7 @@ impl Store {
             if old.exists() {
                 std::fs::remove_file(old)?;
             }
+            self.rehydrate_entry_locked(old_date, updated.id)?;
             self.unindex_entry_locked(old_date, updated.id)?;
         }
         self.index_entry_locked(updated)
@@ -2915,6 +3239,13 @@ fn json_stems(paths: &[PathBuf]) -> std::collections::BTreeSet<String> {
         .collect()
 }
 
+/// The cold id index (#350): `date -> ids` over the published cold days, in
+/// `archive/entries/.idx.ids.json`. A dot file like the indexes below, so it is
+/// never a document and never counts toward `MAX_DOCS`; written only by the
+/// archival pass, and validated slice by slice against the cold day folder it
+/// describes before any read believes it.
+type ColdIdIndex = HashMap<String, Vec<String>>;
+
 /// The per-user entry index (#335): `date -> (owner -> ids)`, holding **every**
 /// document in the day so a member read can prove its slice complete against
 /// the day folder's own listing. A dot file, never a document.
@@ -2935,6 +3266,19 @@ struct ExpenseUserIndex {
 /// The index key for an owner: the `Uuid`, or `""` for a legacy `None`.
 fn index_user_key(owner: Option<Uuid>) -> String {
     owner.map(|u| u.to_string()).unwrap_or_default()
+}
+
+/// Merge a day's cold documents into its hot ones, by entry id, **hot wins**
+/// (#350). The #349 pass removes the hot day only after its cold copy is
+/// complete, so a day a crash left in both trees still resolves to the document
+/// the pass had not finished with.
+fn merge_cold_docs(hot: &mut Vec<Entry>, cold: Vec<Entry>) {
+    let mut seen: std::collections::HashSet<Uuid> = hot.iter().map(|e| e.id).collect();
+    for doc in cold {
+        if seen.insert(doc.id) {
+            hot.push(doc);
+        }
+    }
 }
 
 /// `owner -> ids` for one day's entries — the shape [`EntryUserIndex`] stores.

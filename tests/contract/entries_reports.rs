@@ -864,3 +864,102 @@ async fn an_out_of_range_limit_and_a_malformed_cursor_are_field_named_422s() {
     assert_eq!(wide, StatusCode::BAD_REQUEST, "{body}");
     assert_eq!(body["error"]["code"], "bad_request");
 }
+
+/// #350: the entries API reads an archived (cold) day — `GET /api/entries?date=`
+/// and `GET /api/entries/{id}` go through the same hot ∪ cold merge the store's
+/// other readers use, and #51 visibility is unchanged by a relocation: a member's
+/// own archived row is theirs, a sibling's archived row is not.
+#[tokio::test]
+async fn archived_days_read_through_the_entries_api() {
+    use tucano_time::lock::NoLocks;
+    use tucano_time::store::Store;
+
+    let day = "2026-08-03";
+    let cutoff = chrono::NaiveDate::from_ymd_opt(2026, 9, 1).unwrap();
+
+    let (app, d) = app().await;
+    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap().to_string();
+    new_project(&app, &cid, "P1", json!({})).await;
+
+    // The member's own row and the admin's, on the same day.
+    let dana = member_cookie(&app, "dana@test.local", "danapass123").await;
+    let (s_mine, mine, _) = raw(
+        &app.router,
+        "POST",
+        "/api/entries",
+        Some(entry_body(&cid, "P1", json!(4), day)),
+        Some(&dana),
+    )
+    .await;
+    assert_eq!(s_mine, StatusCode::CREATED, "{mine}");
+    let mine_id = mine["id"].as_str().unwrap().to_string();
+    let (s_theirs, theirs) = json_req(
+        &app,
+        "POST",
+        "/api/entries",
+        Some(entry_body(&cid, "P1", json!(3), day)),
+    )
+    .await;
+    assert_eq!(s_theirs, StatusCode::CREATED, "{theirs}");
+    let theirs_id = theirs["id"].as_str().unwrap().to_string();
+
+    // #349 relocates the whole day; everything below reads the cold copy.
+    let store = Store::open(d.path().join("data")).expect("store");
+    let report = store
+        .archive_entries_before(cutoff, false, &NoLocks)
+        .expect("the pass runs");
+    assert_eq!(report.days.len(), 1, "{:?}", report.days);
+
+    // By date: the admin sees both archived rows.
+    let (s_day, day_list) = json_req(&app, "GET", &format!("/api/entries?date={day}"), None).await;
+    assert_eq!(s_day, StatusCode::OK, "{day_list}");
+    assert_eq!(
+        day_list["entries"].as_array().unwrap().len(),
+        2,
+        "{day_list}"
+    );
+
+    // By id: the archived document is the entry, hours and date included.
+    let (s_one, one) = json_req(&app, "GET", &format!("/api/entries/{theirs_id}"), None).await;
+    assert_eq!(s_one, StatusCode::OK, "{one}");
+    assert_eq!(one["hours"], json!(3));
+    assert_eq!(one["date"], day);
+
+    // #51 survives the relocation: the member's own archived row is theirs…
+    let (s_own_day, own_day, _) = raw(
+        &app.router,
+        "GET",
+        &format!("/api/entries?date={day}"),
+        None,
+        Some(&dana),
+    )
+    .await;
+    assert_eq!(s_own_day, StatusCode::OK, "{own_day}");
+    assert_eq!(own_day["entries"].as_array().unwrap().len(), 1, "{own_day}");
+    assert_eq!(own_day["entries"][0]["id"], mine_id.as_str());
+    // …and a sibling's is not, at either granularity — 404, not 403, so existence
+    // is not leaked from the cold tree either.
+    let (s_sibling, _, _) = raw(
+        &app.router,
+        "GET",
+        &format!("/api/entries/{theirs_id}"),
+        None,
+        Some(&dana),
+    )
+    .await;
+    assert_eq!(s_sibling, StatusCode::NOT_FOUND);
+
+    // Negative: an id in neither tree is a 404, and a malformed date is refused
+    // before any tree is read.
+    let (s_missing, _) = json_req(
+        &app,
+        "GET",
+        &format!("/api/entries/{}", uuid::Uuid::new_v4()),
+        None,
+    )
+    .await;
+    assert_eq!(s_missing, StatusCode::NOT_FOUND);
+    let (s_bad, body) = json_req(&app, "GET", "/api/entries?date=not-a-date", None).await;
+    assert_eq!(s_bad, StatusCode::BAD_REQUEST, "{body}");
+}

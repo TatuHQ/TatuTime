@@ -1761,3 +1761,82 @@ async fn invoice_pdf_preview_unknown_id_and_access_control() {
     let (st, _) = json_req(&app, "POST", &url, None).await;
     assert_eq!(st, StatusCode::METHOD_NOT_ALLOWED);
 }
+
+/// #350: invoicing discovery reads through the same merge, so an archived but
+/// unbilled period still previews and still issues with its lines — and once
+/// issued, the same period previews empty rather than re-billing the cold day.
+#[tokio::test]
+async fn an_archived_unbilled_period_still_previews_and_issues() {
+    use tucano_time::lock::NoLocks;
+    use tucano_time::store::Store;
+
+    let day = "2026-08-03";
+    let cutoff = chrono::NaiveDate::from_ymd_opt(2026, 9, 1).unwrap();
+
+    let (app, d) = app().await;
+    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap().to_string();
+    new_project(&app, &cid, "P1", json!({"rate_minor": 6000})).await;
+    let (_, entry) = json_req(
+        &app,
+        "POST",
+        "/api/entries",
+        Some(entry_body(&cid, "P1", json!(3), day)),
+    )
+    .await;
+    let eid = entry["id"].as_str().unwrap().to_string();
+
+    // The period is unbilled, so #349 archives it: the cold copy is what the
+    // builder below has to discover.
+    let store = Store::open(d.path().join("data")).expect("store");
+    let report = store
+        .archive_entries_before(cutoff, false, &NoLocks)
+        .expect("the pass runs");
+    assert_eq!(report.days.len(), 1, "{:?}", report.days);
+
+    // Preview: the archived day is one line of the draft, priced at the resolved
+    // rate — the relocation changed neither the discovery nor the number.
+    let (s_draft, draft) = json_req(
+        &app,
+        "POST",
+        "/api/invoices",
+        Some(json!({"customer_id": cid, "from": day, "to": day})),
+    )
+    .await;
+    assert_eq!(s_draft, StatusCode::CREATED, "{draft}");
+    let lines = draft["lines"].as_array().expect("lines");
+    assert_eq!(lines.len(), 1, "the archived day bills once: {draft}");
+    assert_eq!(lines[0]["entry_id"], eid.as_str(), "{draft}");
+    assert_eq!(draft["total_minor"], 18000, "3h at 60.00: {draft}");
+
+    // Issue: the archived entry is the invoice's line, and the invoice is now
+    // evidence for an issued number (the permanent #248 exclusion).
+    let iid = draft["id"].as_str().unwrap();
+    let (s_issue, issued) =
+        json_req(&app, "POST", &format!("/api/invoices/{iid}/issue"), None).await;
+    assert_eq!(s_issue, StatusCode::OK, "{issued}");
+    assert_eq!(issued["status"], "issued");
+
+    // No duplicate re-preview: the same period now has nothing billable, in either
+    // tree, and the empty draft is refused instead of being persisted.
+    let (s_again, again) = json_req(
+        &app,
+        "POST",
+        "/api/invoices",
+        Some(json!({"customer_id": cid, "from": day, "to": day})),
+    )
+    .await;
+    assert_eq!(s_again, StatusCode::CONFLICT, "{again}");
+    assert_eq!(again["error"]["code"], "conflict");
+
+    // Negative: a period that was never billed is refused the same way, so the
+    // refusal above is about the billing state and not about the archive.
+    let (s_empty, body) = json_req(
+        &app,
+        "POST",
+        "/api/invoices",
+        Some(json!({"customer_id": cid, "from": "2026-08-04", "to": "2026-08-04"})),
+    )
+    .await;
+    assert_eq!(s_empty, StatusCode::CONFLICT, "{body}");
+}
