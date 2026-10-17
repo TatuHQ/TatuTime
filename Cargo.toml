@@ -1,6 +1,6 @@
 [package]
 name = "tucano-time"
-version = "0.1.23"
+version = "0.1.24"
 description = "Timesheet system: daily and weekly time entries, customers and project codes with currencies and rates"
 edition = "2024"
 license = "AGPL-3.0-or-later"
@@ -42,3 +42,11 @@ unsafe_code = "forbid"
 
 [lints.clippy]
 all = "deny"
+
+# Container size: the shipped binary is stripped and thin-LTO'd (the image is
+# the delivery vehicle, so its footprint is a release concern). `panic` is
+# deliberately NOT set to "abort": unwinding is part of the runtime's panic
+# isolation and must not change under a packaging decision.
+[profile.release]
+strip = true
+lto = "thin"

@@ -27,9 +27,25 @@ suite — file-based (no database), one container, browser GUI.
 
 ## Quick start (Docker)
 
+The image is one stripped binary on a **distroless** base (no shell, no package
+manager) and runs as uid **10001** with a read-only root filesystem: only the
+`/data` volume and a small `/tmp` tmpfs are writable.
+
 ```sh
 docker build -t tucanotime .
-docker run -d -p 8080:8080 -v tucanotime-data:/data --name tucanotime tucanotime
+docker run -d --name tucanotime \
+  --read-only --tmpfs /tmp \
+  --cap-drop ALL --security-opt no-new-privileges \
+  -p 127.0.0.1:8080:8080 \
+  -v tucanotime-data:/data \
+  tucanotime
+```
+
+Or with Compose, where that hardening is already declared for both services:
+
+```sh
+docker compose up -d                            # http://127.0.0.1:8080/
+TUCANO_HOST_ADDR=0.0.0.0 docker compose up -d   # publish on the LAN instead
 ```
 
 Open <http://localhost:8080/> — the API docs are at <http://localhost:8080/docs>.
@@ -59,10 +75,13 @@ the volume via `PUT /api/admin/config` / `GET /api/admin/config` (masked to the
 non-secret whitelist by construction).
 
 Secret files (bind-mount / Docker secrets) work for both keys:
-`TUCANO_SESSION_SECRET_FILE` and `TUCANO_SECRET_KEY_FILE`. If the vault store
-exists on disk but the key is missing or wrong, the app **refuses to start**
-with a clear message — a silently disabled Settings tab has historically
-looked like lost data, and we'd rather stop than mislead.
+`TUCANO_SESSION_SECRET_FILE` and `TUCANO_SECRET_KEY_FILE` — and that is the
+**recommended** way to supply them: the operator mounts a file, never exports a
+secret into the environment or the Compose file (see the commented `secrets:`
+block in [`docker-compose.yml`](docker-compose.yml)). If the vault store exists
+on disk but the key is missing or wrong, the app **refuses to start** with a
+clear message — a silently disabled Settings tab has historically looked like
+lost data, and we'd rather stop than mislead.
 
 ### Upgrading an image
 
@@ -88,6 +107,28 @@ carries a vault store while no key is configured.
 
 The container runs as uid **10001**; bind-mounted host dirs need to be
 writable by it (`chown -R 10001:10001 ./Data`), or just use a named volume.
+A named volume is the recommended default — it is the only writable path the
+hardened container needs.
+
+### Container security
+
+The server needs no writable path outside `/data`, so the shipped image and
+both Compose services are locked down by default:
+
+| Setting | Effect |
+|---|---|
+| `read_only: true` + `tmpfs: ["/tmp"]` | read-only root filesystem; only `/data` (volume) and `/tmp` (tmpfs) accept writes |
+| `cap_drop: ["ALL"]` | no Linux capabilities at all |
+| `security_opt: ["no-new-privileges:true"]` | no setuid/setgid escalation (enforced by the runtime, not a label) |
+| `user: "10001:10001"` | numeric, non-root uid/gid fixed in the image and in Compose |
+| `init: true` | a tiny init reaps orphans and forwards SIGTERM |
+| `stop_grace_period: 30s` | the server finishes in-flight writes before exit |
+| `ports: 127.0.0.1:8080:8080` | loopback-only by default; set `TUCANO_HOST_ADDR=0.0.0.0` for LAN use |
+| distroless runtime | no shell, no package manager, no apt state — `docker run --entrypoint sh` fails by design |
+
+The image base is pinned by digest, the runtime layer installs nothing, and the
+builder compiles dependencies in a separate cached layer, so rebuilds after a
+source edit recompile only this crate.
 
 ## Authentication
 
@@ -117,10 +158,20 @@ Environment variables (all optional; precedence env > `config.json` > default):
 | `TUCANO_MAX_DOCS` | per-collection document cap (abuse guard) |
 
 ```sh
-docker run -d -p 8080:8080 \
-  -e TUCANO_SESSION_SECRET="$(openssl rand -hex 32)" \
-  -v tucanotime-data:/data --name tucanotime tucanotime
+# Preferred: mount the key as a file (uid 10001 must be able to read it).
+mkdir -p secrets && openssl rand -hex 32 > secrets/session.key && chmod 600 secrets/session.key
+docker run -d --name tucanotime \
+  --read-only --tmpfs /tmp \
+  --cap-drop ALL --security-opt no-new-privileges \
+  -p 127.0.0.1:8080:8080 \
+  -v tucanotime-data:/data \
+  --mount type=bind,src="$PWD/secrets/session.key",dst=/run/secrets/session.key,readonly \
+  -e TUCANO_SESSION_SECRET_FILE=/run/secrets/session.key \
+  tucanotime
 ```
+
+`TUCANO_SESSION_SECRET` (plaintext env) still works, but a file mount keeps the
+secret out of `docker inspect` and the process environment.
 
 Roles: `admin` (user management) and `member` (timesheet work).
 
