@@ -67,6 +67,44 @@ fn run_cli(args: &[String]) -> Result<bool, String> {
     }
 }
 
+/// Wait for a termination signal. Resolves with the signal's name so the caller
+/// can log it; never panics and never gives up early.
+///
+/// `docker stop` delivers SIGTERM, an interactive Ctrl-C delivers SIGINT, so
+/// the serve path honours whichever arrives first. Only the long-running serve
+/// path uses this — the operator subcommands (`--health`, `--backup`,
+/// `--restore`) exit before a listener exists and stay unchanged.
+#[cfg(unix)]
+async fn sigterm() {
+    use tokio::signal::unix::{SignalKind, signal};
+    match signal(SignalKind::terminate()) {
+        Ok(mut stream) => {
+            stream.recv().await;
+        }
+        Err(e) => {
+            // Without a handler we must not shut down spuriously: keep waiting
+            // (Ctrl-C still works through the other select branch).
+            tracing::error!("cannot install SIGTERM handler: {e}");
+            std::future::pending::<()>().await;
+        }
+    }
+}
+
+async fn shutdown_signal() -> &'static str {
+    #[cfg(unix)]
+    {
+        tokio::select! {
+            _ = sigterm() => "SIGTERM",
+            _ = tokio::signal::ctrl_c() => "SIGINT",
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = tokio::signal::ctrl_c().await;
+        "SIGINT"
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt()
@@ -181,7 +219,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let app = tucano_time::build_router(state);
     let listener = tokio::net::TcpListener::bind(("0.0.0.0", port.parse()?)).await?;
     tracing::info!("tucano-time listening on :{port}, data dir {root_str}");
-    axum::serve(listener, app).await?;
+    // Graceful stop (container SIGTERM / Ctrl-C): stop accepting connections,
+    // let in-flight requests finish, then fall through to the normal exit so
+    // the process ends with status 0 instead of being SIGKILLed mid-write.
+    axum::serve(listener, app)
+        .with_graceful_shutdown(async {
+            let signal = shutdown_signal().await;
+            tracing::info!("shutting down ({signal})");
+        })
+        .await?;
+    tracing::info!("shutdown complete");
     drop(server_lock); // released only when we shut down
     Ok(())
 }
