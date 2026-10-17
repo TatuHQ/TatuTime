@@ -1,0 +1,58 @@
+# Build context for the TucanoTime image.
+#
+# The image is one Rust binary: the only inputs the build needs are the crate
+# manifest + lockfile, the pinned toolchain file, `src/`, the `web/` assets and
+# `openapi.json` (both embedded at compile time). Everything else — above all
+# `target/`, which is tens of GB — is excluded so the context stays a few MB
+# instead of tens of GB.
+
+# Build output / VCS.
+target/
+.git/
+.gitignore
+.gitattributes
+.gitleaks.toml
+
+# Runtime data and operator state — never bake a volume into the image.
+Data/
+data/
+backups/
+customers/
+entries/
+expenses/
+invoices/
+users/
+categories/
+notifications/
+audit.log
+scheduler.json
+email_reminders.json
+session.key
+secrets.bin
+.server.lock
+.tucanotime.lock
+config.json
+
+# Tests, harnesses and tooling that are not part of the shipped binary.
+tests/
+gui-test/
+docs/
+.github/
+.vscode/
+.idea/
+.agents/
+AgentRules/
+
+# Deployment descriptors and policy files (not read by the build).
+docker-compose.yml
+deny.toml
+
+# Documentation and editor noise.
+*.md
+.DS_Store
+*.json.tmp
+__pycache__/
+*.pyc
+
+# Belt-and-braces: never let a local Dockerfile copy of the ignore list in.
+Dockerfile.dockerignore

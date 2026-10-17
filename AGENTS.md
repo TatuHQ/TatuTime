@@ -186,8 +186,9 @@ the `v0.1.8` release notes is no longer needed.
 | Format check / apply | `cargo fmt --all -- --check` / `cargo fmt --all` |
 | Lint (CI treats all clippy lints as errors) | `cargo clippy --all-targets -- -D warnings` |
 | Latest version of a crate | `cargo info <crate>` (or crates.io API) |
-| Container image | `docker build -t tucanotime .` |
-| Container run | `docker run -d -p 8080:8080 -v tucanotime-data:/data tucanotime` |
+| Container image (distroless, uid 10001, ~41 MiB) | `docker build -t tucanotime .` |
+| Container run (hardened, loopback-only) | `docker run -d --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges -p 127.0.0.1:8080:8080 -v tucanotime-data:/data tucanotime` |
+| Container stack (same hardening, from `docker-compose.yml`) | `docker compose up -d` |
 
 The toolchain is pinned by `rust-toolchain.toml` and the Dockerfile/CI images
 carry the same version; bump all three in one intentional PR.

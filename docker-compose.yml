@@ -1,4 +1,4 @@
-# TucanoTime — recreate-safe deployment (#94).
+# TucanoTime — recreate-safe, hardened deployment (#94).
 #
 # Everything the app *stores* lives on the named volume: users, entries,
 # invoices, the encrypted vault (secrets.bin), config.json and scheduler
@@ -6,23 +6,42 @@
 # nothing, with **zero required environment setup**:
 #
 #   * sessions — the signing key is auto-generated on first boot and kept at
-#     <volume>/session.key (0600), so logins survive restarts. Override with
-#     TUCANO_SESSION_SECRET or a mounted TUCANO_SESSION_SECRET_FILE;
+#     <volume>/session.key (0600), so logins survive restarts. Override with a
+#     mounted TUCANO_SESSION_SECRET_FILE (see "secrets" below);
 #   * settings — resolved env > /data/config.json > default. Make runtime
 #     knobs survive recreation via `PUT /admin/config` (Settings tab in the
 #     GUI) or by editing config.json on the volume;
-#   * vault key — mount TUCANO_SECRET_KEY[_FILE] (examples below). If
+#   * vault key — mount TUCANO_SECRET_KEY_FILE (see "secrets" below). If
 #     /data/secrets.bin exists but the key is missing or wrong, the app
 #     REFUSES to start (a loud operator error, never a silent downgrade).
+#
+# Hardening applied to **both** services: the container root filesystem is
+# read-only (only /data and the /tmp tmpfs are writable), every capability is
+# dropped, privilege escalation is blocked, an init reaps zombies, and the
+# published port binds to loopback unless TUCANO_HOST_ADDR says otherwise.
+# The server was verified to run under exactly this set.
 services:
   tucanotime:
     build: .
     image: tucanotime:latest
     restart: unless-stopped
+    # Loopback by default (S4): a timesheet server with a first-run bootstrap
+    # endpoint should not appear on every interface because of a side effect.
+    # For LAN use set TUCANO_HOST_ADDR=0.0.0.0 (and see TUCANO_SECURE_COOKIES).
     ports:
-      - "${TUCANO_HOST_PORT:-8080}:8080"
+      - "${TUCANO_HOST_ADDR:-127.0.0.1}:${TUCANO_HOST_PORT:-8080}:8080"
     volumes:
       - tucanotime-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    init: true
+    user: "10001:10001"
+    stop_grace_period: 30s
     environment:
       # All optional. Empty/unset means defaults (sessions auto-persist).
       TUCANO_ENV: ${TUCANO_ENV:-production}
@@ -31,13 +50,11 @@ services:
       # default (secure in production) would break login over http://IP.
       # This flag is independent of the strong-secret enforcement (review A5).
       TUCANO_SECURE_COOKIES: ${TUCANO_SECURE_COOKIES:-}
-      # Vault master key — pick ONE style; uncomment what you need:
-      # TUCANO_SECRET_KEY: ${TUCANO_SECRET_KEY:?set or remove this line}
-      # TUCANO_SESSION_SECRET_FILE: /secrets/session.key
-      # TUCANO_SECRET_KEY_FILE: /secrets/vault.key
-    # To use file-mounted secrets instead of env vars:
-    # secrets: [tucano_vault_key]
-    # labels are ignored by docker but document the backup recipe:
+      # Recommended secret path: file-based, never plaintext env. Enable the
+      # `secrets:` blocks at the bottom of this file and uncomment these two:
+      # TUCANO_SESSION_SECRET_FILE: /run/secrets/tucano_session_secret
+      # TUCANO_SECRET_KEY_FILE: /run/secrets/tucano_vault_key
+      # labels are ignored by docker but document the backup recipe:
     labels:
       com.tucanotime.backup: >-
         docker compose run --rm tucanotime-cli --backup /backups/manual.tar.gz
@@ -50,15 +67,42 @@ services:
   # (--restore refuses a non-empty data dir unless you pass --force)
   tucanotime-cli:
     image: tucanotime:latest
-    profiles: ["cli"]
-    entrypoint: ["/usr/local/bin/tucano-time"]
+    profiles: [ "cli" ]
+    entrypoint: [ "/usr/local/bin/tucano-time" ]
     volumes:
       - tucanotime-data:/data
       - ${TUCANO_BACKUP_DIR:-./backups}:/backups
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    init: true
+    user: "10001:10001"
+    stop_grace_period: 30s
+    environment:
+      TUCANO_ENV: ${TUCANO_ENV:-production}
+      # Same file-based secrets as the server, so a restore/backup run can see
+      # the vault key it needs to describe (see the `secrets:` block below).
+      # TUCANO_SECRET_KEY_FILE: /run/secrets/tucano_vault_key
 
-# secrets:
-#   tucano_vault_key:
-#     file: ./secrets/vault.key
+      # File-based secrets (recommended over plaintext env). To enable:
+      #
+      #   mkdir -p secrets
+      #   openssl rand -hex 32 > secrets/vault.key     # 32-byte AES-256-GCM key
+      #   openssl rand -hex 32 > secrets/session.key
+      #   chmod 600 secrets/*.key
+      #
+      # then uncomment this block and the matching `secrets:` grants +
+      # `*_FILE` environment entries above. The app reads the *files*; the operator
+      # never puts a secret into the environment or the compose file.
+      # secrets:
+      #   tucano_vault_key:
+      #     file: ${TUCANO_SECRETS_DIR:-./secrets}/vault.key
+      #   tucano_session_secret:
+      #     file: ${TUCANO_SECRETS_DIR:-./secrets}/session.key
 
 volumes:
   tucanotime-data:
