@@ -64,7 +64,11 @@ pub async fn start_timer(
         note: input.note,
         started_at: app.clock.now(),
     };
-    app.store.put_timer(&timer)?;
+    // QA-03: the pre-check above keeps the serial answer friendly, but it is
+    // not the guard — `put_timer_if_none` re-checks existence and writes under
+    // one writer lock, so a parallel start that raced past the pre-check loses
+    // with 409 instead of being handed a `started_at` that never stuck.
+    app.store.put_timer_if_none(&timer)?;
     Ok((StatusCode::CREATED, Json(timer)).into_response())
 }
 

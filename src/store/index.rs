@@ -187,7 +187,7 @@ impl Store {
         if !dir.exists() {
             return Ok(std::collections::BTreeSet::new());
         }
-        Ok(json_stems(&dir_entries(&dir, self.max_docs)?))
+        Ok(json_stems(&dir_entries(&dir)?))
     }
 
     fn expense_disk_ids(&self) -> Result<std::collections::BTreeSet<String>, StoreError> {
@@ -195,7 +195,7 @@ impl Store {
         if !dir.exists() {
             return Ok(std::collections::BTreeSet::new());
         }
-        Ok(json_stems(&dir_entries(&dir, self.max_docs)?))
+        Ok(json_stems(&dir_entries(&dir)?))
     }
 
     /// One entry document decode, counted for the #335 read-cost test.
@@ -447,7 +447,7 @@ impl Store {
         let mut idx = EntryUserIndex::default();
         let entries_dir = self.root.join(ENTRIES_DIR);
         if entries_dir.exists() {
-            for day in dir_entries(&entries_dir, self.max_docs)? {
+            for day in dir_entries(&entries_dir)? {
                 if !day.is_dir() {
                     continue;
                 }

@@ -29,7 +29,7 @@ impl Store {
         if !dir.exists() {
             return Ok(false);
         }
-        for path in dir_entries(&dir, self.max_docs)? {
+        for path in dir_entries(&dir)? {
             if path.extension().and_then(|e| e.to_str()) != Some("json") {
                 continue;
             }
@@ -113,6 +113,11 @@ impl Store {
             return Err(StoreError::Conflict(
                 "at least one active administrator is required".into(),
             ));
+        }
+        // QA-05: a *new* account is subject to the per-collection cap; an
+        // update of an existing one is not.
+        if !self.doc_path::<User>(&user.id.to_string()).exists() {
+            self.ensure_capacity::<User>()?;
         }
         std::fs::create_dir_all(self.doc_dir::<User>())?;
         write_json(&self.doc_path::<User>(&user.id.to_string()), user)?;

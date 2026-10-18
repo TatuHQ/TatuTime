@@ -60,7 +60,7 @@ impl Store {
         if !root.exists() {
             return Ok(Vec::new());
         }
-        Ok(dir_entries(&root, self.max_docs)?
+        Ok(dir_entries(&root)?
             .into_iter()
             .filter(|p| p.is_dir())
             .collect())
@@ -72,7 +72,7 @@ impl Store {
     pub(super) fn cold_day_folders(&self) -> Result<Vec<NaiveDate>, StoreError> {
         let mut out = Vec::new();
         for month in self.cold_month_dirs()? {
-            for day in dir_entries(&month, self.max_docs)? {
+            for day in dir_entries(&month)? {
                 if !day.is_dir() {
                     continue;
                 }
@@ -100,7 +100,7 @@ impl Store {
         if !dir.exists() {
             return Ok(std::collections::BTreeSet::new());
         }
-        Ok(json_stems(&dir_entries(&dir, self.max_docs)?))
+        Ok(json_stems(&dir_entries(&dir)?))
     }
 
     /// The cold copies of one day's documents, in `dir_entries` order.
@@ -110,7 +110,7 @@ impl Store {
             return Ok(Vec::new());
         }
         let mut out = Vec::new();
-        for path in dir_entries(&dir, self.max_docs)? {
+        for path in dir_entries(&dir)? {
             if path.extension().and_then(|e| e.to_str()) != Some("json") {
                 continue;
             }
@@ -124,13 +124,12 @@ impl Store {
     /// One day as a reader sees it: the hot documents plus the cold copies they
     /// do not already hold, deduplicated by entry id with the hot copy winning
     /// (#350). The union — not either tree — is what a day *is* after a
-    /// relocation. The `MAX_DOCS` cap is one budget over the union.
+    /// relocation. A read lists every document the union holds: QA-05 moved
+    /// the `MAX_DOCS` cap to the write path, so a pre-existing over-cap day
+    /// stays readable instead of failing every listing.
     fn merged_day_docs(&self, date: NaiveDate) -> Result<Vec<Entry>, StoreError> {
         let mut out = self.walk_docs(&self.day_dir(date), |p| self.read_entry(p))?;
         merge_cold_docs(&mut out, self.cold_day_docs(date)?);
-        if out.len() > self.max_docs {
-            return Err(StoreError::TooManyItems);
-        }
         Ok(out)
     }
 
@@ -171,7 +170,7 @@ impl Store {
     fn find_entry_path(&self, id: Uuid) -> Result<Option<PathBuf>, StoreError> {
         let dir = self.root.join(ENTRIES_DIR);
         if dir.exists() {
-            for day in dir_entries(&dir, self.max_docs)? {
+            for day in dir_entries(&dir)? {
                 let path = day.join(format!("{id}.json"));
                 if path.is_file() {
                     return Ok(Some(path));
@@ -313,7 +312,7 @@ impl Store {
         if !day.is_dir() {
             return;
         }
-        if dir_entries(&day, self.max_docs).is_ok_and(|left| left.is_empty()) {
+        if dir_entries(&day).is_ok_and(|left| left.is_empty()) {
             let _ = std::fs::remove_dir(&day);
         }
     }
@@ -360,22 +359,21 @@ impl Store {
     fn scan_all_entries(&self) -> Result<Vec<Entry>, StoreError> {
         // #350: the lifetime scan is hot ∪ cold, so a budget total, a deletion
         // guard or any other lifetime count never changes when a day is relocated.
-        // An id in both trees (a day a crash left half-published) counts **once**,
-        // and the `MAX_DOCS` cap is one budget over the union, not one per tree.
+        // An id in both trees (a day a crash left half-published) counts **once**.
+        // QA-05: the `MAX_DOCS` cap no longer truncates or refuses this read —
+        // the write path keeps collections under the cap, and an over-cap tree
+        // an operator supplied must stay countable rather than unreadable.
         let mut out = Vec::new();
         let mut seen: std::collections::HashSet<Uuid> = std::collections::HashSet::new();
         let dir = self.root.join(ENTRIES_DIR);
         if dir.exists() {
-            for day in dir_entries(&dir, self.max_docs)? {
+            for day in dir_entries(&dir)? {
                 if !day.is_dir() {
                     continue;
                 }
-                for path in dir_entries(&day, self.max_docs)? {
+                for path in dir_entries(&day)? {
                     if path.extension().and_then(|e| e.to_str()) != Some("json") {
                         continue;
-                    }
-                    if out.len() >= self.max_docs {
-                        return Err(StoreError::TooManyItems);
                     }
                     if let Some(e) = read_json::<Entry>(&path)?
                         && seen.insert(e.id)
@@ -386,12 +384,9 @@ impl Store {
             }
         }
         for date in self.cold_day_folders()? {
-            for path in dir_entries(&self.cold_day_dir(date), self.max_docs)? {
+            for path in dir_entries(&self.cold_day_dir(date))? {
                 if path.extension().and_then(|e| e.to_str()) != Some("json") {
                     continue;
-                }
-                if out.len() >= self.max_docs {
-                    return Err(StoreError::TooManyItems);
                 }
                 if let Some(e) = read_json::<Entry>(&path)?
                     && seen.insert(e.id)

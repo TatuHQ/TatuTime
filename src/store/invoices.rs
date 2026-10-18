@@ -57,6 +57,10 @@ impl Store {
 
     pub fn put_invoice(&self, invoice: &Invoice) -> Result<(), StoreError> {
         let _guard = self.write_lock()?;
+        let path = self.doc_path::<Invoice>(&invoice.id.to_string());
+        if !path.exists() {
+            self.ensure_capacity::<Invoice>()?;
+        }
         std::fs::create_dir_all(self.doc_dir::<Invoice>())?;
         write_json(&self.doc_path::<Invoice>(&invoice.id.to_string()), invoice)?;
         self.index_invoice_locked(invoice)
@@ -180,6 +184,9 @@ impl Store {
 
     /// Number + persist an invoice with the lock **already** held.
     pub(super) fn create_invoice_inner(&self, mut invoice: Invoice) -> Result<Invoice, StoreError> {
+        // QA-05: the collection cap is checked before a new document is
+        // numbered and persisted, under this same lock.
+        self.ensure_capacity::<Invoice>()?;
         std::fs::create_dir_all(self.root.join("invoices"))?;
         let seq_path = self.root.join("invoices").join(".seq.json");
         let stored: u64 = read_json(&seq_path)?.unwrap_or(0);

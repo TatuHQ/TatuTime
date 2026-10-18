@@ -141,6 +141,10 @@ pub const CODE_VOCABULARY: &[&str] = &[
     "calendar_fetch",
     "email_failed",
     "oauth_exchange",
+    // QA-05: a write refused because its collection is at MAX_DOCS.
+    "collection_full",
+    // QA-02: issue refused because the draft no longer matches the timesheet.
+    "draft_out_of_date",
 ];
 
 impl ApiError {
@@ -163,11 +167,21 @@ impl From<StoreError> for ApiError {
                 "write_lock_busy",
                 "another write is in progress; retry shortly",
             ),
-            StoreError::TooManyItems => {
-                // A collection exceeded MAX_DOCS — a server-side limit, not a
-                // client error; report generically without leaking the cap.
-                ApiError::internal("collection exceeds the configured size limit".into())
-            }
+            // QA-05: the cap is now a *write-time* refusal and a client error:
+            // the collection is still readable, so the caller can delete records
+            // and retry. The configured cap itself is never echoed.
+            StoreError::TooManyItems => ApiError::new(
+                StatusCode::CONFLICT,
+                "collection_full",
+                "this collection has reached its size limit; delete unused records and retry",
+            ),
+            // QA-02: the timesheet moved after the draft was generated. Nothing
+            // was issued (no status change, no archive, no entry lock).
+            StoreError::DraftOutOfDate => ApiError::new(
+                StatusCode::CONFLICT,
+                "draft_out_of_date",
+                "the timesheet changed after this draft was generated; regenerate the draft and issue it again",
+            ),
             StoreError::Io(detail) => ApiError::internal(detail),
         }
     }

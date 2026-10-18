@@ -232,15 +232,48 @@ mod tests {
     }
 
     #[test]
-    fn collection_cap_enforced() {
+    fn collection_cap_is_enforced_on_write_not_on_read() {
+        // QA-05: the cap refuses the *new* document before it is persisted and
+        // the collection stays readable — an over-cap directory is never
+        // unreadable, and a write never lands past the cap.
         let dir = tempfile::tempdir().unwrap();
         let store = Store::open(dir.path().join("data"))
             .unwrap()
             .with_max_docs(2);
         store.put_customer(&cust()).unwrap();
         store.put_customer(&cust()).unwrap();
-        store.put_customer(&cust()).unwrap(); // 3rd file
-        let err = store.list_customers().expect_err("3 > cap of 2");
+        let err = store
+            .put_customer(&cust())
+            .expect_err("3rd file > cap of 2");
         assert!(matches!(err, StoreError::TooManyItems), "{err:?}");
+        assert_eq!(
+            store.list_customers().unwrap().len(),
+            2,
+            "the refused write persisted nothing and the collection still lists"
+        );
+        // An update of an existing document is not a new member: still allowed.
+        let existing = store.list_customers().unwrap();
+        let mut updated = existing[0].clone();
+        updated.name = "Renamed".into();
+        store
+            .put_customer(&updated)
+            .expect("overwrite stays allowed");
+    }
+
+    #[test]
+    fn over_cap_directory_still_lists_everything() {
+        // QA-05: a pre-seeded over-cap directory (an operator restored it, or
+        // an older build wrote past the cap) must stay recoverable.
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("data");
+        let store = Store::open(&root).unwrap();
+        for _ in 0..3 {
+            store.put_customer(&cust()).unwrap();
+        }
+        let capped = Store::open(&root).unwrap().with_max_docs(2);
+        assert_eq!(
+            capped.list_customers().expect("over-cap read lists").len(),
+            3
+        );
     }
 }

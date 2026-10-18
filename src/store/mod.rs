@@ -47,8 +47,12 @@ pub const MAX_RANGE_DAYS: i64 = 400;
 pub const MAX_PDF_BYTES: u64 = 8 * 1024 * 1024;
 
 /// Hard cap on documents in any single collection directory (#50). A personal
-/// timesheet is far below this; it bounds a pathological/corrupted tree so no
-/// request does an unbounded directory walk.
+/// timesheet is far below this; it bounds a pathological tree.
+///
+/// QA-05: this is a **write-time** cap — a new document is refused (409
+/// `collection_full`) once its collection holds this many, before anything is
+/// persisted. Reads never enforce it: an operator-supplied over-cap directory
+/// is listed in full so it stays recoverable instead of answering 500 forever.
 pub const MAX_DOCS: usize = 100_000;
 
 /// Cap on retained per-invoice timeline events. The sidecar is a display aid,
@@ -73,8 +77,14 @@ pub enum StoreError {
     RangeTooLarge,
     #[error("write lock busy")]
     LockTimeout,
+    /// A *new* document would exceed `MAX_DOCS` (QA-05) — refused on the write
+    /// path before persisting; maps to 409 `collection_full`.
     #[error("collection too large (max {MAX_DOCS})")]
     TooManyItems,
+    /// The stored draft no longer matches the timesheet (QA-02) — issue is
+    /// refused and nothing is persisted; maps to 409 `draft_out_of_date`.
+    #[error("draft out of date")]
+    DraftOutOfDate,
     #[error("io failure: {0}")]
     Io(String),
 }

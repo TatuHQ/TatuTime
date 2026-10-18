@@ -117,7 +117,9 @@
                   "calendar_not_configured",
                   "calendar_fetch",
                   "email_failed",
-                  "oauth_exchange"
+                  "oauth_exchange",
+                  "collection_full",
+                  "draft_out_of_date"
                 ]
               },
               "message": {
@@ -2747,6 +2749,16 @@
           }
         }
       },
+      "CollectionFull": {
+        "description": "The target collection has reached its configured document limit (code collection_full, TUCANO_MAX_DOCS). Nothing was written; the collection stays readable, so delete unused records and retry.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
       "BadRequest": {
         "description": "Malformed query or body.",
         "content": {
@@ -3088,6 +3100,9 @@
           }
         },
         "responses": {
+          "409": {
+            "$ref": "#/components/responses/CollectionFull"
+          },
           "201": {
             "description": "Admin created; session cookie set.",
             "content": {
@@ -3277,7 +3292,14 @@
             "$ref": "#/components/responses/Forbidden"
           },
           "409": {
-            "$ref": "#/components/responses/Conflict"
+            "description": "The email is already taken (code conflict) or the users collection is full (code collection_full). Nothing is persisted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           },
           "422": {
             "$ref": "#/components/responses/ValidationError"
@@ -3566,6 +3588,9 @@
           }
         ],
         "responses": {
+          "409": {
+            "$ref": "#/components/responses/CollectionFull"
+          },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
@@ -4787,7 +4812,14 @@
             }
           },
           "409": {
-            "$ref": "#/components/responses/Conflict"
+            "description": "A timer is already running (code conflict) or the timers collection is full (code collection_full). Nothing is persisted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           },
           "422": {
             "$ref": "#/components/responses/ValidationError"
@@ -5215,6 +5247,9 @@
           }
         ],
         "responses": {
+          "409": {
+            "$ref": "#/components/responses/CollectionFull"
+          },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
@@ -5497,7 +5532,14 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "$ref": "#/components/responses/Conflict"
+            "description": "The period has nothing billable left or mixes currencies (code conflict), or the invoices collection is full (code collection_full). Nothing is persisted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
@@ -5676,7 +5718,14 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "$ref": "#/components/responses/Conflict"
+            "description": "The invoice is not a draft (code conflict), or the draft no longer matches the current timesheet (code draft_out_of_date: an entry on it was edited or deleted after the draft was generated). Nothing is issued in either case: regenerate the draft from the period and issue again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           }
         }
       }
@@ -6450,6 +6499,9 @@
           }
         ],
         "responses": {
+          "409": {
+            "$ref": "#/components/responses/CollectionFull"
+          },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
@@ -6659,6 +6711,9 @@
           }
         ],
         "responses": {
+          "409": {
+            "$ref": "#/components/responses/CollectionFull"
+          },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
@@ -7197,7 +7252,14 @@
             }
           },
           "409": {
-            "$ref": "#/components/responses/Conflict"
+            "description": "The week is already submitted (code conflict) or the submissions collection is full (code collection_full). Nothing is persisted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
@@ -7330,6 +7392,9 @@
           }
         ],
         "responses": {
+          "409": {
+            "$ref": "#/components/responses/CollectionFull"
+          },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
@@ -7912,6 +7977,9 @@
           }
         ],
         "responses": {
+          "409": {
+            "$ref": "#/components/responses/CollectionFull"
+          },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
@@ -8262,6 +8330,9 @@
           }
         ],
         "responses": {
+          "409": {
+            "$ref": "#/components/responses/CollectionFull"
+          },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },

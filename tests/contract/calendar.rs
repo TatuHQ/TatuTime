@@ -181,3 +181,89 @@ async fn timer_invalid_project_is_422_and_stop_without_timer_is_404() {
     let (s_stop, _) = json_req(&app, "POST", "/api/timer/stop", None).await;
     assert_eq!(s_stop, StatusCode::NOT_FOUND);
 }
+
+/// QA-03: four parallel `POST /api/timer` calls produce exactly one 201 and
+/// three 409 conflicts, and exactly one timer document lands on disk. The
+/// unlocked pre-check is only the friendly path; `put_timer_if_none` is the
+/// guard, re-checking existence inside the writer lock.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn parallel_timer_starts_yield_exactly_one_winner() {
+    let (app, d) = app().await;
+    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap();
+    new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
+
+    let body = json!({"customer_id": cid, "project_code": "P1"});
+    let (a, b, cc, dd) = tokio::join!(
+        raw(
+            &app.router,
+            "POST",
+            "/api/timer",
+            Some(body.clone()),
+            Some(&app.cookie)
+        ),
+        raw(
+            &app.router,
+            "POST",
+            "/api/timer",
+            Some(body.clone()),
+            Some(&app.cookie)
+        ),
+        raw(
+            &app.router,
+            "POST",
+            "/api/timer",
+            Some(body.clone()),
+            Some(&app.cookie)
+        ),
+        raw(
+            &app.router,
+            "POST",
+            "/api/timer",
+            Some(body.clone()),
+            Some(&app.cookie)
+        ),
+    );
+    let responses = [a, b, cc, dd];
+    let statuses: Vec<StatusCode> = responses.iter().map(|(s, _, _)| *s).collect();
+    assert_eq!(
+        statuses
+            .iter()
+            .filter(|s| **s == StatusCode::CREATED)
+            .count(),
+        1,
+        "exactly one start wins: {statuses:?}"
+    );
+    assert_eq!(
+        statuses
+            .iter()
+            .filter(|s| **s == StatusCode::CONFLICT)
+            .count(),
+        3,
+        "every loser is told the timer is already running: {statuses:?}"
+    );
+    for (status, body, _) in &responses {
+        if *status == StatusCode::CONFLICT {
+            assert_eq!(body["error"]["code"], "conflict", "{body}");
+            assert!(
+                body["error"]["message"]
+                    .as_str()
+                    .unwrap()
+                    .contains("already running"),
+                "{body}"
+            );
+        }
+    }
+
+    // Exactly one timer document on disk, and it is the one the 201 reported.
+    let timers = d.path().join("data/timers");
+    let docs: Vec<std::path::PathBuf> = std::fs::read_dir(&timers)
+        .expect("timers directory")
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| p.extension().and_then(|x| x.to_str()) == Some("json"))
+        .collect();
+    assert_eq!(docs.len(), 1, "exactly one timer on disk: {docs:?}");
+    let (_, running) = json_req(&app, "GET", "/api/timer", None).await;
+    assert_eq!(running["timer"]["customer_id"], cid);
+}

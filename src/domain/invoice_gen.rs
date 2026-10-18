@@ -207,6 +207,111 @@ pub fn generate_invoice(
     })
 }
 
+/// QA-02: whether `draft` has drifted from the timesheet it was generated from.
+///
+/// The issue transaction calls this **before persisting anything**, so an
+/// issued invoice can never bill hours the timesheet no longer holds —
+/// AGENTS.md's rule that the archived invoice is the record of what was billed
+/// and "the timesheet must never drift from it".
+///
+/// Re-deriving the whole line set would need the create-time narrowing
+/// (`include_expenses`, `project_codes`) that a draft does not carry, and
+/// manual lines have no source document at all. So the check is exact where it
+/// can be: **every tracked line** (time/expense) is re-resolved from its source
+/// record at issue time — existence, customer, period, billability, date,
+/// project/task, and the rate [`effective_rates`] resolves *now* — and must
+/// still reproduce the stored snapshot (`rate_minor`, `amount_minor`). A line
+/// whose source is gone, changed, or already billed on another non-draft
+/// invoice makes the draft stale; a manual (fixed) line never does.
+#[allow(clippy::too_many_arguments)]
+pub fn draft_is_stale(
+    draft: &Invoice,
+    customer: &Customer,
+    projects: &[Project],
+    users: &[User],
+    entries: &[Entry],
+    expenses: &[Expense],
+    excluded_entries: &[Uuid],
+    excluded_expenses: &[Uuid],
+) -> bool {
+    let project_by_code: std::collections::HashMap<&str, &Project> =
+        projects.iter().map(|p| (p.code.0.as_str(), p)).collect();
+    let user_by_id: std::collections::HashMap<Uuid, &User> =
+        users.iter().map(|u| (u.id, u)).collect();
+    let entry_by_id: std::collections::HashMap<Uuid, &Entry> =
+        entries.iter().map(|e| (e.id, e)).collect();
+    let expense_by_id: std::collections::HashMap<Uuid, &Expense> =
+        expenses.iter().map(|x| (x.id, x)).collect();
+    let excluded_entry: std::collections::HashSet<Uuid> =
+        excluded_entries.iter().copied().collect();
+    let excluded_expense: std::collections::HashSet<Uuid> =
+        excluded_expenses.iter().copied().collect();
+    let user_rate = |e: &Entry| -> Option<u64> {
+        e.user_id
+            .and_then(|uid| user_by_id.get(&uid).map(|u| u.default_rate_minor))
+    };
+    for line in &draft.lines {
+        match line.kind {
+            LineKind::Time => {
+                let Some(id) = line.entry_id else {
+                    // A time line with no source entry is not something the
+                    // timesheet can vouch for: never issue it.
+                    return true;
+                };
+                if excluded_entry.contains(&id) {
+                    return true; // already billed on a non-draft invoice (#248)
+                }
+                let Some(entry) = entry_by_id.get(&id).copied() else {
+                    return true; // the entry was deleted after the draft was built
+                };
+                if entry.customer_id != customer.id
+                    || !entry.billable
+                    || entry.date < draft.period_from
+                    || entry.date > draft.period_to
+                    || entry.date != line.date
+                    || line.hours != Some(entry.hours)
+                    || line.project_code.as_ref() != Some(&entry.project_code)
+                    || line.task_code != entry.task_code
+                {
+                    return true;
+                }
+                let project = project_by_code.get(entry.project_code.0.as_str()).copied();
+                let (currency, rate) = effective_rates(customer, project, user_rate(entry));
+                if currency != draft.currency
+                    || line.rate_minor != Some(rate)
+                    || line.amount_minor != entry.hours.amount_minor(rate)
+                {
+                    return true; // the period resolution no longer yields the snapshot
+                }
+            }
+            LineKind::Expense => {
+                let Some(id) = line.expense_id else {
+                    return true;
+                };
+                if excluded_expense.contains(&id) {
+                    return true;
+                }
+                let Some(expense) = expense_by_id.get(&id).copied() else {
+                    return true;
+                };
+                if expense.customer_id != customer.id
+                    || !expense.billable
+                    || expense.currency != draft.currency
+                    || expense.date < draft.period_from
+                    || expense.date > draft.period_to
+                    || expense.date != line.date
+                    || expense.amount_minor != line.amount_minor
+                {
+                    return true;
+                }
+            }
+            // Manual lines are free-form: no timesheet record to drift from.
+            LineKind::Fixed => {}
+        }
+    }
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

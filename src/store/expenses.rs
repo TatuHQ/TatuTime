@@ -102,8 +102,12 @@ impl Store {
     /// stale index (safe: reads verify it) and never a phantom row.
     pub fn put_expense(&self, expense: &Expense) -> Result<(), StoreError> {
         let _guard = self.write_lock()?;
+        let path = self.doc_path::<Expense>(&expense.id.to_string());
+        if !path.exists() {
+            self.ensure_capacity::<Expense>()?;
+        }
         std::fs::create_dir_all(self.doc_dir::<Expense>())?;
-        write_json(&self.doc_path::<Expense>(&expense.id.to_string()), expense)?;
+        write_json(&path, expense)?;
         self.index_expense_locked(expense)
     }
 

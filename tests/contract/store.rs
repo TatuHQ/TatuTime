@@ -1071,7 +1071,7 @@ mod cold_tree_reads {
     use serde_json::{Value, json};
     use tucano_time::domain::Entry;
     use tucano_time::lock::NoLocks;
-    use tucano_time::store::{ArchiveRefusal, Store, StoreError};
+    use tucano_time::store::{ArchiveRefusal, Store};
     use uuid::Uuid;
 
     use crate::support::{
@@ -1358,11 +1358,12 @@ mod cold_tree_reads {
         assert_eq!(merged.hours.0, 900, "the hot copy wins the merge");
     }
 
-    /// `MAX_DOCS` is one budget over the union, not one per tree: a day split
-    /// between the trees whose union exceeds it is refused, not silently
-    /// truncated.
+    /// QA-05 moved the `MAX_DOCS` cap to the write path: a day whose union
+    /// (hot ∪ cold) exceeds the cap is still listed in full — reading never
+    /// fails and never truncates — so a pre-existing over-cap tree stays
+    /// recoverable.
     #[tokio::test]
-    async fn the_document_cap_is_one_budget_over_the_union() {
+    async fn an_over_cap_day_still_lists_its_whole_union() {
         let (client, d) = app().await;
         let token = fixture(&client).await;
         // Two rows move to the cold tree, and two more land on the same date in
@@ -1377,23 +1378,21 @@ mod cold_tree_reads {
         entry_on(&client, None, &token, DAY, 1, None).await;
         entry_on(&client, None, &token, DAY, 2, None).await;
 
-        // Each tree alone is inside a cap of three; only their union is not — so
-        // an error here is the union budget and nothing else.
+        // Each tree alone is inside a cap of three; their union is not. The
+        // read lists all four documents anyway (the cap is a write guard).
         let capped = store_at(&data).with_max_docs(3);
-        let merged = capped.list_by_date(day());
-        assert!(
-            matches!(merged, Err(StoreError::TooManyItems)),
-            "the merged day is capped as one union: {merged:?}"
-        );
-        let all = capped.list_all_entries();
-        assert!(
-            matches!(all, Err(StoreError::TooManyItems)),
-            "and so is the lifetime scan: {all:?}"
-        );
-
-        // Without the cap biting, the day is the union: all four documents.
         assert_eq!(
-            store_at(&data).list_by_date(day()).expect("day read").len(),
+            capped
+                .list_by_date(day())
+                .expect("over-cap day read lists")
+                .len(),
+            4
+        );
+        assert_eq!(
+            capped
+                .list_all_entries()
+                .expect("over-cap lifetime scan lists")
+                .len(),
             4
         );
     }
@@ -1821,4 +1820,63 @@ mod cold_tree_reads {
             2
         );
     }
+}
+
+// ------------------------------------------------------------ QA-05: the cap --
+
+/// QA-05: with a low `MAX_DOCS`, the write past the cap is a 409
+/// `collection_full` and persists nothing; the collection still lists.
+#[tokio::test]
+async fn the_document_cap_refuses_a_write_past_it_and_persists_nothing() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = tucano_time::store::Store::open(dir.path().join("data"))
+        .expect("store")
+        .with_max_docs(3);
+    let client = Client::new(store, None).await;
+
+    for name in ["A", "B", "C"] {
+        new_customer(&client, name, "EUR", 6000).await;
+    }
+    let (s_over, body) = json_req(
+        &client,
+        "POST",
+        "/api/customers",
+        Some(json!({"name":"D","currency":"EUR","default_rate_minor":6000})),
+    )
+    .await;
+    assert_eq!(s_over, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"]["code"], "collection_full", "{body}");
+    // Nothing was written, and the listing still works (never a 500).
+    let (s_list, listed) = json_req(&client, "GET", "/api/customers", None).await;
+    assert_eq!(s_list, StatusCode::OK, "{listed}");
+    assert_eq!(listed["customers"].as_array().unwrap().len(), 3);
+}
+
+/// QA-05: a pre-seeded over-cap collection (an operator restored it, or an
+/// older build wrote past the cap) still lists in full — reading never fails.
+#[tokio::test]
+async fn a_pre_seeded_over_cap_collection_still_lists_what_is_there() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let data = dir.path().join("data");
+    let seeded = Client::new(tucano_time::store::Store::open(&data).expect("store"), None).await;
+    for name in ["A", "B", "C", "D"] {
+        new_customer(&seeded, name, "EUR", 6000).await;
+    }
+
+    // Reopen the same data dir under a cap of two: the directory already holds
+    // four documents.
+    let capped = tucano_time::store::Store::open(&data)
+        .expect("store")
+        .with_max_docs(2);
+    let capped = Client::new(capped, None).await;
+    let (s, body) = json_req(&capped, "GET", "/api/customers", None).await;
+    assert_eq!(s, StatusCode::OK, "over-cap listing must not 500: {body}");
+    assert_eq!(
+        body["customers"].as_array().unwrap().len(),
+        4,
+        "the reader lists every document present"
+    );
+    // Categories listing (the QA repro's second symptom) is untouched too.
+    let (s_cat, _) = json_req(&capped, "GET", "/api/categories", None).await;
+    assert_eq!(s_cat, StatusCode::OK);
 }

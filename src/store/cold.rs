@@ -100,7 +100,7 @@ impl Store {
         let entries_dir = self.root.join(ENTRIES_DIR);
         let mut candidates: Vec<NaiveDate> = Vec::new();
         if entries_dir.exists() {
-            for child in dir_entries(&entries_dir, self.max_docs)? {
+            for child in dir_entries(&entries_dir)? {
                 let name = child
                     .file_name()
                     .and_then(|n| n.to_str())
@@ -130,7 +130,7 @@ impl Store {
             // The day's documents by file name alone: an entry's id *is* its
             // document stem, so neither the refusal check nor the manifest ever
             // decodes the money/hours a relocation must not touch.
-            let docs = dir_entries(&day, self.max_docs)?;
+            let docs = dir_entries(&day)?;
             let mut ids: Vec<Uuid> = Vec::with_capacity(docs.len());
             let mut unrecognised = false;
             for doc in &docs {

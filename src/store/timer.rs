@@ -17,6 +17,24 @@ impl Store {
         self.put_doc(timer)
     }
 
+    /// Start a timer **only if** the user has none (QA-03): the existence check
+    /// and the write happen under one writer lock, mirroring the bootstrap
+    /// guard (`put_user_if_none`). A racing caller therefore loses with
+    /// `AlreadyExists` (→ 409) instead of being told a start time that the
+    /// winner's write immediately overwrote.
+    pub fn put_timer_if_none(&self, timer: &Timer) -> Result<(), StoreError> {
+        let _guard = self.write_lock()?;
+        let path = self.doc_path::<Timer>(&timer.user_id.to_string());
+        if path.exists() {
+            return Err(StoreError::AlreadyExists(
+                "a timer is already running".into(),
+            ));
+        }
+        self.ensure_capacity::<Timer>()?;
+        std::fs::create_dir_all(self.doc_dir::<Timer>())?;
+        write_json(&path, timer)
+    }
+
     pub fn delete_timer(&self, user_id: Uuid) -> Result<(), StoreError> {
         let _guard = self.write_lock()?;
         let path = self.doc_path::<Timer>(&user_id.to_string());
