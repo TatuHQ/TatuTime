@@ -32,4 +32,5 @@ import './js/timer.js';
 import './js/notifications.js';
 import './js/boot.js';
 import './js/wizard.js';
+import './js/setup.js';
 import './js/auth.js';

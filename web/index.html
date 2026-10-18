@@ -121,6 +121,16 @@
 
     <!-- TIMESHEETS (top-level section, #107): Day | Week as in-page segments -->
     <section id="panel-timesheet" role="tabpanel" aria-labelledby="tab-timesheet" tabindex="0">
+      <!-- Admin startup wizard re-entry (see #admin-wizard below): offered only
+           to an administrator whose organisation name is still empty, and never
+           auto-opened over a signed-in app. Dismissible by design. -->
+      <div id="aw-prompt" class="p-card p-card--muted" hidden>
+        <p id="aw-prompt-text">Your organisation identity is still empty — invoices, emails and PDFs use the fallback name.</p>
+        <div class="dlg-actions">
+          <button type="button" id="aw-prompt-open" data-positive="1" class="p-button--positive">Finish setup</button>
+          <button type="button" id="aw-prompt-dismiss" class="p-button">Dismiss</button>
+        </div>
+      </div>
       <!-- No section H2 here: the masthead H1 already carries the tab name
            ("Timesheets"), so a second "Timesheet" heading duplicated the
            page title instead of adding outline structure (Ubuntu guidance:
@@ -1173,6 +1183,103 @@
           <button id="wz-next" class="p-button--positive" type="button">Next</button>
         </div>
       </div>
+    </div>
+
+  </dialog>
+
+  <!-- Admin startup wizard (first run): five steps that create the
+       administrator, record the organisation identity and the base currency,
+       then verify what was persisted. Separate from the #111 customer/project
+       wizard (#wizard-dialog) above; every new id is `aw-`-prefixed and the
+       #229 auth ids stay untouched. Escapable by design: closing it falls back
+       to the existing "Create the first administrator" card, so an instance can
+       never end up with no way to create an admin. -->
+  <dialog id="admin-wizard" class="p-modal" role="dialog" aria-modal="true" aria-labelledby="aw-title">
+    <div class="p-modal__dialog">
+      <header class="p-modal__header">
+        <h2 class="p-modal__title" id="aw-title">Welcome to TucanoTime</h2>
+      </header>
+      <form id="aw-form" novalidate>
+        <div id="aw-step-1" class="aw-step">
+          <p>This creates the administrator account that owns user management and
+            invoicing, and sets the organisation identity used on invoices, emails
+            and PDFs.</p>
+        </div>
+        <div id="aw-step-2" class="aw-step" hidden>
+          <div class="p-form__group">
+            <label class="p-form__label" for="aw-name">Your name</label>
+            <input type="text" class="p-form__control" id="aw-name" maxlength="120" autocomplete="name">
+          </div>
+          <div class="p-form__group">
+            <label class="p-form__label" for="aw-email">Email</label>
+            <input type="email" class="p-form__control" id="aw-email" maxlength="200" autocomplete="username">
+          </div>
+          <div class="p-form__group">
+            <label class="p-form__label" for="aw-password">Password</label>
+            <input type="password" class="p-form__control" id="aw-password" minlength="8" maxlength="200" autocomplete="new-password">
+            <p class="p-form-help-text">At least 8 characters.</p>
+          </div>
+          <div class="p-form__group">
+            <label class="p-form__label" for="aw-confirm">Confirm password</label>
+            <input type="password" class="p-form__control" id="aw-confirm" minlength="8" maxlength="200" autocomplete="new-password">
+          </div>
+        </div>
+        <div id="aw-step-3" class="aw-step" hidden>
+          <div class="p-form__group">
+            <label class="p-form__label" for="aw-org-name">Organisation name</label>
+            <input type="text" class="p-form__control" id="aw-org-name" maxlength="120" autocomplete="organization">
+          </div>
+          <div class="p-form__group">
+            <label class="p-form__label" for="aw-org-legal">Legal / VAT id (optional)</label>
+            <input type="text" class="p-form__control" id="aw-org-legal" maxlength="60">
+          </div>
+          <div class="p-form__group">
+            <label class="p-form__label" for="aw-org-street">Address line (optional)</label>
+            <input type="text" class="p-form__control" id="aw-org-street" maxlength="120" autocomplete="street-address">
+          </div>
+          <div class="p-form__group">
+            <label class="p-form__label" for="aw-org-city">City (optional)</label>
+            <input type="text" class="p-form__control" id="aw-org-city" maxlength="80" autocomplete="address-level2">
+          </div>
+          <div class="p-form__group">
+            <label class="p-form__label" for="aw-org-postal">Postal code (optional)</label>
+            <input type="text" class="p-form__control" id="aw-org-postal" maxlength="16" autocomplete="postal-code">
+          </div>
+          <div class="p-form__group">
+            <label class="p-form__label" for="aw-org-country">Country (required with an address)</label>
+            <input type="text" class="p-form__control" id="aw-org-country" maxlength="56" autocomplete="country-name">
+          </div>
+          <div class="p-form__group">
+            <label class="p-form__label" for="aw-org-accent">Invoice accent colour (optional)</label>
+            <input type="text" class="p-form__control" id="aw-org-accent" maxlength="7" placeholder="#rrggbb">
+          </div>
+        </div>
+        <div id="aw-step-4" class="aw-step" hidden>
+          <div class="p-form__group">
+            <label class="p-form__label" for="aw-currency">Base currency</label>
+            <input type="text" class="p-form__control" id="aw-currency" maxlength="3" placeholder="EUR">
+            <p class="p-form-help-text">Three-letter ISO 4217 code. Leave empty to keep mixed-currency display off.</p>
+          </div>
+        </div>
+        <div id="aw-step-5" class="aw-step" hidden>
+          <p>Review what was saved, then enter the application.</p>
+          <dl class="aw-review">
+            <dt>Administrator</dt><dd id="aw-review-name"></dd>
+            <dt>Email</dt><dd id="aw-review-email"></dd>
+            <dt>Organisation</dt><dd id="aw-review-org"></dd>
+          </dl>
+        </div>
+        <div class="p-form-validation is-error">
+          <p class="p-form-validation__message" id="aw-error" role="alert" hidden></p>
+        </div>
+        <p id="aw-status" role="status" aria-live="polite" class="p-form-help-text"></p>
+        <footer class="p-modal__footer">
+          <button type="button" id="aw-close" class="p-button">Close</button>
+          <button type="button" id="aw-skip" class="p-button" hidden>Set this up later</button>
+          <button type="button" id="aw-back" class="p-button" hidden>Back</button>
+          <button type="button" id="aw-next" class="p-button--positive">Get started</button>
+        </footer>
+      </form>
     </div>
   </dialog>
 

@@ -436,6 +436,13 @@ dialog.p-modal::backdrop { background: transparent; }
 #customer-dialog .p-modal__dialog { max-width: 38rem; }
 #project-dialog .p-modal__dialog, #task-dialog .p-modal__dialog { max-width: 32rem; }
 #user-dialog .p-modal__dialog, #user-password-dialog .p-modal__dialog { max-width: 34rem; }
+#admin-wizard .p-modal__dialog { max-width: 34rem; }
+#admin-wizard form { margin: 0; }
+#admin-wizard .aw-review { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: .25rem .75rem; margin: 0 0 1rem; }
+#admin-wizard .aw-review dt { color: var(--muted); }
+#admin-wizard .aw-review dd { margin: 0; }
+#aw-prompt { margin: 0 0 1rem; }
+#aw-prompt p { margin: 0 0 .5rem; }
 #customer-dialog form { margin: 0; }
 #user-dialog form, #user-password-dialog form { margin: 0; }
 #user-dialog input:not([type="checkbox"]), #user-dialog select, #user-password-dialog input { width: 100%; }
