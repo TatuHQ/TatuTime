@@ -1803,15 +1803,33 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
   // leave the All tab on: downstream checks (paid rows etc.) need every status
 }
 
-// ---- EMAIL (#35): set a billing email, then email the issued invoice ----
+// ---- EMAIL (#35): set a billing contact, then email the issued invoice ----
+// Seed the address the way the app itself publishes it: a billing contact
+// (#139) on the customer, saved through the API. The register the dialog reads
+// is a cache refreshed when the Customers view is shown, so an out-of-band PUT
+// alone is invisible to it; showing the Customers tab re-pulls it, exactly what
+// saving the customer form does. Seeding only the legacy `email` and never
+// re-pulling left `state.customers` without any address, so the dialog opened
+// with no candidates and this smoke failed.
 const custObj = (await (await fetch(BASE + `/api/customers/${acmeOpt.value}`, { headers: { Cookie: SESSION_COOKIE } })).json());
 custObj.email = 'billing@acme.test';
 const putC = await fetch(`${BASE}/api/customers/${acmeOpt.value}`, {
   method: 'PUT',
   headers: { 'content-type': 'application/json', Cookie: SESSION_COOKIE },
-  body: JSON.stringify({ name: custObj.name, currency: custObj.currency, default_rate_minor: custObj.default_rate_minor, active: custObj.active, email: 'billing@acme.test' }),
+  body: JSON.stringify({
+    name: custObj.name,
+    currency: custObj.currency,
+    default_rate_minor: custObj.default_rate_minor,
+    active: custObj.active,
+    email: 'billing@acme.test',
+    contacts: [{ name: 'Accounts', role: 'Billing', email: 'billing@acme.test', billing: true }],
+  }),
 });
-check('customer email round-trips via API', putC.status === 200 && (await putC.json()).email === 'billing@acme.test');
+const putBody = await putC.json();
+check('customer email round-trips via API', putC.status === 200 && putBody.email === 'billing@acme.test');
+check('the email smoke seeds a billing contact (#139)',
+  putBody.contacts.length === 1 && putBody.contacts[0].billing === true
+  && putBody.contacts[0].email === 'billing@acme.test');
 const emailRes = await fetch(`${BASE}/api/invoices/${acmeInv.id}/email`, { method: 'POST', headers: { Cookie: SESSION_COOKIE } });
 const emailBody = await emailRes.json();
 check('invoice email endpoint sends to the billing address', emailRes.status === 200 && emailBody.sent_to === 'billing@acme.test');
@@ -1821,6 +1839,10 @@ check('invoice email endpoint sends to the billing address', emailRes.status ===
 // on-file address pre-ticked and sends nothing; the dialog's own Send is what
 // posts. Opening + cancelling, then, must leave the live region and the history
 // exactly as they were.
+// Re-pull the customer register first: the dialog resolves the invoice's
+// customer from `state.customers`, which only a view change refreshes.
+window.document.getElementById('tab-customers').dispatchEvent(new window.Event('click', { bubbles: true }));
+await settle('the customer register to re-pull the saved billing contact');
 window.document.getElementById('tab-invoices').dispatchEvent(new window.Event('click', { bubbles: true }));
 // Tab is shown -> refreshInvoices() re-pulls; wait for the issued-state Email
 // action instead of racing the refresh (#265).
