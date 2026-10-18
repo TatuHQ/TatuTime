@@ -357,22 +357,25 @@ test('leaving the Invoice template section releases the framed preview synchrono
 
     assert.equal(frame.getAttribute('src'), null, 'the frame is released in the same tick');
     assert.ok(window.revokedUrls.includes(framed), 'the blob URL is revoked in the same tick');
+    const blank = document.getElementById('template-preview-frame');
+    assert.notEqual(blank, frame, 'the live frame element is replaced, so its PDF viewer is torn down');
     dom.window.close();
 });
 
 test('returning to the Invoice template section re-renders the released preview (#365)', async () => {
     const { dom, document, window, t } = setup();
     await openPreview(t, window, document);
-    const frame = document.getElementById('template-preview-frame');
-    const framed = frame.getAttribute('src');
+    const framed = document.getElementById('template-preview-frame').getAttribute('src');
 
     document.getElementById('settings-tab-users').click();
-    assert.equal(frame.getAttribute('src'), null, 'the frame is released in the same tick');
+    assert.equal(document.getElementById('template-preview-frame').getAttribute('src'), null,
+        'the frame is released in the same tick');
 
     document.getElementById('settings-tab-invoice-template').click();
-    await waitFor(() => frame.getAttribute('src') !== null && frame.getAttribute('src') !== framed, {
-        message: 'the re-shown section to render a fresh preview',
-    });
+    await waitFor(() => {
+        const frame = document.getElementById('template-preview-frame');
+        return frame.getAttribute('src') !== null && frame.getAttribute('src') !== framed;
+    }, { message: 'the re-shown section to render a fresh preview' });
     dom.window.close();
 });
 

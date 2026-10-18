@@ -627,6 +627,26 @@ function setTemplatePreviewStatus(text) {
   if (status) status.textContent = text;
 }
 
+/// A blank copy of the shell's frame (same id, class and title, no `src`).
+/// `releaseTemplatePreview` swaps the live frame for one of these: merely
+/// clearing `src` leaves the PDF viewer's document in place, and Firefox flushes
+/// layout on it when the page is navigated away — the "Layout was forced before
+/// the page was fully loaded" warning the next view's console drain catches
+/// (#365). The invoice detail panel tears its frame down the same way (it
+/// empties its host node). The clone is taken from the markup so the attributes
+/// stay declared in one place.
+let templatePreviewFrameTemplate = null;
+
+function blankTemplatePreviewFrame() {
+  const frame = $('template-preview-frame');
+  if (!frame) return null;
+  if (!templatePreviewFrameTemplate) {
+    templatePreviewFrameTemplate = frame.cloneNode(false);
+    templatePreviewFrameTemplate.removeAttribute('src');
+  }
+  return templatePreviewFrameTemplate.cloneNode(false);
+}
+
 /// The exact payload Save sends. Building it once means the preview can never
 /// drift from what would be persisted.
 export function templatePayload() {
@@ -672,7 +692,12 @@ export function releaseTemplatePreview() {
   }
   templatePreviewEtag = null;
   const frame = $('template-preview-frame');
-  if (frame) frame.removeAttribute('src');
+  if (!frame) return;
+  frame.removeAttribute('src');
+  // Replace the element: removing the PDF document from the DOM is what stops
+  // the viewer, and it must happen before the browser tears the page down.
+  const blank = blankTemplatePreviewFrame();
+  if (blank && frame.parentNode) frame.parentNode.replaceChild(blank, frame);
 }
 
 /// Open the framed PDF in a new tab. The current blob URL is the document on
