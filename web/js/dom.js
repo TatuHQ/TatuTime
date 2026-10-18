@@ -246,6 +246,7 @@ const UNKNOWN_FIELD = 'unknown field';
 
 export function showFormError(el, err) {
   const fields = err.payload?.error?.fields;
+  const code = err.payload?.error?.code;
   let text = err.message || 'The request failed.';
   if (Array.isArray(fields) && fields.length) {
     // A failure serde could not tie to a key (a body that is not JSON, or a
@@ -257,7 +258,19 @@ export function showFormError(el, err) {
     if (fields.some((f) => f.message === UNKNOWN_FIELD)) {
       text += ' — the running server is older than this page: restart or rebuild it.';
     }
+  } else if (typeof err.status === 'number' && err.status >= 500) {
+    // A 5xx is the server's own failure. `ApiError::internal` deliberately
+    // withholds the cause (paths and raw filesystem errors never reach a
+    // client), so name the contract code and the status — the details exist
+    // only in the server log. Nothing from the response body beyond the
+    // code is printed, and only `textContent` is ever assigned.
+    const label = code ? `${code}, HTTP ${err.status}` : `HTTP ${err.status}`;
+    text += ` (${label}) — check the server log for details.`;
   }
+  // A machine-readable hook for tests and screenshots: the code without
+  // parsing the prose above. `clearFormError` removes it with the text.
+  if (code) el.dataset.errorCode = code;
+  else delete el.dataset.errorCode;
   el.textContent = text;
   el.hidden = false;
   const form = el.closest('form');
@@ -280,6 +293,7 @@ export function showFormError(el, err) {
 export function clearFormError(el) {
   el.textContent = '';
   el.hidden = true;
+  delete el.dataset.errorCode;
   for (const input of el.closest('form')?.elements || []) {
     if (input.dataset?.errorMessage !== el.id) continue;
     input.removeAttribute('aria-invalid');

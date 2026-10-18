@@ -616,3 +616,90 @@ async fn bootstrap_weak_password_is_422_through_the_endpoint() {
     let (_s2, st, _) = raw(&router, "GET", "/api/auth/status", None, None).await;
     assert_eq!(st["initialised"], false);
 }
+
+/// A file under `users/` that does not decode to a `User` must not make the
+/// instance look initialised. It used to: `has_users` counted any file, so a
+/// single corrupt document refused bootstrap as `initialised` while every
+/// login scan failed with an opaque 500 — no way in at all.
+#[tokio::test]
+async fn an_undecodable_user_document_does_not_lock_the_instance_out() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("data");
+    std::fs::create_dir_all(root.join("users")).unwrap();
+    std::fs::write(root.join("users").join("broken.json"), b"not json").unwrap();
+    let store = Store::open(&root).unwrap();
+    let router = tucano_time::build_router(AppState::with_session(
+        store,
+        Arc::new(Session::new(
+            b"test-session-secret-0000000000000032".to_vec(),
+            3600,
+            false,
+        )),
+    ));
+
+    // The corrupt document is skipped: the instance is uninitialised (200,
+    // never a 500), so the GUI offers first-run setup instead of a login form
+    // that cannot work.
+    let (s, body, _) = raw(&router, "GET", "/api/auth/status", None, None).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    assert_eq!(body["initialised"], false, "{body}");
+
+    // Bootstrap is therefore open and creates the first admin...
+    let (s, body, cookie) = raw(
+        &router,
+        "POST",
+        "/api/auth/bootstrap",
+        Some(json!({"name":"Admin","email":"admin@example.com","password":"supersecret1"})),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{body}");
+    assert!(
+        cookie.unwrap_or_default().contains("tt_session="),
+        "bootstrap signs the new admin in"
+    );
+
+    // ...who can sign in while the corrupt file is still on disk.
+    let (s, body, _) = raw(
+        &router,
+        "POST",
+        "/api/auth/login",
+        Some(json!({"email":"admin@example.com","password":"supersecret1"})),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    assert_eq!(body["email"], "admin@example.com");
+
+    // With a real admin present, status reports initialised and bootstrap is
+    // refused again — the create-once guarantee still holds with the tolerant
+    // predicate.
+    let (s, body, _) = raw(&router, "GET", "/api/auth/status", None, None).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    assert_eq!(body["initialised"], true, "{body}");
+    let (s, body, _) = raw(
+        &router,
+        "POST",
+        "/api/auth/bootstrap",
+        Some(json!({"name":"X","email":"x@y.co","password":"whatever12"})),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+    assert_eq!(body["error"]["code"], "initialised", "{body}");
+
+    // The refusal persisted nothing: `broken.json` plus exactly one admin
+    // document (dot files are side indexes, not accounts).
+    let docs = std::fs::read_dir(root.join("users"))
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            let name = e.file_name().to_string_lossy().into_owned();
+            name.ends_with(".json") && !name.starts_with('.')
+        })
+        .count();
+    assert_eq!(
+        docs, 2,
+        "one broken file and exactly one admin were written"
+    );
+}

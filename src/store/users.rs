@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use uuid::Uuid;
 
-use super::io::{read_json, write_json};
+use super::io::{dir_entries, read_json, write_json};
 use super::*;
 
 impl Store {
@@ -14,27 +14,35 @@ impl Store {
         Ok(out)
     }
 
-    /// Whether any user document exists, without decoding the collection: a
-    /// `read_dir` + the same "is a document" filter as `dir_entries` (dot files
-    /// such as the email side index and `*.tmp` leftovers are not documents).
-    /// The public `GET /api/auth/status` probe answers "is the dir empty" this
-    /// way, never by deserialising every user (#256).
+    /// Whether at least one user document **decodes to a valid `User`**.
+    ///
+    /// A file under `users/` is not proof of an account: a half-restored or
+    /// hand-edited document is logged (file + reason) and skipped, so one
+    /// corrupt file can no longer make the instance look initialised while
+    /// leaving nobody able to sign in (bootstrap refused as `initialised`,
+    /// every login scan failing with an opaque 500). Dot files such as the
+    /// email side index and `*.tmp` leftovers are not documents (`dir_entries`
+    /// skips them), and the #256 directory scan — not a decode of the whole
+    /// collection — still answers the first candidate that validates.
     pub fn has_users(&self) -> Result<bool, StoreError> {
         let dir = self.doc_dir::<User>();
         if !dir.exists() {
             return Ok(false);
         }
-        for entry in std::fs::read_dir(&dir)? {
-            let path = entry?.path();
-            let name = path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or_default();
-            if !name.starts_with('.')
-                && !name.ends_with(".tmp")
-                && path.extension().and_then(|e| e.to_str()) == Some("json")
-            {
-                return Ok(true);
+        for path in dir_entries(&dir, self.max_docs)? {
+            if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                continue;
+            }
+            match read_json::<User>(&path) {
+                Ok(Some(_)) => return Ok(true),
+                Ok(None) => {}
+                // Server log only: the client never learns a path or a parse
+                // error (the one error shape stays generic).
+                Err(error) => tracing::warn!(
+                    file = %path.display(),
+                    %error,
+                    "skipping undecodable user document"
+                ),
             }
         }
         Ok(false)
@@ -228,7 +236,14 @@ mod tests {
         std::fs::write(users_dir.join(".idx.emails.json"), b"{}").unwrap();
         std::fs::write(users_dir.join("abc.json.tmp"), b"{}").unwrap();
         assert!(!store.has_users().unwrap());
-        // A real document flips it.
+        // A `*.json` document that does not decode to a `User` is not an
+        // account: the probe skips it (and logs it) instead of claiming the
+        // instance is initialised (the lockout this guards against).
+        std::fs::write(users_dir.join("broken.json"), b"not json").unwrap();
+        assert!(!store.has_users().unwrap());
+        // A real document flips it. Written directly because this test is
+        // about the scan: `put_user` itself scans the collection (and a
+        // corrupt sibling is a store error on that path).
         let user = User {
             id: Uuid::new_v4(),
             name: "A".into(),
@@ -241,7 +256,11 @@ mod tests {
             created_at: chrono::Utc::now(),
             session_version: 0,
         };
-        store.put_user(&user).unwrap();
+        std::fs::write(
+            users_dir.join(format!("{}.json", user.id)),
+            serde_json::to_vec(&user).unwrap(),
+        )
+        .unwrap();
         assert!(store.has_users().unwrap());
     }
 }

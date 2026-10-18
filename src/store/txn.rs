@@ -381,10 +381,16 @@ impl Store {
     /// share one lock, closing the double-admin TOCTOU (review A12/B4).
     pub fn put_user_if_none(&self, user: &User) -> Result<(), StoreError> {
         let _guard = self.write_lock()?;
-        // The "no users yet" guard keeps `AlreadyExists` on purpose: `api::auth`
-        // matches it to raise the `initialised` code. Folding it into the
-        // typed-error cleanup is tracked by #187.
-        if !self.list_users()?.is_empty() {
+        // The guard is *the same predicate* the public status probe and the
+        // bootstrap pre-check use (`Store::has_users`): only a decodable user
+        // document counts. A tolerant re-implementation here would let a
+        // corrupt file keep the instance unlocked while bootstrap refuses it,
+        // or the reverse; `has_users` takes no store lock, so calling it while
+        // this guard is held cannot re-enter the non-reentrant write lock.
+        // The "no users yet" answer keeps `AlreadyExists` on purpose:
+        // `api::auth` matches it to raise the `initialised` code. Folding it
+        // into the typed-error cleanup is tracked by #187.
+        if self.has_users()? {
             return Err(StoreError::AlreadyExists("initialised".into()));
         }
         write_json(&self.doc_path::<User>(&user.id.to_string()), user)?;

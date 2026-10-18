@@ -102,5 +102,38 @@ test('an ordinary field error keeps the server\'s own wording', () => {
         },
     });
     assert.equal(el.textContent, 'amount_minor: at most 100000000');
+    assert.equal(el.dataset.errorCode, 'validation_failed');
+    window.close();
+});
+
+// A 5xx carries the contract code and status, but the cause never leaves the
+// server (paths and raw filesystem errors are not client data). The GUI must
+// therefore say *where* the detail is, not invent it — and expose the code
+// structurally so a screenshot/test need not parse prose.
+test('a 500 names the code and status and points at the server log', () => {
+    const window = load();
+    const el = window.document.getElementById('expense-error');
+    const err = window.requestFailure('POST', '/expenses', response(500, null), {
+        error: { code: 'internal', message: 'the request could not be completed' },
+    });
+    window.showFormError(el, err);
+    assert.equal(
+        el.textContent,
+        'the request could not be completed (internal, HTTP 500) — check the server log for details.',
+    );
+    assert.equal(el.dataset.errorCode, 'internal');
+    assert.equal(el.hidden, false);
+    window.close();
+});
+
+test('a 4xx keeps the server message as-is and still exposes its code', () => {
+    const window = load();
+    const el = window.document.getElementById('expense-error');
+    const err = window.requestFailure('POST', '/expenses', response(422, null), {
+        error: { code: 'validation_failed', message: 'payload failed validation' },
+    });
+    window.showFormError(el, err);
+    assert.equal(el.textContent, 'payload failed validation');
+    assert.equal(el.dataset.errorCode, 'validation_failed');
     window.close();
 });

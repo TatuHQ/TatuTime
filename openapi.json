@@ -3057,7 +3057,8 @@
                   ],
                   "properties": {
                     "initialised": {
-                      "type": "boolean"
+                      "type": "boolean",
+                      "description": "True when at least one document under users/ decodes to a valid account. A file that cannot be decoded is logged server-side and skipped, so it does not make the instance look initialised while leaving nobody able to sign in."
                     }
                   },
                   "additionalProperties": false
