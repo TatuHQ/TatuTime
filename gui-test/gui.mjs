@@ -1140,6 +1140,12 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
     && String(byId('ip-frame').getAttribute('src')).startsWith('blob:')
     && byId('ip-pdf-state').hidden === true);
   check('draft invoice hides the Get paid box (#357)', byId('ip-getpaid').hidden === true);
+  // The detail panel renders the PDF and the timeline as two concurrent
+  // fetches; wait for the entry this check reads instead of racing the fetch
+  // that may not have resolved with the PDF yet (#265).
+  await waitFor(() => /Invoice created\./.test(byId('ip-timeline').textContent), {
+    message: 'the draft history to render its creation entry',
+  });
   check('a draft history renders its creation entry (#349)',
     /Invoice created\./.test(byId('ip-timeline').textContent));
   // Mark as sent on a draft is refused (409) and reported plainly (#349).
