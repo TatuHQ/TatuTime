@@ -4,7 +4,7 @@
 
 import { api, fetchAll } from './api.js';
 import { refreshCalendar } from './calendar.js';
-import { $, addDays, announce, askAlert, askConfirm, askPrompt, clearFormError, el, isoDate, mondayOf, rowAction, showFormError, statusChip, ubuntuIcon } from './dom.js';
+import { $, addDays, announce, askAlert, askConfirm, askPrompt, clearFormError, el, isoDate, mondayOf, panelRefresh, rowAction, showFormError, statusChip, ubuntuIcon } from './dom.js';
 import { focusInvoice } from './invoices.js';
 import { refreshNotifications } from './notifications.js';
 import { showTimesheet } from './route.js';
@@ -114,7 +114,13 @@ export function navigateDay(delta) {
   refreshDay();
 }
 
-export async function refreshDay() {
+export function refreshDay() {
+  // QA-10: a failed load renders the stale-data banner in the Day view instead
+  // of silently leaving the previous rows looking current.
+  return panelRefresh('panel-day', 'the day view', refreshDayBody);
+}
+
+async function refreshDayBody() {
   const date = dayDate();
   if (!date) return;
   const isDayCurrent = daySeq();
@@ -346,6 +352,11 @@ export async function removeEntry(e) {
 
 export async function saveEntry(evt) {
   evt.preventDefault();
+  // QA-01: a double click (or a second Enter) must not POST the entry twice.
+  // `entrySaving` already exists for the dialog's Escape/close guards, so the
+  // same in-flight flag is the single-flight gate: the second submit returns
+  // before it reads the form or issues any request.
+  if (entrySaving) return;
   clearFormError($('entry-error'));
   const id = $('entry-id').value;
   const projectId = $('entry-project').value;
@@ -363,6 +374,11 @@ export async function saveEntry(evt) {
     billable: $('entry-billable').checked,
   };
   entrySaving = true;
+  // Readable busy state: the control stays labelled "Save entry" but is
+  // disabled and announced as busy for exactly the request's lifetime.
+  const saveButton = $('entry-save');
+  saveButton.disabled = true;
+  saveButton.setAttribute('aria-busy', 'true');
   try {
     if (id) {
       await api.put(`/entries/${id}`, body);
@@ -385,6 +401,8 @@ export async function saveEntry(evt) {
     showFormError($('entry-error'), err);
   } finally {
     entrySaving = false;
+    saveButton.disabled = false;
+    saveButton.removeAttribute('aria-busy');
   }
 }
 
@@ -455,7 +473,13 @@ export function weekShort(dateStr) {
   return `${String(d).padStart(2, '0')} ${MONTH_NAMES[m - 1]}`; // #189: one month table
 }
 
-export async function refreshWeek() {
+export function refreshWeek() {
+  // QA-10: same contract as the Day view -- stale rows stay, a visible banner
+  // names the failure and offers Retry.
+  return panelRefresh('panel-week', 'the week view', refreshWeekBody);
+}
+
+async function refreshWeekBody() {
   const anchor = $('week-date').value;
   if (!anchor) return;
   const seq = ++weekState.seq;

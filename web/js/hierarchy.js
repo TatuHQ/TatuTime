@@ -5,7 +5,7 @@
 import { API_BASE, api } from './api.js';
 import { iw } from './billing.js';
 import { refreshPanel, switchTab } from './boot.js';
-import { $, announce, askAlert, askConfirm, clearFormError, el, fillSelect, formatMoney, showFormError, statusChip } from './dom.js';
+import { $, announce, askAlert, askConfirm, clearFormError, el, fillSelect, formatMoney, panelRefresh, showFormError, singleFlight, statusChip } from './dom.js';
 import { ed } from './invoices.js';
 import { createSeqGuard } from './seq.js';
 import { customerName, fillCustomerSelect, fillProjectSelect, loadCustomers, loadProjects, state } from './state.js';
@@ -59,6 +59,17 @@ export async function refreshCustomerTable() {
       ]),
     );
   }
+}
+
+// QA-10: the Customers view's navigation refresh (fetch + render + pickers)
+// runs through the shared stale-panel wrapper, so a failed load leaves the rows
+// and shows the visible banner with Retry.
+export function refreshCustomersView() {
+  return panelRefresh('panel-customers', 'the customer register', async () => {
+    await loadCustomers();
+    await refreshCustomerTable();
+    await refreshCustomerPickers();
+  });
 }
 
 export function startCustomerEdit(c) {
@@ -137,6 +148,11 @@ export function setContacts(list) {
 
 export async function saveCustomer(evt) {
   evt.preventDefault();
+  // QA-01: a double click must not create two customers.
+  return singleFlight($('customer-save'), saveCustomerBody);
+}
+
+async function saveCustomerBody() {
   clearFormError($('customer-error'));
   const id = $('customer-id').value;
   // Payment terms (#116): the select carries the kind; only `custom` sends days.
@@ -330,6 +346,14 @@ export async function refreshProjectTable() {
       : 'No projects yet. Use + Project to add one.';
   }
   updateHierarchyActions();
+}
+
+// QA-10: the Projects view's navigation refresh, through the shared wrapper.
+export function refreshProjectsView() {
+  return panelRefresh('panel-projects', 'the projects register', async () => {
+    await loadCustomers();
+    await refreshProjectTable();
+  });
 }
 
 export function fillParentCustomers(select, selectedId) {
@@ -544,6 +568,14 @@ export async function refreshTaskTable() {
   }
 }
 
+// QA-10: the Tasks view's navigation refresh, through the shared wrapper.
+export function refreshTasksView() {
+  return panelRefresh('panel-tasks', 'the tasks register', async () => {
+    await loadCustomers();
+    await refreshTaskTable();
+  });
+}
+
 export async function startTaskEdit(t) {
   // #182: a task knows its own parents (rows can outlive the filter state).
   await fillTaskParents(t.customer_id, t.project_code, true);
@@ -656,8 +688,14 @@ export async function refreshCustomerPickers() {
 
 // ------------------------------------------------------------- reports ---
 
-export async function runReport(evt) {
+export function runReport(evt) {
   evt.preventDefault();
+  // QA-10: a failed report fetch keeps the previous rows and shows the banner.
+  // The form listener has no caller to hand the rejection to, so it stops here.
+  return panelRefresh('panel-reports', 'the report', runReportBody).catch(() => {});
+}
+
+async function runReportBody() {
   const from = $('report-from').value;
   const to = $('report-to').value;
   const group = $('report-group').value;

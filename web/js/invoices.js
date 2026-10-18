@@ -5,7 +5,7 @@
 import { api } from './api.js';
 import { catalogItems } from './billing.js';
 import { startApp, switchTab } from './boot.js';
-import { $, announce, askConfirm, askPrompt, clearFormError, el, formatMoney, rowAction, showFormError, statusChip } from './dom.js';
+import { $, announce, askConfirm, askPrompt, clearFormError, el, formatMoney, panelRefresh, rowAction, showFormError, singleFlight, statusChip } from './dom.js';
 import { convertMinor, currencyCode, fetchRateQuote } from './fx.js';
 import { createSeqGuard } from './seq.js';
 import { customerName, state } from './state.js';
@@ -16,7 +16,13 @@ const invoiceSeq = createSeqGuard();
 // -------------------------------------------------------------- invoices ---
 
 
-export async function refreshInvoices() {
+export function refreshInvoices() {
+  // QA-10: a failed load keeps the last invoice rows and shows the visible
+  // banner with Retry instead of leaving the register looking current.
+  return panelRefresh('panel-invoices', 'the invoice register', refreshInvoicesBody);
+}
+
+async function refreshInvoicesBody() {
   // #188: GET /invoices is admin-tier (src/lib.rs). Previously an un-caught
   // 403 rejection aborted member boot (Promise.all in startApp), so members
   // never got the page title, timer wiring or version label.
@@ -1230,6 +1236,11 @@ export function edCancel() {
 }
 
 export async function edSave() {
+  // QA-01: a double click on Save draft must not create two drafts.
+  return singleFlight($('ed-save'), edSaveBody);
+}
+
+async function edSaveBody() {
   clearFormError($('ed-error'));
   const manual = [...$('ed-lines').querySelectorAll('tbody tr')]
     .map((r) => r.__read?.())

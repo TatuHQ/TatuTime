@@ -7,7 +7,7 @@ import { calState, refreshTimeCal, shiftMonth } from './calendar.js';
 import { $, addDays, announce, clearFormError, decorateUbuntuButton, isoDate, mondayOf } from './dom.js';
 import { ADD_CATEGORY_VALUE, addCategory, addExpenseCategory, fillCategorySelect, refreshCategories, refreshExpenses, refreshSubmissions, resetCategoryForm, resetExpenseForm, saveExpense, submitWeek } from './expenses.js';
 import { refreshExpenseConversion, resetExpenseConversion, showConverted } from './fx.js';
-import { cancelCustomerEdit, cancelProjectEdit, cancelTaskEdit, contactRow, fillParentCustomers, fillTaskParents, prefillProjectParent, refreshCustomerPickers, refreshCustomerTable, refreshProjectTable, refreshTaskTable, runReport, saveCustomer, saveProject, saveTask } from './hierarchy.js';
+import { cancelCustomerEdit, cancelProjectEdit, cancelTaskEdit, contactRow, fillParentCustomers, fillTaskParents, prefillProjectParent, refreshCustomerPickers, refreshCustomerTable, refreshCustomersView, refreshProjectTable, refreshProjectsView, refreshTaskTable, refreshTasksView, runReport, saveCustomer, saveProject, saveTask } from './hierarchy.js';
 import { closeDeliveryRecord, closeInvoicePreview, dash, dashApplyColumns, downloadInvoicePdf, ed, edCancel, edLineRow, edOpen, edRecalc, edSave, invoicePreview, markInvoiceSent, refreshInvoiceSummary, refreshInvoices, sendInvoiceEmail } from './invoices.js';
 import { markNotificationsRead, refreshNotifications } from './notifications.js';
 import { initReceiptPreview } from './receipt.js';
@@ -44,20 +44,13 @@ export function refreshPanel(tabId) {
     },
     'tab-expenses': refreshExpenses,
     'tab-submissions': refreshSubmissions,
-    'tab-customers': async () => {
-      await loadCustomers();
-      await refreshCustomerTable();
-      await refreshCustomerPickers();
-    },
+    // QA-10: the Setup registers refresh through their view wrappers, so a
+    // failed navigation load leaves the last rows and shows the visible banner
+    // with Retry (the wrapper owns load + render + the stale-panel contract).
+    'tab-customers': refreshCustomersView,
     // #182: the hierarchy sections pull their own scoped data on show.
-    'tab-projects': async () => {
-      await loadCustomers();
-      await refreshProjectTable();
-    },
-    'tab-tasks': async () => {
-      await loadCustomers();
-      await refreshTaskTable();
-    },
+    'tab-projects': refreshProjectsView,
+    'tab-tasks': refreshTasksView,
     'tab-settings': refreshSettings,
   }[tabId];
   // #188: panel refreshes were dispatched un-awaited and un-caught; any
