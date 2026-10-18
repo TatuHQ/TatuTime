@@ -27,11 +27,13 @@ async fn category_and_expense_crud_with_references() {
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({})).await;
 
+    // Not a seeded default: "Travel" already exists from the list call, and
+    // duplicate names are now a 409 (SET-12).
     let (sc, cat) = json_req(
         &app,
         "POST",
         "/api/categories",
-        Some(json!({"name":"Travel"})),
+        Some(json!({"name":"Conference"})),
     )
     .await;
     assert_eq!(sc, StatusCode::CREATED);
@@ -715,6 +717,100 @@ async fn category_invalid_shapes_are_422_without_persistence() {
             .any(|c| c["id"] == cat["id"] && c["name"] == "Travel"),
         "refused update must not change the stored category"
     );
+}
+
+/// SET-12: category names are unique org-wide, trimmed and case-insensitive on
+/// both create and rename, with the row being renamed excluded from its own
+/// check. A duplicate is a 409 `conflict` and persists nothing.
+#[tokio::test]
+async fn category_names_are_unique_case_insensitively_with_self_exclusion() {
+    let (app, _d) = app().await;
+    let (s1, first) = json_req(
+        &app,
+        "POST",
+        "/api/categories",
+        Some(json!({"name":"Food"})),
+    )
+    .await;
+    assert_eq!(s1, StatusCode::CREATED, "{first}");
+    let first_id = first["id"].as_str().unwrap().to_string();
+
+    for duplicate in ["Food", " food ", "FOOD"] {
+        let (s, body) = json_req(
+            &app,
+            "POST",
+            "/api/categories",
+            Some(json!({"name": duplicate})),
+        )
+        .await;
+        assert_eq!(s, StatusCode::CONFLICT, "{duplicate}: {body}");
+        assert_eq!(body["error"]["code"], "conflict", "{body}");
+        assert!(
+            body["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("already exists"),
+            "{body}"
+        );
+    }
+    let (_, list) = json_req(&app, "GET", "/api/categories", None).await;
+    let food_rows = list["categories"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|c| c["name"].as_str().unwrap().eq_ignore_ascii_case("food"))
+        .count();
+    assert_eq!(food_rows, 1, "duplicates never persist: {list}");
+
+    let (s2, second) = json_req(
+        &app,
+        "POST",
+        "/api/categories",
+        Some(json!({"name":"Travel"})),
+    )
+    .await;
+    assert_eq!(s2, StatusCode::CREATED, "{second}");
+    let second_id = second["id"].as_str().unwrap().to_string();
+
+    // Renaming onto another row's name (any case, padded) is refused.
+    let (s3, body3) = json_req(
+        &app,
+        "PUT",
+        &format!("/api/categories/{second_id}"),
+        Some(json!({"name":" food "})),
+    )
+    .await;
+    assert_eq!(s3, StatusCode::CONFLICT, "{body3}");
+    assert_eq!(body3["error"]["code"], "conflict", "{body3}");
+    let (_, after_conflict) = json_req(&app, "GET", "/api/categories", None).await;
+    let kept = after_conflict["categories"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["id"] == second_id.as_str())
+        .unwrap();
+    assert_eq!(kept["name"], "Travel", "refused rename persists nothing");
+
+    // A different case of its OWN name is a no-op rename, not a conflict.
+    let (s4, renamed) = json_req(
+        &app,
+        "PUT",
+        &format!("/api/categories/{second_id}"),
+        Some(json!({"name":"TRAVEL"})),
+    )
+    .await;
+    assert_eq!(s4, StatusCode::OK, "{renamed}");
+    assert_eq!(renamed["name"], "TRAVEL");
+
+    let (s5, first_renamed) = json_req(
+        &app,
+        "PUT",
+        &format!("/api/categories/{first_id}"),
+        Some(json!({"name":"FOOD"})),
+    )
+    .await;
+    assert_eq!(s5, StatusCode::OK, "{first_renamed}");
+    assert_eq!(first_renamed["name"], "FOOD");
 }
 
 /// #262 Tier 2: the claim workflow's error shapes — submit-twice conflicts, a

@@ -195,6 +195,96 @@ async fn admin_config_roundtrip_precedence_and_guards() {
     assert_eq!(sm, StatusCode::FORBIDDEN);
 }
 
+/// SET-13: `Str`/`Csv` values are trimmed on write and a whitespace-only
+/// `org_name` is a 422 naming the field (documents must never render an empty
+/// issuer). `base_currency: null` still clears the key.
+#[tokio::test]
+async fn config_values_are_trimmed_and_blank_org_name_is_refused() {
+    let (app, d) = app().await;
+    let (s_blank, body_blank) = json_req(
+        &app,
+        "PUT",
+        "/api/admin/config",
+        Some(json!({"org_name": "   "})),
+    )
+    .await;
+    assert_eq!(s_blank, StatusCode::UNPROCESSABLE_ENTITY, "{body_blank}");
+    assert_eq!(body_blank["error"]["code"], "validation_failed");
+    assert_eq!(body_blank["error"]["fields"][0]["field"], "org_name");
+    assert!(
+        body_blank["error"]["fields"][0]["message"]
+            .as_str()
+            .unwrap()
+            .contains("org_name"),
+        "{body_blank}"
+    );
+    let cfg_path = d.path().join("data").join("config.json");
+    assert!(
+        !cfg_path.exists()
+            || !std::fs::read_to_string(&cfg_path)
+                .unwrap()
+                .contains("org_name"),
+        "a refused blank org_name persists nothing"
+    );
+
+    // Padded values are stored trimmed, for both `Str` and `Csv`.
+    let (s_trim, body_trim) = json_req(
+        &app,
+        "PUT",
+        "/api/admin/config",
+        Some(json!({
+            "org_name": "  Acme Ltd  ",
+            "sso_allowed_domains": " acme.test , other.test "
+        })),
+    )
+    .await;
+    assert_eq!(s_trim, StatusCode::OK, "{body_trim}");
+    let persisted = std::fs::read_to_string(&cfg_path).unwrap();
+    assert!(persisted.contains("\"Acme Ltd\""), "{persisted}");
+    assert!(!persisted.contains("  Acme"), "{persisted}");
+    let (_s_eff, eff) = json_req(&app, "GET", "/api/admin/config", None).await;
+    let org = eff["config"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["key"] == "org_name")
+        .unwrap();
+    assert_eq!(org["value"], "Acme Ltd");
+    let domains = eff["config"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["key"] == "sso_allowed_domains")
+        .unwrap();
+    assert_eq!(domains["value"], "acme.test , other.test");
+
+    // `null` still clears an optional currency key.
+    let (s_set, _) = json_req(
+        &app,
+        "PUT",
+        "/api/admin/config",
+        Some(json!({"base_currency": "EUR"})),
+    )
+    .await;
+    assert_eq!(s_set, StatusCode::OK);
+    let (s_clear, clear_body) = json_req(
+        &app,
+        "PUT",
+        "/api/admin/config",
+        Some(json!({"base_currency": null})),
+    )
+    .await;
+    assert_eq!(s_clear, StatusCode::OK, "{clear_body}");
+    let (_s_after, after) = json_req(&app, "GET", "/api/admin/config", None).await;
+    let currency = after["config"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["key"] == "base_currency")
+        .unwrap();
+    assert_eq!(currency["value"], serde_json::Value::Null);
+}
+
 /// Subtask D: the `base_currency` display preference lives in the appconfig
 /// whitelist (config.json, not the vault). It is ISO 4217 shaped (exactly three
 /// ASCII letters), normalised to canonical uppercase on write, unset by

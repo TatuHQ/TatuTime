@@ -654,6 +654,70 @@ async fn admin_email_put_validates_and_requires_the_vault() {
     assert_eq!(after["configured"], false);
 }
 
+/// SET-09: `host` and `username` are bounded server-side (255 chars, matching
+/// the form) with a 422 and nothing persisted, and the audit subject is
+/// truncated so an oversized host never lands in the log verbatim.
+#[tokio::test]
+async fn admin_email_bounds_fields_and_truncates_the_audit_subject() {
+    let (app, d) = vault_client_dynamic().await;
+    let (s_host, body_host) = json_req(
+        &app,
+        "PUT",
+        "/api/admin/email",
+        Some(json!({"host": "h".repeat(256), "port": 25})),
+    )
+    .await;
+    assert_eq!(s_host, StatusCode::UNPROCESSABLE_ENTITY, "{body_host}");
+    assert_eq!(body_host["error"]["code"], "validation_failed");
+    assert_eq!(body_host["error"]["fields"][0]["field"], "host");
+
+    let (s_user, body_user) = json_req(
+        &app,
+        "PUT",
+        "/api/admin/email",
+        Some(json!({
+            "host": "relay.test",
+            "port": 25,
+            "username": "u".repeat(256)
+        })),
+    )
+    .await;
+    assert_eq!(s_user, StatusCode::UNPROCESSABLE_ENTITY, "{body_user}");
+    assert_eq!(body_user["error"]["fields"][0]["field"], "username");
+
+    // Neither rejected request persisted anything.
+    let (_sg, before) = json_req(&app, "GET", "/api/admin/email", None).await;
+    assert_eq!(before["configured"], false, "{before}");
+
+    // A long but within-cap host is accepted; the audit keeps only a short
+    // prefix plus an ellipsis.
+    let host = format!("{}.test", "a".repeat(195)); // 200 chars
+    let (sp, saved) = json_req(
+        &app,
+        "PUT",
+        "/api/admin/email",
+        Some(json!({"host": host, "port": 25})),
+    )
+    .await;
+    assert_eq!(sp, StatusCode::OK, "{saved}");
+    assert_eq!(saved["host"], host.as_str());
+
+    let audit =
+        std::fs::read_to_string(d.path().join("data").join("audit.log")).expect("audit log exists");
+    let line = audit
+        .lines()
+        .rfind(|l| l.contains("email_settings_updated"))
+        .expect("audit line for the settings update");
+    let event: Value = serde_json::from_str(line).expect("audit line is JSON");
+    let subject = event["subject"].as_str().unwrap();
+    assert!(
+        subject.chars().count() <= 65,
+        "audit subject stays short: {subject}"
+    );
+    assert!(subject.ends_with('…'), "truncation marker: {subject}");
+    assert_ne!(subject, host, "the full host is not recorded");
+}
+
 #[tokio::test]
 async fn admin_email_test_unconfigured_configured_and_failure() {
     // Unconfigured: 422 email_not_configured and no send.

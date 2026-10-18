@@ -2745,7 +2745,7 @@
         }
       },
       "Conflict": {
-        "description": "The operation conflicts with existing state (duplicate, or referenced by entries).",
+        "description": "The operation conflicts with existing state: a duplicate name/code, a record still referenced, or a full collection (codes conflict / collection_full).",
         "content": {
           "application/json": {
             "schema": {
@@ -6614,7 +6614,7 @@
         ],
         "responses": {
           "409": {
-            "$ref": "#/components/responses/CollectionFull"
+            "$ref": "#/components/responses/Conflict"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -6680,6 +6680,9 @@
           },
           "403": {
             "$ref": "#/components/responses/CsrfForbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
           },
           "200": {
             "description": "Updated.",
@@ -7253,6 +7256,7 @@
                   "host": {
                     "type": "string",
                     "minLength": 1,
+                    "maxLength": 255,
                     "description": "SMTP hostname or address; no spaces or control characters."
                   },
                   "port": {
@@ -7262,6 +7266,7 @@
                   },
                   "username": {
                     "type": "string",
+                    "maxLength": 255,
                     "description": "Optional; omitted keeps the stored username."
                   },
                   "password": {
@@ -8063,7 +8068,7 @@
           "invoices"
         ],
         "summary": "Preview an unsaved invoice template as a PDF (#116); admin only",
-        "description": "Renders the CANDIDATE template from the request body against the shared sample invoice, the saved org profile (branding/accent/sender) and the sample customer's payment details, returning the PDF inline. Validates exactly like PUT (unknown %variables%, oversized fields, control characters in the subject, malformed payment terms) with the same 422 shape and persists nothing: no template, invoice, PDF archive or timeline entry. A command on existing configuration, so 200. The ETag is the SHA-256 of the rendered bytes, a fingerprint of template + org the GUI can compare to skip a redundant render.",
+        "description": "Renders the CANDIDATE template from the request body against the shared sample invoice, the saved org profile (branding/accent/sender) and the sample customer's payment details, returning the PDF inline. Validates exactly like PUT (unknown %variables%, oversized fields, control characters in the subject, malformed payment terms) with the same 422 shape and persists nothing: no template, invoice, PDF archive or timeline entry. A command on existing configuration, so 200. The ETag is keyed on the inputs (canonical candidate template + resolved org + renderer/sample version), so a matching If-None-Match (including `*` and comma-separated lists) is answered 304 with no body before any render; the same ETag is returned on both responses.",
         "requestBody": {
           "required": true,
           "content": {
@@ -8087,7 +8092,7 @@
             "description": "Rendered preview PDF of the candidate template.",
             "headers": {
               "ETag": {
-                "description": "SHA-256 of the rendered bytes, quoted."
+                "description": "SHA-256 of the preview inputs (candidate template + resolved org + renderer/sample version), quoted."
               },
               "Content-Disposition": {
                 "description": "inline; filename=\"invoice-template-preview.pdf\""
@@ -8099,6 +8104,14 @@
                   "type": "string",
                   "format": "binary"
                 }
+              }
+            }
+          },
+          "304": {
+            "description": "Not modified: If-None-Match matched the input-keyed ETag, so no PDF was rendered and the body is empty. The same ETag is returned.",
+            "headers": {
+              "ETag": {
+                "description": "The same input-keyed ETag as the 200 response."
               }
             }
           },

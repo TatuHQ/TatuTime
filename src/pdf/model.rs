@@ -27,6 +27,26 @@ impl Org {
             accent: String::new(),
         }
     }
+
+    /// Compose the document identity from the stored org profile, profile-first:
+    /// a non-blank `profile.name` wins, otherwise `fallback_name` (the
+    /// `org_name` config key). This is the ONE resolver behind invoice documents,
+    /// invoice emails and the overdue-reminder job (SET-03): a Company-name
+    /// change reaches every surface without duplicating the precedence rule.
+    #[must_use]
+    pub fn resolve(profile: &crate::domain::OrgProfile, fallback_name: &str) -> Self {
+        let name = if profile.name.trim().is_empty() {
+            fallback_name.to_string()
+        } else {
+            profile.name.trim().to_string()
+        };
+        Self {
+            name,
+            legal_id: profile.legal_id.clone(),
+            address: profile.address.clone(),
+            accent: profile.accent.clone(),
+        }
+    }
 }
 
 /// Parse a '#rrggbb' accent into PDF floats (case-insensitive, no alpha).

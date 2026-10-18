@@ -217,18 +217,60 @@ pub(crate) fn render_sample_pdf(template: &InvoiceTemplate, org: &crate::pdf::Or
     crate::pdf::render_invoice_pdf(&sample_document(template, org))
 }
 
+/// Bumped whenever the sample fixture or the renderer changes in a way that can
+/// alter the bytes. Part of the input-keyed `ETag`, so a renderer upgrade can
+/// never leave a stale tag looking current (SET-06).
+const PREVIEW_ETAG_VERSION: u32 = 1;
+
+/// The preview `ETag`, keyed on the **inputs** — canonical candidate-template
+/// JSON, the resolved org profile and the renderer/sample version — so it can be
+/// evaluated *before* rendering (SET-06). The sample invoice/customer are pure
+/// constants covered by `PREVIEW_ETAG_VERSION`.
+fn preview_etag(template: &InvoiceTemplate, org: &crate::pdf::Org) -> String {
+    use sha2::{Digest, Sha256};
+    let inputs = serde_json::json!({
+        "version": PREVIEW_ETAG_VERSION,
+        "template": template,
+        "org": {
+            "name": org.name,
+            "legal_id": org.legal_id,
+            "address": org.address,
+            "accent": org.accent,
+        },
+    });
+    let canonical = serde_json::to_vec(&inputs).unwrap_or_default();
+    crate::hex_lower(&Sha256::digest(canonical))
+}
+
+/// Whether an `If-None-Match` header matches `etag`. Handles the `*` form, a
+/// comma-separated list and weak validators (`W/"…"`), exactly the shapes a
+/// browser or a fetch client may send. A malformed header simply misses.
+fn if_none_match_matches(headers: &axum::http::HeaderMap, etag: &str) -> bool {
+    let Some(raw) = headers
+        .get(axum::http::header::IF_NONE_MATCH)
+        .and_then(|v| v.to_str().ok())
+    else {
+        return false;
+    };
+    raw.split(',').map(str::trim).any(|candidate| {
+        let candidate = candidate.strip_prefix("W/").unwrap_or(candidate);
+        candidate == "*" || candidate.trim_matches('"') == etag
+    })
+}
+
 /// `POST /admin/invoice-template/preview` — render the **unsaved** candidate
 /// template as a PDF, using the saved org profile (branding/accent/sender) and
 /// the shared sample invoice.
 ///
 /// Validates exactly like `PUT` (identical 422 `validation_failed` shapes) and
 /// **persists nothing**: no template, invoice, archive or timeline. A command
-/// on existing configuration, so **200** (C8), not 201. The `ETag` is the
-/// SHA-256 of the rendered bytes, and therefore a fingerprint of
-/// template + org + sample: the GUI can skip a redundant render when it is
-/// unchanged.
+/// on existing configuration, so **200** (C8), not 201. The `ETag` is a SHA-256
+/// of the inputs (candidate template + resolved org + renderer/sample version),
+/// so a conditional request can be answered **304 with no body** before any
+/// rendering happens; the same `ETag` rides both responses (SET-06).
 pub async fn invoice_template_preview(
     State(app): State<AppState>,
+    headers: axum::http::HeaderMap,
     ValidJson(template): ValidJson<InvoiceTemplate>,
 ) -> ApiResult {
     let errors = validate_template(&template);
@@ -236,9 +278,17 @@ pub async fn invoice_template_preview(
         return Err(ApiError::validation(errors));
     }
     let org = super::org_for(&app)?;
+    let etag = preview_etag(&template, &org);
+    let quoted = format!("\"{etag}\"");
+    if if_none_match_matches(&headers, &etag) {
+        tracing::debug!("invoice template preview not modified");
+        return Ok((
+            StatusCode::NOT_MODIFIED,
+            [(axum::http::header::ETAG, quoted)],
+        )
+            .into_response());
+    }
     let bytes = render_sample_pdf(&template, &org);
-    use sha2::{Digest, Sha256};
-    let etag = crate::hex_lower(&Sha256::digest(&bytes));
     tracing::debug!(
         bytes = bytes.len(),
         "invoice template pdf preview (candidate, nothing persisted)"
@@ -254,7 +304,7 @@ pub async fn invoice_template_preview(
                 axum::http::header::CONTENT_DISPOSITION,
                 "inline; filename=\"invoice-template-preview.pdf\"".to_string(),
             ),
-            (axum::http::header::ETAG, format!("\"{etag}\"")),
+            (axum::http::header::ETAG, quoted),
         ],
         bytes,
     )

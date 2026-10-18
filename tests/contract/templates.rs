@@ -430,6 +430,17 @@ async fn preview_req(
     body: Value,
     cookie: Option<&str>,
 ) -> (StatusCode, axum::http::HeaderMap, Vec<u8>) {
+    preview_req_conditional(app, body, cookie, None).await
+}
+
+/// The same request with an optional `If-None-Match`, for the 304 path
+/// (SET-06).
+async fn preview_req_conditional(
+    app: &Client,
+    body: Value,
+    cookie: Option<&str>,
+    if_none_match: Option<&str>,
+) -> (StatusCode, axum::http::HeaderMap, Vec<u8>) {
     let mut b = axum::http::Request::builder()
         .method("POST")
         .uri("/api/admin/invoice-template/preview")
@@ -437,6 +448,9 @@ async fn preview_req(
         .header(header::CONTENT_TYPE, "application/json");
     if let Some(c) = cookie {
         b = b.header(header::COOKIE, c);
+    }
+    if let Some(tag) = if_none_match {
+        b = b.header(header::IF_NONE_MATCH, tag);
     }
     let res = app
         .router
@@ -526,6 +540,57 @@ async fn template_preview_renders_a_pdf_with_no_invoice_in_the_store() {
     // redundant render.
     let (_, again, _) = preview_req(&app, body, Some(&app.cookie)).await;
     assert_eq!(again[header::ETAG], headers[header::ETAG]);
+}
+
+/// SET-06: the preview ETag is a real conditional request. It is derived from
+/// the inputs, so a matching `If-None-Match` (exact, `*` or a list) answers 304
+/// with no body before any render; a changed candidate yields a new tag.
+#[tokio::test]
+async fn template_preview_honours_if_none_match_with_304() {
+    let (app, _d) = app().await;
+    let body = json!({
+        "subject": "Conditional %invoice_number%",
+        "body": "Body CONDITIONAL",
+        "footer": "Footer CONDITIONAL",
+        "payment_terms": null
+    });
+    let (s1, h1, bytes1) = preview_req(&app, body.clone(), Some(&app.cookie)).await;
+    assert_eq!(s1, StatusCode::OK, "{}", String::from_utf8_lossy(&bytes1));
+    let etag = h1[header::ETAG].to_str().unwrap().to_string();
+    assert!(!bytes1.is_empty());
+
+    // Exact validator: 304, empty body, same ETag.
+    let (s2, h2, bytes2) =
+        preview_req_conditional(&app, body.clone(), Some(&app.cookie), Some(&etag)).await;
+    assert_eq!(s2, StatusCode::NOT_MODIFIED);
+    assert!(bytes2.is_empty(), "304 carries no body");
+    assert_eq!(h2[header::ETAG], h1[header::ETAG]);
+
+    // The `*` form matches any current representation.
+    let (s_star, _, star_body) =
+        preview_req_conditional(&app, body.clone(), Some(&app.cookie), Some("*")).await;
+    assert_eq!(s_star, StatusCode::NOT_MODIFIED);
+    assert!(star_body.is_empty());
+
+    // A comma-separated list is honoured, including a weak validator.
+    let list = format!("\"deadbeef\", W/{etag}");
+    let (s_list, _, list_body) =
+        preview_req_conditional(&app, body.clone(), Some(&app.cookie), Some(&list)).await;
+    assert_eq!(s_list, StatusCode::NOT_MODIFIED);
+    assert!(list_body.is_empty());
+
+    // A different candidate is a different input, hence a different ETag and
+    // a fresh 200 body.
+    let changed = json!({
+        "subject": "Conditional %invoice_number%",
+        "body": "Body CHANGED",
+        "footer": "Footer CONDITIONAL",
+        "payment_terms": null
+    });
+    let (s3, h3, bytes3) = preview_req(&app, changed, Some(&app.cookie)).await;
+    assert_eq!(s3, StatusCode::OK);
+    assert_ne!(h3[header::ETAG], h1[header::ETAG], "inputs changed the tag");
+    assert!(!bytes3.is_empty());
 }
 
 #[tokio::test]

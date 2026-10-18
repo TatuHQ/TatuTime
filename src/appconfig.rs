@@ -67,7 +67,7 @@ pub const KEYS: &[KeyDef] = &[
         kind: Kind::Str {
             default: "TucanoTime",
         },
-        description: "Issuing organisation shown on invoice emails and PDFs (#113)",
+        description: "Fallback organisation name, used only when the Company name is blank (#138, #113)",
     },
     KeyDef {
         name: "sso_admin_group",
@@ -146,6 +146,24 @@ pub fn key_def(name: &str) -> Option<&'static KeyDef> {
 pub struct AppConfig {
     stored: Map<String, Value>,
     path: PathBuf,
+}
+
+/// A refused `PUT /admin/config`: the offending key (when there is one) and a
+/// client-safe message. The key becomes the `FieldError.field`, so the caller
+/// learns which knob failed without any filesystem detail (SET-13).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfigError {
+    pub key: Option<String>,
+    pub message: String,
+}
+
+impl ConfigError {
+    fn keyed(key: &str, message: impl Into<String>) -> Self {
+        Self {
+            key: Some(key.to_string()),
+            message: message.into(),
+        }
+    }
 }
 
 impl AppConfig {
@@ -276,7 +294,10 @@ impl AppConfig {
     }
 
     /// Validate one whitelisted patch value against its kind. Returns the
-    /// normalised value to store, or an error message for the API.
+    /// normalised value to store, or an error message for the API. `Str`/`Csv`
+    /// values are trimmed, and a `Str` whose kind carries a non-empty default
+    /// (a required identity such as `org_name`) refuses a whitespace-only value
+    /// instead of persisting a blank that would render an empty issuer (#SET-13).
     pub fn validate(def: &'static KeyDef, value: &Value) -> Result<Value, String> {
         match (def.kind, value) {
             (Kind::Int { min, max, .. }, Value::Number(n)) => match n.as_i64() {
@@ -285,10 +306,17 @@ impl AppConfig {
                 None => Err("not an integer".into()),
             },
             (Kind::Csv, Value::String(s)) | (Kind::Str { .. }, Value::String(s)) => {
-                if s.len() > 500 {
+                let trimmed = s.trim();
+                if trimmed.len() > 500 {
                     return Err("too long".into());
                 }
-                Ok(Value::String(s.clone()))
+                if let Kind::Str { default } = def.kind
+                    && !default.is_empty()
+                    && trimmed.is_empty()
+                {
+                    return Err(format!("{} must not be blank", def.name));
+                }
+                Ok(Value::String(trimmed.to_string()))
             }
             (Kind::OptionalStr, Value::String(s)) => {
                 if s.len() > 300 {
@@ -313,11 +341,11 @@ impl AppConfig {
     }
 
     /// Merge a validated patch and write the whole file atomically.
-    pub fn update(&mut self, patch: Map<String, Value>) -> Result<(), String> {
+    pub fn update(&mut self, patch: Map<String, Value>) -> Result<(), ConfigError> {
         for (k, v) in patch {
             match key_def(&k) {
                 Some(def) => {
-                    let v = Self::validate(def, &v)?;
+                    let v = Self::validate(def, &v).map_err(|m| ConfigError::keyed(&k, m))?;
                     if v.is_null() {
                         self.stored.remove(&k);
                     } else {
@@ -325,10 +353,16 @@ impl AppConfig {
                     }
                 }
                 // Unknown or secret-shaped keys are refused by the whitelist.
-                None => return Err(format!("unknown configuration key: {k}")),
+                None => {
+                    return Err(ConfigError::keyed(
+                        &k,
+                        format!("unknown configuration key: {k}"),
+                    ));
+                }
             }
         }
         self.persist()
+            .map_err(|message| ConfigError { key: None, message })
     }
 
     fn persist(&self) -> Result<(), String> {

@@ -9,6 +9,24 @@
 use super::vault_config::require_vault;
 use super::*;
 
+/// The same bound the Settings form applies, enforced server-side too: a host
+/// or username is a single identifier, never a document (SET-09).
+const MAX_SMTP_FIELD_CHARS: usize = 255;
+/// The audit log records an identifier, not a payload; a hostile or accidental
+/// 5 000-char host must not land there verbatim (SET-09).
+const AUDIT_SUBJECT_MAX_CHARS: usize = 64;
+
+/// Shorten an audit subject to [`AUDIT_SUBJECT_MAX_CHARS`], appending an
+/// ellipsis when truncated. Credentials never reach this function.
+fn audit_subject(value: &str) -> String {
+    if value.chars().count() <= AUDIT_SUBJECT_MAX_CHARS {
+        return value.to_string();
+    }
+    let mut short: String = value.chars().take(AUDIT_SUBJECT_MAX_CHARS).collect();
+    short.push('…');
+    short
+}
+
 /// The `GET`/`PUT` payload. `password` is only ever an input.
 fn settings_view(app: &AppState) -> serde_json::Value {
     let resolved = crate::email::SmtpConfig::from_sources(app.vault.as_deref());
@@ -75,6 +93,11 @@ pub async fn admin_email_put(
     let host = input.host.trim();
     if host.is_empty() {
         errors.push(FieldError::new("host", "SMTP host is required"));
+    } else if host.chars().count() > MAX_SMTP_FIELD_CHARS {
+        errors.push(FieldError::new(
+            "host",
+            format!("at most {MAX_SMTP_FIELD_CHARS} characters"),
+        ));
     } else if host.chars().any(char::is_whitespace) || crate::email::has_control_characters(host) {
         errors.push(FieldError::new(
             "host",
@@ -86,11 +109,18 @@ pub async fn admin_email_put(
         errors.push(FieldError::new("port", "port must be between 1 and 65535"));
     }
     let username = input.username.as_deref().map(str::trim);
-    if username.is_some_and(crate::email::has_control_characters) {
-        errors.push(FieldError::new(
-            "username",
-            "username must not contain control characters",
-        ));
+    if let Some(username) = username {
+        if username.chars().count() > MAX_SMTP_FIELD_CHARS {
+            errors.push(FieldError::new(
+                "username",
+                format!("at most {MAX_SMTP_FIELD_CHARS} characters"),
+            ));
+        } else if crate::email::has_control_characters(username) {
+            errors.push(FieldError::new(
+                "username",
+                "username must not contain control characters",
+            ));
+        }
     }
     let from = input.from.as_deref().map(str::trim);
     if let Some(from) = from
@@ -120,8 +150,9 @@ pub async fn admin_email_put(
     vault
         .put_many(&entries)
         .map_err(|e| ApiError::internal(format!("vault write failed: {e}")))?;
-    // Audit the host only — credentials never reach the audit log.
-    record_audit(&app, "email_settings_updated", host).await;
+    // Audit the host only — credentials never reach the audit log, and the
+    // subject is bounded so an oversized host cannot flood it (SET-09).
+    record_audit(&app, "email_settings_updated", &audit_subject(host)).await;
     Ok(Json(settings_view(&app)).into_response())
 }
 
