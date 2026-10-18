@@ -145,18 +145,18 @@ async fn page_routes_serve_the_shell_and_never_shadow_the_api() {
     assert_eq!(body["error"]["code"], "not_found");
 }
 
-/// #262(5): the request-body cap (`MAX_REQUEST_BODY_BYTES`, src/lib.rs). Two
-/// rules bound a write, and they answer differently on purpose:
+/// #262(5) / QA-06: the request-body cap (`MAX_REQUEST_BODY_BYTES`, src/lib.rs).
+/// Two rules bound a write, and they answer differently on purpose:
 ///
 /// * a body *under* the transport cap but over a **field** rule is validated like
 ///   any other payload — 422 in the app's own shape, naming the field; the cap
 ///   was raised to 6 MiB so an inline receipt (~3 MB of file) is never refused by
 ///   the transport before a handler can say what was wrong (the bug that made a
 ///   scanned receipt unstorable);
-/// * a body *over* the cap is bounded before any handler, and still answers the
-///   documented `bad_request` 400 rather than 413 — the #262(5) gap the ignored
-///   test below tracks (the `ValidJson` extractor collapses the length-limit read
-///   error; `openapi.json` declares no 413).
+/// * a body *over* the cap now answers the documented **413
+///   `payload_too_large`** on *both* read paths: the `Content-Length` pre-check
+///   (refused before routing) and the chunked read (discovered by the
+///   extractor). The message never echoes the limit.
 ///
 /// Neither path persists a byte.
 #[tokio::test]
@@ -172,15 +172,28 @@ async fn oversized_body_is_rejected_without_persistence() {
     assert_eq!(body["error"]["code"], "validation_failed");
     assert_eq!(body["error"]["fields"][0]["field"], "name");
 
-    // Past the cap itself: refused by the transport, whatever status the gap
-    // above gives it.
+    // Past the cap itself, Content-Length path: refused by the transport before
+    // any handler, in the documented shape.
+    let over = "x".repeat(7 * 1024 * 1024);
+    let (status, body) =
+        sized_json_req(&app, "POST", "/api/categories", json!({"name": over})).await;
+    assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE, "{body}");
+    assert_eq!(body["error"]["code"], "payload_too_large", "{body}");
+    assert!(
+        !body
+            .to_string()
+            .to_ascii_lowercase()
+            .contains("length limit"),
+        "the transport message must not be echoed: {body}"
+    );
+
+    // Past the cap itself, chunked path (no Content-Length): the extractor
+    // discovers the limit while reading and answers the same shape.
     let over = "x".repeat(7 * 1024 * 1024);
     let (status, body) =
         json_req(&app, "POST", "/api/categories", Some(json!({"name": over}))).await;
-    assert!(
-        status == StatusCode::BAD_REQUEST || status == StatusCode::PAYLOAD_TOO_LARGE,
-        "an over-cap body must be refused: {status} {body}"
-    );
+    assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE, "{body}");
+    assert_eq!(body["error"]["code"], "payload_too_large", "{body}");
 
     // Neither one persisted anything.
     let (_, list) = json_req(&app, "GET", "/api/categories", None).await;
@@ -193,21 +206,58 @@ async fn oversized_body_is_rejected_without_persistence() {
     );
 }
 
-/// #262(5) INTENT — kept ignored because the gap is in the behaviour, not the
-/// test: an oversized body *should* answer `413 Payload Too Large` (the status
-/// the issue names and the convention `RequestBodyLimitLayer` exists to signal).
-/// Today the `ValidJson` extractor collapses the length-limit read failure into
-/// its generic 400, so this cannot pass without a production change —
-/// deliberately out of scope for this test-only PR. Follow-up: give the body
-/// limit a 413 code in the router/extractor and declare it in `openapi.json`.
-/// The sample is the cap itself, which the inline receipt moved to 6 MiB.
-#[ignore = "defect: over-cap bodies surface as 400, not 413 (needs a production follow-up)"]
+/// #262(5) / QA-06: an oversized body answers `413 Payload Too Large` in the
+/// app's single JSON error shape — not `text/plain` on the Content-Length path
+/// and not the extractor's generic 400 on the chunked one. Both paths are
+/// asserted, which is why this test is no longer ignored.
 #[tokio::test]
 async fn oversized_body_should_surface_as_413() {
     let (app, _d) = app().await;
     let huge = "x".repeat(7 * 1024 * 1024);
-    let (status, _) = json_req(&app, "POST", "/api/categories", Some(json!({"name": huge}))).await;
-    assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
+
+    let (sized, sized_body) =
+        sized_json_req(&app, "POST", "/api/categories", json!({"name": huge})).await;
+    assert_eq!(sized, StatusCode::PAYLOAD_TOO_LARGE, "{sized_body}");
+    assert_eq!(sized_body["error"]["code"], "payload_too_large");
+
+    let huge = "x".repeat(7 * 1024 * 1024);
+    let (chunked, chunked_body) =
+        json_req(&app, "POST", "/api/categories", Some(json!({"name": huge}))).await;
+    assert_eq!(chunked, StatusCode::PAYLOAD_TOO_LARGE, "{chunked_body}");
+    assert_eq!(chunked_body["error"]["code"], "payload_too_large");
+}
+
+/// QA-07: a malformed path parameter (including a traversal-shaped one) and a
+/// malformed query answer the app's one error shape with `bad_request`, never
+/// axum's plain-text rejection quoting the extractor's internals.
+#[tokio::test]
+async fn malformed_path_and_query_parameters_answer_the_json_error_shape() {
+    let (app, _d) = app().await;
+
+    let (status, body) = json_req(&app, "GET", "/api/entries/..%2f..%2fcustomers", None).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(body["error"]["code"], "bad_request", "{body}");
+    let text = body.to_string();
+    for leaked in ["UUID", "Invalid URL", "Cannot parse", "deserialize"] {
+        assert!(!text.contains(leaked), "extractor internals leaked: {text}");
+    }
+
+    // The same mapping covers a Query rejection (a repeated single-valued param
+    // is a serde error inside the extractor).
+    let (status, body) = json_req(
+        &app,
+        "GET",
+        "/api/entries?date=2026-10-01&date=2026-10-02",
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(body["error"]["code"], "bad_request", "{body}");
+    let text = body.to_string();
+    assert!(
+        !text.contains("deserialize") && !text.contains("query string"),
+        "extractor internals leaked: {text}"
+    );
 }
 
 /// #262(6b): `GET /openapi.json` + `GET /docs` — the served contract and its UI.
@@ -226,5 +276,102 @@ async fn openapi_and_docs_are_served_at_root() {
             .to_ascii_lowercase()
             .contains("swagger"),
         "docs page must serve the Swagger UI shell"
+    );
+}
+
+/// QA-11: a collection directory replaced by a regular file is a **broken data
+/// tree**, not an empty collection. It used to answer `200 {"entries":[]}`
+/// while every write failed with an opaque 500.
+#[tokio::test]
+async fn a_collection_replaced_by_a_file_is_not_an_empty_collection() {
+    let (app, d) = app().await;
+    let entries = d.path().join("data/entries");
+    std::fs::remove_dir_all(&entries).expect("remove the entries collection");
+    std::fs::write(&entries, b"x").expect("replace it with a file");
+
+    let (status, body) = json_req(&app, "GET", "/api/entries?date=2026-10-02", None).await;
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "{body}");
+    assert_eq!(body["error"]["code"], "data_dir_invalid", "{body}");
+    let text = body.to_string();
+    assert!(
+        !text.contains("entries") && !text.contains("data/"),
+        "the path must not be echoed: {text}"
+    );
+
+    // A range read and a single-document read refuse the same way.
+    let (status, body) = json_req(
+        &app,
+        "GET",
+        "/api/entries?from=2026-10-01&to=2026-10-02",
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "{body}");
+    assert_eq!(body["error"]["code"], "data_dir_invalid", "{body}");
+}
+
+/// QA-12: a corrupt `config.json` is a *stored document* failure, distinguishable
+/// from the opaque `internal`, with no path in the response.
+#[tokio::test]
+async fn a_corrupt_config_is_a_corrupt_document_not_internal() {
+    let (app, d) = app().await;
+    std::fs::write(d.path().join("data/config.json"), b"{ not json").expect("write config");
+
+    let (status, body) = json_req(
+        &app,
+        "PUT",
+        "/api/admin/config",
+        Some(json!({"org_name": "X"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "{body}");
+    assert_eq!(body["error"]["code"], "corrupt_document", "{body}");
+    let text = body.to_string();
+    assert!(
+        !text.contains("config.json") && !text.contains("data/"),
+        "the path must not be echoed: {text}"
+    );
+}
+
+/// QA-12: a data directory the process cannot write answers
+/// `data_dir_not_writable` (actionable), never the opaque `internal`.
+#[tokio::test]
+async fn a_read_only_collection_dir_answers_data_dir_not_writable() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let (app, d) = app().await;
+    let customers = d.path().join("data/customers");
+    let original = std::fs::metadata(&customers)
+        .expect("customers dir")
+        .permissions();
+    let mut read_only = original.clone();
+    read_only.set_mode(0o555);
+    std::fs::set_permissions(&customers, read_only).expect("chmod 555");
+
+    // Running as root bypasses directory permissions: skip rather than assert a
+    // lie (say so in the report).
+    if std::fs::write(customers.join(".probe"), b"x").is_ok() {
+        let _ = std::fs::remove_file(customers.join(".probe"));
+        std::fs::set_permissions(&customers, original).expect("restore mode");
+        return;
+    }
+
+    let (status, body) = json_req(
+        &app,
+        "POST",
+        "/api/customers",
+        Some(json!({"name":"Blocked","currency":"EUR","default_rate_minor":1000})),
+    )
+    .await;
+    std::fs::set_permissions(&customers, original).expect("restore mode");
+
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "{body}");
+    assert_eq!(body["error"]["code"], "data_dir_not_writable", "{body}");
+    assert!(
+        body["error"]["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("not writable"),
+        "the message must be actionable: {body}"
     );
 }

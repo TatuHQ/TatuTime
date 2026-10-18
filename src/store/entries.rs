@@ -5,7 +5,7 @@ use uuid::Uuid;
 
 use super::cold::ColdIdIndex;
 use super::index::{merge_cold_docs, sort_entries_by_created};
-use super::io::{dir_entries, json_stems, read_json, write_json};
+use super::io::{dir_entries, dir_exists, json_stems, read_json, write_json};
 use super::*;
 use crate::domain::Entry;
 
@@ -57,7 +57,7 @@ impl Store {
     /// The cold month folders: `archive/entries/<YYYY-MM>/`.
     fn cold_month_dirs(&self) -> Result<Vec<PathBuf>, StoreError> {
         let root = self.root.join(ARCHIVE_DIR).join(ENTRIES_DIR);
-        if !root.exists() {
+        if !dir_exists(&root)? {
             return Ok(Vec::new());
         }
         Ok(dir_entries(&root)?
@@ -97,7 +97,7 @@ impl Store {
         date: NaiveDate,
     ) -> Result<std::collections::BTreeSet<String>, StoreError> {
         let dir = self.cold_day_dir(date);
-        if !dir.exists() {
+        if !dir_exists(&dir)? {
             return Ok(std::collections::BTreeSet::new());
         }
         Ok(json_stems(&dir_entries(&dir)?))
@@ -106,7 +106,7 @@ impl Store {
     /// The cold copies of one day's documents, in `dir_entries` order.
     pub(super) fn cold_day_docs(&self, date: NaiveDate) -> Result<Vec<Entry>, StoreError> {
         let dir = self.cold_day_dir(date);
-        if !dir.exists() {
+        if !dir_exists(&dir)? {
             return Ok(Vec::new());
         }
         let mut out = Vec::new();
@@ -169,7 +169,7 @@ impl Store {
     /// is a hint, never the source of truth.
     fn find_entry_path(&self, id: Uuid) -> Result<Option<PathBuf>, StoreError> {
         let dir = self.root.join(ENTRIES_DIR);
-        if dir.exists() {
+        if dir_exists(&dir)? {
             for day in dir_entries(&dir)? {
                 let path = day.join(format!("{id}.json"));
                 if path.is_file() {
@@ -216,7 +216,9 @@ impl Store {
     /// let week = store.list_range(monday, sunday)?; // inclusive on both ends
     /// ```
     pub fn list_range(&self, from: NaiveDate, to: NaiveDate) -> Result<Vec<Entry>, StoreError> {
-        if (to - from).num_days() > MAX_RANGE_DAYS {
+        // QA-08: the cap means "at most MAX_RANGE_DAYS *inclusive* days", so
+        // the difference may be at most one less (400 days span 399).
+        if (to - from).num_days() >= MAX_RANGE_DAYS {
             return Err(StoreError::RangeTooLarge);
         }
         let mut out = Vec::new();
@@ -366,7 +368,7 @@ impl Store {
         let mut out = Vec::new();
         let mut seen: std::collections::HashSet<Uuid> = std::collections::HashSet::new();
         let dir = self.root.join(ENTRIES_DIR);
-        if dir.exists() {
+        if dir_exists(&dir)? {
             for day in dir_entries(&dir)? {
                 if !day.is_dir() {
                     continue;

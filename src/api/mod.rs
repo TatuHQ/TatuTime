@@ -52,9 +52,18 @@ impl<T: DeserializeOwned, S: Send + Sync> FromRequest<S> for ValidJson<T> {
     type Rejection = ApiError;
 
     async fn from_request(req: Request, state: &S) -> Result<Self, Self::Rejection> {
-        let body = Bytes::from_request(req, state)
-            .await
-            .map_err(|_| ApiError::bad_request("failed to read the request body"))?;
+        // QA-06: the chunked read path reaches this extractor (a Content-Length
+        // over the cap is refused by `RequestBodyLimitLayer` before routing and
+        // is rewritten by the API's response-mapping layer). Preserve the
+        // transport's 413 as `payload_too_large`; every other body-read failure
+        // stays the generic `bad_request`. Neither branch echoes the limit.
+        let body = Bytes::from_request(req, state).await.map_err(|rejection| {
+            if rejection.status() == StatusCode::PAYLOAD_TOO_LARGE {
+                ApiError::payload_too_large()
+            } else {
+                ApiError::bad_request("failed to read the request body")
+            }
+        })?;
         let value = serde_json::from_slice::<T>(&body).map_err(|e| deser_error(e, &body))?;
         Ok(ValidJson(value))
     }

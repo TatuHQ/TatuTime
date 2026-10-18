@@ -193,6 +193,39 @@ pub(crate) async fn json_req(
     (s, v)
 }
 
+/// Authenticated request with an explicit `Content-Length` header (QA-06).
+///
+/// `json_req` sends no length, which is the **chunked** read path: the cap is
+/// only discovered while the body is consumed. This helper declares the size,
+/// which is the path `RequestBodyLimitLayer` refuses before routing.
+pub(crate) async fn sized_json_req(
+    client: &Client,
+    method: &str,
+    uri: &str,
+    body: Value,
+) -> (StatusCode, Value) {
+    let payload = body.to_string();
+    let req = Request::builder()
+        .method(method)
+        .uri(uri)
+        .header(header::COOKIE, &client.cookie)
+        .header("x-csrf-protection", "1")
+        .header(header::CONTENT_TYPE, "application/json")
+        .header(header::CONTENT_LENGTH, payload.len())
+        .body(Body::from(payload))
+        .unwrap();
+    let res = client.router.clone().oneshot(req).await.expect("oneshot");
+    let status = res.status();
+    let bytes = res.into_body().collect().await.expect("body").to_bytes();
+    let value = if bytes.is_empty() {
+        Value::Null
+    } else {
+        serde_json::from_slice(&bytes)
+            .unwrap_or_else(|_| Value::String(String::from_utf8_lossy(&bytes).into_owned()))
+    };
+    (status, value)
+}
+
 /// Authenticated request that keeps the **raw response bytes and headers** —
 /// needed for the binary PDF download (#113), where the body is not JSON.
 pub(crate) async fn raw_req(

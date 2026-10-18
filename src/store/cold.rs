@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use chrono::{NaiveDate, Utc};
 use uuid::Uuid;
 
-use super::io::{dir_entries, write_json};
+use super::io::{dir_entries, dir_exists, write_json};
 use super::*;
 
 impl Store {
@@ -99,7 +99,7 @@ impl Store {
         // it touches it.
         let entries_dir = self.root.join(ENTRIES_DIR);
         let mut candidates: Vec<NaiveDate> = Vec::new();
-        if entries_dir.exists() {
+        if dir_exists(&entries_dir)? {
             for child in dir_entries(&entries_dir)? {
                 let name = child
                     .file_name()

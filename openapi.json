@@ -119,7 +119,11 @@
                   "email_failed",
                   "oauth_exchange",
                   "collection_full",
-                  "draft_out_of_date"
+                  "draft_out_of_date",
+                  "payload_too_large",
+                  "data_dir_invalid",
+                  "data_dir_not_writable",
+                  "corrupt_document"
                 ]
               },
               "message": {
@@ -2760,7 +2764,17 @@
         }
       },
       "BadRequest": {
-        "description": "Malformed query or body.",
+        "description": "Malformed query, malformed path parameter or malformed body. The body is always the shared Error shape (codes bad_request / validation_failed); extractor or parser internals are never quoted.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "PayloadTooLarge": {
+        "description": "The request body exceeded the transport limit (code payload_too_large). Nothing past the limit was read, no handler ran and nothing was persisted. The limit itself is not echoed.",
         "content": {
           "application/json": {
             "schema": {
@@ -2847,7 +2861,7 @@
         }
       },
       "InternalError": {
-        "description": "Server-side failure (code internal). The body stays generic and never carries paths, stack traces or raw filesystem errors.",
+        "description": "Server-side failure. The body stays generic and never carries paths, stack traces or raw filesystem errors. Codes: internal (unexpected), data_dir_invalid (a data path that must be a directory is not one), data_dir_not_writable (the filesystem refused a write: permissions or a read-only mount) and corrupt_document (a stored document did not decode; the file and parse error are in the server log).",
         "content": {
           "application/json": {
             "schema": {
@@ -2890,7 +2904,7 @@
           "format": "date",
           "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
         },
-        "description": "Inclusive start of a range. A range query needs both from and to: the range-only endpoints answer 400 when either is absent. At most 400 days."
+        "description": "Inclusive start of a range. A range query needs both from and to: the range-only endpoints answer 400 when either is absent. A span of at most 400 inclusive days is accepted (from=2025-01-01&to=2026-02-04); a wider one is refused."
       },
       "ToParam": {
         "name": "to",
@@ -3045,6 +3059,9 @@
           },
           "422": {
             "$ref": "#/components/responses/ValidationError"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
           }
         }
       }
@@ -3121,6 +3138,9 @@
           },
           "429": {
             "$ref": "#/components/responses/RateLimited"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
           }
         }
       }
@@ -3162,6 +3182,9 @@
           },
           "422": {
             "$ref": "#/components/responses/ValidationError"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
           }
         }
       }
@@ -3303,6 +3326,9 @@
           },
           "422": {
             "$ref": "#/components/responses/ValidationError"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
           }
         }
       }
@@ -3366,6 +3392,9 @@
           },
           "422": {
             "$ref": "#/components/responses/ValidationError"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
           }
         }
       },
@@ -3452,6 +3481,9 @@
           },
           "422": {
             "$ref": "#/components/responses/ValidationError"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
           }
         }
       }
@@ -3609,6 +3641,9 @@
           },
           "422": {
             "$ref": "#/components/responses/ValidationError"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
           }
         }
       }
@@ -3693,6 +3728,9 @@
           },
           "422": {
             "$ref": "#/components/responses/ValidationError"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
           }
         }
       },
@@ -3821,6 +3859,9 @@
           },
           "422": {
             "$ref": "#/components/responses/ValidationError"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
           }
         }
       }
@@ -3913,6 +3954,9 @@
           },
           "422": {
             "$ref": "#/components/responses/ValidationError"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
           }
         }
       },
@@ -4049,6 +4093,9 @@
           },
           "422": {
             "$ref": "#/components/responses/ValidationError"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
           }
         }
       }
@@ -4149,6 +4196,9 @@
           },
           "422": {
             "$ref": "#/components/responses/ValidationError"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
           }
         }
       },
@@ -4189,7 +4239,7 @@
           "entries"
         ],
         "summary": "List entries for a day or an inclusive date range",
-        "description": "Exactly one form: ?date=YYYY-MM-DD or ?from=...&to=... (span at most 400 days). Paged (#334): the rows walk the total order `(date, id)` ascending, a response holds at most `limit` of them, and `next_cursor` is the opaque key of the page that follows — `null` when the page ended the set. Follow the cursor to see every row exactly once.",
+        "description": "Exactly one form: ?date=YYYY-MM-DD or ?from=...&to=... (span at most 400 inclusive days). Paged (#334): the rows walk the total order `(date, id)` ascending, a response holds at most `limit` of them, and `next_cursor` is the opaque key of the page that follows — `null` when the page ended the set. Follow the cursor to see every row exactly once.",
         "parameters": [
           {
             "$ref": "#/components/parameters/DateParam"
@@ -4294,6 +4344,9 @@
           },
           "422": {
             "$ref": "#/components/responses/ValidationError"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
           }
         }
       }
@@ -4384,6 +4437,9 @@
           },
           "503": {
             "$ref": "#/components/responses/Locked"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
           }
         }
       },
@@ -4823,6 +4879,9 @@
           },
           "422": {
             "$ref": "#/components/responses/ValidationError"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
           }
         }
       },
@@ -5271,6 +5330,9 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
           }
         }
       }
@@ -5359,6 +5421,9 @@
           },
           "422": {
             "$ref": "#/components/responses/ValidationError"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
           }
         }
       }
@@ -5546,6 +5611,9 @@
           },
           "422": {
             "$ref": "#/components/responses/ValidationError"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
           }
         }
       }
@@ -5669,6 +5737,9 @@
           },
           "422": {
             "$ref": "#/components/responses/ValidationError"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
           }
         }
       }
@@ -6013,6 +6084,9 @@
           },
           "502": {
             "$ref": "#/components/responses/BadGateway"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
           }
         }
       }
@@ -6092,6 +6166,9 @@
           },
           "422": {
             "$ref": "#/components/responses/ValidationError"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
           }
         },
         "description": "amount_minor absent = the full remaining balance (legacy behaviour). 0 is a 422, over-balance a 409 \u2014 both without persistence. Settling the last cent flips to paid; anything less parks at partly_paid with a ledger entry."
@@ -6172,6 +6249,9 @@
           },
           "422": {
             "$ref": "#/components/responses/ValidationError"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
           }
         }
       }
@@ -6520,6 +6600,9 @@
           },
           "422": {
             "$ref": "#/components/responses/ValidationError"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
           }
         }
       }
@@ -6579,6 +6662,9 @@
           },
           "422": {
             "$ref": "#/components/responses/ValidationError"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
           }
         }
       },
@@ -6732,6 +6818,9 @@
           },
           "422": {
             "$ref": "#/components/responses/ValidationError"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
           }
         }
       }
@@ -6823,6 +6912,9 @@
           },
           "503": {
             "$ref": "#/components/responses/Locked"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
           }
         }
       },
@@ -7027,6 +7119,9 @@
           },
           "422": {
             "$ref": "#/components/responses/ValidationError"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
           }
         }
       }
@@ -7144,6 +7239,9 @@
           },
           "503": {
             "$ref": "#/components/responses/VaultUnavailable"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
           }
         }
       },
@@ -7269,6 +7367,9 @@
           },
           "503": {
             "$ref": "#/components/responses/Locked"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
           }
         }
       }
@@ -7331,6 +7432,9 @@
           },
           "422": {
             "$ref": "#/components/responses/ValidationError"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
           }
         }
       }
@@ -7413,6 +7517,9 @@
           },
           "422": {
             "$ref": "#/components/responses/ValidationError"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
           }
         }
       }
@@ -7525,6 +7632,9 @@
           },
           "422": {
             "$ref": "#/components/responses/ValidationError"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
           }
         }
       }
@@ -7627,6 +7737,9 @@
           },
           "422": {
             "$ref": "#/components/responses/ValidationError"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
           }
         }
       }
@@ -7875,6 +7988,9 @@
           },
           "422": {
             "$ref": "#/components/responses/ValidationError"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
           }
         }
       }
@@ -7948,6 +8064,9 @@
           },
           "422": {
             "$ref": "#/components/responses/ValidationError"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
           }
         }
       }
@@ -8001,6 +8120,9 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
           }
         }
       }
@@ -8057,6 +8179,9 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
           }
         }
       }
@@ -8141,6 +8266,9 @@
           },
           "422": {
             "$ref": "#/components/responses/ValidationError"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
           }
         }
       }
@@ -8201,6 +8329,9 @@
           },
           "422": {
             "$ref": "#/components/responses/ValidationError"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
           }
         }
       },
@@ -8367,6 +8498,9 @@
           },
           "422": {
             "$ref": "#/components/responses/ValidationError"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
           }
         }
       }
@@ -8549,6 +8683,9 @@
           },
           "422": {
             "$ref": "#/components/responses/ValidationError"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
           }
         }
       }
@@ -8626,6 +8763,9 @@
           },
           "422": {
             "$ref": "#/components/responses/ValidationError"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
           }
         }
       }

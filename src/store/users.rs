@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use uuid::Uuid;
 
-use super::io::{dir_entries, read_json, write_json};
+use super::io::{dir_entries, dir_exists, read_json, write_json};
 use super::*;
 
 impl Store {
@@ -26,7 +26,7 @@ impl Store {
     /// collection — still answers the first candidate that validates.
     pub fn has_users(&self) -> Result<bool, StoreError> {
         let dir = self.doc_dir::<User>();
-        if !dir.exists() {
+        if !dir_exists(&dir)? {
             return Ok(false);
         }
         for path in dir_entries(&dir)? {
@@ -48,25 +48,66 @@ impl Store {
         Ok(false)
     }
 
+    /// Every user document that **decodes**, skipping (and logging) an
+    /// undecodable one. Login and the email side index use this: one corrupt
+    /// `users/*.json` file must not lock out an unrelated valid account
+    /// (QA-04) — the same tolerance [`Store::has_users`] already applies.
+    ///
+    /// Collection *listings* deliberately stay fail-closed through
+    /// [`Store::list_users`], so a corrupt document is never silently omitted
+    /// from the admin's user list.
+    pub(super) fn user_docs_tolerant(&self) -> Result<Vec<User>, StoreError> {
+        let dir = self.doc_dir::<User>();
+        if !dir_exists(&dir)? {
+            return Ok(Vec::new());
+        }
+        let mut out = Vec::new();
+        for path in dir_entries(&dir)? {
+            if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                continue;
+            }
+            match read_json::<User>(&path) {
+                Ok(Some(user)) => out.push(user),
+                Ok(None) => {}
+                // Server log only: the client never learns a path or a parse
+                // error (the one error shape stays generic).
+                Err(error) => tracing::warn!(
+                    file = %path.display(),
+                    %error,
+                    "skipping undecodable user document"
+                ),
+            }
+        }
+        Ok(out)
+    }
+
     pub fn get_user(&self, id: Uuid) -> Result<Option<User>, StoreError> {
         self.get_doc::<User>(&id.to_string())
     }
 
     pub fn get_user_by_email(&self, email: &str) -> Result<Option<User>, StoreError> {
-        // Fast path: the email side index, verified against the document.
-        if let Some(id) =
-            read_json::<HashMap<String, String>>(&self.email_index_path())?.and_then(|idx| {
+        // Fast path: the email side index, verified against the document. The
+        // index is a hint, so an unreadable or corrupt index — or a document it
+        // points at that no longer decodes — falls through to the scan instead
+        // of failing login (QA-04).
+        let indexed = read_json::<HashMap<String, String>>(&self.email_index_path())
+            .ok()
+            .flatten()
+            .and_then(|idx| {
                 idx.get(&email.to_lowercase())
                     .and_then(|s| Uuid::parse_str(s).ok())
-            })
-            && let Some(user) = self.get_user(id)?
+            });
+        if let Some(id) = indexed
+            && let Ok(Some(user)) = self.get_user(id)
             && user.email.eq_ignore_ascii_case(email)
         {
             return Ok(Some(user));
         }
         // The scan stays authoritative (pre-index dirs, restored docs, drift).
+        // It skips undecodable siblings (QA-04): a corrupt document for some
+        // *other* account must not turn this lookup into a 500.
         let found = self
-            .list_users()?
+            .user_docs_tolerant()?
             .into_iter()
             .find(|u| u.email.eq_ignore_ascii_case(email));
         // Reaching a hit through the scan means the fast path missed while a

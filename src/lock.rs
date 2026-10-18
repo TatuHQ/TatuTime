@@ -14,8 +14,12 @@ pub enum LockReason {
     Invoiced {
         id: String,
     },
+    /// An entry on a submitted or approved timesheet. `approved` distinguishes
+    /// the two (QA-09): a submitted week can be rejected to unlock, an approved
+    /// one is permanent, and the decision endpoint refuses to reject it.
     Submitted {
         id: String,
+        approved: bool,
     },
     /// An expense referenced by an *open* invoice (#8/#114) — the expense
     /// counterpart of `Invoiced`.
@@ -30,7 +34,19 @@ impl LockReason {
             LockReason::Invoiced { id } => {
                 format!("entry is invoiced ({id}); invoiced time is permanent and cannot be changed")
             }
-            LockReason::Submitted { id } => {
+            // QA-09: the approved message must not offer an impossible action.
+            // `POST /submissions/{id}/decision` only decides a *submitted* week,
+            // so "reject it first" on an approved week sent the user into a 409.
+            LockReason::Submitted {
+                id,
+                approved: true,
+            } => format!(
+                "entry is in an approved timesheet ({id}); approved time is permanent and cannot be changed"
+            ),
+            LockReason::Submitted {
+                id,
+                approved: false,
+            } => {
                 format!("entry is in a submitted timesheet ({id}); reject/withdraw it first")
             }
             LockReason::ExpenseInvoiced => {
@@ -222,7 +238,10 @@ impl EntryLock for SubmissionLock {
         Ok(snapshot(&self.store)?
             .submitted_entries
             .get(&entry_id)
-            .map(|week| LockReason::Submitted { id: week.clone() }))
+            .map(|week| LockReason::Submitted {
+                id: week.week_start.clone(),
+                approved: week.approved,
+            }))
     }
 
     fn locked_entries(&self) -> Result<std::collections::HashSet<Uuid>, LockUnavailable> {

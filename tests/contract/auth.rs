@@ -703,3 +703,47 @@ async fn an_undecodable_user_document_does_not_lock_the_instance_out() {
         "one broken file and exactly one admin were written"
     );
 }
+
+/// QA-04: one corrupt user document must not break login for a *different*,
+/// valid account. The email lookup skips undecodable documents (logged), and the
+/// index it heals tolerates them too. Collection listings deliberately stay
+/// fail-closed, now with the distinguishable `corrupt_document`.
+#[tokio::test]
+async fn a_corrupt_user_document_does_not_break_another_users_login() {
+    let (app, d) = app().await;
+    let users = d.path().join("data/users");
+    std::fs::write(users.join("broken.json"), b"not json").expect("corrupt user file");
+    // Remove the side index so the *scan* path (not the fast path) is the one
+    // that must skip the corrupt document.
+    std::fs::remove_file(users.join(".idx.emails.json")).expect("remove email index");
+
+    let (s, body, cookie) = raw(
+        &app.router,
+        "POST",
+        "/api/auth/login",
+        Some(json!({"email": ADMIN_EMAIL, "password": ADMIN_PW})),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    assert!(
+        cookie.unwrap_or_default().contains("tt_session="),
+        "login must succeed: {body}"
+    );
+    assert_eq!(body["email"], ADMIN_EMAIL);
+
+    // The index was rebuilt from the documents that decode.
+    assert!(
+        users.join(".idx.emails.json").exists(),
+        "the email index must heal despite the corrupt sibling"
+    );
+
+    // The session resolves…
+    let (s, me, _) = raw(&app.router, "GET", "/api/auth/me", None, Some(&app.cookie)).await;
+    assert_eq!(s, StatusCode::OK, "{me}");
+
+    // …while the listing stays fail-closed, now distinguishable by code.
+    let (s, list, _) = raw(&app.router, "GET", "/api/users", None, Some(&app.cookie)).await;
+    assert_eq!(s, StatusCode::INTERNAL_SERVER_ERROR, "{list}");
+    assert_eq!(list["error"]["code"], "corrupt_document", "{list}");
+}

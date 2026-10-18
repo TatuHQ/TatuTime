@@ -86,8 +86,10 @@ fn concurrent_writer_times_out_with_lock_busy() {
 #[tokio::test]
 async fn store_fault_during_entry_validation_is_500_not_422() {
     // #187: validate_entry_refs' `.ok().flatten()` turned any store failure
-    // into a bogus "customer does not exist" 422. A corrupt customer doc
-    // must surface as a 500 (generic, no internals leaked).
+    // into a bogus "customer does not exist" 422. A corrupt customer doc must
+    // surface as a 500 — and, since QA-12, as the distinguishable
+    // `corrupt_document` rather than the opaque `internal` (no internals
+    // leaked either way).
     let (app, d) = app().await;
     let c = new_customer(&app, "ACME", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap().to_string();
@@ -105,7 +107,7 @@ async fn store_fault_during_entry_validation_is_500_not_422() {
     )
     .await;
     assert_eq!(s, StatusCode::INTERNAL_SERVER_ERROR, "{b}");
-    assert_eq!(b["error"]["code"], "internal");
+    assert_eq!(b["error"]["code"], "corrupt_document");
     let text = b.to_string();
     assert!(
         !text.contains("json") && !text.contains("data/"),

@@ -301,6 +301,10 @@ pub fn build_router(state: AppState) -> Router {
         // front of the router.
         .layer(axum::extract::DefaultBodyLimit::max(MAX_REQUEST_BODY_BYTES))
         .layer(RequestBodyLimitLayer::new(MAX_REQUEST_BODY_BYTES))
+        // Outermost on purpose: the transport limit above short-circuits before
+        // the route (and so before any layer inside the `/api` nest) runs, so
+        // only a layer outside it can give that 413 the app's JSON shape.
+        .layer(axum::middleware::from_fn(json_api_errors))
         .with_state(state)
 }
 
@@ -341,6 +345,71 @@ fn allowed_methods(path: &str) -> Vec<&'static str> {
             })
     };
     collect(&matches_template)
+}
+
+/// Give every **non-JSON** 4xx/5xx produced under `/api` the app's one error
+/// shape (QA-06, QA-07).
+///
+/// Two producers cannot speak JSON themselves:
+///
+/// * the tower body limit, which answers `413 text/plain`,
+///   `length limit exceeded` before routing — hence this layer sits outside it;
+/// * axum's own `Path`/`Query` extractors, whose rejections are plain text and
+///   quote extractor internals (`Invalid URL: Cannot parse `id` …`).
+///
+/// Responses that are already JSON are passed through untouched, so the app's
+/// own errors (`ApiError`, the CSRF guard, the 405 rewrite) keep their status
+/// and message. The GUI and the static assets are outside `/api` and never
+/// enter this mapping.
+async fn json_api_errors(req: axum::extract::Request, next: axum::middleware::Next) -> Response {
+    use axum::http::header::{CONTENT_LENGTH, CONTENT_TYPE, TRANSFER_ENCODING};
+    let path = req.uri().path().to_string();
+    let is_api = path == "/api" || path.starts_with("/api/");
+    let response = next.run(req).await;
+    if !is_api {
+        return response;
+    }
+    let status = response.status();
+    if !(status.is_client_error() || status.is_server_error()) {
+        return response;
+    }
+    let already_json = response
+        .headers()
+        .get(CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| {
+            value
+                .trim()
+                .to_ascii_lowercase()
+                .starts_with("application/json")
+        });
+    if already_json {
+        return response;
+    }
+
+    // The original body is a transport or extractor message, never a client
+    // message, so it is dropped. The status is the one the contract documents
+    // for the mapped code (413 stays 413, 400 stays 400, an unexpected 5xx
+    // becomes the documented generic 500).
+    let replacement = match status {
+        StatusCode::PAYLOAD_TOO_LARGE => ApiError::payload_too_large(),
+        StatusCode::NOT_FOUND => ApiError::not_found("resource"),
+        status if status.is_server_error() => {
+            ApiError::internal(format!("non-JSON {status} response under /api"))
+        }
+        _ => ApiError::bad_request("the request path or query is invalid"),
+    };
+    let mut mapped = replacement.into_response();
+    // Keep every header an inner layer added (the security headers, `Allow`,
+    // `Retry-After`, …); only the representation headers of the discarded body
+    // are replaced.
+    let headers = mapped.headers_mut();
+    for (name, value) in response.headers() {
+        if name != CONTENT_TYPE && name != CONTENT_LENGTH && name != TRANSFER_ENCODING {
+            headers.insert(name.clone(), value.clone());
+        }
+    }
+    mapped
 }
 
 /// Give axum's bare 405 the app's one error shape, naming the verbs the path
