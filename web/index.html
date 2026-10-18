@@ -1309,13 +1309,22 @@
             </div>
           </div>
         </div>
-        <div id="template-preview" class="p-card" hidden>
+        <div id="template-preview" class="p-card">
           <div class="p-card__header">
-            <h2>Preview - newest invoice</h2>
+            <h2>Live preview</h2>
           </div>
           <div class="p-card__content">
-            <p id="template-preview-subject"></p>
-            <div id="template-preview-body"></div>
+            <p class="p-form-help-text">This is the sample invoice rendered with the template above, before anything
+              is saved: two time lines and an expense line, VAT, your payment details and the current field labels.
+              Edits re-render it a moment after you stop typing.</p>
+            <div class="template-preview-toolbar">
+              <button type="button" id="template-preview-refresh">Refresh</button>
+              <button type="button" id="template-preview-open">Open in new tab</button>
+              <p id="template-preview-status" class="p-form-help-text" role="status" aria-live="polite">Preview not
+                rendered yet.</p>
+            </div>
+            <iframe id="template-preview-frame" class="template-preview-frame" height="640"
+              title="Rendered sample invoice PDF using the current template"></iframe>
           </div>
         </div>
       </section>

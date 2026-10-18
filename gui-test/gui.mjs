@@ -2371,7 +2371,7 @@ check('Email settings discloses the delivery transport state (#130)',
   /Email delivery:/i.test(window.document.getElementById('email-status').textContent)
   && !window.document.getElementById('settings-panel-email').hidden);
 const varRows = [...window.document.querySelectorAll('#template-vars tbody tr')];
-window.document.getElementById('settings-tab-invoice').dispatchEvent(new window.Event('click', { bubbles: true }));
+window.document.getElementById('settings-tab-invoice-template').dispatchEvent(new window.Event('click', { bubbles: true }));
 // ---- APPEARANCE & MESSAGES (#146) ----
 {
   const set = (id, v) => { const el = window.document.getElementById(id); el.value = v; };
@@ -2484,16 +2484,22 @@ check('customer invoice fields persist via the form', !!termy && termy.payment_t
     !!addrCo && addrCo.contacts.length === 1 && addrCo.contacts[0].billing === true
     && addrCo.contacts[0].email === 'ada@addrco.test');
 
-// Document preview card uses GET /invoices/{id}/document on the newest invoice.
+// The Invoice template section frames a live PDF of the *candidate* template:
+// the API renders the sample invoice, so no saved/issued invoice is required.
 window.document.getElementById('tab-settings').dispatchEvent(new window.Event('click', { bubbles: true }));
-await waitFor(() => byId('template-preview').hidden === false && byId('template-preview-subject').textContent.includes('Invoice '), {
-  message: 'the template preview card to render the subject',
+window.document.getElementById('settings-tab-invoice-template').dispatchEvent(new window.Event('click', { bubbles: true }));
+await waitFor(() => byId('template-preview-frame').getAttribute('src') === 'blob:jsdom-stub'
+  && byId('template-preview-status').textContent === 'Preview updated', {
+  message: 'the live template preview to render the sample PDF into the frame',
 });
-const prev = window.document.getElementById('template-preview');
-check('template preview card shows the rendered subject', !prev.hidden
-  && window.document.getElementById('template-preview-subject').textContent.includes('Invoice '));
-check('preview body is plain text (textContent-only rule)', window.document.getElementById('template-preview-body').children.length === 0
-  && window.document.getElementById('template-preview-body').textContent.includes('consulting work'));
+check('the Invoice template section frames a live PDF preview without a saved invoice',
+  byId('template-preview-frame').getAttribute('src') === 'blob:jsdom-stub'
+  && byId('template-preview-status').textContent === 'Preview updated');
+check('the preview frame is titled for assistive technology',
+  (byId('template-preview-frame').getAttribute('title') || '').length > 0);
+check('the toolbar offers Refresh and Open in new tab as real buttons',
+  byId('template-preview-refresh').tagName === 'BUTTON'
+  && byId('template-preview-open').tagName === 'BUTTON');
 
 // ---- PARTIAL PAYMENTS & WRITE-OFF (#114): record payment + write off via GUI ----
 const paid2028 = await (await fetch(BASE + '/api/entries', {

@@ -423,60 +423,237 @@ export async function refreshInvoiceTemplate() {
         ]),
       );
     }
-    await refreshTemplatePreview();
+    // The live preview may only render what the form actually shows, so it
+    // waits for this fill. `initTemplatePreview` renders when the section is
+    // shown; a refresh while it is already visible renders immediately.
+    templatePreviewLoaded = true;
+    if (templatePanelShown()) scheduleTemplatePreview(0);
   } catch {
     /* members cannot see the template; tab stays hidden for them */
   }
 }
 
-export async function refreshTemplatePreview() {
-  const card = $('template-preview');
-  try {
-    const data = await api.get('/invoices');
-    const invoices = (data.invoices || []).filter((i) => i.status !== 'draft');
-    if (invoices.length === 0) {
-      card.hidden = true;
-      return;
-    }
-    const newest = invoices[invoices.length - 1];
-    const doc = await api.get(`/invoices/${newest.id}/document`);
-    $('template-preview-subject').textContent = doc.subject || '';
-    // The server-returned HTML is reduced to plain text through the DOM (no
-    // markup is ever inserted into this page: the textContent rule holds).
-    const parsed = new DOMParser().parseFromString(doc.html || '', 'text/html');
-    $('template-preview-body').textContent = parsed.body.textContent;
-    card.hidden = false;
-  } catch {
-    card.hidden = true;
-  }
+// ------------------------------------------- live template preview (#new) --
+//
+// The Invoice template section renders the *candidate* template -- exactly what
+// Save would send -- against the API's sample invoice, so the page shows the PDF
+// while it is being edited and no invoice has to exist. The card owns one frame:
+// a render mints one object URL and revokes the one it replaced, so a document
+// the panel stopped showing never stays alive behind a pinned URL (the rule the
+// receipt and invoice previews follow, #332/#349).
+
+/// How long typing must pause before a render is requested: long enough that a
+/// burst of keystrokes costs one PDF, short enough to feel live.
+export const TEMPLATE_PREVIEW_DEBOUNCE_MS = 500;
+
+/// The controls whose edits change the rendered document. Both `input` and
+/// `change` are observed: typing fires `input`, a pick or the number spinner
+/// fires `change`.
+const TEMPLATE_PREVIEW_FIELDS = [
+  'template-subject', 'template-body', 'template-footer',
+  'template-terms', 'template-terms-days',
+  'lb-description', 'lb-quantity', 'lb-unit-price', 'lb-subtotal',
+  'lb-discount', 'lb-tax', 'lb-total',
+];
+
+/// The blob URL currently framed -- the only URL this panel may revoke.
+let templatePreviewUrl = '';
+/// The ETag of the framed bytes, or null when nothing is framed. A release
+/// drops the frame, so it also drops the ETag: answering `304` for bytes the
+/// page no longer holds would leave the frame blank.
+let templatePreviewEtag = null;
+let templatePreviewTimer = null;
+let templatePreviewInFlight = false;
+let templatePreviewPending = false;
+let templatePreviewRun = Promise.resolve();
+/// Bumped by every release: a response that arrives after the section was
+/// hidden (or the page torn down) must neither frame a document nor mint a URL.
+let templatePreviewGeneration = 0;
+/// True once the form holds the stored template: before that, a render would
+/// preview an empty form rather than what was saved.
+let templatePreviewLoaded = false;
+let templatePreviewWired = false;
+
+const templatePanel = () => $('settings-panel-invoice-template');
+const templatePanelShown = () => {
+  const panel = templatePanel();
+  return !!panel && !panel.hidden;
+};
+
+function setTemplatePreviewStatus(text) {
+  const status = $('template-preview-status');
+  if (status) status.textContent = text;
 }
 
-export async function saveInvoiceTemplate(evt) {
-  evt.preventDefault();
-  clearFormError($('template-error'));
+/// The exact payload Save sends. Building it once means the preview can never
+/// drift from what would be persisted.
+export function templatePayload() {
   const kind = $('template-terms').value;
   let payment_terms = null;
   if (kind) {
     payment_terms = { kind };
     if (kind === 'custom') payment_terms.days = Number($('template-terms-days').value);
   }
+  return {
+    subject: $('template-subject').value.trim(),
+    body: $('template-body').value,
+    footer: $('template-footer').value,
+    payment_terms,
+    // #147 display labels ride the same template store (no parallel truth).
+    labels: {
+      description: $('lb-description').value.trim(),
+      quantity: $('lb-quantity').value.trim(),
+      unit_price: $('lb-unit-price').value.trim(),
+      subtotal: $('lb-subtotal').value.trim(),
+      discount: $('lb-discount').value.trim(),
+      tax: $('lb-tax').value.trim(),
+      total: $('lb-total').value.trim(),
+    },
+  };
+}
+
+/// Drop the frame and its URL. Called when the section is hidden or the page is
+/// torn down; a render still in flight is invalidated rather than applied.
+export function releaseTemplatePreview() {
+  templatePreviewGeneration += 1;
+  if (templatePreviewTimer !== null) {
+    clearTimeout(templatePreviewTimer);
+    templatePreviewTimer = null;
+  }
+  templatePreviewPending = false;
+  if (templatePreviewUrl) {
+    URL.revokeObjectURL(templatePreviewUrl);
+    templatePreviewUrl = '';
+  }
+  templatePreviewEtag = null;
+  const frame = $('template-preview-frame');
+  if (frame) frame.removeAttribute('src');
+}
+
+/// Open the framed PDF in a new tab. The current blob URL is the document on
+/// screen, so the new tab shows exactly what the preview shows.
+export function openTemplatePreviewInNewTab() {
+  if (!templatePreviewUrl) {
+    setTemplatePreviewStatus('Preview not rendered yet — edit the template or press Refresh.');
+    return;
+  }
+  const opened = window.open(templatePreviewUrl, '_blank');
+  if (opened) opened.opener = null;
+  else setTemplatePreviewStatus('The browser blocked the new tab — allow pop-ups to open the preview.');
+}
+
+/// Request a render after the user pauses typing. `delay: 0` is used when the
+/// section becomes visible or the stored template finishes loading.
+export function scheduleTemplatePreview(delay = TEMPLATE_PREVIEW_DEBOUNCE_MS) {
+  if (!templatePanelShown()) return;
+  if (templatePreviewTimer !== null) clearTimeout(templatePreviewTimer);
+  templatePreviewTimer = setTimeout(() => {
+    templatePreviewTimer = null;
+    renderTemplatePreview();
+  }, delay);
+}
+
+/// One render, coalesced: at most one request is in flight, and edits made
+/// while it runs schedule exactly one follow-up with the newest form state.
+/// `force` skips the conditional request (the toolbar's Refresh).
+export function renderTemplatePreview({ force = false } = {}) {
+  if (!templatePanelShown()) return Promise.resolve();
+  if (templatePreviewInFlight) {
+    templatePreviewPending = true;
+    return templatePreviewRun;
+  }
+  templatePreviewInFlight = true;
+  const generation = templatePreviewGeneration;
+  templatePreviewRun = (async () => {
+    try {
+      let runForce = force;
+      do {
+        templatePreviewPending = false;
+        await renderTemplatePreviewOnce(runForce);
+        runForce = false; // only the explicit Refresh re-fetches unconditionally
+      } while (templatePreviewPending && generation === templatePreviewGeneration);
+    } finally {
+      templatePreviewInFlight = false;
+    }
+  })();
+  return templatePreviewRun;
+}
+
+async function renderTemplatePreviewOnce(force) {
+  const frame = $('template-preview-frame');
+  if (!frame) return;
+  const generation = templatePreviewGeneration;
+  setTemplatePreviewStatus('Rendering…');
   try {
-    await api.put('/admin/invoice-template', {
-      subject: $('template-subject').value.trim(),
-      body: $('template-body').value,
-      footer: $('template-footer').value,
-      payment_terms,
-      // #147 display labels ride the same template store (no parallel truth).
-      labels: {
-        description: $('lb-description').value.trim(),
-        quantity: $('lb-quantity').value.trim(),
-        unit_price: $('lb-unit-price').value.trim(),
-        subtotal: $('lb-subtotal').value.trim(),
-        discount: $('lb-discount').value.trim(),
-        tax: $('lb-tax').value.trim(),
-        total: $('lb-total').value.trim(),
-      },
-    });
+    const result = await api.requestBlob(
+      'POST',
+      '/admin/invoice-template/preview',
+      templatePayload(),
+      { ifNoneMatch: force ? null : templatePreviewEtag },
+    );
+    if (generation !== templatePreviewGeneration) return; // section closed mid-flight
+    if (result.notModified) {
+      // The bytes on screen are still the bytes this template renders: keep the
+      // frame, say so in the live region.
+      setTemplatePreviewStatus('Preview updated');
+      return;
+    }
+    const previous = templatePreviewUrl;
+    templatePreviewUrl = URL.createObjectURL(result.blob);
+    frame.setAttribute('src', templatePreviewUrl);
+    if (previous) URL.revokeObjectURL(previous);
+    templatePreviewEtag = result.etag || null;
+    clearFormError($('template-error'));
+    setTemplatePreviewStatus('Preview updated');
+  } catch (err) {
+    if (generation !== templatePreviewGeneration) return;
+    if (err.status === 422) {
+      // Field errors belong on the form, where the user is typing; the frame
+      // keeps the last good document and nothing typed is discarded.
+      showFormError($('template-error'), err);
+      setTemplatePreviewStatus('Preview not updated — fix the highlighted fields.');
+    } else {
+      // A transient failure (403, network, 5xx) is a sentence, not an alert
+      // storm, and never blanks the document already on screen.
+      setTemplatePreviewStatus(`Preview unavailable — ${err.message}`);
+    }
+  }
+}
+
+/// Wire the preview card once. Editing any template/label control schedules a
+/// debounced render; hiding the section releases the frame and the URL.
+export function initTemplatePreview() {
+  if (templatePreviewWired) return;
+  const panel = templatePanel();
+  if (!panel) return;
+  templatePreviewWired = true;
+  for (const id of TEMPLATE_PREVIEW_FIELDS) {
+    const control = $(id);
+    if (!control) continue;
+    control.addEventListener('input', () => scheduleTemplatePreview());
+    control.addEventListener('change', () => scheduleTemplatePreview());
+  }
+  $('template-preview-refresh')?.addEventListener('click', () => {
+    renderTemplatePreview({ force: true });
+  });
+  $('template-preview-open')?.addEventListener('click', openTemplatePreviewInNewTab);
+  if (typeof MutationObserver === 'function') {
+    // The section is hidden/shown by the tab strip (router.js), not by this
+    // module; observing the attribute keeps the release and the first render
+    // tied to what the user can actually see.
+    new MutationObserver(() => {
+      if (panel.hidden) releaseTemplatePreview();
+      else if (templatePreviewLoaded) scheduleTemplatePreview(0);
+    }).observe(panel, { attributes: true, attributeFilter: ['hidden'] });
+  }
+  window.addEventListener('pagehide', releaseTemplatePreview);
+}
+
+export async function saveInvoiceTemplate(evt) {
+  evt.preventDefault();
+  clearFormError($('template-error'));
+  try {
+    await api.put('/admin/invoice-template', templatePayload());
     announce('Invoice template saved.');
     await refreshInvoiceTemplate();
   } catch (err) {

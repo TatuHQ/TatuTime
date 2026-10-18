@@ -12,7 +12,7 @@ import { closeDeliveryRecord, closeInvoicePreview, closeSendEmailDialog, confirm
 import { markNotificationsRead, refreshNotifications } from './notifications.js';
 import { initReceiptPreview } from './receipt.js';
 import { initRouter, initSegTabs, initSettingsTabs, initTabs, refreshTimesheetView, segActiveId, showTimesheet } from './route.js';
-import { addSecret, closeUserForm, closeUserPassword, newUserForm, paintAccent, refreshSettings, renderUsers, saveConfig, saveEmailSettings, saveInvoiceTemplate, saveOrgProfile, saveUser, saveUserPassword, sendTestEmail } from './settings.js';
+import { addSecret, closeUserForm, closeUserPassword, initTemplatePreview, newUserForm, paintAccent, refreshSettings, renderUsers, saveConfig, saveEmailSettings, saveInvoiceTemplate, saveOrgProfile, saveUser, saveUserPassword, sendTestEmail } from './settings.js';
 import { customerName, fillProjectSelect, fillTaskSelect, loadCustomers, state } from './state.js';
 import { discardTimer, refreshTimer, startTimer, stopTimer } from './timer.js';
 import { commitCell, copyLastWeek, copyPreviousDay, entrySaving, navigateDay, navigateWeek, openWeekRowForm, refreshDay, refreshWeek, resetEntryForm, resetWeekRowForm, saveEntry, saveWeekRow, selectDay, showEntryForm, showWeekRowForm, weekState } from './timesheet.js';
@@ -601,6 +601,9 @@ export async function startApp() {
   initTabs();
   document.querySelectorAll('button').forEach(decorateUbuntuButton);
   initSegTabs(); // Day | Week inside the Timesheets section (#107)
+  // Before the tab strips can show the section: the preview card releases its
+  // frame when hidden and renders the stored template once it is visible.
+  initTemplatePreview();
   initSettingsTabs();
   initRouter(); // deep-link each view to a stable path (page routing)
   initWizard(); // first-run setup wizard (#111)

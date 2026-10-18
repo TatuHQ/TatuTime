@@ -81,13 +81,16 @@ function setup({
         this.removeAttribute('open');
     };
     const prelude = `
-      window.calls = { get: [], put: [], post: [] };
+      window.calls = { get: [], put: [], post: [], preview: [] };
       window.__email = ${JSON.stringify(email)};
       window.__org = ${JSON.stringify(ORG)};
       window.__template = ${JSON.stringify(TEMPLATE)};
       window.__putError = ${JSON.stringify(putError)};
       window.__postResult = ${JSON.stringify(postResult)};
       window.__postError = ${JSON.stringify(postError)};
+      // The live preview's transport. Tests replace __previewHandler to hold a
+      // render open, or to answer 422/304.
+      window.__previewHandler = null;
       api.get = async (path) => {
         window.calls.get.push(path);
         if (path === '/auth/status') return { initialised: true };
@@ -96,7 +99,6 @@ function setup({
         if (path === '/admin/email') return window.__email;
         if (path === '/admin/org') return window.__org;
         if (path === '/admin/invoice-template') return window.__template;
-        if (path === '/invoices') return { invoices: [] };
         return {};
       };
       api.put = async (path, body) => {
@@ -122,6 +124,23 @@ function setup({
         }
         return window.__postResult;
       };
+      api.requestBlob = async (method, path, body, opts) => {
+        window.calls.preview.push({ method, path, body, ifNoneMatch: (opts || {}).ifNoneMatch ?? null });
+        if (window.__previewHandler) return window.__previewHandler(method, path, body, opts);
+        return { notModified: false, etag: '"preview-etag-1"', blob: { type: 'application/pdf' }, status: 200 };
+      };
+      window.createdUrls = [];
+      window.revokedUrls = [];
+      // A monotonic sequence, so clearing the ledger after the opening render
+      // does not renumber the next URL.
+      window.urlSeq = 0;
+      URL.createObjectURL = (blob) => {
+        window.urlSeq += 1;
+        const url = 'blob:preview-' + window.urlSeq;
+        window.createdUrls.push(url);
+        return url;
+      };
+      URL.revokeObjectURL = (url) => window.revokedUrls.push(url);
       initTabs();
       initSettingsTabs();
     `;
@@ -129,6 +148,9 @@ function setup({
       applyRoute, normaliseRoute, showAccount, initSettingsTabs,
       refreshOrgProfile, saveOrgProfile, refreshInvoiceTemplate, saveInvoiceTemplate,
       refreshEmailSettings, saveEmailSettings, sendTestEmail, EMAIL_SETTINGS_ROUTE,
+      initTemplatePreview, renderTemplatePreview, scheduleTemplatePreview,
+      releaseTemplatePreview, openTemplatePreviewInNewTab, templatePayload,
+      TEMPLATE_PREVIEW_DEBOUNCE_MS,
       calls: () => window.calls,
     };`);
     return { dom, document: window.document, window, t: window.t };
@@ -237,6 +259,7 @@ test('Invoice template loads the cheat-sheet and saves labels with the template'
     const rows = [...document.querySelectorAll('#template-vars tbody tr')];
     assert.equal(rows.length, 3, 'the %variable% cheat-sheet comes from the server');
     assert.match(rows.map((row) => row.textContent).join(' '), /%invoice_issue_month%/);
+    assert.equal(t.calls().preview.length, 0, 'a hidden section never renders a preview');
 
     setValue(document, 'lb-total', 'Amount due');
     await t.saveInvoiceTemplate({ preventDefault() { } });
@@ -244,6 +267,233 @@ test('Invoice template loads the cheat-sheet and saves labels with the template'
     assert.equal(call.body.labels.total, 'Amount due');
     assert.equal(call.body.labels.description, 'Work');
     assert.equal(call.body.payment_terms.kind, 'net_30');
+    dom.window.close();
+});
+
+// -------------------------------------------------- live template preview ---
+//
+// The preview card replaces the retired "newest invoice" document: it renders
+// the *candidate* template against the API's sample invoice, so it works with no
+// invoice in the store and reflects unsaved edits.
+
+/// Open the section with the stored template loaded, and wait for the render the
+/// visibility change starts. The ledgers are cleared after it, so each test only
+/// sees the requests and URLs it caused.
+async function openPreview(t, window, document) {
+    await t.refreshInvoiceTemplate();
+    assert.equal(t.calls().preview.length, 0, 'a hidden section renders nothing');
+    t.initTemplatePreview();
+    document.getElementById('settings-panel-invoice-template').hidden = false;
+    await waitFor(() => t.calls().preview.length === 1, {
+        message: 'the visible section to render its first preview',
+    });
+    await waitFor(() => document.getElementById('template-preview-frame').getAttribute('src') !== null, {
+        message: 'the first preview to be framed',
+    });
+    t.calls().preview.length = 0;
+    window.createdUrls.length = 0;
+    window.revokedUrls.length = 0;
+}
+
+test('typing in the body and labels debounces one preview POST with the form payload', async () => {
+    const { dom, document, window, t } = setup();
+    await openPreview(t, window, document);
+    const body = document.getElementById('template-body');
+    const total = document.getElementById('lb-total');
+    body.value = 'Dear %customer_name%, please pay.';
+    body.dispatchEvent(new window.Event('input', { bubbles: true }));
+    total.value = 'Amount due';
+    total.dispatchEvent(new window.Event('input', { bubbles: true }));
+    total.dispatchEvent(new window.Event('change', { bubbles: true }));
+    await waitFor(() => t.calls().preview.length === 1, { message: 'the debounced render' });
+    await waitFor(() => document.getElementById('template-preview-status').textContent === 'Preview updated', {
+        message: 'the debounced render to finish',
+    });
+    // One event-loop turn (not a fixed wait): any timer the burst had queued
+    // would run now, so a trailing request would be counted below.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(t.calls().preview.length, 1, 'one render for the whole burst');
+    const call = t.calls().preview[0];
+    assert.equal(call.method, 'POST');
+    assert.equal(call.path, '/admin/invoice-template/preview');
+    assert.deepEqual(JSON.parse(JSON.stringify(call.body)), {
+        subject: 'Invoice %invoice_number%',
+        body: 'Dear %customer_name%, please pay.',
+        footer: 'Bank: BE00',
+        payment_terms: { kind: 'net_30' },
+        labels: {
+            description: 'Work',
+            quantity: 'Hours',
+            unit_price: 'Rate',
+            subtotal: 'Subtotal',
+            discount: 'Discount',
+            tax: 'VAT',
+            total: 'Amount due',
+        },
+    }, 'the preview sends exactly what Save would');
+    assert.equal(call.ifNoneMatch, '"preview-etag-1"', 'the conditional request carries the last ETag');
+    dom.window.close();
+});
+
+test('each render mints one object URL, revokes the one it replaced and releases on teardown', async () => {
+    const { dom, document, window, t } = setup();
+    await openPreview(t, window, document);
+    const frame = document.getElementById('template-preview-frame');
+    const first = frame.getAttribute('src');
+    document.getElementById('template-body').value = 'Second render';
+    document.getElementById('template-body').dispatchEvent(new window.Event('input', { bubbles: true }));
+    await waitFor(() => window.createdUrls.length === 1, { message: 'the debounced render to mint a URL' });
+    assert.deepEqual([...window.createdUrls], ['blob:preview-2'], 'one URL per render');
+    assert.deepEqual([...window.revokedUrls], ['blob:preview-1'], 'the replaced URL is revoked, not pinned');
+    assert.equal(frame.getAttribute('src'), 'blob:preview-2');
+
+    // A second render revokes exactly the URL it replaces.
+    document.getElementById('template-body').value = 'Third render';
+    await t.renderTemplatePreview();
+    assert.deepEqual([...window.createdUrls], ['blob:preview-2', 'blob:preview-3']);
+    assert.deepEqual([...window.revokedUrls], ['blob:preview-1', 'blob:preview-2']);
+    assert.notEqual(frame.getAttribute('src'), first);
+
+    // Hiding the section is a teardown: the frame and its URL are released.
+    document.getElementById('settings-panel-invoice-template').hidden = true;
+    await waitFor(() => window.revokedUrls.includes('blob:preview-3'), {
+        message: 'hiding the section to revoke the framed URL',
+    });
+    assert.equal(frame.hasAttribute('src'), false, 'no URL survives the hidden section');
+    dom.window.close();
+});
+
+test('Open in new tab opens the blob URL currently framed', async () => {
+    const { dom, document, window, t } = setup();
+    await openPreview(t, window, document);
+    const frame = document.getElementById('template-preview-frame');
+    const current = frame.getAttribute('src');
+    const opened = [];
+    window.open = (url, target) => {
+        opened.push({ url, target });
+        return { opener: null };
+    };
+    document.getElementById('template-preview-open').click();
+    assert.deepEqual(opened, [{ url: current, target: '_blank' }], 'the tab shows what the preview shows');
+
+    t.releaseTemplatePreview();
+    document.getElementById('template-preview-open').click();
+    assert.match(document.getElementById('template-preview-status').textContent, /not rendered yet/i,
+        'with nothing framed, the control explains instead of opening a dead tab');
+    dom.window.close();
+});
+
+test('a 422 keeps the last good preview, shows the field errors and retries on the next edit', async () => {
+    const { dom, document, window, t } = setup();
+    await openPreview(t, window, document);
+    const frame = document.getElementById('template-preview-frame');
+    const good = frame.getAttribute('src');
+    window.__previewHandler = async () => {
+        const err = new Error('payload failed validation');
+        err.status = 422;
+        err.payload = {
+            error: {
+                code: 'validation_failed',
+                fields: [{ field: 'body', message: 'unknown variable %bogus%' }],
+            },
+        };
+        throw err;
+    };
+    document.getElementById('template-body').value = 'pay %bogus%';
+    document.getElementById('template-body').dispatchEvent(new window.Event('input', { bubbles: true }));
+    await waitFor(() => t.calls().preview.length === 1, { message: 'the invalid render' });
+    await waitFor(() => document.getElementById('template-error').hidden === false, {
+        message: 'the field error to render inline',
+    });
+    assert.equal(frame.getAttribute('src'), good, 'the last good document stays framed');
+    assert.match(document.getElementById('template-error').textContent, /body: unknown variable %bogus%/);
+    assert.match(document.getElementById('template-preview-status').textContent, /fix the highlighted fields/i);
+    assert.equal(document.getElementById('template-body').value, 'pay %bogus%', 'the edit is never lost');
+
+    window.__previewHandler = null;
+    document.getElementById('template-body').value = 'pay %customer_name%';
+    document.getElementById('template-body').dispatchEvent(new window.Event('input', { bubbles: true }));
+    await waitFor(() => t.calls().preview.length === 2, { message: 'the retry render' });
+    await waitFor(() => document.getElementById('template-preview-status').textContent === 'Preview updated', {
+        message: 'the retry to succeed',
+    });
+    assert.equal(t.calls().preview[1].body.body, 'pay %customer_name%', 'the retry carries the newest edit');
+    assert.equal(document.getElementById('template-error').hidden, true, 'success clears the field error');
+    dom.window.close();
+});
+
+test('a 304 keeps the framed document and only updates the status', async () => {
+    const { dom, document, window, t } = setup();
+    await openPreview(t, window, document);
+    const frame = document.getElementById('template-preview-frame');
+    const good = frame.getAttribute('src');
+    window.__previewHandler = async (method, path, body, opts) => ({
+        notModified: true,
+        etag: (opts || {}).ifNoneMatch,
+        blob: null,
+        status: 304,
+    });
+    document.getElementById('lb-total').value = 'Due now';
+    await t.renderTemplatePreview();
+    assert.equal(t.calls().preview.length, 1);
+    assert.equal(t.calls().preview[0].ifNoneMatch, '"preview-etag-1"');
+    assert.equal(frame.getAttribute('src'), good, 'a 304 never blanks the frame');
+    assert.deepEqual([...window.createdUrls], [], 'a 304 mints no URL');
+    assert.deepEqual([...window.revokedUrls], [], 'a 304 revokes nothing');
+    assert.equal(document.getElementById('template-preview-status').textContent, 'Preview updated');
+    dom.window.close();
+});
+
+test('edits during an in-flight render coalesce into one follow-up with the newest state', async () => {
+    const { dom, document, window, t } = setup();
+    await openPreview(t, window, document);
+    let release;
+    let renders = 0;
+    window.__previewHandler = async () => {
+        renders += 1;
+        if (renders === 1) await new Promise((resolve) => { release = resolve; });
+        return { notModified: false, etag: `"etag-${renders}"`, blob: { type: 'application/pdf' }, status: 200 };
+    };
+    document.getElementById('template-body').value = 'first edit';
+    const started = t.renderTemplatePreview();
+    // Two more edits while the first response is held open.
+    document.getElementById('template-body').value = 'second edit';
+    t.renderTemplatePreview();
+    document.getElementById('template-body').value = 'newest edit';
+    const joined = t.renderTemplatePreview();
+    assert.equal(renders, 1, 'only one request is in flight');
+    release();
+    await started;
+    await joined;
+    assert.equal(renders, 2, 'exactly one follow-up render, never a storm');
+    assert.equal(t.calls().preview.length, 2);
+    assert.equal(t.calls().preview[1].body.body, 'newest edit', 'the follow-up carries the newest state');
+    assert.deepEqual([...window.createdUrls], ['blob:preview-2', 'blob:preview-3'],
+        'the two applied renders each minted one URL');
+    assert.deepEqual([...window.revokedUrls], ['blob:preview-1', 'blob:preview-2'],
+        'each applied render revoked exactly the URL it replaced');
+    dom.window.close();
+});
+
+test('the preview card is a titled, labelled, politely announced region', () => {
+    const { dom, document } = setup();
+    const card = document.getElementById('template-preview');
+    assert.ok(card, 'the card always renders: it no longer depends on an invoice existing');
+    assert.equal(card.hidden, false);
+    assert.equal(document.getElementById('template-preview-subject'), null, 'the retired text preview is gone');
+    const frame = document.getElementById('template-preview-frame');
+    assert.ok(frame.getAttribute('title').length > 20, 'the frame has a descriptive title');
+    const status = document.getElementById('template-preview-status');
+    assert.equal(status.getAttribute('role'), 'status', 'the status line is a status region');
+    assert.equal(status.getAttribute('aria-live'), 'polite');
+    for (const id of ['template-preview-refresh', 'template-preview-open']) {
+        const button = document.getElementById(id);
+        assert.equal(button.tagName, 'BUTTON', `${id} is a real button`);
+        assert.equal(button.getAttribute('type'), 'button');
+        assert.ok(button.textContent.trim(), `${id} has a visible label`);
+    }
+    assert.equal(document.querySelectorAll('#template-preview input, #template-preview select').length, 0,
+        'no click-only controls live in the preview card');
     dom.window.close();
 });
 
