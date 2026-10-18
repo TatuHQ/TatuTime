@@ -33,8 +33,12 @@ pub async fn update_config(
     State(app): State<AppState>,
     ValidJson(patch): ValidJson<serde_json::Map<String, serde_json::Value>>,
 ) -> ApiResult {
+    // QA-12: a corrupt config.json is a *stored document* failure (500
+    // corrupt_document), not the opaque `internal`. `AppConfig::load` returns
+    // the path and parse error for the log; the client only learns to look
+    // there.
     let mut cfg =
-        crate::appconfig::AppConfig::load(app.store.root()).map_err(ApiError::internal)?;
+        crate::appconfig::AppConfig::load(app.store.root()).map_err(ApiError::corrupt_document)?;
     cfg.update(patch)
         .map_err(|e| ApiError::validation(vec![FieldError::new("config", e)]))?;
     // Reflect the change for request-time readers.

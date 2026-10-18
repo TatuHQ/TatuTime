@@ -76,9 +76,22 @@ async fn issuing_invoice_locks_its_entries() {
         "draft invoice must not lock entries"
     );
 
+    // QA-02: the edit left the draft stale, so regenerate it before issuing.
+    let (s_drop, b_drop) = json_req(&app, "DELETE", &format!("/api/invoices/{iid}"), None).await;
+    assert_eq!(s_drop, StatusCode::NO_CONTENT, "{b_drop}");
+    let (s_fresh, fresh) = json_req(
+        &app,
+        "POST",
+        "/api/invoices",
+        Some(json!({"customer_id":cid,"from":"2026-10-01","to":"2026-10-07"})),
+    )
+    .await;
+    assert_eq!(s_fresh, StatusCode::CREATED, "{fresh}");
+    let iid = fresh["id"].as_str().unwrap();
+
     // Issue -> now locked.
-    let (si, _) = json_req(&app, "POST", &format!("/api/invoices/{iid}/issue"), None).await;
-    assert_eq!(si, StatusCode::OK);
+    let (si, b_issue) = json_req(&app, "POST", &format!("/api/invoices/{iid}/issue"), None).await;
+    assert_eq!(si, StatusCode::OK, "{b_issue}");
     let (s_edit, body) = json_req(
         &app,
         "PUT",
@@ -1839,4 +1852,144 @@ async fn an_archived_unbilled_period_still_previews_and_issues() {
     )
     .await;
     assert_eq!(s_empty, StatusCode::CONFLICT, "{body}");
+}
+
+// ------------------------------------------------- QA-02: issue vs timesheet --
+
+/// QA-02: a draft built from 7.5 h whose entry was then edited to 7 h (drafts
+/// lock nothing) must not issue. The refusal is 409 `draft_out_of_date`, no
+/// invoice is issued and no entry is locked; regenerating the draft bills the
+/// current 7 h.
+#[tokio::test]
+async fn issuing_refuses_a_draft_the_timesheet_moved_past() {
+    let (app, _d) = app().await;
+    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap();
+    new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
+    let (s_e, e) = json_req(
+        &app,
+        "POST",
+        "/api/entries",
+        Some(json!({"date":"2026-10-01","customer_id":cid,"project_code":"P1","hours":7.5})),
+    )
+    .await;
+    assert_eq!(s_e, StatusCode::CREATED, "{e}");
+    let eid = e["id"].as_str().unwrap();
+
+    let (s, draft) = json_req(
+        &app,
+        "POST",
+        "/api/invoices",
+        Some(json!({"customer_id":cid,"from":"2026-10-01","to":"2026-10-07"})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{draft}");
+    let iid = draft["id"].as_str().unwrap();
+    assert_eq!(draft["lines"][0]["hours"], 7.5);
+    assert_eq!(draft["lines"][0]["amount_minor"], 45000);
+    assert_eq!(draft["total_minor"], 45000);
+
+    // A draft locks nothing: the entry shrinks to 7 h.
+    let (s_edit, b_edit) = json_req(
+        &app,
+        "PUT",
+        &format!("/api/entries/{eid}"),
+        Some(json!({"date":"2026-10-01","customer_id":cid,"project_code":"P1","hours":7})),
+    )
+    .await;
+    assert_eq!(s_edit, StatusCode::OK, "{b_edit}");
+
+    // Issue is refused with the specific code, and persists nothing.
+    let (s_issue, b_issue) =
+        json_req(&app, "POST", &format!("/api/invoices/{iid}/issue"), None).await;
+    assert_eq!(s_issue, StatusCode::CONFLICT, "{b_issue}");
+    assert_eq!(b_issue["error"]["code"], "draft_out_of_date", "{b_issue}");
+    assert!(
+        b_issue["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("regenerate"),
+        "{b_issue}"
+    );
+    let (_, still) = json_req(&app, "GET", &format!("/api/invoices/{iid}"), None).await;
+    assert_eq!(still["status"], "draft", "nothing was issued: {still}");
+    assert!(still["issued_at"].is_null(), "{still}");
+    assert!(still["pdf"].is_null(), "no PDF was archived: {still}");
+
+    // The entry was never locked by the refused issue.
+    let (s_unlocked, b_unlocked) = json_req(
+        &app,
+        "PUT",
+        &format!("/api/entries/{eid}"),
+        Some(json!({"date":"2026-10-01","customer_id":cid,"project_code":"P1","hours":7,"note":"still editable"})),
+    )
+    .await;
+    assert_eq!(s_unlocked, StatusCode::OK, "{b_unlocked}");
+
+    // Regenerate (delete + rebuild) and issue: the line bills the current 7 h.
+    let (s_drop, _) = json_req(&app, "DELETE", &format!("/api/invoices/{iid}"), None).await;
+    assert_eq!(s_drop, StatusCode::NO_CONTENT);
+    let (s_new, fresh) = json_req(
+        &app,
+        "POST",
+        "/api/invoices",
+        Some(json!({"customer_id":cid,"from":"2026-10-01","to":"2026-10-07"})),
+    )
+    .await;
+    assert_eq!(s_new, StatusCode::CREATED, "{fresh}");
+    let fresh_id = fresh["id"].as_str().unwrap();
+    let (s_final, issued) = json_req(
+        &app,
+        "POST",
+        &format!("/api/invoices/{fresh_id}/issue"),
+        None,
+    )
+    .await;
+    assert_eq!(s_final, StatusCode::OK, "{issued}");
+    assert_eq!(issued["status"], "issued");
+    assert_eq!(issued["lines"][0]["hours"], 7.0);
+    assert_eq!(issued["lines"][0]["amount_minor"], 42000, "7 h x 60.00");
+    assert_eq!(issued["total_minor"], 42000);
+}
+
+/// QA-02 (no regression): an unchanged draft still issues with the same
+/// totals, and a second invoice over the same period is still refused.
+#[tokio::test]
+async fn an_unchanged_draft_still_issues_and_a_second_invoice_is_refused() {
+    let (app, _d) = app().await;
+    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap();
+    new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
+    json_req(
+        &app,
+        "POST",
+        "/api/entries",
+        Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":3})),
+    )
+    .await;
+    let (s, draft) = json_req(
+        &app,
+        "POST",
+        "/api/invoices",
+        Some(json!({"customer_id":cid,"from":"2026-10-01","to":"2026-10-07"})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{draft}");
+    let iid = draft["id"].as_str().unwrap();
+    let (s_issue, issued) =
+        json_req(&app, "POST", &format!("/api/invoices/{iid}/issue"), None).await;
+    assert_eq!(s_issue, StatusCode::OK, "{issued}");
+    assert_eq!(issued["status"], "issued");
+    assert_eq!(issued["total_minor"], draft["total_minor"]);
+    assert_eq!(issued["total_minor"], 18000);
+    assert_eq!(issued["lines"], draft["lines"], "the snapshot is untouched");
+    // Nothing is left to bill for that period.
+    let (s_second, body) = json_req(
+        &app,
+        "POST",
+        "/api/invoices",
+        Some(json!({"customer_id":cid,"from":"2026-10-01","to":"2026-10-07"})),
+    )
+    .await;
+    assert_eq!(s_second, StatusCode::CONFLICT, "{body}");
 }

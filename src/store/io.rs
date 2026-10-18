@@ -73,10 +73,10 @@ impl Store {
         decode: impl Fn(&Path) -> Result<Option<T>, StoreError>,
     ) -> Result<Vec<T>, StoreError> {
         let mut out = Vec::new();
-        if !dir.exists() {
+        if !dir_exists(dir)? {
             return Ok(out);
         }
-        for path in dir_entries(dir, self.max_docs)? {
+        for path in dir_entries(dir)? {
             if path.extension().and_then(|e| e.to_str()) != Some("json") {
                 continue;
             }
@@ -91,12 +91,33 @@ impl Store {
         read_json(&self.doc_path::<T>(id))
     }
 
-    /// Lock, ensure the directory, atomic write — the one put path for
-    /// flat collections.
+    /// Lock, enforce the collection cap, ensure the directory, atomic write —
+    /// the one put path for flat collections.
+    ///
+    /// QA-05: the `MAX_DOCS` cap is a **write-time** guard. It is checked
+    /// before a *new* document is persisted (an overwrite can never grow the
+    /// collection), under the same writer lock as the write itself, so two
+    /// concurrent creates cannot both slip past it.
     pub(crate) fn put_doc<T: Entity>(&self, value: &T) -> Result<(), StoreError> {
         let _guard = self.write_lock()?;
+        let path = self.doc_path::<T>(&value.id());
+        if !path.exists() {
+            self.ensure_capacity::<T>()?;
+        }
         std::fs::create_dir_all(self.doc_dir::<T>())?;
-        write_json(&self.doc_path::<T>(&value.id()), value)
+        write_json(&path, value)
+    }
+
+    /// Refuse a *new* document when its collection already holds `MAX_DOCS`
+    /// documents (QA-05). Callers hold the writer lock and have already
+    /// established that the document is new, so the count and the write are
+    /// one unit. Reads never consult this: an over-cap directory is still
+    /// listed in full, so a pre-existing one stays recoverable.
+    pub(super) fn ensure_capacity<T: Entity>(&self) -> Result<(), StoreError> {
+        if doc_count(&self.doc_dir::<T>())? >= self.max_docs {
+            return Err(StoreError::TooManyItems);
+        }
+        Ok(())
     }
 
     /// Lock, exists → `NotFound`, remove — the one delete path. Guards that
@@ -140,11 +161,42 @@ pub(super) fn prune_tmp_files(dir: &Path) {
     }
 }
 
-/// Read a directory and return its document paths, bounded by `max` (#50).
-/// Sorting by name keeps listings stable across platforms. Dot files (state
-/// such as `invoices/.seq.json`) and crashed-write `*.tmp` leftovers (review
-/// D6) are **not** documents: they are skipped here and pruned at open.
-pub(super) fn dir_entries(dir: &Path, max: usize) -> Result<Vec<PathBuf>, StoreError> {
+/// Whether `dir` is a directory: `Ok(true)`/`Ok(false)` when it is present or
+/// absent, and an error when something else sits at that path.
+///
+/// QA-11: `Path::exists()` answers **false** for a path whose parent is a
+/// regular file, so a collection directory replaced by a file used to read as
+/// an empty collection (200) while every write failed with an opaque 500. A
+/// missing directory is legitimately empty (it is created on first write); a
+/// non-directory is a broken data tree and must surface as
+/// [`StoreError::DataDirInvalid`].
+pub(super) fn dir_exists(dir: &Path) -> Result<bool, StoreError> {
+    match std::fs::metadata(dir) {
+        Ok(meta) if meta.is_dir() => Ok(true),
+        Ok(_) => Err(StoreError::DataDirInvalid),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(e) if e.kind() == std::io::ErrorKind::NotADirectory => Err(StoreError::DataDirInvalid),
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// Read a directory and return its document paths. Sorting by name keeps
+/// listings stable across platforms. Dot files (state such as
+/// `invoices/.seq.json`) and crashed-write `*.tmp` leftovers (review D6) are
+/// **not** documents: they are skipped here and pruned at open.
+///
+/// QA-05: a read lists **what is there** and never fails because a directory
+/// is over the `MAX_DOCS` cap. The cap is enforced on the write path (see
+/// [`Store::ensure_capacity`]), so the API can no longer create such a
+/// directory; an operator-supplied one stays readable — and therefore
+/// recoverable — instead of wedging every listing at 500.
+///
+/// QA-11: a missing directory is an empty collection; a path that exists as a
+/// regular file is refused (`data_dir_invalid`), never reported as empty.
+pub(super) fn dir_entries(dir: &Path) -> Result<Vec<PathBuf>, StoreError> {
+    if !dir_exists(dir)? {
+        return Ok(Vec::new());
+    }
     let mut paths: Vec<PathBuf> = std::fs::read_dir(dir)?
         .filter_map(|e| e.ok())
         .map(|e| e.path())
@@ -153,11 +205,17 @@ pub(super) fn dir_entries(dir: &Path, max: usize) -> Result<Vec<PathBuf>, StoreE
             !(name.starts_with('.') || name.ends_with(".tmp"))
         })
         .collect();
-    if paths.len() > max {
-        return Err(StoreError::TooManyItems);
-    }
     paths.sort();
     Ok(paths)
+}
+
+/// How many documents a collection directory holds; `0` when it does not
+/// exist yet (it is created on first write). Feeds the write-time cap guard.
+pub(super) fn doc_count(dir: &Path) -> Result<usize, StoreError> {
+    if !dir_exists(dir)? {
+        return Ok(0);
+    }
+    Ok(dir_entries(dir)?.len())
 }
 
 /// The `<id>` stems of every `.json` document among `paths` (a directory
@@ -177,8 +235,12 @@ where
 {
     match std::fs::read(path) {
         Ok(bytes) => {
-            let value = serde_json::from_slice(&bytes)
-                .map_err(|e| StoreError::Io(format!("corrupt document {}: {e}", path.display())))?;
+            // QA-04/QA-12: a stored document that does not decode is its own
+            // *distinguishable* failure (500 `corrupt_document`), with the file
+            // and parse error kept for the server log — never for a client.
+            let value = serde_json::from_slice(&bytes).map_err(|e| {
+                StoreError::CorruptDocument(format!("corrupt document {}: {e}", path.display()))
+            })?;
             Ok(Some(value))
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),

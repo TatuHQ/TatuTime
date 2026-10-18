@@ -78,6 +78,49 @@ impl ApiError {
         )
     }
 
+    /// A request body over the transport cap (QA-06). Both the Content-Length
+    /// pre-check and the chunked stream failure answer this shape; the limit
+    /// itself is never echoed.
+    pub fn payload_too_large() -> Self {
+        Self::new(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "payload_too_large",
+            "request body is too large; reduce its size and retry",
+        )
+    }
+
+    /// A path that must be a directory exists as something else (QA-11). The
+    /// operator has to fix the data tree; the path stays in the server log.
+    pub fn data_dir_invalid() -> Self {
+        Self::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "data_dir_invalid",
+            "a data directory is not usable; stop the server and check TUCANO_DATA_DIR",
+        )
+    }
+
+    /// The filesystem refused a write: a read-only mount or a permissions
+    /// problem (QA-12). The underlying OS error stays in the server log.
+    pub fn data_dir_not_writable() -> Self {
+        Self::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "data_dir_not_writable",
+            "the data directory is not writable; check its ownership and permissions",
+        )
+    }
+
+    /// A stored document did not decode (QA-04/QA-12). The file name and the
+    /// parse error are logged; the client only learns that the server log has
+    /// the detail.
+    pub fn corrupt_document(detail: impl Into<String>) -> Self {
+        tracing::error!(detail = %detail.into(), "stored document could not be decoded");
+        Self::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "corrupt_document",
+            "a stored document could not be read; see the server log",
+        )
+    }
+
     /// The path exists but not for this verb. Axum's own 405 is a bare status
     /// with an empty body, which tells a client nothing — including when it is
     /// talking to a server that does not serve the route it thinks it does.
@@ -141,6 +184,18 @@ pub const CODE_VOCABULARY: &[&str] = &[
     "calendar_fetch",
     "email_failed",
     "oauth_exchange",
+    // QA-05: a write refused because its collection is at MAX_DOCS.
+    "collection_full",
+    // QA-02: issue refused because the draft no longer matches the timesheet.
+    "draft_out_of_date",
+    // QA-06: a request body over the transport cap, on either read path.
+    "payload_too_large",
+    // QA-11: a data directory that should be a directory is something else.
+    "data_dir_invalid",
+    // QA-12: the filesystem refused a write (permissions, read-only mount).
+    "data_dir_not_writable",
+    // QA-04/QA-12: a stored document did not decode.
+    "corrupt_document",
 ];
 
 impl ApiError {
@@ -163,11 +218,29 @@ impl From<StoreError> for ApiError {
                 "write_lock_busy",
                 "another write is in progress; retry shortly",
             ),
-            StoreError::TooManyItems => {
-                // A collection exceeded MAX_DOCS — a server-side limit, not a
-                // client error; report generically without leaking the cap.
-                ApiError::internal("collection exceeds the configured size limit".into())
-            }
+            // QA-05: the cap is now a *write-time* refusal and a client error:
+            // the collection is still readable, so the caller can delete records
+            // and retry. The configured cap itself is never echoed.
+            StoreError::TooManyItems => ApiError::new(
+                StatusCode::CONFLICT,
+                "collection_full",
+                "this collection has reached its size limit; delete unused records and retry",
+            ),
+            // QA-02: the timesheet moved after the draft was generated. Nothing
+            // was issued (no status change, no archive, no entry lock).
+            StoreError::DraftOutOfDate => ApiError::new(
+                StatusCode::CONFLICT,
+                "draft_out_of_date",
+                "the timesheet changed after this draft was generated; regenerate the draft and issue it again",
+            ),
+            // QA-11: a collection path is a file (or something else that is not
+            // a directory), so the collection cannot be read as empty.
+            StoreError::DataDirInvalid => ApiError::data_dir_invalid(),
+            // QA-12: permission denied / read-only filesystem.
+            StoreError::NotWritable => ApiError::data_dir_not_writable(),
+            // QA-04/QA-12: a document that does not decode. The detail (file and
+            // parse error) is logged, never serialised.
+            StoreError::CorruptDocument(detail) => ApiError::corrupt_document(detail),
             StoreError::Io(detail) => ApiError::internal(detail),
         }
     }
@@ -221,6 +294,10 @@ mod tests {
             ApiError::bad_request("x").code,
             ApiError::lock_unavailable().code,
             ApiError::internal("boom".into()).code,
+            ApiError::payload_too_large().code,
+            ApiError::data_dir_invalid().code,
+            ApiError::data_dir_not_writable().code,
+            ApiError::corrupt_document("x").code,
         ];
         for code in emitted {
             assert!(

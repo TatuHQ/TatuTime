@@ -3,7 +3,7 @@
 
 
 import { api } from './api.js';
-import { $, announce, clearFormError, fillSelect, showDialog, showFormError } from './dom.js';
+import { $, announce, clearFormError, fillSelect, showDialog, showFormError, singleFlight } from './dom.js';
 import { refreshCustomerPickers, refreshCustomerTable } from './hierarchy.js';
 import { fillProjectSelect, loadCustomers, state } from './state.js';
 
@@ -99,7 +99,13 @@ export async function wizNext() {
   return wizFinish();
 }
 
-export async function wizCreateCustomer() {
+export function wizCreateCustomer() {
+  // QA-01: the wizard's Next is click-driven, so a double click used to POST
+  // the customer twice. The shared guard makes it single flight.
+  return singleFlight($('wz-next'), wizCreateCustomerBody);
+}
+
+async function wizCreateCustomerBody() {
   const name = $('wz-cust-name').value.trim();
   if (!name) {
     $('wz-error').textContent = 'name: required, at most 120 characters';

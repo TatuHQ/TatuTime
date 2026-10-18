@@ -21,6 +21,11 @@ impl Store {
     /// (the archive is never overwritten for an issued invoice); the invoice
     /// JSON is the record of authority, so the write fails as a whole if the
     /// archive cannot be persisted (no partial persistence).
+    ///
+    /// QA-02: a draft that no longer describes the current timesheet is
+    /// refused with [`StoreError::DraftOutOfDate`] **inside this transaction**
+    /// — an entry edit cannot slip between the check and the persist, and the
+    /// refusal writes nothing (no status change, no PDF, no lock).
     pub fn issue_invoice(
         &self,
         id: Uuid,
@@ -37,6 +42,9 @@ impl Store {
             return Err(StoreError::Conflict(
                 "only a draft invoice can be issued".into(),
             ));
+        }
+        if self.draft_is_stale(&invoice)? {
+            return Err(StoreError::DraftOutOfDate);
         }
         let pdf_path = self.invoice_pdf_path(&id.to_string());
         let hint = if pdf_path.exists() {
@@ -57,6 +65,44 @@ impl Store {
         invoice.pdf = Some(hint);
         write_json(&self.doc_path::<Invoice>(&id.to_string()), &invoice)?;
         Ok(invoice)
+    }
+
+    /// QA-02: whether `draft`'s tracked lines still bill exactly what the
+    /// timesheet holds. Called with the writer lock already held (so no entry
+    /// edit can land between the answer and the persist); every read below is
+    /// an unlock-only scan. The policy itself is pure and lives in
+    /// [`crate::domain::draft_is_stale`].
+    fn draft_is_stale(&self, draft: &Invoice) -> Result<bool, StoreError> {
+        // A manual draft tracks no timesheet record, so there is nothing that
+        // could have drifted: skip every scan.
+        if !draft
+            .lines
+            .iter()
+            .any(|l| l.entry_id.is_some() || l.expense_id.is_some())
+        {
+            return Ok(false);
+        }
+        let customer = self
+            .get_customer(draft.customer_id)?
+            .ok_or(StoreError::NotFound)?;
+        let projects = self.list_projects(customer.id)?;
+        let users = self.list_users()?;
+        let entries = self.list_range(draft.period_from, draft.period_to)?;
+        let expenses = self.list_expenses()?;
+        let invoices = self.list_invoices()?;
+        // #248: the same non-draft exclusion every builder uses, so a draft
+        // whose line was billed elsewhere is stale too (never double-billed).
+        let (excluded_entries, excluded_expenses) = crate::domain::already_invoiced(&invoices);
+        Ok(crate::domain::draft_is_stale(
+            draft,
+            &customer,
+            &projects,
+            &users,
+            &entries,
+            &expenses,
+            &excluded_entries,
+            &excluded_expenses,
+        ))
     }
 
     /// Archive an already-rendered PDF for an issued invoice that has no
@@ -223,6 +269,14 @@ impl Store {
     ) -> Result<Invoice, StoreError> {
         let _guard = self.write_lock()?;
         let invoice = self.create_invoice_inner(invoice)?;
+        // QA-05: an advancing schedule is normally an existing document, but a
+        // missing one would be a *new* collection member — honour the cap.
+        if !self
+            .doc_path::<RecurringSchedule>(&schedule.id.to_string())
+            .exists()
+        {
+            self.ensure_capacity::<RecurringSchedule>()?;
+        }
         std::fs::create_dir_all(self.root.join("schedules"))?;
         write_json(
             &self.doc_path::<RecurringSchedule>(&schedule.id.to_string()),
@@ -381,12 +435,19 @@ impl Store {
     /// share one lock, closing the double-admin TOCTOU (review A12/B4).
     pub fn put_user_if_none(&self, user: &User) -> Result<(), StoreError> {
         let _guard = self.write_lock()?;
-        // The "no users yet" guard keeps `AlreadyExists` on purpose: `api::auth`
-        // matches it to raise the `initialised` code. Folding it into the
-        // typed-error cleanup is tracked by #187.
-        if !self.list_users()?.is_empty() {
+        // The guard is *the same predicate* the public status probe and the
+        // bootstrap pre-check use (`Store::has_users`): only a decodable user
+        // document counts. A tolerant re-implementation here would let a
+        // corrupt file keep the instance unlocked while bootstrap refuses it,
+        // or the reverse; `has_users` takes no store lock, so calling it while
+        // this guard is held cannot re-enter the non-reentrant write lock.
+        // The "no users yet" answer keeps `AlreadyExists` on purpose:
+        // `api::auth` matches it to raise the `initialised` code. Folding it
+        // into the typed-error cleanup is tracked by #187.
+        if self.has_users()? {
             return Err(StoreError::AlreadyExists("initialised".into()));
         }
+        self.ensure_capacity::<User>()?;
         write_json(&self.doc_path::<User>(&user.id.to_string()), user)?;
         self.index_user_locked(user)
     }

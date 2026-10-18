@@ -5,7 +5,7 @@ use chrono::NaiveDate;
 use uuid::Uuid;
 
 use super::cold::ColdIdIndex;
-use super::io::{dir_entries, json_stems, read_json, write_json};
+use super::io::{dir_entries, dir_exists, json_stems, read_json, write_json};
 use super::{ARCHIVE_DIR, ENTRIES_DIR, MAX_RANGE_DAYS, Store, StoreError};
 use crate::auth::User;
 use crate::domain::{Entry, Expense, Invoice};
@@ -94,9 +94,15 @@ impl Store {
     pub(super) fn rebuild_email_index(&self) -> Result<(), StoreError> {
         let _guard = self.write_lock()?;
         let mut idx: HashMap<String, String> = HashMap::new();
-        for u in self.list_users()? {
-            // list_users is name-sorted; the scan's first match wins, so keep
-            // the first insertion per address.
+        // QA-04: the index is a hint, so it is built from the documents that
+        // decode (an undecodable sibling is logged and skipped). Using the
+        // fail-closed listing here would let one corrupt user file break a
+        // login that has *already* found its account through the scan.
+        let mut users = self.user_docs_tolerant()?;
+        users.sort_by(|a, b| a.name.cmp(&b.name));
+        for u in users {
+            // Name-sorted, matching `list_users`: the scan's first match wins,
+            // so keep the first insertion per address.
             idx.entry(u.email.to_lowercase())
                 .or_insert_with(|| u.id.to_string());
         }
@@ -184,18 +190,18 @@ impl Store {
         date: NaiveDate,
     ) -> Result<std::collections::BTreeSet<String>, StoreError> {
         let dir = self.day_dir(date);
-        if !dir.exists() {
+        if !dir_exists(&dir)? {
             return Ok(std::collections::BTreeSet::new());
         }
-        Ok(json_stems(&dir_entries(&dir, self.max_docs)?))
+        Ok(json_stems(&dir_entries(&dir)?))
     }
 
     fn expense_disk_ids(&self) -> Result<std::collections::BTreeSet<String>, StoreError> {
         let dir = self.doc_dir::<Expense>();
-        if !dir.exists() {
+        if !dir_exists(&dir)? {
             return Ok(std::collections::BTreeSet::new());
         }
-        Ok(json_stems(&dir_entries(&dir, self.max_docs)?))
+        Ok(json_stems(&dir_entries(&dir)?))
     }
 
     /// One entry document decode, counted for the #335 read-cost test.
@@ -446,8 +452,8 @@ impl Store {
         let _guard = self.write_lock()?;
         let mut idx = EntryUserIndex::default();
         let entries_dir = self.root.join(ENTRIES_DIR);
-        if entries_dir.exists() {
-            for day in dir_entries(&entries_dir, self.max_docs)? {
+        if dir_exists(&entries_dir)? {
+            for day in dir_entries(&entries_dir)? {
                 if !day.is_dir() {
                     continue;
                 }
@@ -489,7 +495,8 @@ impl Store {
         to: NaiveDate,
         user_id: Uuid,
     ) -> Result<Vec<Entry>, StoreError> {
-        if (to - from).num_days() > MAX_RANGE_DAYS {
+        // QA-08: at most MAX_RANGE_DAYS *inclusive* days.
+        if (to - from).num_days() >= MAX_RANGE_DAYS {
             return Err(StoreError::RangeTooLarge);
         }
         let idx = self.read_entry_index();

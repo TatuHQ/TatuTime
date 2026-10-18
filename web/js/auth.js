@@ -5,6 +5,7 @@
 import { api } from './api.js';
 import { startApp } from './boot.js';
 import { $, announce, clearFormError, el, initDialog, initDialogFocusReturn, showFormError } from './dom.js';
+import { initAdminWizard, offerOrgSetup, openAdminWizard } from './setup.js';
 import { state } from './state.js';
 
 // ----------------------------------------------------------------- auth ---
@@ -52,7 +53,15 @@ export function showAccount(me) {
 export async function initAuth() {
   const st = await api.get('/auth/status');
   if (!st.initialised) {
-    showAuth('setup');
+    // The admin startup wizard is the primary first-run surface. Closing it
+    // falls back to the existing create-admin card (#auth-form), so the
+    // instance can never be left with no way to create an administrator.
+    openAdminWizard({
+      firstRun: true,
+      onCancel: () => showAuth('setup'),
+      onSignedIn: (me) => showAccount(me),
+      onExistingAdmin: () => showAuth('login'),
+    });
     return false;
   }
   try {
@@ -94,11 +103,17 @@ export async function logout() {
 document.addEventListener('DOMContentLoaded', async () => {
   initDialog(); // one <dialog> for confirm/prompt/alert (#102)
   initDialogFocusReturn(); // #232 inc 4: every popup returns focus to its opener
+  initAdminWizard(); // first-run administrator + organisation flow
   $('auth-form').addEventListener('submit', onAuthSubmit);
   $('logout').addEventListener('click', logout);
   loadSsoProviders(); // advertise configured identity providers (#32)
   try {
-    if (await initAuth()) await startApp();
+    if (await initAuth()) {
+      await startApp();
+      // A dismissible dashboard prompt only — never an auto-opened modal. Not
+      // awaited: it is one optional GET and must not gate the boot handler.
+      offerOrgSetup();
+    }
   } catch (err) {
     announce(`Failed to start: ${err.message}`);
   }

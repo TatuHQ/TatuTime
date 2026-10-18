@@ -3,7 +3,7 @@
 
 
 import { api, fetchAll } from './api.js';
-import { $, addDays, announce, askConfirm, askPrompt, clearFormError, el, formatMoney, isoDate, mondayOf, rowAction, showFormError, statusChip } from './dom.js';
+import { $, addDays, announce, askConfirm, askPrompt, clearFormError, el, formatMoney, isoDate, mondayOf, rowAction, showFormError, singleFlight, statusChip } from './dom.js';
 import { ed, parseHundredths, refreshInvoices } from './invoices.js';
 import { customerName, state } from './state.js';
 
@@ -216,6 +216,12 @@ export function iwRenderReview() {
 }
 
 export async function iwSave() {
+  // QA-01: a double click on Save draft must not create two invoices from the
+  // same tracked work.
+  return singleFlight($('iw-save'), iwSaveBody);
+}
+
+async function iwSaveBody() {
   const picks = iwSelectedProjects();
   try {
     const created = await api.post('/invoices', {
@@ -338,6 +344,11 @@ export async function refreshCatalog() {
 
 export async function saveCatalogItem(evt) {
   evt.preventDefault();
+  // QA-01: one catalog item per click.
+  return singleFlight($('item-save'), saveCatalogItemBody);
+}
+
+async function saveCatalogItemBody() {
   clearFormError($('item-error'));
   const id = $('item-id').value;
   const body = {
@@ -487,6 +498,12 @@ export async function retShow(id) {
 
 export async function createRetainer(evt) {
   evt.preventDefault();
+  // QA-01: one retainer per click (creation is not keyed by the customer and
+  // project, so a second POST would create a second record).
+  return singleFlight($('ret-add'), createRetainerBody);
+}
+
+async function createRetainerBody() {
   clearFormError($('ret-error'));
   const opening = parseHundredths($('ret-opening').value || '0');
   try {
@@ -551,6 +568,11 @@ export async function refreshSchedules() {
 
 export async function addRecurring(evt) {
   evt.preventDefault();
+  // QA-01: one schedule per click.
+  return singleFlight($('rec-add'), addRecurringBody);
+}
+
+async function addRecurringBody() {
   clearFormError($('rec-error'));
   const cid = $('rec-customer').value;
   const c = state.customers.find((x) => x.id === cid);

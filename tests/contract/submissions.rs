@@ -103,6 +103,72 @@ async fn approve_keeps_locked_and_double_submit_refused() {
     assert_eq!(s2, StatusCode::CONFLICT);
 }
 
+/// QA-09: an approved week's 409 must not offer an action the API refuses —
+/// rejecting an approved submission is itself a 409. A submitted week keeps the
+/// actionable "reject it first".
+#[tokio::test]
+async fn approved_week_lock_message_does_not_offer_reject() {
+    let (app, _d) = app().await;
+    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap().to_string();
+    new_project(&app, &cid, "P1", json!({})).await;
+    let eid = seed_week(&app, &cid).await;
+    let (_, sub) = json_req(
+        &app,
+        "POST",
+        "/api/submissions",
+        Some(json!({"week_start":"2026-09-28"})),
+    )
+    .await;
+    let sid = sub["id"].as_str().unwrap().to_string();
+    let edit = json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":4});
+
+    // Submitted: the rejection is possible, so the message may suggest it.
+    let (s_sub, b_sub) = json_req(
+        &app,
+        "PUT",
+        &format!("/api/entries/{eid}"),
+        Some(edit.clone()),
+    )
+    .await;
+    assert_eq!(s_sub, StatusCode::CONFLICT, "{b_sub}");
+    assert!(
+        b_sub["error"]["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("reject"),
+        "a submitted week can be rejected: {b_sub}"
+    );
+
+    // Approve, then the same edit must say permanent, never "reject".
+    json_req(
+        &app,
+        "POST",
+        &format!("/api/submissions/{sid}/decision"),
+        Some(json!({"decision":"approve"})),
+    )
+    .await;
+    let (s_app, b_app) = json_req(&app, "PUT", &format!("/api/entries/{eid}"), Some(edit)).await;
+    assert_eq!(s_app, StatusCode::CONFLICT, "{b_app}");
+    assert_eq!(b_app["error"]["code"], "conflict", "{b_app}");
+    let message = b_app["error"]["message"].as_str().unwrap_or_default();
+    assert!(message.contains("approved"), "{b_app}");
+    assert!(
+        !message.contains("reject") && !message.contains("withdraw"),
+        "an approved week cannot be rejected, so the message must not offer it: {b_app}"
+    );
+
+    // The action the old message offered is indeed refused.
+    let (s_rej, _) = json_req(
+        &app,
+        "POST",
+        &format!("/api/submissions/{sid}/decision"),
+        Some(json!({"decision":"reject"})),
+    )
+    .await;
+    assert_eq!(s_rej, StatusCode::CONFLICT);
+}
+
 /// #262 Tier 2: submissions POST rejects an absent/malformed `week_start`, and
 /// the decision endpoint rejects a malformed `decision` without changing state.
 #[tokio::test]

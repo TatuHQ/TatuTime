@@ -226,8 +226,16 @@ function dialogSetup() {
     const dom = new JSDOM(html, { runScripts: 'outside-only', url: 'http://localhost/' });
     dom.window.HTMLDialogElement.prototype.showModal = function () { this.open = true; };
     dom.window.HTMLDialogElement.prototype.close = function () { this.open = false; };
+    // An initialised instance with no session: initAuth() probes /auth/me, gets
+    // no valid session, and shows the sign-in card (a first-run instance now
+    // opens the admin startup wizard instead, which these popup tests are not
+    // about).
     const stub = `
-api.get = async () => ({});
+api.get = async (path) => {
+  if (path === '/auth/status') return { initialised: true };
+  if (path === '/auth/sso/providers') return { providers: [] };
+  throw new Error('no session');
+};
 api.post = async () => ({});
 initDialogFocusReturn(); // #232 inc 4: focus returns to the opener
 initDialog();            // shared confirm/prompt/alert dialog

@@ -1314,14 +1314,20 @@ class Gate:
             "the bespoke .field/.hint/.form-error markup is gone and the official "
             "form vocabulary is in place (#232 phase 2b)",
             counts["field"] == 0 and counts["hint"] == 0 and counts["formError"] == 0
-            # 125/120/120 after #349 removed the legacy direct draft
-            # generator's three field rows (customer / from / to).
-            and counts["groups"] == 125 and counts["labels"] == 120
-            # 32 after the rebase: upstream's Get paid box (#357) plus the #349
-            # invoice detail panel's history state line and delivery-record note.
-            and counts["controls"] == 120 and counts["help"] == 32
-            # 22: the legacy direct draft generator's #invoice-error is gone.
-            and counts["messages"] == counts["errorGroups"] == 22,
+            # 137/132/132: 125/120/120 after #349 removed the legacy direct draft
+            # generator's three field rows (customer / from / to), plus the admin
+            # startup wizard's twelve stacked field rows (web/index.html
+            # #admin-wizard: four administrator, seven organisation, one base
+            # currency).
+            and counts["groups"] == 137 and counts["labels"] == 132
+            # 35: the pre-wizard 32 (upstream's Get paid box (#357) plus the #349
+            # invoice detail panel's history state line and delivery-record note)
+            # and the wizard's password hint, base-currency hint and aria-live
+            # step announcer.
+            and counts["controls"] == 132 and counts["help"] == 35
+            # 23: the legacy direct draft generator's #invoice-error is gone; the
+            # admin startup wizard's #aw-error is new.
+            and counts["messages"] == counts["errorGroups"] == 23,
             f"counts={counts}",
             info=f"{counts['groups']} groups, {counts['help']} help texts, "
                  f"{counts['messages']} validation messages",

@@ -3,7 +3,7 @@
 
 
 import { api, fetchAll } from './api.js';
-import { $, announce, el, isoDate, ubuntuIcon } from './dom.js';
+import { $, announce, el, isoDate, panelRefresh, ubuntuIcon } from './dom.js';
 import { activateSeg } from './route.js';
 import { createSeqGuard } from './seq.js';
 import { MONTH_NAMES, fmtHM, refreshDay, showEntryForm, weekLockIndex } from './timesheet.js';
@@ -29,7 +29,13 @@ export function monthName(month) {
   return `${MONTH_NAMES[mm - 1]} ${yy}`;
 }
 
-export async function refreshTimeCal() {
+export function refreshTimeCal() {
+  // QA-10: a failed month load renders the stale-data banner in the Calendar
+  // view; the previously painted grid stays as the last known good data.
+  return panelRefresh('panel-calendar', 'the calendar', refreshTimeCalBody);
+}
+
+async function refreshTimeCalBody() {
   const today = isoDate(new Date());
   if (!calState.month) calState.month = (($('day-date').value || today).slice(0, 7));
   const month = calState.month;

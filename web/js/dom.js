@@ -231,6 +231,124 @@ export function announce(msg) {
   $('live-region').textContent = msg;
 }
 
+// ---------------------------------------------------------- single flight --
+//
+// QA-01: a create form's submit control stays live while its request is in
+// flight, so a double click (or a second Enter) used to POST twice and create
+// the record twice. `singleFlight` is the one guard the create-form handlers
+// share: the first run marks the button busy -- disabled + `aria-busy` so it
+// still reads sensibly to assistive tech -- and a second run returns immediately
+// without issuing anything. `finally` restores the control, so a rejected save
+// never leaves the form permanently stuck.
+//
+// The button is also the guard's identity: `dataset.busy` is the flag, so two
+// different forms can never block each other.
+
+export async function singleFlight(button, run) {
+  if (button && button.dataset.busy === '1') return undefined;
+  if (button) {
+    button.dataset.busy = '1';
+    button.disabled = true;
+    button.setAttribute('aria-busy', 'true');
+  }
+  try {
+    return await run();
+  } finally {
+    if (button) {
+      delete button.dataset.busy;
+      button.disabled = false;
+      button.removeAttribute('aria-busy');
+    }
+  }
+}
+
+// ------------------------------------------------- stale panels (#QA-10) --
+//
+// A refresh that fails must not leave the panel looking current, and must not
+// blank it either: the rows on screen are the last known good data. Every view
+// loader runs through `panelRefresh`, which renders one visible `role="alert"`
+// banner inside that view's panel on failure -- naming the error, saying the
+// data is stale -- with a Retry button that re-runs the same loader. A later
+// successful load removes the banner, so it clears itself automatically.
+//
+// One banner per panel: repeated failures replace it, and two loaders can never
+// stack two banners in the same view. The banner reuses the app's existing
+// notification vocabulary (`p-notification p-notification--caution`), so no new
+// skin is introduced.
+
+const panelViews = new Map(); // panelId -> { panelId, label, run, loaded, banner }
+
+function panelView(panelId, label, run) {
+  let view = panelViews.get(panelId);
+  if (!view) {
+    view = { panelId, label, run, loaded: false, banner: null };
+    panelViews.set(panelId, view);
+  }
+  view.label = label;
+  view.run = run;
+  return view;
+}
+
+function clearPanelBanner(view) {
+  if (!view.banner) return;
+  view.banner.remove();
+  view.banner = null;
+}
+
+function showPanelBanner(view, err) {
+  const host = $(view.panelId);
+  if (!host) return;
+  clearPanelBanner(view);
+  // The stale claim is only true once something loaded: before the first
+  // successful load there is no last-known-good data to speak of.
+  const stale = view.loaded
+    ? 'Showing data from the last successful load.'
+    : 'No data has been loaded yet.';
+  const retry = el('button', {
+    type: 'button',
+    cls: 'p-button',
+    text: 'Retry',
+    attrs: { 'aria-label': `Retry refreshing ${view.label}` },
+  });
+  retry.addEventListener('click', () => {
+    if (retry.dataset.busy === '1') return;
+    retry.dataset.busy = '1';
+    retry.disabled = true;
+    retry.setAttribute('aria-busy', 'true');
+    // A retry either clears the banner (success) or replaces it (still
+    // failing), so the busy button is never left behind in either case.
+    panelRefresh(view.panelId, view.label, view.run).catch(() => {});
+  });
+  const banner = el('div', {
+    cls: 'p-notification p-notification--caution',
+    attrs: { role: 'alert', 'data-panel': view.panelId },
+  }, [
+    el('div', { cls: 'p-notification__content' }, [
+      el('p', { cls: 'p-notification__title', text: `Refresh failed -- ${err.message}` }),
+      el('p', { cls: 'p-notification__message', text: stale }),
+      retry,
+    ]),
+  ]);
+  host.prepend(banner);
+  view.banner = banner;
+}
+
+/// Run one view's loader with the shared stale-panel contract. The loader's
+/// rejection is re-thrown unchanged: `refreshPanel` still announces it on the
+/// live region, and direct callers keep the behaviour they had before.
+export async function panelRefresh(panelId, label, run) {
+  const view = panelView(panelId, label, run);
+  try {
+    const result = await run();
+    view.loaded = true;
+    clearPanelBanner(view);
+    return result;
+  } catch (err) {
+    showPanelBanner(view, err);
+    throw err;
+  }
+}
+
 /// The reason the API gives for a key it does not know at all — the
 /// `deny_unknown_fields` rejection in `api::deser_error`, `FieldError::new(field,
 /// "unknown field")`. serde only refuses a key that was *actually sent*, so this
@@ -246,6 +364,7 @@ const UNKNOWN_FIELD = 'unknown field';
 
 export function showFormError(el, err) {
   const fields = err.payload?.error?.fields;
+  const code = err.payload?.error?.code;
   let text = err.message || 'The request failed.';
   if (Array.isArray(fields) && fields.length) {
     // A failure serde could not tie to a key (a body that is not JSON, or a
@@ -257,7 +376,19 @@ export function showFormError(el, err) {
     if (fields.some((f) => f.message === UNKNOWN_FIELD)) {
       text += ' — the running server is older than this page: restart or rebuild it.';
     }
+  } else if (typeof err.status === 'number' && err.status >= 500) {
+    // A 5xx is the server's own failure. `ApiError::internal` deliberately
+    // withholds the cause (paths and raw filesystem errors never reach a
+    // client), so name the contract code and the status — the details exist
+    // only in the server log. Nothing from the response body beyond the
+    // code is printed, and only `textContent` is ever assigned.
+    const label = code ? `${code}, HTTP ${err.status}` : `HTTP ${err.status}`;
+    text += ` (${label}) — check the server log for details.`;
   }
+  // A machine-readable hook for tests and screenshots: the code without
+  // parsing the prose above. `clearFormError` removes it with the text.
+  if (code) el.dataset.errorCode = code;
+  else delete el.dataset.errorCode;
   el.textContent = text;
   el.hidden = false;
   const form = el.closest('form');
@@ -280,6 +411,7 @@ export function showFormError(el, err) {
 export function clearFormError(el) {
   el.textContent = '';
   el.hidden = true;
+  delete el.dataset.errorCode;
   for (const input of el.closest('form')?.elements || []) {
     if (input.dataset?.errorMessage !== el.id) continue;
     input.removeAttribute('aria-invalid');

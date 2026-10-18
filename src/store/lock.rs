@@ -76,11 +76,17 @@ impl Store {
             ) {
                 continue;
             }
-            let week = sub.week_start.format("%Y-%m-%d").to_string();
+            // QA-09: carry the week's *state* with it — a submitted week can be
+            // rejected to unlock, an approved one cannot, and the 409 message
+            // must not offer an action the decision endpoint refuses.
+            let frozen = FrozenWeek {
+                week_start: sub.week_start.format("%Y-%m-%d").to_string(),
+                approved: sub.state == crate::domain::SubmissionState::Approved,
+            };
             for entry in &sub.entry_ids {
                 snap.submitted_entries
                     .entry(*entry)
-                    .or_insert_with(|| week.clone());
+                    .or_insert_with(|| frozen.clone());
             }
         }
         for claim in self.list_claims()? {

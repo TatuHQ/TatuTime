@@ -193,7 +193,27 @@ async fn invoiced_time_is_permanently_locked() {
     )
     .await;
     assert_eq!(s_draft, StatusCode::OK, "draft invoices must not lock");
-    json_req(&app, "POST", &format!("/api/invoices/{iid}/issue"), None).await;
+    // QA-02: that edit left the draft stale, so regenerate it from the period
+    // before issuing — an issued invoice never bills hours the timesheet lost.
+    let (s_del_draft, b_del_draft) =
+        json_req(&app, "DELETE", &format!("/api/invoices/{iid}"), None).await;
+    assert_eq!(s_del_draft, StatusCode::NO_CONTENT, "{b_del_draft}");
+    let (s_fresh, fresh) = json_req(
+        &app,
+        "POST",
+        "/api/invoices",
+        Some(json!({"customer_id":cid.clone(),"from":"2026-10-01","to":"2026-10-07"})),
+    )
+    .await;
+    assert_eq!(s_fresh, StatusCode::CREATED, "{fresh}");
+    assert_eq!(
+        fresh["total_minor"], 24000,
+        "the regenerated draft bills 4 h"
+    );
+    let iid = fresh["id"].as_str().unwrap().to_string();
+    let (s_issue, b_issue) =
+        json_req(&app, "POST", &format!("/api/invoices/{iid}/issue"), None).await;
+    assert_eq!(s_issue, StatusCode::OK, "{b_issue}");
     let (s_open, b_open) = json_req(
         &app,
         "PUT",
@@ -214,7 +234,7 @@ async fn invoiced_time_is_permanently_locked() {
         &app,
         "POST",
         &format!("/api/invoices/{iid}/pay"),
-        Some(json!({"amount_minor": 18000, "reference": "wire-full"})),
+        Some(json!({"amount_minor": 24000, "reference": "wire-full"})),
     )
     .await;
     let (s_paid, _) = json_req(

@@ -666,11 +666,43 @@ async fn invoice_report_gains_paid_and_balance_columns() {
     );
 }
 
-/// #262(8): the HTTP-level 400-day range cap (`MAX_RANGE_DAYS`, enforced at the
-/// store level). A wider query rejects with 400; the ceiling itself passes.
+/// #262(8) / QA-08: the range cap means exactly "at most 400 **inclusive**
+/// days". It used to compare `to - from` with `> 400`, so a 401-day window
+/// (a difference of 400) was accepted. Renamed from
+/// `range_query_over_max_days_rejects_with_400` when the boundary moved.
 #[tokio::test]
-async fn range_query_over_max_days_rejects_with_400() {
+async fn range_query_cap_is_400_inclusive_days() {
     let (app, _d) = app().await;
+
+    // 400 inclusive days: 2025-01-01 .. 2026-02-04 is a difference of 399.
+    let (ok, body) = json_req(
+        &app,
+        "GET",
+        "/api/entries?from=2025-01-01&to=2026-02-04",
+        None,
+    )
+    .await;
+    assert_eq!(ok, StatusCode::OK, "{body}");
+
+    // 401 inclusive days: one day more (a difference of 400) is refused.
+    let (over, body) = json_req(
+        &app,
+        "GET",
+        "/api/entries?from=2025-01-01&to=2026-02-05",
+        None,
+    )
+    .await;
+    assert_eq!(over, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(body["error"]["code"], "bad_request");
+    assert!(
+        body["error"]["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("400"),
+        "the refusal must name the cap: {body}"
+    );
+
+    // A much wider window is still refused.
     let (status, body) = json_req(
         &app,
         "GET",
@@ -679,16 +711,6 @@ async fn range_query_over_max_days_rejects_with_400() {
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
-    assert_eq!(body["error"]["code"], "bad_request");
-    // A window inside the cap is accepted.
-    let (ok, _) = json_req(
-        &app,
-        "GET",
-        "/api/entries?from=2026-01-01&to=2026-06-01",
-        None,
-    )
-    .await;
-    assert_eq!(ok, StatusCode::OK);
 }
 
 // ------------------------------------------------------- pagination (#334) --

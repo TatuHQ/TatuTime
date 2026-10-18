@@ -38,7 +38,9 @@ use io::prune_tmp_files;
 pub use cold::{ArchiveRefusal, ArchiveReport, ArchivedDay, SkippedDay};
 
 /// Hard cap on a range scan so a malformed or adversarial query cannot spin
-/// over the whole tree. 400 days covers a year plus buffer.
+/// over the whole tree. 400 days covers a year plus buffer, and is counted
+/// **inclusively** (QA-08): `from=2025-01-01&to=2026-02-04` is exactly 400
+/// days and is accepted, while a 401-day window is refused.
 pub const MAX_RANGE_DAYS: i64 = 400;
 
 /// Hard bound on a PDF archive read (#50, #113): invoices render far below
@@ -47,8 +49,12 @@ pub const MAX_RANGE_DAYS: i64 = 400;
 pub const MAX_PDF_BYTES: u64 = 8 * 1024 * 1024;
 
 /// Hard cap on documents in any single collection directory (#50). A personal
-/// timesheet is far below this; it bounds a pathological/corrupted tree so no
-/// request does an unbounded directory walk.
+/// timesheet is far below this; it bounds a pathological tree.
+///
+/// QA-05: this is a **write-time** cap — a new document is refused (409
+/// `collection_full`) once its collection holds this many, before anything is
+/// persisted. Reads never enforce it: an operator-supplied over-cap directory
+/// is listed in full so it stays recoverable instead of answering 500 forever.
 pub const MAX_DOCS: usize = 100_000;
 
 /// Cap on retained per-invoice timeline events. The sidecar is a display aid,
@@ -69,12 +75,33 @@ pub enum StoreError {
     AlreadyExists(String),
     #[error("state conflict: {0}")]
     Conflict(String),
-    #[error("range too large (max {MAX_RANGE_DAYS} days)")]
+    /// The span is wider than `MAX_RANGE_DAYS` **inclusive** days (QA-08):
+    /// `to - from` may be at most `MAX_RANGE_DAYS - 1`.
+    #[error("range too large (max {MAX_RANGE_DAYS} days, inclusive)")]
     RangeTooLarge,
     #[error("write lock busy")]
     LockTimeout,
+    /// A *new* document would exceed `MAX_DOCS` (QA-05) — refused on the write
+    /// path before persisting; maps to 409 `collection_full`.
     #[error("collection too large (max {MAX_DOCS})")]
     TooManyItems,
+    /// The stored draft no longer matches the timesheet (QA-02) — issue is
+    /// refused and nothing is persisted; maps to 409 `draft_out_of_date`.
+    #[error("draft out of date")]
+    DraftOutOfDate,
+    /// A path that must be a directory exists as something else (QA-11) —
+    /// maps to 500 `data_dir_invalid`, never silently to an empty collection.
+    #[error("data directory is not a directory")]
+    DataDirInvalid,
+    /// The filesystem refused a write: a read-only mount or a permissions
+    /// problem (QA-12) — maps to 500 `data_dir_not_writable`.
+    #[error("data directory is not writable")]
+    NotWritable,
+    /// A stored document did not decode (QA-04/QA-12). The detail (file name
+    /// and parse error) is for the server log only — maps to 500
+    /// `corrupt_document`.
+    #[error("corrupt document: {0}")]
+    CorruptDocument(String),
     #[error("io failure: {0}")]
     Io(String),
 }
@@ -96,9 +123,19 @@ impl<E> From<StoreError> for UpdateError<E> {
 
 // `Io` carries the operation context only; the underlying error is logged
 // server-side, never serialised to a client (see security rules).
+//
+// QA-12: the two *actionable* operating conditions get their own codes rather
+// than the opaque `internal`: a filesystem that refuses writes (permissions or
+// a read-only mount) and a collection path that is not a directory (QA-11).
 impl From<std::io::Error> for StoreError {
     fn from(e: std::io::Error) -> Self {
-        Self::Io(e.to_string())
+        match e.kind() {
+            std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::ReadOnlyFilesystem => {
+                Self::NotWritable
+            }
+            std::io::ErrorKind::NotADirectory => Self::DataDirInvalid,
+            _ => Self::Io(e.to_string()),
+        }
     }
 }
 
@@ -117,10 +154,20 @@ pub struct LockSnapshot {
     pub invoiced_entries: std::collections::HashMap<Uuid, String>,
     /// Expense id -> invoice number (frozen by an *open* invoice).
     pub invoiced_expenses: std::collections::HashMap<Uuid, String>,
-    /// Entry id -> week start `YYYY-MM-DD` (frozen by a submitted/approved week).
-    pub submitted_entries: std::collections::HashMap<Uuid, String>,
+    /// Entry id -> the frozen week, with its state (QA-09): a submitted week
+    /// can still be rejected, an approved one is permanent, so the 409 message
+    /// must not offer an action the API refuses.
+    pub submitted_entries: std::collections::HashMap<Uuid, FrozenWeek>,
     /// Expense id -> claim id (frozen by a submitted/approved claim).
     pub claimed_expenses: std::collections::HashMap<Uuid, String>,
+}
+
+/// One timesheet week that has frozen its entries: its start date and whether
+/// it is merely submitted (rejectable) or approved (permanent).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FrozenWeek {
+    pub week_start: String,
+    pub approved: bool,
 }
 
 /// Cheap freshness token for the memoized lock snapshot (#255): the

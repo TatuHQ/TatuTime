@@ -4,7 +4,7 @@
 
 
 import { api, fetchAll } from './api.js';
-import { $, announce, askConfirm, clearFormError, el, fillSelect, formatMoney, showFormError, statusChip } from './dom.js';
+import { $, announce, askConfirm, clearFormError, el, fillSelect, formatMoney, panelRefresh, showFormError, singleFlight, statusChip } from './dom.js';
 import { customerName, fillCustomerSelect, fillProjectSelect, loadProjects, state } from './state.js';
 import { adoptExpenseRate, billedCurrency, currencyCode, refreshExpenseConversion, resetExpenseConversion, toMinor } from './fx.js';
 import { invalidateLockCache, refreshDay } from './timesheet.js';
@@ -80,23 +80,26 @@ export async function removeCategory(category) {
 
 export async function addCategory(evt) {
   evt.preventDefault();
-  clearFormError($('category-error'));
-  const id = $('category-id').value;
-  try {
-    const existing = id ? (state.categories || []).find((category) => category.id === id) : null;
-    const body = {
-      name: $('category-name').value.trim(),
-      default_billable: existing ? existing.default_billable : true,
-      active: existing ? existing.active : true,
-    };
-    if (id) await api.put(`/categories/${id}`, body);
-    else await api.post('/categories', body);
-    resetCategoryForm();
-    await refreshCategories();
-    announce(id ? 'Category updated.' : 'Category added.');
-  } catch (err) {
-    showFormError($('category-error'), err);
-  }
+  // QA-01: one POST /categories per click, not one per event.
+  return singleFlight($('category-save'), async () => {
+    clearFormError($('category-error'));
+    const id = $('category-id').value;
+    try {
+      const existing = id ? (state.categories || []).find((category) => category.id === id) : null;
+      const body = {
+        name: $('category-name').value.trim(),
+        default_billable: existing ? existing.default_billable : true,
+        active: existing ? existing.active : true,
+      };
+      if (id) await api.put(`/categories/${id}`, body);
+      else await api.post('/categories', body);
+      resetCategoryForm();
+      await refreshCategories();
+      announce(id ? 'Category updated.' : 'Category added.');
+    } catch (err) {
+      showFormError($('category-error'), err);
+    }
+  });
 }
 
 export const ADD_CATEGORY_VALUE = '__add_expense_category__';
@@ -115,22 +118,27 @@ export async function fillCategorySelect(preferred = '') {
 
 export async function addExpenseCategory(evt) {
   evt.preventDefault();
-  clearFormError($('expense-category-error'));
-  try {
-    const created = await api.post('/categories', {
-      name: $('expense-category-name').value.trim(),
-      default_billable: true,
-      active: true,
-    });
-    $('expense-category-form').reset();
-    $('expense-category-dialog').close();
-    await refreshCategories();
-    await fillCategorySelect(created.id);
-    announce(`Category ${created.name} added and selected.`);
-    $('expense-category').focus();
-  } catch (err) {
-    showFormError($('expense-category-error'), err);
-  }
+  // QA-01: the quick-add dialog has no `#...-save` id of its own, so the guard
+  // sits on the form's actual submit control.
+  const saveButton = $('expense-category-form').querySelector('[type="submit"]');
+  return singleFlight(saveButton, async () => {
+    clearFormError($('expense-category-error'));
+    try {
+      const created = await api.post('/categories', {
+        name: $('expense-category-name').value.trim(),
+        default_billable: true,
+        active: true,
+      });
+      $('expense-category-form').reset();
+      $('expense-category-dialog').close();
+      await refreshCategories();
+      await fillCategorySelect(created.id);
+      announce(`Category ${created.name} added and selected.`);
+      $('expense-category').focus();
+    } catch (err) {
+      showFormError($('expense-category-error'), err);
+    }
+  });
 }
 
 /// A fresh draft: no id, no receipt, and the dialog back to its create wording.
@@ -180,7 +188,12 @@ export async function startExpenseEdit(x) {
   await refreshExpenseConversion();
 }
 
-export async function refreshExpenses() {
+export function refreshExpenses() {
+  // QA-10: a failed register load keeps the last rows and shows the banner.
+  return panelRefresh('panel-expenses', 'the expense register', refreshExpensesBody);
+}
+
+async function refreshExpensesBody() {
   // #334: the register is the one view with no range filter, so it is the one
   // that can outgrow a single page. It follows every cursor, and says so if the
   // client-side cap stopped the walk — a register that quietly showed the first
@@ -278,6 +291,11 @@ export async function refreshExpenses() {
 
 export async function saveExpense(evt) {
   evt.preventDefault();
+  // QA-01: two submits must not record the expense twice.
+  return singleFlight($('expense-save'), saveExpenseBody);
+}
+
+async function saveExpenseBody() {
   clearFormError($('expense-error'));
   const id = $('expense-id').value;
   const enteredMinor = toMinor($('expense-amount').value) || 0;
@@ -350,7 +368,12 @@ export async function saveExpense(evt) {
 
 // ------------------------------------------------------------ submissions --
 
-export async function refreshSubmissions() {
+export function refreshSubmissions() {
+  // QA-10: the approvals register follows the same stale-data contract.
+  return panelRefresh('panel-submissions', 'the approvals register', refreshSubmissionsBody);
+}
+
+async function refreshSubmissionsBody() {
   const data = await api.get('/submissions');
   const subs = data.submissions || [];
   const tbody = $('submission-table').querySelector('tbody');

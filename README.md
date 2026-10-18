@@ -155,7 +155,7 @@ Environment variables (all optional; precedence env > `config.json` > default):
 | `TUCANO_SECRET_KEY[_FILE]` | 32-byte vault key; unset ⇒ vault disabled (fail-closed) |
 | `TUCANO_ENV=production` | strict secret policy + `Secure` cookies by default |
 | `TUCANO_SECURE_COOKIES=0` | drop the `Secure` flag for plain-HTTP serving on a trusted LAN |
-| `TUCANO_MAX_DOCS` | per-collection document cap (abuse guard) |
+| `TUCANO_MAX_DOCS` | per-collection document cap, enforced on writes (a create past it is refused with 409 `collection_full`); reads always list what is stored, so a pre-existing over-cap directory stays recoverable |
 
 ```sh
 # Preferred: mount the key as a file (uid 10001 must be able to read it).
