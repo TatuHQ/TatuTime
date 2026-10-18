@@ -198,7 +198,7 @@ before #232 can be closed.
 | 10 | Reports | `/reports` | ⬜ |
 | 11 | Settings — Security & runtime | `/settings/security` | ⬜ |
 | 12 | Settings — Users | `/settings/users` | ⬜ |
-| 13 | Settings — Invoice documents | `/settings/invoices` | ⬜ |
+| 13 | Settings — Invoice template | `/settings/invoice-template` | ⬜ |
 | 14 | Settings — Products & services | `/settings/catalog` | ⬜ |
 | 15 | Settings — Expense categories | `/settings/expenses` | ⬜ |
 
@@ -213,7 +213,8 @@ review land too: the user (`/settings/users`), approval (`/approvals`), credenti
 (`/settings/security`), catalog (`/settings/catalog`) and the advanced-billing
 recurring/retainer (`/invoices`) registers are `p-card` + `p-table--mobile-card`
 shells, and the runtime-config (`/settings/security`) and template-variable
-(`/settings/invoices`) summaries are plain official tables in a `p-card`. The
+(`/settings/invoice-template`) summaries are official mobile-card tables in a
+`p-card`. Company identity lives in `/settings/company`. The
 Day/Week/Calendar grids and the invoice line editor are deliberately untouched;
 the Invoices sortable register (row 7) is now **phase 2d** — the real `aria-sort`
 + `.p-table__sort-button` pattern (there is no `.p-table--sortable` class in

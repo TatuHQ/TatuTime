@@ -646,7 +646,7 @@
           <div id="iw-step1">
             <div class="p-form__group"><label class="p-form__label" for="iw-customer">Customer</label><select class="p-form__control" id="iw-customer"></select></div>
             <div class="p-form__group"><label class="p-form__label" for="iw-expenses"><input class="p-form__control" type="checkbox" id="iw-expenses" checked>
-              Include billable expenses (#25)</label></div>
+              Include billable expenses</label></div>
           </div>
           <div id="iw-step2" hidden>
             <div class="p-form__group"><label class="p-form__label" for="iw-preset">Period</label><select class="p-form__control" id="iw-preset">
@@ -729,6 +729,48 @@
           <p id="message-note" class="p-form-help-text"></p>
           <footer class="buttons p-modal__footer">
             <button type="button" class="secondary" id="message-close">Close</button>
+          </footer>
+        </div>
+      </dialog>
+      <!-- Invoice email recipients (#139 follow-up). Opened by BOTH delivery
+           entry points -- `#ip-send` in the detail panel and the register's
+           Email row action -- so the admin chooses who receives the invoice
+           before anything is sent. The candidates are the customer's on-file
+           addresses (the flagged billing contact first, checked by default),
+           the admin may tick more than one, and an address that is not on file
+           can be typed in. Sending posts the explicit list, or omits the body
+           to keep the server-side billing-email default. The SMTP notice is a
+           role=alert: when delivery is not configured it explains why Send is
+           disabled and links to the Settings route (EMAIL_SETTINGS_ROUTE in
+           web/js/invoices.js). Escape, the focus trap and the return of focus
+           to the opener come from the native <dialog> plus
+           dom.js initDialogFocusReturn. -->
+      <dialog id="send-email-dialog" class="p-modal" aria-modal="true" aria-labelledby="send-email-title">
+        <div class="p-modal__dialog">
+          <header class="p-modal__header">
+            <h2 class="p-modal__title" id="send-email-title">Email invoice</h2>
+          </header>
+          <p class="p-form-help-text" id="send-email-invoice"></p>
+          <div id="send-email-recipients-group" role="group" aria-labelledby="send-email-recipients-title">
+            <h3 id="send-email-recipients-title">Recipients</h3>
+            <div id="send-email-recipients"></div>
+            <p class="p-form-help-text" id="send-email-empty" hidden>No email address is on file for this customer. Type one below, or add it on the customer form.</p>
+          </div>
+          <div class="p-form__group">
+            <label class="p-form__label" for="send-email-extra">Add another email (comma-separated)</label>
+            <input class="p-form__control" id="send-email-extra" type="text" inputmode="email" autocomplete="off" placeholder="name@example.com">
+          </div>
+          <div class="p-form-validation is-error">
+            <p class="p-form-validation__message" id="send-email-error" role="alert" hidden></p>
+          </div>
+          <div class="p-form-validation is-error">
+            <p class="p-form-validation__message" id="send-email-notice" role="alert" hidden>Email delivery is not configured, so sending would only be logged. Set up SMTP in Settings, then come back here.</p>
+            <button type="button" class="link secondary" id="send-email-settings">Open Settings</button>
+          </div>
+          <p class="p-form-help-text" id="send-email-result" role="status" aria-live="polite" hidden></p>
+          <footer class="buttons p-modal__footer">
+            <button type="button" id="send-email-send" class="primary" data-positive="1">Send</button>
+            <button type="button" class="secondary" id="send-email-close">Cancel</button>
           </footer>
         </div>
       </dialog>
@@ -871,244 +913,558 @@
     <section id="panel-settings" role="tabpanel" aria-labelledby="tab-settings" tabindex="0" hidden>
       <div class="settings-head">
         <!-- #232 increment 5: the settings tab bar is the official
-             p-tabs__list. -->
+         p-tabs__list. -->
         <div id="settings-tabs" class="settings-tabs p-tabs__list" role="tablist" aria-label="Settings categories">
-          <div class="p-tabs__item"><button type="button" class="p-tabs__link" role="tab" id="settings-tab-security" aria-controls="settings-panel-security" aria-selected="true">Security &amp; runtime</button></div>
-          <div class="p-tabs__item"><button type="button" class="p-tabs__link" role="tab" id="settings-tab-users" aria-controls="settings-panel-users" aria-selected="false" tabindex="-1">Users</button></div>
-          <div class="p-tabs__item"><button type="button" class="p-tabs__link" role="tab" id="settings-tab-invoice" aria-controls="settings-panel-invoice" aria-selected="false" tabindex="-1">Invoice documents</button></div>
-          <div class="p-tabs__item"><button type="button" class="p-tabs__link" role="tab" id="settings-tab-catalog" aria-controls="settings-panel-catalog" aria-selected="false" tabindex="-1">Products &amp; services</button></div>
-          <div class="p-tabs__item"><button type="button" class="p-tabs__link" role="tab" id="settings-tab-expenses" aria-controls="settings-panel-expenses" aria-selected="false" tabindex="-1">Expense categories</button></div>
+          <div class="p-tabs__item"><button type="button" class="p-tabs__link" role="tab" id="settings-tab-users"
+              aria-controls="settings-panel-users" aria-selected="true">Users</button></div>
+          <div class="p-tabs__item"><button type="button" class="p-tabs__link" role="tab" id="settings-tab-company"
+              aria-controls="settings-panel-company" aria-selected="false" tabindex="-1">Company</button></div>
+          <div class="p-tabs__item"><button type="button" class="p-tabs__link" role="tab"
+              id="settings-tab-invoice-template" aria-controls="settings-panel-invoice-template"
+              aria-selected="false" tabindex="-1">Invoice template</button></div>
+          <div class="p-tabs__item"><button type="button" class="p-tabs__link" role="tab" id="settings-tab-catalog"
+              aria-controls="settings-panel-catalog" aria-selected="false" tabindex="-1">Products &amp; services</button></div>
+          <div class="p-tabs__item"><button type="button" class="p-tabs__link" role="tab" id="settings-tab-expenses"
+              aria-controls="settings-panel-expenses" aria-selected="false" tabindex="-1">Expense categories</button></div>
+          <div class="p-tabs__item"><button type="button" class="p-tabs__link" role="tab" id="settings-tab-email"
+              aria-controls="settings-panel-email" aria-selected="false" tabindex="-1">Email</button></div>
+          <div class="p-tabs__item"><button type="button" class="p-tabs__link" role="tab" id="settings-tab-security"
+              aria-controls="settings-panel-security" aria-selected="false" tabindex="-1">Security &amp; runtime</button></div>
         </div>
       </div>
 
-      <section id="settings-panel-users" class="settings-panel" role="tabpanel" aria-labelledby="settings-tab-users" tabindex="0" hidden>
-        <!-- #232 phase 2a (registers): the user register is a Vanilla p-card;
-             the #230 heading slot becomes its p-card__header. -->
-        <div class="p-card">
-        <div class="p-card__header panel-heading-row">
-          <h2>User management</h2>
+      <section id="settings-panel-users" class="settings-panel" role="tabpanel" aria-labelledby="settings-tab-users"
+        tabindex="0" hidden>
+        <!-- #230/#232: each Settings panel leads with the app-wide heading
+         slot (title + actions) and continues with a Vanilla p-card that owns
+         a p-card__header and p-card__content — the Customers/Invoices shape. -->
+        <div class="ts-head">
+          <h2>Users</h2>
           <div class="hierarchy-actions" role="group" aria-label="User actions">
             <button type="button" id="user-new" data-icon="plus" data-positive="1">User</button>
           </div>
         </div>
-        <div class="bar user-filters">
-          <div><label for="user-search">Name or email</label><input id="user-search" type="search" autocomplete="off"></div>
-          <div><label for="user-filter-role">Role</label><select id="user-filter-role"><option value="">All roles</option><option value="admin">Administrator</option><option value="member">Member</option></select></div>
-          <div><label for="user-filter-active">Status</label><select id="user-filter-active"><option value="">All statuses</option><option value="true">Active</option><option value="false">Inactive</option></select></div>
-        </div>
-        <p id="user-list-status" role="status" aria-live="polite"></p>
-        <dialog id="user-dialog" class="p-modal" aria-modal="true" aria-labelledby="user-dialog-title">
-        <div class="p-modal__dialog">
-        <header class="p-modal__header">
-          <h2 class="p-modal__title" id="user-dialog-title">Add user</h2>
-        </header>
-        <form id="user-form">
-          <input type="hidden" id="user-id">
-          <div class="p-form__group"><label class="p-form__label" for="user-name">Name</label><input type="text" class="p-form__control" id="user-name" maxlength="120" required autocomplete="name"></div>
-          <div class="p-form__group"><label class="p-form__label" for="user-email">Email</label><input class="p-form__control" id="user-email" type="email" maxlength="254" required autocomplete="email"></div>
-          <div class="p-form__group" id="user-password-field"><label class="p-form__label" for="user-password">Initial password</label><input class="p-form__control" id="user-password" type="password" minlength="8" autocomplete="new-password" required></div>
-          <div class="p-form__group"><label class="p-form__label" for="user-role">Role</label><select class="p-form__control" id="user-role"><option value="member">Member</option><option value="admin">Administrator</option></select></div>
-          <div class="p-form__group"><label class="p-form__label" for="user-active"><input class="p-form__control" id="user-active" type="checkbox" checked> Active</label></div>
-          <details><summary>Billing and cost rates</summary>
-          <div class="p-form__group"><label class="p-form__label" for="user-default-rate">Default hourly rate</label><input class="p-form__control" id="user-default-rate" type="number" min="0" max="1000000" step="0.01" inputmode="decimal" value="0"></div>
-          <div class="p-form__group"><label class="p-form__label" for="user-cost-rate">Hourly cost rate</label><input class="p-form__control" id="user-cost-rate" type="number" min="0" max="1000000" step="0.01" inputmode="decimal" value="0"></div>
-          </details>
-          <div class="p-form-validation is-error">
-            <p class="p-form-validation__message" id="user-error" role="alert" hidden></p>
+        <div class="p-card">
+          <div class="p-card__header">
+            <h2>User management</h2>
           </div>
-          <footer class="buttons p-modal__footer"><button data-positive="1" type="submit" id="user-save" class="p-button--positive">Add user</button><button type="button" class="p-button" id="user-cancel">Cancel</button></footer>
-        </form>
-        </div>
-        </dialog>
-        <dialog id="user-password-dialog" class="p-modal" aria-modal="true" aria-labelledby="user-password-title">
-          <div class="p-modal__dialog">
-          <header class="p-modal__header">
-            <h2 class="p-modal__title" id="user-password-title">Change password</h2>
-          </header>
-          <form id="user-password-form">
-            <input type="hidden" id="user-password-id">
-            <div class="p-form__group"><label class="p-form__label" for="user-new-password">New password</label><input class="p-form__control" type="password" id="user-new-password" minlength="8" autocomplete="new-password" required></div>
-            <div class="p-form-validation is-error">
-              <p class="p-form-validation__message" id="user-password-error" role="alert" hidden></p>
+          <div class="p-card__content">
+            <div class="bar user-filters">
+              <div><label for="user-search">Name or email</label><input id="user-search" type="search"
+                  autocomplete="off"></div>
+              <div><label for="user-filter-role">Role</label><select id="user-filter-role">
+                  <option value="">All roles</option>
+                  <option value="admin">Administrator</option>
+                  <option value="member">Member</option>
+                </select></div>
+              <div><label for="user-filter-active">Status</label><select id="user-filter-active">
+                  <option value="">All statuses</option>
+                  <option value="true">Active</option>
+                  <option value="false">Inactive</option>
+                </select></div>
             </div>
-            <footer class="buttons p-modal__footer"><button data-positive="1" type="submit" class="p-button--positive">Change password</button><button type="button" id="user-password-cancel" class="p-button">Cancel</button></footer>
-          </form>
+            <p id="user-list-status" role="status" aria-live="polite"></p>
+            <dialog id="user-dialog" class="p-modal" aria-modal="true" aria-labelledby="user-dialog-title">
+              <div class="p-modal__dialog">
+                <header class="p-modal__header">
+                  <h2 class="p-modal__title" id="user-dialog-title">Add user</h2>
+                </header>
+                <form id="user-form">
+                  <input type="hidden" id="user-id">
+                  <div class="p-form__group"><label class="p-form__label" for="user-name">Name</label><input
+                      type="text" class="p-form__control" id="user-name" maxlength="120" required
+                      autocomplete="name">
+                  </div>
+                  <div class="p-form__group"><label class="p-form__label" for="user-email">Email</label><input
+                      class="p-form__control" id="user-email" type="email" maxlength="254" required
+                      autocomplete="email"></div>
+                  <div class="p-form__group" id="user-password-field"><label class="p-form__label"
+                      for="user-password">Initial password</label><input class="p-form__control" id="user-password"
+                      type="password" minlength="8" autocomplete="new-password" required></div>
+                  <div class="p-form__group"><label class="p-form__label" for="user-role">Role</label><select
+                      class="p-form__control" id="user-role">
+                      <option value="member">Member</option>
+                      <option value="admin">Administrator</option>
+                    </select></div>
+                  <div class="p-form__group"><label class="p-form__label" for="user-active"><input
+                        class="p-form__control" id="user-active" type="checkbox" checked> Active</label></div>
+                  <details>
+                    <summary>Billing and cost rates</summary>
+                    <div class="p-form__group"><label class="p-form__label" for="user-default-rate">Default hourly
+                        rate</label><input class="p-form__control" id="user-default-rate" type="number" min="0"
+                        max="1000000" step="0.01" inputmode="decimal" value="0"></div>
+                    <div class="p-form__group"><label class="p-form__label" for="user-cost-rate">Hourly cost
+                        rate</label><input class="p-form__control" id="user-cost-rate" type="number" min="0"
+                        max="1000000" step="0.01" inputmode="decimal" value="0"></div>
+                  </details>
+                  <div class="p-form-validation is-error">
+                    <p class="p-form-validation__message" id="user-error" role="alert" hidden></p>
+                  </div>
+                  <footer class="buttons p-modal__footer"><button data-positive="1" type="submit" id="user-save"
+                      class="p-button--positive">Add user</button><button type="button" class="p-button"
+                      id="user-cancel">Cancel</button></footer>
+                </form>
+              </div>
+            </dialog>
+            <dialog id="user-password-dialog" class="p-modal" aria-modal="true"
+              aria-labelledby="user-password-title">
+              <div class="p-modal__dialog">
+                <header class="p-modal__header">
+                  <h2 class="p-modal__title" id="user-password-title">Change password</h2>
+                </header>
+                <form id="user-password-form">
+                  <input type="hidden" id="user-password-id">
+                  <div class="p-form__group"><label class="p-form__label" for="user-new-password">New
+                      password</label><input class="p-form__control" type="password" id="user-new-password"
+                      minlength="8" autocomplete="new-password" required></div>
+                  <div class="p-form-validation is-error">
+                    <p class="p-form-validation__message" id="user-password-error" role="alert" hidden></p>
+                  </div>
+                  <footer class="buttons p-modal__footer"><button data-positive="1" type="submit"
+                      class="p-button--positive">Change password</button><button type="button"
+                      id="user-password-cancel" class="p-button">Cancel</button></footer>
+                </form>
+              </div>
+            </dialog>
+            <div class="table-scroll">
+              <table id="user-table" class="p-table--mobile-card">
+                <caption class="sr-only">Users</caption>
+                <thead>
+                  <tr>
+                    <th scope="col">Name</th>
+                    <th scope="col">Email</th>
+                    <th scope="col">Role</th>
+                    <th scope="col">Status</th>
+                    <th scope="col">Rates</th>
+                    <th scope="col" class="actions-col">Actions</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+            <p id="user-empty" class="workspace-empty" hidden>No users found.</p>
           </div>
-        </dialog>
-        <div class="table-scroll"><table id="user-table" class="p-table--mobile-card">
-          <caption class="sr-only">Users</caption>
-          <thead><tr><th scope="col">Name</th><th scope="col">Email</th><th scope="col">Role</th><th scope="col">Status</th><th scope="col">Rates</th><th scope="col" class="actions-col">Actions</th></tr></thead>
-          <tbody></tbody>
-        </table></div>
-        <p id="user-empty" hidden>No users found.</p>
         </div>
       </section>
 
-      <section id="settings-panel-security" class="settings-panel" role="tabpanel" aria-labelledby="settings-tab-security" tabindex="0">
-        <h2>Integration credentials <span class="beta">Beta</span></h2>
-      <p class="p-form-help-text">Store provider secrets (OAuth, SMTP, calendar feeds) encrypted at rest. The integrations that consume these are <strong>Beta</strong> — not yet wired to live providers.</p>
-      <p id="vault-status" class="p-form-help-text"></p>
-      <p id="email-status" class="p-form-help-text" role="status" aria-live="polite"></p>
-      <form id="secret-form" class="p-card">
-        <div class="p-form__group"><label class="p-form__label" for="secret-key">Key (e.g. smtp.password)</label><input type="text" class="p-form__control" id="secret-key" maxlength="100" required></div>
-        <div class="p-form__group"><label class="p-form__label" for="secret-value">Value</label><input class="p-form__control" id="secret-value" type="password" autocomplete="off" required></div>
-        <div class="p-form-validation is-error">
-          <p class="p-form-validation__message" id="secret-error" role="alert" hidden></p>
+      <section id="settings-panel-security" class="settings-panel" role="tabpanel"
+        aria-labelledby="settings-tab-security" tabindex="0" hidden>
+        <div class="ts-head">
+          <h2>Security &amp; runtime</h2>
         </div>
-        <div class="buttons"><button data-positive="1" type="submit" id="secret-save">Save secret</button></div>
-      </form>
-      <!-- #232 phase 2a (registers): the credential register is a Vanilla
-           p-card using the p-table--mobile-card row pattern. -->
-      <div class="p-card" id="secret-card">
-      <div class="table-scroll"><table id="secret-table" class="p-table--mobile-card">
-        <caption class="sr-only">Configured secrets</caption>
-        <thead><tr><th scope="col">Key</th><th scope="col">Value</th><th scope="col" class="actions-col">Actions</th></tr></thead>
-        <tbody></tbody>
-      </table></div>
-      <p id="secret-empty" hidden>No credentials stored yet.</p>
-      </div>
-
-      <h2>Runtime configuration <span class="beta">Beta</span></h2>
-      <p class="p-form-help-text">Effective settings, resolved <strong>env &gt; config.json &gt; default</strong> and stored on the data volume — a restart or image update keeps them (#94).</p>
-      <!-- #232 phase 2a (registers): the configuration summary is a plain
-           official table inside a Vanilla p-card (key/value/source, not a
-           mobile-card list). -->
-      <div class="p-card" id="config-card">
-      <div class="table-scroll"><table id="config-table">
-        <caption class="sr-only">Effective runtime configuration</caption>
-        <thead><tr><th scope="col">Setting</th><th scope="col">Value</th><th scope="col">Source</th></tr></thead>
-        <tbody></tbody>
-      </table></div>
-      </div>
-      <form id="config-form" class="p-card">
-        <div class="p-form__group"><label class="p-form__label" for="config-key">Setting</label><select class="p-form__control" id="config-key"></select></div>
-        <div class="p-form__group"><label class="p-form__label" for="config-value">New value</label><input type="text" class="p-form__control" id="config-value" maxlength="300"></div>
-        <div class="p-form-validation is-error">
-          <p class="p-form-validation__message" id="config-error" role="alert" hidden></p>
-        </div>
-        <div class="buttons"><button data-positive="1" type="submit" id="config-save">Apply to config.json</button></div>
-      </form>
-      </section>
-
-      <section id="settings-panel-expenses" class="settings-panel" role="tabpanel" aria-labelledby="settings-tab-expenses" tabindex="0" hidden>
-        <h2>Expense categories</h2>
-        <p class="p-form-help-text">Choose the categories available when recording expenses. Removing a category is blocked while an expense still uses it.</p>
-        <form id="category-form" class="bar">
-          <input type="hidden" id="category-id">
-          <label for="category-name">Category name</label>
-          <input type="text" id="category-name" maxlength="120" required autocomplete="off">
-          <button data-positive="1" type="submit" id="category-save" class="primary">Add category</button>
-          <button type="button" id="category-cancel" class="secondary" hidden>Cancel edit</button>
+        <form id="secret-form" class="p-card">
+          <div class="p-card__header">
+            <h2>Integration credentials <span class="beta">Beta</span></h2>
+          </div>
+          <div class="p-card__content">
+            <p class="p-form-help-text">Store provider secrets (OAuth, SMTP, calendar feeds) encrypted at rest. The
+              integrations that consume these are <strong>Beta</strong> — not yet wired to live providers.</p>
+            <p id="vault-status" class="p-form-help-text"></p>
+            <div class="p-form__group"><label class="p-form__label" for="secret-key">Key (e.g.
+                smtp.password)</label><input type="text" class="p-form__control" id="secret-key" maxlength="100"
+                required></div>
+            <div class="p-form__group"><label class="p-form__label" for="secret-value">Value</label><input
+                class="p-form__control" id="secret-value" type="password" autocomplete="off" required></div>
+            <div class="p-form-validation is-error">
+              <p class="p-form-validation__message" id="secret-error" role="alert" hidden></p>
+            </div>
+            <div class="buttons"><button data-positive="1" type="submit" id="secret-save">Save secret</button></div>
+          </div>
         </form>
-        <div class="p-form-validation is-error">
-          <p class="p-form-validation__message" id="category-error" role="alert" hidden></p>
+        <div class="p-card" id="secret-card">
+          <div class="p-card__header">
+            <h2>Stored credentials</h2>
+          </div>
+          <div class="p-card__content">
+            <div class="table-scroll">
+              <table id="secret-table" class="p-table--mobile-card">
+                <caption class="sr-only">Configured secrets</caption>
+                <thead>
+                  <tr>
+                    <th scope="col">Key</th>
+                    <th scope="col">Value</th>
+                    <th scope="col" class="actions-col">Actions</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+            <p id="secret-empty" class="workspace-empty" hidden>No credentials stored yet.</p>
+          </div>
         </div>
-        <ul id="category-list" class="chips"></ul>
+        <div class="p-card" id="config-card">
+          <div class="p-card__header">
+            <h2>Runtime configuration <span class="beta">Beta</span></h2>
+          </div>
+          <div class="p-card__content">
+            <p class="p-form-help-text">Externalised settings, resolved <strong>env &gt; config.json &gt;
+                default</strong> and stored on the data volume — a restart or image update keeps them (#94).
+                Rows marked <strong>after restart</strong> are read once at boot (reminder and retention
+                scheduling, the provider registries); every other row applies to the next request.</p>
+            <div class="table-scroll">
+              <table id="config-table" class="p-table--mobile-card">
+                <caption class="sr-only">Effective runtime configuration</caption>
+                <thead>
+                  <tr>
+                    <th scope="col">Setting</th>
+                    <th scope="col">Value</th>
+                    <th scope="col">Source</th>
+                    <th scope="col">Applies</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+        <form id="config-form" class="p-card">
+          <div class="p-card__header">
+            <h2>Change a setting</h2>
+          </div>
+          <div class="p-card__content">
+            <div class="p-form__group"><label class="p-form__label" for="config-key">Setting</label><select
+                class="p-form__control" id="config-key"></select></div>
+            <div class="p-form__group"><label class="p-form__label" for="config-value">New value</label><input
+                type="text" class="p-form__control" id="config-value" maxlength="300"></div>
+            <div class="p-form-validation is-error">
+              <p class="p-form-validation__message" id="config-error" role="alert" hidden></p>
+            </div>
+            <div class="buttons"><button data-positive="1" type="submit" id="config-save" disabled>Apply to
+                config.json</button></div>
+          </div>
+        </form>
+        <div class="p-card" id="audit-card">
+          <div class="p-card__header">
+            <h2>Audit log</h2>
+          </div>
+          <div class="p-card__content">
+            <p class="p-form-help-text">The most recent security events, newest first — sign-ins, user and
+              secret changes, invoice deliveries. Read-only: the log is append-only, so nothing here can be
+              edited or deleted.</p>
+            <div class="buttons"><button type="button" id="audit-refresh">Refresh</button></div>
+            <div class="table-scroll">
+              <table id="audit-table" class="p-table--mobile-card">
+                <caption class="sr-only">Recent security audit events</caption>
+                <thead>
+                  <tr>
+                    <th scope="col">Time</th>
+                    <th scope="col">Event</th>
+                    <th scope="col">Subject</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+            <p id="audit-empty" class="workspace-empty" hidden>No audit events recorded yet.</p>
+            <p id="audit-status" class="p-form-help-text" role="status" aria-live="polite"></p>
+          </div>
+        </div>
       </section>
 
-      <section id="settings-panel-invoice" class="settings-panel" role="tabpanel" aria-labelledby="settings-tab-invoice" tabindex="0" hidden>
-      <h2>Invoice settings: company, appearance, messages</h2>
-      <p class="p-form-help-text">Printed on invoice documents and emails (#138). Leave the name empty to keep the boot-time <code>org_name</code> setting; due terms and message wording live in the invoice template below (one store, no parallel defaults).</p>
-      <form id="org-form" class="p-card">
-        <div class="p-form__group"><label class="p-form__label" for="org-name">Company name</label><input type="text" class="p-form__control" id="org-name" maxlength="120" autocomplete="off"></div>
-        <div class="p-form__group"><label class="p-form__label" for="org-legal">VAT / company id</label><input type="text" class="p-form__control" id="org-legal" maxlength="60" autocomplete="off" placeholder="BE0123456789"></div>
-        <div class="p-form__group"><label class="p-form__label" for="org-street">Street</label><input type="text" class="p-form__control" id="org-street" maxlength="120" autocomplete="off"></div>
-        <div class="p-form__group"><label class="p-form__label" for="org-city">City</label><input type="text" class="p-form__control" id="org-city" maxlength="80" autocomplete="off"></div>
-        <div class="p-form__group"><label class="p-form__label" for="org-postal">Postal code</label><input type="text" class="p-form__control" id="org-postal" maxlength="16" autocomplete="off"></div>
-        <div class="p-form__group"><label class="p-form__label" for="org-country">Country</label><input type="text" class="p-form__control" id="org-country" maxlength="56" autocomplete="off"></div>
-                <div class="p-form__group"><label class="p-form__label" for="org-from">Email sender display name</label><input type="text" class="p-form__control" id="org-from" maxlength="120" autocomplete="off" placeholder="TucanoTime (#146)"></div>
-        <div class="p-form__group"><label class="p-form__label" for="org-reply">Reply-To address</label><input class="p-form__control" id="org-reply" type="email" maxlength="200" autocomplete="off" placeholder="billing@yourcompany.test"></div>
-        <div class="p-form__group"><label class="p-form__label" for="org-accent">Invoice accent color (#rrggbb)</label>
-          <span class="accent-row"><input type="text" class="p-form__control" id="org-accent" maxlength="7" pattern="^#[0-9a-fA-F]{6}$" placeholder="#E95420" autocomplete="off"><span id="accent-swatch" class="accent-swatch" aria-hidden="true"></span></span></div>
-        <div class="p-form-validation is-error">
-          <p class="p-form-validation__message" id="org-error" role="alert" hidden></p>
+      <section id="settings-panel-expenses" class="settings-panel" role="tabpanel"
+        aria-labelledby="settings-tab-expenses" tabindex="0" hidden>
+        <div class="ts-head">
+          <h2>Expense categories</h2>
         </div>
-        <div class="buttons"><button data-positive="1" type="submit" id="org-save">Save company info</button></div>
-      </form>
-
-      <h2>Invoice template</h2>
-      <p class="p-form-help-text">Subject, body and footer for invoice documents and emails (#116). <code>%variable%</code> placeholders resolve at issue/render time; unknown variables are rejected on save. Leave everything empty to keep the built-in wording.</p>
-      <h3>Field labels</h3>
-      <p class="p-form-help-text">Rename what the invoice <em>document</em> shows (#147). The API and stored field names never change; blank keeps the built-in word.</p>
-      <div id="labels-form" class="p-card">
-        <div class="p-form__group"><label class="p-form__label" for="lb-description">Line column label</label><input type="text" class="p-form__control" id="lb-description" maxlength="40" autocomplete="off" placeholder="Description"></div>
-        <div class="p-form__group"><label class="p-form__label" for="lb-quantity">Quantity column label</label><input type="text" class="p-form__control" id="lb-quantity" maxlength="40" autocomplete="off" placeholder="Hours"></div>
-        <div class="p-form__group"><label class="p-form__label" for="lb-unit-price">Unit price column label</label><input type="text" class="p-form__control" id="lb-unit-price" maxlength="40" autocomplete="off" placeholder="Rate"></div>
-        <div class="p-form__group"><label class="p-form__label" for="lb-subtotal">Subtotal label</label><input type="text" class="p-form__control" id="lb-subtotal" maxlength="40" autocomplete="off" placeholder="Subtotal"></div>
-        <div class="p-form__group"><label class="p-form__label" for="lb-discount">Discount label</label><input type="text" class="p-form__control" id="lb-discount" maxlength="40" autocomplete="off" placeholder="Discount"></div>
-        <div class="p-form__group"><label class="p-form__label" for="lb-tax">VAT label</label><input type="text" class="p-form__control" id="lb-tax" maxlength="40" autocomplete="off" placeholder="VAT"></div>
-        <div class="p-form__group"><label class="p-form__label" for="lb-total">Total label</label><input type="text" class="p-form__control" id="lb-total" maxlength="40" autocomplete="off" placeholder="Total"></div>
-        <div class="buttons"><button type="button" id="lb-reset" class="secondary">Use built-in labels</button></div>
-      </div>
-
-      <form id="template-form" class="p-card">
-        <div class="p-form__group"><label class="p-form__label" for="template-subject">Subject (max 120)</label>
-          <input type="text" class="p-form__control" id="template-subject" maxlength="120" autocomplete="off" placeholder="Invoice %invoice_number% for %customer_name%"></div>
-        <div class="p-form__group"><label class="p-form__label" for="template-body">Body (markdown: #, ##, ###, **bold**, *italic*, - bullets, 1. lists)</label>
-          <textarea class="p-form__control" id="template-body" maxlength="8000" rows="5" placeholder="Dear %customer_name%,&#10;&#10;Here is the work for %invoice_issue_month% %invoice_issue_year%."></textarea></div>
-        <div class="p-form__group"><label class="p-form__label" for="template-footer">Footer (markdown, e.g. bank details)</label>
-          <textarea class="p-form__control" id="template-footer" maxlength="8000" rows="3"></textarea></div>
-        <div class="p-form__group"><label class="p-form__label" for="template-terms">Default payment terms</label>
-          <select class="p-form__control" id="template-terms">
-            <option value="">Legacy (net-14 from period end)</option>
-            <option value="upon_receipt">Upon Receipt</option>
-            <option value="net_15">NET 15</option>
-            <option value="net_20">NET 20</option>
-            <option value="net_30">NET 30</option>
-            <option value="net_45">NET 45</option>
-            <option value="custom">Custom (n days)</option>
-          </select></div>
-        <div class="p-form__group" id="template-terms-days-field" hidden>
-          <label class="p-form__label" for="template-terms-days">Days (1-365)</label>
-          <input class="p-form__control" id="template-terms-days" type="number" min="1" max="365" step="1" inputmode="numeric">
+        <div class="p-card">
+          <div class="p-card__header">
+            <h2>Categories</h2>
+          </div>
+          <div class="p-card__content">
+            <p class="p-form-help-text">Choose the categories available when recording expenses. Removing a
+              category is blocked while an expense still uses it.</p>
+            <form id="category-form" class="bar">
+              <input type="hidden" id="category-id">
+              <label for="category-name">Category name</label>
+              <input type="text" id="category-name" maxlength="120" required autocomplete="off">
+              <button data-positive="1" type="submit" id="category-save" class="primary">Add category</button>
+              <button type="button" id="category-cancel" class="secondary" hidden>Cancel edit</button>
+            </form>
+            <div class="p-form-validation is-error">
+              <p class="p-form-validation__message" id="category-error" role="alert" hidden></p>
+            </div>
+            <ul id="category-list" class="chips"></ul>
+          </div>
         </div>
-        <div class="p-form-validation is-error">
-          <p class="p-form-validation__message" id="template-error" role="alert" hidden></p>
-        </div>
-        <div class="buttons"><button data-positive="1" type="submit" id="template-save">Save template</button></div>
-      </form>
-      <!-- #232 phase 2a (registers): the placeholder cheat-sheet is a plain
-           official table inside a Vanilla p-card (a reference list, not a
-           mobile-card register). -->
-      <div class="p-card">
-      <div class="table-scroll"><table id="template-vars">
-        <caption class="sr-only">Available %variable% placeholders</caption>
-        <thead><tr><th scope="col">Variable</th><th scope="col">Example</th></tr></thead>
-        <tbody></tbody>
-      </table></div>
-      </div>
-      <div id="template-preview" class="p-card" hidden>
-        <div class="p-card__header">
-          <h3>Preview - newest invoice</h3>
-        </div>
-        <p id="template-preview-subject"></p>
-        <div id="template-preview-body"></div>
-      </div>
       </section>
 
-      <section id="settings-panel-catalog" class="settings-panel" role="tabpanel" aria-labelledby="settings-tab-catalog" tabindex="0" hidden>
-      <h2>Product / Service catalog</h2>
-      <p class="p-form-help-text">Reusable manual-invoice line types (#147): name, type, default unit price. Archiving hides an item from new picks without touching history.</p>
-      <form id="item-form" class="p-card">
-        <input type="hidden" id="item-id">
-        <div class="p-form__group"><label class="p-form__label" for="item-name">Name</label><input type="text" class="p-form__control" id="item-name" maxlength="120" required autocomplete="off"></div>
-        <div class="p-form__group"><label class="p-form__label" for="item-kind">Type</label><select class="p-form__control" id="item-kind"><option value="service">Service</option><option value="product">Product</option></select></div>
-        <div class="p-form__group"><label class="p-form__label" for="item-desc">Description</label><textarea class="p-form__control" id="item-desc" maxlength="500" rows="2"></textarea></div>
-        <div class="p-form__group"><label class="p-form__label" for="item-price">Default unit price</label><input class="p-form__control" id="item-price" type="number" min="0" step="0.01" value="0" inputmode="decimal"></div>
-        <div class="p-form__group"><label class="p-form__label" for="item-currency">Currency</label><input type="text" class="p-form__control" id="item-currency" maxlength="3" value="EUR"></div>
-        <div class="p-form-validation is-error">
-          <p class="p-form-validation__message" id="item-error" role="alert" hidden></p>
+      <section id="settings-panel-company" class="settings-panel" role="tabpanel"
+        aria-labelledby="settings-tab-company" tabindex="0" hidden>
+        <div class="ts-head">
+          <h2>Company</h2>
         </div>
-        <div class="buttons"><button data-positive="1" type="submit" id="item-save">Save item</button><button type="button" class="secondary" id="item-cancel" hidden>Cancel</button></div>
-      </form>
-      <div class="p-card">
-      <div class="table-scroll"><table id="item-table" class="p-table--mobile-card">
-        <caption class="sr-only">Catalog item types</caption>
-        <thead><tr><th scope="col">Name</th><th scope="col">Type</th><th scope="col" class="num">Default price</th><th scope="col">Status</th><th scope="col" class="actions-col">Actions</th></tr></thead>
-        <tbody></tbody>
-      </table></div>
-      <p id="item-empty" hidden>No catalog items yet.</p>
-      </div>
+        <form id="org-form" class="p-card">
+          <div class="p-card__header">
+            <h2>Organisation identity and appearance</h2>
+          </div>
+          <div class="p-card__content">
+            <p class="p-form-help-text">Printed on invoice documents and emails (#138). Leave the name empty to
+              keep the boot-time <code>org_name</code> setting; due terms and message wording live in the invoice
+              template (one store, no parallel defaults).</p>
+            <div class="p-form__group"><label class="p-form__label" for="org-name">Company name</label><input
+                type="text" class="p-form__control" id="org-name" maxlength="120" autocomplete="off"></div>
+            <div class="p-form__group"><label class="p-form__label" for="org-legal">VAT / company id</label><input
+                type="text" class="p-form__control" id="org-legal" maxlength="60" autocomplete="off"
+                placeholder="BE0123456789"></div>
+            <div class="p-form__group"><label class="p-form__label" for="org-street">Street</label><input
+                type="text" class="p-form__control" id="org-street" maxlength="120" autocomplete="off"></div>
+            <div class="p-form__group"><label class="p-form__label" for="org-city">City</label><input type="text"
+                class="p-form__control" id="org-city" maxlength="80" autocomplete="off"></div>
+            <div class="p-form__group"><label class="p-form__label" for="org-postal">Postal code</label><input
+                type="text" class="p-form__control" id="org-postal" maxlength="16" autocomplete="off"></div>
+            <div class="p-form__group"><label class="p-form__label" for="org-country">Country</label><input
+                type="text" class="p-form__control" id="org-country" maxlength="56" autocomplete="off"></div>
+            <div class="p-form__group"><label class="p-form__label" for="org-from">Email sender display
+                name</label><input type="text" class="p-form__control" id="org-from" maxlength="120"
+                autocomplete="off" placeholder="TucanoTime (#146)"></div>
+            <div class="p-form__group"><label class="p-form__label" for="org-reply">Reply-To address</label><input
+                class="p-form__control" id="org-reply" type="email" maxlength="200" autocomplete="off"
+                placeholder="billing@yourcompany.test"></div>
+            <div class="p-form__group"><label class="p-form__label" for="org-accent">Invoice accent color
+                (#rrggbb)</label>
+              <span class="accent-row"><input type="text" class="p-form__control" id="org-accent" maxlength="7"
+                  pattern="^#[0-9a-fA-F]{6}$" placeholder="#E95420" autocomplete="off"><span id="accent-swatch"
+                  class="accent-swatch" aria-hidden="true"></span></span>
+            </div>
+            <div class="p-form-validation is-error">
+              <p class="p-form-validation__message" id="org-error" role="alert" hidden></p>
+            </div>
+            <div class="buttons"><button data-positive="1" type="submit" id="org-save" disabled>Save company
+                info</button></div>
+          </div>
+        </form>
+      </section>
+
+      <section id="settings-panel-invoice-template" class="settings-panel" role="tabpanel"
+        aria-labelledby="settings-tab-invoice-template" tabindex="0" hidden>
+        <div class="ts-head">
+          <h2>Invoice template</h2>
+        </div>
+        <div id="labels-form" class="p-card">
+          <div class="p-card__header">
+            <h2>Field labels</h2>
+          </div>
+          <div class="p-card__content">
+            <p class="p-form-help-text">Rename what the invoice <em>document</em> shows (#147). The API and stored
+              field names never change; blank keeps the built-in word.</p>
+            <div class="p-form__group"><label class="p-form__label" for="lb-description">Line column
+                label</label><input type="text" class="p-form__control" id="lb-description" maxlength="40"
+                autocomplete="off" placeholder="Description"></div>
+            <div class="p-form__group"><label class="p-form__label" for="lb-quantity">Quantity column
+                label</label><input type="text" class="p-form__control" id="lb-quantity" maxlength="40"
+                autocomplete="off" placeholder="Hours"></div>
+            <div class="p-form__group"><label class="p-form__label" for="lb-unit-price">Unit price column
+                label</label><input type="text" class="p-form__control" id="lb-unit-price" maxlength="40"
+                autocomplete="off" placeholder="Rate"></div>
+            <div class="p-form__group"><label class="p-form__label" for="lb-subtotal">Subtotal label</label><input
+                type="text" class="p-form__control" id="lb-subtotal" maxlength="40" autocomplete="off"
+                placeholder="Subtotal"></div>
+            <div class="p-form__group"><label class="p-form__label" for="lb-discount">Discount label</label><input
+                type="text" class="p-form__control" id="lb-discount" maxlength="40" autocomplete="off"
+                placeholder="Discount"></div>
+            <div class="p-form__group"><label class="p-form__label" for="lb-tax">VAT label</label><input type="text"
+                class="p-form__control" id="lb-tax" maxlength="40" autocomplete="off" placeholder="VAT"></div>
+            <div class="p-form__group"><label class="p-form__label" for="lb-total">Total label</label><input
+                type="text" class="p-form__control" id="lb-total" maxlength="40" autocomplete="off"
+                placeholder="Total"></div>
+            <div class="buttons"><button type="button" id="lb-reset" class="secondary">Use built-in
+                labels</button></div>
+          </div>
+        </div>
+
+        <form id="template-form" class="p-card">
+          <div class="p-card__header">
+            <h2>Subject, body and footer</h2>
+          </div>
+          <div class="p-card__content">
+            <p class="p-form-help-text">Subject, body and footer for invoice documents and emails (#116).
+              <code>%variable%</code> placeholders resolve at issue/render time; unknown variables are rejected on
+              save. Leave everything empty to keep the built-in wording.
+            </p>
+            <div class="p-form__group"><label class="p-form__label" for="template-subject">Subject (max 120)</label>
+              <input type="text" class="p-form__control" id="template-subject" maxlength="120" autocomplete="off"
+                placeholder="Invoice %invoice_number% for %customer_name%">
+            </div>
+            <div class="p-form__group"><label class="p-form__label" for="template-body">Body (markdown: #, ##, ###,
+                **bold**, *italic*, - bullets, 1. lists)</label>
+              <textarea class="p-form__control" id="template-body" maxlength="8000" rows="5"
+                placeholder="Dear %customer_name%,&#10;&#10;Here is the work for %invoice_issue_month% %invoice_issue_year%."></textarea>
+            </div>
+            <div class="p-form__group"><label class="p-form__label" for="template-footer">Footer (markdown, e.g.
+                bank
+                details)</label>
+              <textarea class="p-form__control" id="template-footer" maxlength="8000" rows="3"></textarea>
+            </div>
+            <div class="p-form__group"><label class="p-form__label" for="template-terms">Default payment
+                terms</label>
+              <select class="p-form__control" id="template-terms">
+                <option value="">Legacy (net-14 from period end)</option>
+                <option value="upon_receipt">Upon Receipt</option>
+                <option value="net_15">NET 15</option>
+                <option value="net_20">NET 20</option>
+                <option value="net_30">NET 30</option>
+                <option value="net_45">NET 45</option>
+                <option value="custom">Custom (n days)</option>
+              </select>
+            </div>
+            <div class="p-form__group" id="template-terms-days-field" hidden>
+              <label class="p-form__label" for="template-terms-days">Days (1-365)</label>
+              <input class="p-form__control" id="template-terms-days" type="number" min="1" max="365" step="1"
+                inputmode="numeric">
+            </div>
+            <div class="p-form-validation is-error">
+              <p class="p-form-validation__message" id="template-error" role="alert" hidden></p>
+            </div>
+            <div class="buttons"><button data-positive="1" type="submit" id="template-save" disabled>Save
+                template</button></div>
+          </div>
+        </form>
+        <div class="p-card">
+          <div class="p-card__header">
+            <h2>Available variables</h2>
+          </div>
+          <div class="p-card__content">
+            <div class="table-scroll">
+              <table id="template-vars" class="p-table--mobile-card">
+                <caption class="sr-only">Available %variable% placeholders</caption>
+                <thead>
+                  <tr>
+                    <th scope="col">Variable</th>
+                    <th scope="col">Example</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+        <div id="template-preview" class="p-card">
+          <div class="p-card__header">
+            <h2>Live preview</h2>
+          </div>
+          <div class="p-card__content">
+            <p class="p-form-help-text">This is the sample invoice rendered with the template above, before anything
+              is saved: two time lines and an expense line, VAT, your payment details and the current field labels.
+              Edits re-render it a moment after you stop typing.</p>
+            <div class="template-preview-toolbar">
+              <button type="button" id="template-preview-refresh">Refresh</button>
+              <button type="button" id="template-preview-open">Open in new tab</button>
+              <p id="template-preview-status" class="p-form-help-text" role="status" aria-live="polite">Preview not
+                rendered yet.</p>
+            </div>
+            <iframe id="template-preview-frame" class="template-preview-frame" height="640"
+              title="Rendered sample invoice PDF using the current template"></iframe>
+          </div>
+        </div>
+      </section>
+
+      <section id="settings-panel-catalog" class="settings-panel" role="tabpanel"
+        aria-labelledby="settings-tab-catalog" tabindex="0" hidden>
+        <div class="ts-head">
+          <h2>Products &amp; services</h2>
+        </div>
+        <form id="item-form" class="p-card">
+          <div class="p-card__header">
+            <h2>Catalog item</h2>
+          </div>
+          <div class="p-card__content">
+            <p class="p-form-help-text">Reusable manual-invoice line types (#147): name, type, default unit price.
+              Archiving hides an item from new picks without touching history.</p>
+            <input type="hidden" id="item-id">
+            <div class="p-form__group"><label class="p-form__label" for="item-name">Name</label><input type="text"
+                class="p-form__control" id="item-name" maxlength="120" required autocomplete="off"></div>
+            <div class="p-form__group"><label class="p-form__label" for="item-kind">Type</label><select
+                class="p-form__control" id="item-kind">
+                <option value="service">Service</option>
+                <option value="product">Product</option>
+              </select></div>
+            <div class="p-form__group"><label class="p-form__label" for="item-desc">Description</label><textarea
+                class="p-form__control" id="item-desc" maxlength="500" rows="2"></textarea></div>
+            <div class="p-form__group"><label class="p-form__label" for="item-price">Default unit
+                price</label><input class="p-form__control" id="item-price" type="number" min="0" step="0.01"
+                value="0" inputmode="decimal"></div>
+            <div class="p-form__group"><label class="p-form__label" for="item-currency">Currency</label><input
+                type="text" class="p-form__control" id="item-currency" maxlength="3" value="EUR"></div>
+            <div class="p-form-validation is-error">
+              <p class="p-form-validation__message" id="item-error" role="alert" hidden></p>
+            </div>
+            <div class="buttons"><button data-positive="1" type="submit" id="item-save">Save item</button><button
+                type="button" class="secondary" id="item-cancel" hidden>Cancel</button></div>
+          </div>
+        </form>
+        <div class="p-card">
+          <div class="p-card__header">
+            <h2>Catalog items</h2>
+          </div>
+          <div class="p-card__content">
+            <div class="table-scroll">
+              <table id="item-table" class="p-table--mobile-card">
+                <caption class="sr-only">Catalog item types</caption>
+                <thead>
+                  <tr>
+                    <th scope="col">Name</th>
+                    <th scope="col">Type</th>
+                    <th scope="col" class="num">Default price</th>
+                    <th scope="col">Status</th>
+                    <th scope="col" class="actions-col">Actions</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+            <p id="item-empty" class="workspace-empty" hidden>No catalog items yet.</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="settings-panel-email" class="settings-panel" role="tabpanel" aria-labelledby="settings-tab-email"
+        tabindex="0" hidden>
+        <div class="ts-head">
+          <h2>Email</h2>
+        </div>
+        <div class="p-card">
+          <div class="p-card__header">
+            <h2>SMTP delivery</h2>
+          </div>
+          <div class="p-card__content">
+            <p id="email-status" class="p-form-help-text" role="status" aria-live="polite"></p>
+            <p class="p-form-help-text">Messages go out through this relay. Saving takes effect immediately — the
+              next send uses the new settings, with no restart needed.</p>
+            <p id="email-vault-notice" class="p-form-help-text" role="alert" hidden></p>
+            <form id="email-form">
+              <div class="p-form__group"><label class="p-form__label" for="email-host">SMTP host</label><input
+                  type="text" class="p-form__control" id="email-host" maxlength="255" autocomplete="off"
+                  placeholder="smtp.example.test" required></div>
+              <div class="p-form__group"><label class="p-form__label" for="email-port">SMTP port</label><input
+                  type="number" class="p-form__control" id="email-port" min="1" max="65535" step="1"
+                  inputmode="numeric" value="25" required></div>
+              <div class="p-form__group"><label class="p-form__label" for="email-username">Username</label><input
+                  type="text" class="p-form__control" id="email-username" maxlength="200" autocomplete="off"></div>
+              <div class="p-form__group"><label class="p-form__label" for="email-password">Password</label><input
+                  type="password" class="p-form__control" id="email-password" autocomplete="new-password"
+                  placeholder="No password stored"></div>
+              <div class="p-form__group"><label class="p-form__label" for="email-from">From address</label><input
+                  type="email" class="p-form__control" id="email-from" maxlength="200" autocomplete="off"
+                  value="noreply@localhost"></div>
+              <div class="p-form-validation is-error">
+                <p class="p-form-validation__message" id="email-error" role="alert" hidden></p>
+              </div>
+              <div class="buttons"><button data-positive="1" type="submit" id="email-save">Save email
+                  settings</button></div>
+            </form>
+            <form id="email-test-form">
+              <div class="p-form__group"><label class="p-form__label" for="email-test-to">Send test email to</label>
+                <input type="email" class="p-form__control" id="email-test-to" maxlength="200" autocomplete="off"
+                  placeholder="you@example.test">
+              </div>
+              <div class="p-form-validation is-error">
+                <p class="p-form-validation__message" id="email-test-error" role="alert" hidden></p>
+              </div>
+              <p id="email-test-result" class="p-form-help-text" role="status" aria-live="polite"></p>
+              <div class="buttons"><button type="button" id="email-test-send">Send test email</button></div>
+            </form>
+          </div>
+        </div>
       </section>
     </section>
       </main>

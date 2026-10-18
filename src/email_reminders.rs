@@ -21,8 +21,10 @@ pub struct EmailReminderJob {
     sender: Arc<dyn EmailSender>,
     cadence_days: i64,
     state_path: PathBuf,
-    /// Issuing organisation, resolved from config at boot (#113).
-    org: crate::pdf::Org,
+    /// The `org_name` config fallback captured at boot (#94). The profile name
+    /// is read at send time, so a Company-name change applies without a
+    /// restart (SET-03).
+    fallback_org_name: String,
 }
 
 /// The configured display name + Reply-To from the org profile (#146);
@@ -43,15 +45,31 @@ impl EmailReminderJob {
         sender: Arc<dyn EmailSender>,
         cadence_days: i64,
         root: &Path,
-        org: crate::pdf::Org,
+        fallback_org_name: String,
     ) -> Self {
         Self {
             store,
             sender,
             cadence_days,
             state_path: root.join("email_reminders.json"),
-            org,
+            fallback_org_name,
         }
+    }
+
+    /// The issuing identity as it is **now**: the saved org profile wins over
+    /// the boot-time `org_name` config fallback, through the same resolver as
+    /// the invoice PDF and email paths (`pdf::Org::resolve`, SET-03). Reading
+    /// it per run is what makes a Company-name change apply without a restart;
+    /// a corrupt profile degrades to the fallback here, exactly as the
+    /// lazily-rendered PDF path always did.
+    fn resolve_org(&self) -> crate::pdf::Org {
+        let profile = self
+            .store
+            .read_json_rel::<crate::domain::OrgProfile>("org_profile.json")
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+        crate::pdf::Org::resolve(&profile, &self.fallback_org_name)
     }
 
     fn load_state(&self) -> HashMap<String, NaiveDate> {
@@ -120,6 +138,7 @@ impl EmailReminderJob {
         inv: &Invoice,
         customer: &crate::domain::Customer,
         now: DateTime<Utc>,
+        org: &crate::pdf::Org,
     ) -> Option<(String, Vec<u8>)> {
         match self.store.invoice_pdf_bytes(inv.id) {
             Ok(Some(bytes)) => Some((
@@ -138,25 +157,9 @@ impl EmailReminderJob {
                     .ok()
                     .flatten()
                     .unwrap_or_default();
-                // Same identity resolution as the API (#138): org_profile
-                // wins over the boot-time config name.
-                let profile = self
-                    .store
-                    .read_json_rel::<crate::domain::OrgProfile>("org_profile.json")
-                    .ok()
-                    .flatten()
-                    .unwrap_or_default();
-                let org = crate::pdf::Org {
-                    name: if profile.name.trim().is_empty() {
-                        self.org.name.clone()
-                    } else {
-                        profile.name.trim().to_string()
-                    },
-                    legal_id: profile.legal_id.clone(),
-                    address: profile.address.clone(),
-                    accent: profile.accent.clone(),
-                };
-                let mut doc = crate::pdf::doc_for_labeled(inv, customer, &org, &template.labels);
+                // Same identity resolution as the API (#138, SET-03): the org
+                // profile wins over the config fallback.
+                let mut doc = crate::pdf::doc_for_labeled(inv, customer, org, &template.labels);
                 let vars = crate::template::vars_for(
                     inv,
                     customer,
@@ -195,6 +198,8 @@ impl Job for EmailReminderJob {
     }
     fn run(&self, now: DateTime<Utc>) {
         let today = now.date_naive();
+        // Resolve the issuing identity once per run, at send time (SET-03).
+        let org = self.resolve_org();
         let invoices = match self.store.list_invoices() {
             Ok(v) => v,
             Err(_) => return,
@@ -217,7 +222,7 @@ impl Job for EmailReminderJob {
             // invoice has them, else render from the snapshot-locked document
             // and archive on first sight. The reminder must carry the same
             // document the customer was issued, never a freshly derived one.
-            let attachment = self.resolve_pdf(&inv, customer, now);
+            let attachment = self.resolve_pdf(&inv, customer, now, &org);
             // Subtask B: a reminder chases an invoice that was ALREADY
             // delivered, so this job deliberately appends no timeline event.
             // `domain::invoice_watermark_stage` derives "sent" from the
@@ -238,12 +243,12 @@ impl Job for EmailReminderJob {
                 &amount,
                 &due,
                 days_over,
-                &self.org.name,
+                &org.name,
                 attachment.is_some(),
                 payment.as_deref(),
             );
             let msg = EmailMessage {
-                to: billing_email,
+                to: vec![billing_email],
                 subject: format!("Overdue invoice {}", inv.number),
                 text,
                 html: None,
@@ -292,6 +297,99 @@ mod tests {
             tax_hundredths: 0,
             discount_hundredths: 0,
         }
+    }
+
+    /// SET-03: the reminder body and the attached PDF resolve the organisation
+    /// name through the same profile-first rule at send time — a profile name
+    /// wins over the config fallback, and clearing it applies without a restart.
+    #[test]
+    fn reminder_signs_off_with_the_profile_name_resolved_at_send_time() {
+        use crate::domain::{Customer, OrgProfile};
+        use crate::email::RecordingEmailSender;
+
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(Store::open(dir.path().join("data")).unwrap());
+        let today = Utc::now().date_naive();
+        let due = today - chrono::Duration::days(1);
+        let customer_id = uuid::Uuid::new_v4();
+        store
+            .put_customer(&Customer {
+                id: customer_id,
+                name: "ACME".into(),
+                currency: Currency("EUR".into()),
+                default_rate_minor: 6000,
+                active: true,
+                email: "billing@acme.test".into(),
+                payment_terms: None,
+                invoice_notes: String::new(),
+                invoice_subject: String::new(),
+                address: None,
+                contacts: vec![],
+                tax_hundredths: 0,
+                discount_hundredths: 0,
+                payment_details: None,
+            })
+            .unwrap();
+        let mut invoice = issued_due(
+            "00000000-0000-0000-0000-000000000010",
+            due,
+            InvoiceStatus::Issued,
+        );
+        invoice.customer_id = customer_id;
+        store.put_invoice(&invoice).unwrap();
+        store
+            .write_json_rel(
+                "org_profile.json",
+                &OrgProfile {
+                    name: "Profile Ltd".into(),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+
+        let recorder = Arc::new(RecordingEmailSender::default());
+        let job = EmailReminderJob::new(
+            store.clone(),
+            recorder.clone(),
+            7,
+            dir.path(),
+            "Config Corp".into(),
+        );
+        job.run(Utc::now());
+
+        let sent = recorder.messages();
+        assert_eq!(sent.len(), 1, "one reminder sent");
+        assert!(
+            sent[0].text.contains("Profile Ltd"),
+            "profile name wins: {}",
+            sent[0].text
+        );
+        assert!(
+            !sent[0].text.contains("Config Corp"),
+            "config fallback is not used while the profile has a name: {}",
+            sent[0].text
+        );
+
+        // Clear the profile name; the config fallback applies on the next run
+        // without rebuilding the job (and so without a restart).
+        store
+            .write_json_rel("org_profile.json", &OrgProfile::default())
+            .unwrap();
+        std::fs::remove_file(dir.path().join("email_reminders.json")).unwrap();
+        job.run(Utc::now());
+
+        let sent = recorder.messages();
+        assert_eq!(sent.len(), 2, "a second reminder was sent");
+        assert!(
+            sent[1].text.contains("Config Corp"),
+            "config fallback applies after the profile name is cleared: {}",
+            sent[1].text
+        );
+        assert!(
+            !sent[1].text.contains("Profile Ltd"),
+            "the old profile name is gone: {}",
+            sent[1].text
+        );
     }
 
     #[test]

@@ -152,6 +152,18 @@ impl SecretVault {
         self.persist(&map)
     }
 
+    /// Store/overwrite several secrets in **one** encrypted write. Used by the
+    /// SMTP settings form so a partially applied configuration (new host, old
+    /// port) is never persisted: either the whole map lands or the 500 leaves
+    /// the previous settings in place.
+    pub fn put_many(&self, entries: &[(String, String)]) -> Result<(), VaultError> {
+        let mut map = lock(&self.data);
+        for (key, value) in entries {
+            map.insert(key.clone(), value.clone());
+        }
+        self.persist(&map)
+    }
+
     pub fn get(&self, key: &str) -> Option<String> {
         lock(&self.data).get(key).cloned()
     }

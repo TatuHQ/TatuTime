@@ -13,11 +13,41 @@ pub async fn list_categories(State(app): State<AppState>) -> ApiResult {
     Ok(Json(serde_json::json!({ "categories": categories })).into_response())
 }
 
+/// Category names are unique org-wide, trimmed and case-insensitive — the same
+/// rule project/task codes follow. Two identical rows in the expense picker are
+/// never a valid state, so a duplicate is a 409 `conflict` on create and rename
+/// (SET-12). Renaming a category to a different case of its own name is allowed:
+/// the row being updated is excluded from the check.
+fn category_name_key(name: &str) -> String {
+    name.trim().to_lowercase()
+}
+
+fn duplicate_category_name(
+    app: &AppState,
+    name: &str,
+    exclude: Option<Uuid>,
+) -> Result<(), ApiError> {
+    let key = category_name_key(name);
+    let Some(existing) = app
+        .store
+        .list_categories()?
+        .into_iter()
+        .find(|c| Some(c.id) != exclude && category_name_key(&c.name) == key)
+    else {
+        return Ok(());
+    };
+    Err(ApiError::conflict(format!(
+        "a category named '{}' already exists",
+        existing.name
+    )))
+}
+
 pub async fn create_category(
     State(app): State<AppState>,
     ValidJson(input): ValidJson<CategoryInput>,
 ) -> ApiResult {
     let draft = validate_category_input(&input).map_err(ApiError::validation)?;
+    duplicate_category_name(&app, &draft.name, None)?;
     let category = Category {
         id: Uuid::new_v4(),
         name: draft.name,
@@ -38,6 +68,7 @@ pub async fn update_category(
         .store
         .get_category(id)?
         .ok_or_else(|| ApiError::not_found("category"))?;
+    duplicate_category_name(&app, &draft.name, Some(id))?;
     category.name = draft.name;
     category.default_billable = draft.default_billable;
     category.active = draft.active;

@@ -32,6 +32,7 @@ use crate::error::ApiError;
 use crate::report;
 use crate::store::{Store, StoreError};
 
+pub mod admin_email;
 pub mod auth;
 pub mod entries_reports;
 pub mod expenses;
@@ -66,6 +67,46 @@ impl<T: DeserializeOwned, S: Send + Sync> FromRequest<S> for ValidJson<T> {
         })?;
         let value = serde_json::from_slice::<T>(&body).map_err(|e| deser_error(e, &body))?;
         Ok(ValidJson(value))
+    }
+}
+
+/// An **optional** JSON body: an absent `Content-Type` means "no body" and
+/// yields `None`, while a present body is parsed with the same
+/// `deny_unknown_fields`/422 mapping as [`ValidJson`].
+///
+/// axum 0.8's own `Option<Json<T>>` treats a deserialisation failure as a
+/// `JsonRejection` whose plain-text 422 the API layer would rewrite into a
+/// generic 400 — losing `validation_failed` and the field name. This adapter
+/// keeps the app's error shape, which is why the endpoint uses it instead.
+/// Like every body extractor it must be the handler's last argument.
+pub struct OptionalValidJson<T>(pub Option<T>);
+
+impl<T: DeserializeOwned, S: Send + Sync> FromRequest<S> for OptionalValidJson<T> {
+    type Rejection = ApiError;
+
+    async fn from_request(req: Request, state: &S) -> Result<Self, Self::Rejection> {
+        let Some(content_type) = req.headers().get(http::header::CONTENT_TYPE) else {
+            return Ok(Self(None));
+        };
+        let json = content_type
+            .to_str()
+            .map(|ct| {
+                let ct = ct.trim().to_ascii_lowercase();
+                ct.starts_with("application/json") || ct.contains("+json")
+            })
+            .unwrap_or(false);
+        if !json {
+            return Err(ApiError::bad_request("expected application/json"));
+        }
+        let body = Bytes::from_request(req, state).await.map_err(|rejection| {
+            if rejection.status() == StatusCode::PAYLOAD_TOO_LARGE {
+                ApiError::payload_too_large()
+            } else {
+                ApiError::bad_request("failed to read the request body")
+            }
+        })?;
+        let value = serde_json::from_slice::<T>(&body).map_err(|e| deser_error(e, &body))?;
+        Ok(Self(Some(value)))
     }
 }
 
@@ -321,12 +362,12 @@ impl AppState {
         ]));
         let audit = Arc::new(crate::audit::AuditLog::new(store.root()));
         let revocations = Arc::new(crate::revoke::Revocations::new(store.root()));
-        // Email adapter (#35): SMTP if configured (vault or env), else disabled.
+        // Email adapter (#35): a *dynamic* transport that re-resolves the
+        // vault/env SMTP settings on every send, so `PUT /api/admin/email`
+        // applies to the next message without a restart. Tests replace it
+        // wholesale through `with_email` and never touch SMTP.
         let email: Arc<dyn crate::email::EmailSender> =
-            match crate::email::SmtpConfig::from_sources(vault.as_deref()) {
-                Some(cfg) => Arc::new(crate::email::SmtpEmailSender::new(cfg)),
-                None => Arc::new(crate::email::DisabledEmailSender),
-            };
+            Arc::new(crate::email::DynamicEmailSender::new(vault.clone()));
         // Accounting providers (#33): enabled when an OAuth token exists.
         let accounting = crate::accounting::registry_from_vault(vault.as_deref(), &cfg);
         // SSO identity providers (#32): enabled when OIDC/SAML config exists.
@@ -370,6 +411,8 @@ impl AppState {
     }
 
     /// Swaps the email transport (tests inject a `RecordingEmailSender`).
+    /// Replaces the dynamic vault-resolving sender entirely: an injected
+    /// transport is used verbatim for every send.
     #[must_use]
     pub fn with_email(mut self, sender: Arc<dyn crate::email::EmailSender>) -> Self {
         self.email = sender;
@@ -654,6 +697,9 @@ pub async fn healthz() -> impl IntoResponse {
 
 // Re-exports keep the central route table in `lib.rs` and `crate::api::…`
 // paths elsewhere in the crate stable (#100).
+pub use self::admin_email::{
+    EmailSettingsInput, EmailTestInput, admin_email_get, admin_email_put, admin_email_test,
+};
 pub use self::auth::{
     BootstrapInput, LoginInput, SsoAssertionInput, audit_log, auth_status, bootstrap, login,
     logout, me, sso_assertion, sso_providers,
@@ -673,10 +719,11 @@ pub use self::invoicing::{
     InvoiceEditInput, InvoiceInput, ManualInvoiceInput, PayInput, SyncInput, create_invoice,
     create_item_type, create_manual_invoice, delete_invoice, delete_item_type, get_invoice_handler,
     invoice_document, invoice_export_csv, invoice_pdf, invoice_pdf_preview, invoice_report_handler,
-    invoice_summary, invoice_template_get, invoice_template_put, invoice_timeline, issue_invoice,
-    list_invoices, list_item_types, mark_invoice_sent, money_for_email, org_get, org_put,
-    pay_invoice, preview_invoice, send_invoice_email, send_invoice_email_copy, sync_invoice,
-    sync_status, update_invoice_draft, update_item_type, write_off_invoice,
+    invoice_summary, invoice_template_get, invoice_template_preview, invoice_template_put,
+    invoice_timeline, issue_invoice, list_invoices, list_item_types, mark_invoice_sent,
+    money_for_email, org_get, org_put, pay_invoice, preview_invoice, send_invoice_email,
+    send_invoice_email_copy, sync_invoice, sync_status, update_invoice_draft, update_item_type,
+    write_off_invoice,
 };
 pub use self::people::{
     UserInput, UserPasswordInput, UserUpdateInput, change_user_password, create_customer,

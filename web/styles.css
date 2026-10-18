@@ -145,7 +145,7 @@ body {
 .ts-head .p-tabs__list, .settings-head .p-tabs__list { width: auto; margin: 0; }
 #ts-seg .p-tabs__item:last-child, .settings-tabs .p-tabs__item:last-child { margin-right: 0; }
 #ts-seg .p-tabs__link { min-width: 8.5ch; }
-.settings-tabs .p-tabs__link { min-width: 9rem; }
+.settings-tabs .p-tabs__link { min-width: 7.5rem; }
 .account { display: flex; align-items: center; justify-content: space-between; gap: .5rem; padding: .5rem; border-top: 1px solid var(--line); color: var(--muted); }
 .account .who { font-size: .85rem; overflow: hidden; text-overflow: ellipsis; }
 .more-tools-group { border-top: 1px solid var(--line); margin-top: .45rem; padding-top: .4rem; }
@@ -264,7 +264,7 @@ td.num, th.num, .ws-total.num { text-align: right; font-variant-numeric: tabular
    are Vanilla p-card shells — the card owns the frame and header rule, so the
    heading slot (and submit/report bars) drops its bottom margin; dense registers
    use p-table--mobile-card (data-heading) and summaries keep a plain table. */
-.p-card__header.panel-heading-row, #report-form.bar, #submission-form.bar { margin-bottom: 0; }
+#report-form.bar, #submission-form.bar { margin-bottom: 0; }
 
 /* #232 phase 2b: errors are the official `p-form-validation__message` (inside a
    `p-form-validation is-error` wrapper) and hints are `p-form-help-text`, so the
@@ -499,7 +499,6 @@ dialog.p-modal::backdrop { background: transparent; }
 .settings-head { display: flex; align-items: center; justify-content: flex-start; gap: 1rem; flex-wrap: wrap; margin-bottom: .9rem; }
 .settings-tabs { flex-wrap: wrap; }
 .settings-panel { min-width: 0; }
-.settings-panel > h2:first-child { margin-top: .4rem; }
 .seg {
   display: inline-flex; overflow: hidden;
   border: 1px solid var(--line); border-radius: var(--radius);
@@ -592,6 +591,17 @@ dialog.p-modal::backdrop { background: transparent; }
 .ip-tl-actor, .ip-tl-when { margin: 0; color: var(--muted); }
 #invoice-table tbody tr { cursor: default; }
 #invoice-table tbody tr[tabindex="0"]:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+/* ---- live invoice-template preview ---- */
+/* The frame gets a fixed, viewport-bounded height so the toolbar stays on
+   screen while a tall document scrolls inside the PDF viewer. Tokens only;
+   no new colours are introduced. */
+.template-preview-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin: .4rem 0; }
+.template-preview-toolbar .p-form-help-text { margin: 0; }
+.template-preview-frame {
+  display: block; width: 100%; height: 40rem; max-height: 70vh;
+  border: 1px solid var(--line); background: var(--surface);
+}
 
 /* #232 phase 2b/2c: the .7rem Day-entry row rhythm folds into the unified
    .65rem one; the entry form dropped the retired `.card` class outright —
@@ -686,8 +696,6 @@ caption { padding-bottom: .35rem; }
 .invoice-table-scroll { display: block; max-width: 100%; overflow-x: auto; }
 .customer-extra-details { margin: .25rem 0 .8rem; border-top: 1px solid var(--line); }
 .customer-extra-details fieldset.p-form__group { margin-top: .5rem; }
-.panel-heading-row { display: flex; align-items: center; justify-content: flex-start; gap: 1rem; margin-bottom: .65rem; }
-.panel-heading-row h2 { margin: 0; }
 .chip-edit { border: 0; background: transparent; color: var(--brand-deep); padding: .1rem .25rem; font-size: .8rem; }
 .chip-edit:hover { text-decoration: underline; }
 
@@ -712,6 +720,15 @@ caption { padding-bottom: .35rem; }
 /* #349: the wizard is a p-modal dialog; it follows the app's per-dialog width
    convention (dialog.p-modal itself is uncapped, web/styles.css above). */
 #invoice-wizard .p-modal__dialog { max-width: 44rem; }
+/* Recipient picker (#139 follow-up): one labelled checkbox row per on-file
+   address, the address itself as supporting text. The dialog stays narrower
+   than the wizard because its content is a short list. */
+#send-email-dialog .p-modal__dialog { max-width: 34rem; }
+#send-email-recipients { display: grid; gap: .25rem; margin: .25rem 0 .5rem; }
+#send-email-recipients label { display: flex; align-items: flex-start; gap: .45rem; }
+#send-email-recipients input[type="checkbox"] { min-height: 0; width: 1rem; height: 1rem; margin-top: .15rem; }
+#send-email-recipients .send-email-contact-meta { opacity: .75; }
+#send-email-invoice { margin-top: 0; }
 #iw-projects { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .2rem .75rem; }
 /* #F: the year stepper (.day-nav), the chart and its one-line note are a
    single column, so the caption and the rate line stay aligned with the chart

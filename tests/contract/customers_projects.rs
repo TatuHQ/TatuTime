@@ -371,7 +371,10 @@ async fn customer_billing_details_round_trip_and_validate() {
         body["sent_to"], "ada@global.test",
         "billing contact wins (#139)"
     );
-    assert_eq!(app.email.messages()[0].to, "ada@global.test");
+    assert_eq!(
+        app.email.messages()[0].to,
+        vec!["ada@global.test".to_string()]
+    );
 
     // Validation matrix: bad contact email, two billing flags, tax too big,
     // country too short — all 422, nothing persisted by the last shape.

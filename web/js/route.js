@@ -5,7 +5,35 @@
 import { refreshPanel, suppressPanelRefresh, switchTab } from './boot.js';
 import { refreshTimeCal } from './calendar.js';
 import { $ } from './dom.js';
+import { releaseTemplatePreview, resumeTemplatePreview } from './settings.js';
 import { refreshDay, refreshWeek } from './timesheet.js';
+
+// #365: a tab's `focus()` scrolls it into view, which flushes layout. Module
+// scripts run while `readyState` is still "loading", so focusing the selected
+// tab from the boot-time route selection forced layout before the page was
+// loaded — Firefox logs that as "Layout was forced before the page was fully
+// loaded. If stylesheets are not yet loaded this may cause a flash of unstyled
+// content." Move focus to the load event instead; a click after load still
+// focuses synchronously.
+function focusTab(tab) {
+  if (!tab) return;
+  // Keyboard navigation inside a tab strip must move focus immediately (the
+  // next key event is dispatched from the newly focused tab); only a focus move
+  // that starts outside the strip — the boot-time route selection — is deferred.
+  const strip = tab.closest('[role="tablist"]');
+  const withinStrip = !!(strip && strip.contains(document.activeElement));
+  if (document.readyState === 'complete' || withinStrip) {
+    tab.focus();
+    return;
+  }
+  window.addEventListener('load', () => {
+    // The user may have selected another view in the meantime: only move focus
+    // onto the tab that is still selected.
+    if (tab.isConnected && tab.getAttribute('aria-selected') === 'true') {
+      tab.focus({ preventScroll: true });
+    }
+  }, { once: true });
+}
 
 // ------------------------------------------------------- timesheet segment --
 //
@@ -33,7 +61,7 @@ export function refreshTimesheetView() {
     segActiveId === 'ts-day' ? refreshDay()
       : segActiveId === 'ts-cal' ? refreshTimeCal()
         : refreshWeek();
-  run.catch?.(() => {});
+  run.catch?.(() => { });
 }
 
 export function initSegTabs() {
@@ -57,6 +85,15 @@ export function initSegTabs() {
 export function initSettingsTabs() {
   const tabs = Array.from(document.querySelectorAll('#settings-tabs [role="tab"]'));
   function activate(tab, moveFocus = true) {
+    // #365: leaving the Invoice template section must drop its framed blob PDF
+    // synchronously, in the same tick as the switch. The MutationObserver below
+    // that watches `hidden` runs later (as a microtask), and a blob iframe
+    // still loading while the next view boots is exactly what forced layout and
+    // produced Firefox's "Layout was forced before the page was fully loaded"
+    // warning on the following view.
+    if (tab.getAttribute('aria-controls') !== 'settings-panel-invoice-template') {
+      releaseTemplatePreview();
+    }
     tabs.forEach((candidate) => {
       const active = candidate === tab;
       candidate.setAttribute('aria-selected', String(active));
@@ -64,7 +101,7 @@ export function initSettingsTabs() {
       const panel = $(candidate.getAttribute('aria-controls'));
       if (panel) panel.hidden = !active;
     });
-    if (moveFocus) tab.focus();
+    if (moveFocus) focusTab(tab);
     syncRoute();
   }
   tabs.forEach((tab) => {
@@ -123,11 +160,13 @@ export const TAB_ROUTES = {
   'tab-submissions': '/approvals',
   'tab-reports': '/reports',
   'tab-settings': {
-    'settings-tab-security': '/settings/security',
     'settings-tab-users': '/settings/users',
-    'settings-tab-invoice': '/settings/invoices',
+    'settings-tab-company': '/settings/company',
+    'settings-tab-invoice-template': '/settings/invoice-template',
     'settings-tab-catalog': '/settings/catalog',
     'settings-tab-expenses': '/settings/expenses',
+    'settings-tab-email': '/settings/email',
+    'settings-tab-security': '/settings/security',
   },
 };
 export const KNOWN_ROUTES = new Set(
@@ -194,11 +233,13 @@ export function applyRoute(route) {
     activateSeg(seg || 'ts-day', false);
   } else if (tabFor === 'tab-settings') {
     const settingsId = {
-      security: 'settings-tab-security',
       users: 'settings-tab-users',
-      invoices: 'settings-tab-invoice',
+      company: 'settings-tab-company',
+      'invoice-template': 'settings-tab-invoice-template',
       catalog: 'settings-tab-catalog',
       expenses: 'settings-tab-expenses',
+      email: 'settings-tab-email',
+      security: 'settings-tab-security',
     }[sub || 'security'];
     const target = $(settingsId || 'settings-tab-security');
     if (target && !target.hidden) target.click();
@@ -257,7 +298,13 @@ export function initTabs() {
     });
     const title = $('page-title');
     if (title) title.textContent = tab.textContent.trim();
-    tab.focus();
+    // #365: the sidebar hides the whole Settings section without touching any
+    // inner panel's `hidden`, so the preview's own observer never sees this
+    // switch. Release the frame when leaving Settings, and re-arm it when the
+    // section comes back (a still-loaded template renders itself again).
+    if (tab.id === 'tab-settings') resumeTemplatePreview();
+    else releaseTemplatePreview();
+    focusTab(tab);
     syncRoute();
     // Re-pull the panel's data on show so it reflects changes made elsewhere
     // (e.g. an invoice issued via the API) without a full reload.

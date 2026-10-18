@@ -10,24 +10,17 @@ pub(crate) fn load_org(app: &AppState) -> Result<crate::domain::OrgProfile, ApiE
 
 /// The issuing organisation for invoice documents and emails, resolved ONCE
 /// here so there is a single source of truth (#138): `org_profile.name` when
-/// set, else the boot-time `org_name` config key (#94), else its default.
-/// Legal id and address come from the profile only.
+/// set, else the `org_name` config key (#94), else its default. Legal id and
+/// address come from the profile only. The precedence itself lives in
+/// [`crate::pdf::Org::resolve`], shared with the reminder job (SET-03).
 pub(crate) fn org_for(app: &AppState) -> Result<crate::pdf::Org, ApiError> {
     // #187: a corrupt org_profile.json must surface (500), not silently
     // render invoices with the fallback identity via `unwrap_or_default()`.
     let profile = load_org(app)?;
-    let name = if profile.name.trim().is_empty() {
-        app.cfg()
-            .get_str("org_name", &crate::appconfig::process_env)
-    } else {
-        profile.name.trim().to_string()
-    };
-    Ok(crate::pdf::Org {
-        name,
-        legal_id: profile.legal_id.clone(),
-        address: profile.address.clone(),
-        accent: profile.accent.clone(),
-    })
+    let fallback = app
+        .cfg()
+        .get_str("org_name", &crate::appconfig::process_env);
+    Ok(crate::pdf::Org::resolve(&profile, &fallback))
 }
 
 /// `GET /admin/org` — company identity (#138).

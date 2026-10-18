@@ -66,6 +66,42 @@ export const api = {
     }
     return res.blob();
   },
+  // POST a candidate payload and read a binary body (#new live template
+  // preview). Same session cookie + CSRF header as `request`; the difference is
+  // the reply: `{ blob, etag, notModified }` instead of parsed JSON. `304` is a
+  // success here, not a redirect to follow: the caller already has the bytes
+  // `ifNoneMatch` names, so the API reports `notModified` and hands back no
+  // body. A non-OK status is still mapped through the one error shape, so a 422
+  // arrives with its `fields` intact.
+  async requestBlob(method, url, body, { ifNoneMatch = null } = {}) {
+    const opts = { method, headers: {}, credentials: 'same-origin' };
+    opts.headers['X-CSRF-Protection'] = '1';
+    if (ifNoneMatch) opts.headers['If-None-Match'] = ifNoneMatch;
+    if (body !== undefined) {
+      opts.headers['Content-Type'] = 'application/json';
+      opts.body = JSON.stringify(body);
+    }
+    const res = await fetch(API_BASE + url, opts);
+    if (res.status === 304) {
+      return { notModified: true, etag: ifNoneMatch, blob: null, status: 304 };
+    }
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      let data = null;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        /* body was not the JSON error shape */
+      }
+      throw requestFailure(method, url, res, data);
+    }
+    return {
+      notModified: false,
+      etag: res.headers.get('etag'),
+      blob: await res.blob(),
+      status: res.status,
+    };
+  },
   get: (u) => api.request('GET', u),
   post: (u, b) => api.request('POST', u, b),
   put: (u, b) => api.request('PUT', u, b),

@@ -14,18 +14,21 @@ const html = readFileSync(new URL('../web/index.html', import.meta.url), 'utf8')
 const app = loadAppSource();
 
 // Card shells whose rows are the mobile-card register (columns stay frozen).
+// SET-14 moved the runtime-config and template-variable summaries here, and the
+// read-only audit log (SET-11) joined them.
 const CARD_REGISTERS = {
     'user-table': ['Name', 'Email', 'Role', 'Status', 'Rates', 'Actions'],
     'submission-table': ['Week', 'Entries', 'State', 'Comment', 'Actions'],
     'secret-table': ['Key', 'Value', 'Actions'],
     'item-table': ['Name', 'Type', 'Default price', 'Status', 'Actions'],
+    'config-table': ['Setting', 'Value', 'Source', 'Applies'],
+    'template-vars': ['Variable', 'Example'],
+    'audit-table': ['Time', 'Event', 'Subject'],
     'rec-table': ['Customer', 'Cadence', 'Bills', 'Retainer', 'Last billed to', 'Status', 'Actions'],
     'ret-table': ['Customer / project', 'Balance', 'Status', 'Last activity', 'Actions'],
 };
 // Summary/reference tables: a plain official table inside the card.
 const SUMMARY_REGISTERS = {
-    'config-table': ['Setting', 'Value', 'Source'],
-    'template-vars': ['Variable', 'Example'],
     'report-table': ['Group', 'Currency', 'Hours', 'Amount', 'Entries'],
 };
 // Deliberately app-owned: the timesheet grids and the editable line editor.

@@ -12,7 +12,9 @@
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct EmailMessage {
-    pub to: String,
+    /// Recipients, in delivery order. Every transport issues one `RCPT TO` per
+    /// address and renders them as one comma-joined `To:` header.
+    pub to: Vec<String>,
     pub subject: String,
     /// Plain-text body (always present).
     pub text: String,
@@ -62,7 +64,7 @@ impl EmailSender for DisabledEmailSender {
         // Refused on this transport too: the guarded values are the ones it
         // logs, and a folded one must not forge a log line either.
         guard_headers(msg)?;
-        tracing::info!(to = %msg.to, subject = %msg.subject, "email (SMTP not configured, not sent)");
+        tracing::info!(to = %msg.to.join(", "), subject = %msg.subject, "email (SMTP not configured, not sent)");
         Ok(())
     }
     fn transport(&self) -> &'static str {
@@ -70,7 +72,7 @@ impl EmailSender for DisabledEmailSender {
     }
 }
 
-/// Test/CI adapter: records messages in memory, validating the recipient.
+/// Test/CI adapter: records messages in memory, validating the recipients.
 #[derive(Debug, Default)]
 pub struct RecordingEmailSender {
     sent: std::sync::Mutex<Vec<EmailMessage>>,
@@ -85,7 +87,7 @@ impl RecordingEmailSender {
 impl EmailSender for RecordingEmailSender {
     fn send(&self, msg: &EmailMessage) -> Result<(), EmailError> {
         guard_headers(msg)?;
-        if !valid_address(&msg.to) {
+        if !recipients_are_addresses(&msg.to) {
             return Err(EmailError::Recipient);
         }
         self.sent.lock().unwrap().push(msg.clone());
@@ -112,8 +114,12 @@ pub fn has_control_characters(value: &str) -> bool {
 /// never went through `valid_address`, say -- is still refused. Fail-closed and
 /// explicit: a hostile value is never silently stripped and shipped mangled.
 pub fn guard_headers(msg: &EmailMessage) -> Result<(), EmailError> {
+    // Every recipient is header-bound: one hostile entry would fold the `To:`
+    // line or the SMTP dialogue, so the whole message is refused.
+    if msg.to.iter().any(|addr| has_control_characters(addr)) {
+        return Err(EmailError::Header("recipient"));
+    }
     let fields = [
-        ("recipient", Some(msg.to.as_str())),
         ("subject", Some(msg.subject.as_str())),
         ("reply-to", msg.reply_to.as_deref()),
         ("sender name", msg.from_name.as_deref()),
@@ -128,6 +134,13 @@ pub fn guard_headers(msg: &EmailMessage) -> Result<(), EmailError> {
         }
     }
     Ok(())
+}
+
+/// True when the list is non-empty and every entry is an address this port
+/// will hand to a relay. Empty lists are refused: a message with no `RCPT TO`
+/// is never a successful send.
+pub fn recipients_are_addresses(to: &[String]) -> bool {
+    !to.is_empty() && to.iter().all(|addr| valid_address(addr))
 }
 
 /// A deliberately small, conservative address check (not full RFC 5322):
@@ -155,6 +168,88 @@ pub fn valid_address(addr: &str) -> bool {
         && !domain.starts_with('.')
         && !domain.ends_with('.')
         && !domain.contains("..")
+}
+
+/// The hard cap on recipients for one invoice email. A typo that turns a
+/// distribution list into hundreds of RCPT commands is refused before any
+/// message is assembled.
+pub const MAX_RECIPIENTS: usize = 10;
+
+/// The RFC 5321 maximum address length (the path including the local part).
+pub const MAX_RECIPIENT_CHARS: usize = 320;
+
+/// Why one recipient entry is unusable, or `None` when it is fine.
+///
+/// Deliberately narrower than [`valid_address`]: the API rule is "one `@`, no
+/// control characters, trimmed, at most 320 chars", so a bare `a@b` is allowed
+/// here even though the transport's stricter check would refuse it. Control
+/// characters are tested on the raw value, before `trim()` could hide a
+/// trailing CR/LF (the header-injection guard).
+pub fn recipient_problem(value: &str) -> Option<&'static str> {
+    if has_control_characters(value) {
+        return Some("recipient contains a control character");
+    }
+    let address = value.trim();
+    if address.is_empty() {
+        return Some("recipient is empty");
+    }
+    if address.chars().count() > MAX_RECIPIENT_CHARS {
+        return Some("recipient is longer than 320 characters");
+    }
+    if address.matches('@').count() != 1 {
+        return Some("recipient must contain exactly one '@'");
+    }
+    None
+}
+
+/// Resolve a request's recipient list (`None`/empty = the customer default).
+///
+/// Validation happens for **every** entry before anything is sent, so a bad
+/// address can never ride along behind a good one. `default` is the customer's
+/// billing address: when the caller supplies nothing and it is empty, the
+/// existing 422 (`customer has no billing email on file`) is preserved.
+pub fn resolve_recipients(
+    raw: &[String],
+    default: Option<&str>,
+) -> Result<Vec<String>, Vec<(String, String)>> {
+    if raw.is_empty() {
+        return match default.map(str::trim).filter(|addr| !addr.is_empty()) {
+            Some(addr) => Ok(vec![addr.to_string()]),
+            None => Err(vec![(
+                "email".into(),
+                "customer has no billing email on file".into(),
+            )]),
+        };
+    }
+    if raw.len() > MAX_RECIPIENTS {
+        return Err(vec![(
+            "recipients".into(),
+            format!("at most {MAX_RECIPIENTS} recipients are allowed"),
+        )]);
+    }
+    let mut errors = Vec::new();
+    let mut recipients: Vec<String> = Vec::new();
+    let mut seen: Vec<String> = Vec::new();
+    for (index, entry) in raw.iter().enumerate() {
+        match recipient_problem(entry) {
+            Some(problem) => errors.push((format!("recipients[{index}]"), problem.to_string())),
+            None => {
+                let address = entry.trim().to_string();
+                // Case-insensitive de-duplication, first occurrence (with its
+                // original casing) wins and the given order is preserved.
+                let key = address.to_ascii_lowercase();
+                if !seen.contains(&key) {
+                    seen.push(key);
+                    recipients.push(address);
+                }
+            }
+        }
+    }
+    if errors.is_empty() {
+        Ok(recipients)
+    } else {
+        Err(errors)
+    }
 }
 
 // ------------------------------------------------------------ SMTP adapter --
@@ -209,10 +304,51 @@ impl SmtpEmailSender {
     }
 }
 
+/// Resolve the live transport from the vault + `TUCANO_SMTP_*` env.
+/// `DisabledEmailSender` when no host is configured.
+pub fn sender_from_sources(
+    vault: Option<&crate::vault::SecretVault>,
+) -> std::sync::Arc<dyn EmailSender> {
+    match SmtpConfig::from_sources(vault) {
+        Some(config) => std::sync::Arc::new(SmtpEmailSender::new(config)),
+        None => std::sync::Arc::new(DisabledEmailSender),
+    }
+}
+
+/// The production transport installed by `AppState::boot`.
+///
+/// It holds the vault handle, **not** a copy of the settings, and re-resolves
+/// `smtp.*` on every `send`/`transport` call. That is what makes
+/// `PUT /api/admin/email` take effect on the very next message without a
+/// restart. Tests replace the whole transport through
+/// `AppState::with_email`, so the injection seam is unchanged.
+pub struct DynamicEmailSender {
+    vault: Option<std::sync::Arc<crate::vault::SecretVault>>,
+}
+
+impl DynamicEmailSender {
+    pub fn new(vault: Option<std::sync::Arc<crate::vault::SecretVault>>) -> Self {
+        Self { vault }
+    }
+
+    fn resolve(&self) -> std::sync::Arc<dyn EmailSender> {
+        sender_from_sources(self.vault.as_deref())
+    }
+}
+
+impl EmailSender for DynamicEmailSender {
+    fn send(&self, msg: &EmailMessage) -> Result<(), EmailError> {
+        self.resolve().send(msg)
+    }
+    fn transport(&self) -> &'static str {
+        self.resolve().transport()
+    }
+}
+
 impl EmailSender for SmtpEmailSender {
     fn send(&self, msg: &EmailMessage) -> Result<(), EmailError> {
         guard_headers(msg)?;
-        if !valid_address(&msg.to) {
+        if !recipients_are_addresses(&msg.to) {
             return Err(EmailError::Recipient);
         }
         let stream = std::net::TcpStream::connect((self.config.host.as_str(), self.config.port))
@@ -295,7 +431,10 @@ impl SmtpConn {
             self.command(&auth_line(p), &[235])?;
         }
         self.command(&format!("MAIL FROM:<{}>", cfg.from), &[250])?;
-        self.command(&format!("RCPT TO:<{}>", msg.to), &[250, 251])?;
+        // One envelope recipient per address: all of them see the same DATA.
+        for recipient in &msg.to {
+            self.command(&format!("RCPT TO:<{recipient}>"), &[250, 251])?;
+        }
         self.command("DATA", &[354])?;
         self.write_message(msg)?;
         self.command("QUIT", &[221])?;
@@ -363,7 +502,7 @@ pub fn build_mime(msg: &EmailMessage) -> Result<String, EmailError> {
     let mut h = format!(
         "From: {}\r\nTo: {}\r\nSubject: {}\r\nDate: {}\r\n",
         encode_header(from_display),
-        encode_header(&msg.to),
+        encode_header(&msg.to.join(", ")),
         encode_header(&msg.subject),
         chrono::Utc::now().to_rfc2822(),
     );
@@ -548,7 +687,7 @@ mod tests {
     fn recording_sender_rejects_bad_recipient() {
         let s = RecordingEmailSender::default();
         let ok = s.send(&EmailMessage {
-            to: "x@y.co".into(),
+            to: vec!["x@y.co".into()],
             subject: "s".into(),
             text: "t".into(),
             html: None,
@@ -558,7 +697,7 @@ mod tests {
         });
         assert!(ok.is_ok());
         let bad = s.send(&EmailMessage {
-            to: "nope".into(),
+            to: vec!["nope".into()],
             subject: "s".into(),
             text: "t".into(),
             html: None,
@@ -641,7 +780,7 @@ mod tests {
     #[test]
     fn mime_builds_multipart_with_attachment() {
         let m = EmailMessage {
-            to: "x@y.co".into(),
+            to: vec!["x@y.co".into()],
             subject: "S".into(),
             text: "body".into(),
             html: None,
@@ -666,7 +805,7 @@ mod tests {
         );
         // The raw bytes must not survive into the header block.
         let m = EmailMessage {
-            to: "x@y.co".into(),
+            to: vec!["x@y.co".into()],
             subject: "Café München".into(),
             text: "body".into(),
             html: None,
@@ -685,7 +824,7 @@ mod tests {
     fn sender_name_and_reply_to_headers() {
         // Default: built-in From, no Reply-To — unchanged for legacy users.
         let m = EmailMessage {
-            to: "x@y.co".into(),
+            to: vec!["x@y.co".into()],
             subject: "S".into(),
             text: "b".into(),
             html: None,
@@ -734,7 +873,7 @@ mod tests {
     #[test]
     fn pdf_attachments_are_labelled_as_pdf() {
         let m = EmailMessage {
-            to: "x@y.co".into(),
+            to: vec!["x@y.co".into()],
             subject: "S".into(),
             text: "body".into(),
             html: None,
@@ -751,7 +890,7 @@ mod tests {
         // The guard rejects injections, not address shapes: a display-name
         // recipient and an ASCII display name build exactly as they always did.
         let m = EmailMessage {
-            to: "billing@acme.test".into(),
+            to: vec!["billing@acme.test".into()],
             subject: "Invoice INV-0001 from Tucano".into(),
             text: "b".into(),
             html: None,
@@ -764,7 +903,7 @@ mod tests {
         assert!(mime.contains("To: billing@acme.test\r\n"), "{mime}");
         assert!(mime.contains("Reply-To: billing@tucano.test\r\n"), "{mime}");
         let named = EmailMessage {
-            to: "Capybara Solutions <emanuele@tucano.test>".into(),
+            to: vec!["Capybara Solutions <emanuele@tucano.test>".into()],
             ..m.clone()
         };
         let mime = build_mime(&named).expect("a display-name recipient builds");
@@ -785,7 +924,7 @@ mod tests {
         // display name). A refused message is refused outright -- never
         // stripped-and-shipped -- and the value never reaches a header.
         let base = EmailMessage {
-            to: "ok@x.co".into(),
+            to: vec!["ok@x.co".into()],
             subject: "S".into(),
             text: "b".into(),
             html: None,
@@ -799,7 +938,7 @@ mod tests {
             "inv@corp.example\0",
         ] {
             let m = EmailMessage {
-                to: hostile.into(),
+                to: vec![hostile.into()],
                 ..base.clone()
             };
             assert!(matches!(
@@ -853,7 +992,7 @@ mod tests {
     #[test]
     fn transports_refuse_control_characters_without_recording() {
         let m = EmailMessage {
-            to: "ok@x.co".into(),
+            to: vec!["ok@x.co".into()],
             subject: "S\r\nBcc: attacker@evil.example".into(),
             text: "b".into(),
             html: None,
@@ -884,5 +1023,66 @@ mod tests {
             password: None,
         });
         assert!(matches!(smtp.send(&m), Err(EmailError::Header("subject"))));
+    }
+
+    #[test]
+    fn recipient_resolution_defaults_dedupes_and_validates() {
+        // Absent/empty list -> the single customer default, exactly as before.
+        let default = resolve_recipients(&[], Some("billing@acme.test")).unwrap();
+        assert_eq!(default, vec!["billing@acme.test".to_string()]);
+        assert!(resolve_recipients(&[], None).is_err());
+        assert!(resolve_recipients(&[], Some("   ")).is_err());
+        // Explicit order is preserved; a case-insensitive duplicate drops the
+        // later occurrence and keeps the first spelling.
+        let list = resolve_recipients(
+            &[
+                "Second@X.test".into(),
+                "first@x.test".into(),
+                " second@x.TEST ".into(),
+            ],
+            Some("ignored@acme.test"),
+        )
+        .unwrap();
+        assert_eq!(
+            list,
+            vec!["Second@X.test".to_string(), "first@x.test".to_string()]
+        );
+        // Control characters, a second '@' and empty entries are refused.
+        for bad in ["a@b.co\r\nBcc: x@y.co", "two@@x.co", "", "   "] {
+            let err = resolve_recipients(&[bad.into()], None).unwrap_err();
+            assert_eq!(err[0].0, "recipients[0]", "{bad:?}");
+        }
+        let long = format!("{}@x.co", "a".repeat(320));
+        assert!(resolve_recipients(&[long], None).is_err());
+        // More than ten is refused outright.
+        let many: Vec<String> = (0..11).map(|i| format!("u{i}@x.co")).collect();
+        assert_eq!(
+            resolve_recipients(&many, None).unwrap_err()[0].0,
+            "recipients"
+        );
+    }
+
+    #[test]
+    fn mime_joins_multiple_recipients_into_one_to_header() {
+        let m = EmailMessage {
+            to: vec!["one@x.co".into(), "two@x.co".into()],
+            subject: "S".into(),
+            text: "b".into(),
+            html: None,
+            attachment: None,
+            from_name: None,
+            reply_to: None,
+        };
+        let mime = build_mime(&m).unwrap();
+        assert!(mime.contains("To: one@x.co, two@x.co\r\n"), "{mime}");
+        // A control character in *any* recipient refuses the whole message.
+        let hostile = EmailMessage {
+            to: vec!["ok@x.co".into(), "bad@x.co\nBcc: x@y.co".into()],
+            ..m
+        };
+        assert!(matches!(
+            build_mime(&hostile),
+            Err(EmailError::Header("recipient"))
+        ));
     }
 }

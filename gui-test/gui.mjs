@@ -315,6 +315,14 @@ entryForm.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: 
 await waitFor(() => byId('day-total').textContent.trim() === '4:15', {
   message: 'the day table to re-render with the new 4.25h entry',
 });
+// saveEntry clears its single-flight guard (`entrySaving`) and the save
+// button's busy state in its `finally`, *after* the dialog closes and the day
+// re-renders. Wait for that, otherwise the reopened dialog's invalid submit
+// below can be dropped by the in-flight guard and the error never appears.
+await waitFor(() => {
+  const save = byId('entry-save');
+  return save.disabled === false && !save.hasAttribute('aria-busy');
+}, { message: 'the entry save to leave its busy state' });
 
 // ---- verify the entry actually reached the server through the form ----
 const day = await (await fetch(BASE + '/api/entries?date=2026-11-11')).json();
@@ -1255,15 +1263,16 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
 {
   window.document.getElementById('tab-settings').dispatchEvent(new window.Event('click', { bubbles: true }));
   await waitFor(() => [...window.document.querySelectorAll('#settings-tabs [role="tab"]')].map((tab) => tab.id).join(',') ===
-    'settings-tab-security,settings-tab-users,settings-tab-invoice,settings-tab-catalog,settings-tab-expenses', {
+    'settings-tab-users,settings-tab-company,settings-tab-invoice-template,settings-tab-catalog,settings-tab-expenses,settings-tab-email,settings-tab-security', {
     message: 'the Settings section to render its tab bar',
   });
-  check('Settings tab bar includes Users, Security, Invoice documents, and Products & services',
+  check('Settings tab bar lists the seven focused sections in order',
     [...window.document.querySelectorAll('#settings-tabs [role="tab"]')].map((tab) => tab.id).join(',') ===
-    'settings-tab-security,settings-tab-users,settings-tab-invoice,settings-tab-catalog,settings-tab-expenses');
-  check('Settings opens on Security & runtime by default',
-    window.document.getElementById('settings-tab-security').getAttribute('aria-selected') === 'true'
-    && !window.document.getElementById('settings-panel-security').hidden);
+    'settings-tab-users,settings-tab-company,settings-tab-invoice-template,settings-tab-catalog,settings-tab-expenses,settings-tab-email,settings-tab-security');
+  check('Settings opens on Users by default',
+    window.document.getElementById('settings-tab-users').getAttribute('aria-selected') === 'true'
+    && !window.document.getElementById('settings-panel-users').hidden
+    && window.document.getElementById('settings-panel-security').hidden);
   window.document.getElementById('settings-tab-users').dispatchEvent(new window.Event('click', { bubbles: true }));
   check('Users tab shows the admin-management table',
     window.document.getElementById('settings-tab-users').getAttribute('aria-selected') === 'true'
@@ -1358,7 +1367,7 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
   check('Products & services tab shows the catalog only',
     window.document.getElementById('settings-tab-catalog').getAttribute('aria-selected') === 'true'
     && !window.document.getElementById('settings-panel-catalog').hidden
-    && window.document.getElementById('settings-panel-invoice').hidden);
+    && window.document.getElementById('settings-panel-invoice-template').hidden);
   window.document.getElementById('item-name').value = 'Site visit';
   window.document.getElementById('item-kind').value = 'service';
   window.document.getElementById('item-desc').value = 'On-site engineering visit';
@@ -1367,10 +1376,10 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
   await settle('the catalog item form to save Site visit');
   const cat = (await (await fetch(BASE + '/api/admin/item-types', { headers: { Cookie: SESSION_COOKIE } })).json()).item_types;
   check('catalog item created via the form (#147)', cat.length === 1 && cat[0].name === 'Site visit' && cat[0].default_price_minor === 12000);
-  window.document.getElementById('settings-tab-invoice').dispatchEvent(new window.Event('click', { bubbles: true }));
-  check('Invoice documents tab shows template and field-label settings',
-    window.document.getElementById('settings-tab-invoice').getAttribute('aria-selected') === 'true'
-    && !window.document.getElementById('settings-panel-invoice').hidden
+  window.document.getElementById('settings-tab-invoice-template').dispatchEvent(new window.Event('click', { bubbles: true }));
+  check('Invoice template tab shows template and field-label settings',
+    window.document.getElementById('settings-tab-invoice-template').getAttribute('aria-selected') === 'true'
+    && !window.document.getElementById('settings-panel-invoice-template').hidden
     && window.document.getElementById('settings-panel-catalog').hidden);
   window.document.getElementById('lb-total').value = 'Amount due';
   window.document.getElementById('lb-description').value = 'Work performed';
@@ -1802,20 +1811,46 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
   // leave the All tab on: downstream checks (paid rows etc.) need every status
 }
 
-// ---- EMAIL (#35): set a billing email, then email the issued invoice ----
+// ---- EMAIL (#35): set a billing contact, then email the issued invoice ----
+// Seed the address the way the app itself publishes it: a billing contact
+// (#139) on the customer, saved through the API. The register the dialog reads
+// is a cache refreshed when the Customers view is shown, so an out-of-band PUT
+// alone is invisible to it; showing the Customers tab re-pulls it, exactly what
+// saving the customer form does. Seeding only the legacy `email` and never
+// re-pulling left `state.customers` without any address, so the dialog opened
+// with no candidates and this smoke failed.
 const custObj = (await (await fetch(BASE + `/api/customers/${acmeOpt.value}`, { headers: { Cookie: SESSION_COOKIE } })).json());
 custObj.email = 'billing@acme.test';
 const putC = await fetch(`${BASE}/api/customers/${acmeOpt.value}`, {
   method: 'PUT',
   headers: { 'content-type': 'application/json', Cookie: SESSION_COOKIE },
-  body: JSON.stringify({ name: custObj.name, currency: custObj.currency, default_rate_minor: custObj.default_rate_minor, active: custObj.active, email: 'billing@acme.test' }),
+  body: JSON.stringify({
+    name: custObj.name,
+    currency: custObj.currency,
+    default_rate_minor: custObj.default_rate_minor,
+    active: custObj.active,
+    email: 'billing@acme.test',
+    contacts: [{ name: 'Accounts', role: 'Billing', email: 'billing@acme.test', billing: true }],
+  }),
 });
-check('customer email round-trips via API', putC.status === 200 && (await putC.json()).email === 'billing@acme.test');
+const putBody = await putC.json();
+check('customer email round-trips via API', putC.status === 200 && putBody.email === 'billing@acme.test');
+check('the email smoke seeds a billing contact (#139)',
+  putBody.contacts.length === 1 && putBody.contacts[0].billing === true
+  && putBody.contacts[0].email === 'billing@acme.test');
 const emailRes = await fetch(`${BASE}/api/invoices/${acmeInv.id}/email`, { method: 'POST', headers: { Cookie: SESSION_COOKIE } });
 const emailBody = await emailRes.json();
 check('invoice email endpoint sends to the billing address', emailRes.status === 200 && emailBody.sent_to === 'billing@acme.test');
 
-// The GUI shows an Email button on the issued invoice and announces the send.
+// The GUI shows an Email button on the issued invoice. It is now a two-step
+// flow (#139): the row action opens the recipient dialog with the customer's
+// on-file address pre-ticked and sends nothing; the dialog's own Send is what
+// posts. Opening + cancelling, then, must leave the live region and the history
+// exactly as they were.
+// Re-pull the customer register first: the dialog resolves the invoice's
+// customer from `state.customers`, which only a view change refreshes.
+window.document.getElementById('tab-customers').dispatchEvent(new window.Event('click', { bubbles: true }));
+await settle('the customer register to re-pull the saved billing contact');
 window.document.getElementById('tab-invoices').dispatchEvent(new window.Event('click', { bubbles: true }));
 // Tab is shown -> refreshInvoices() re-pulls; wait for the issued-state Email
 // action instead of racing the refresh (#265).
@@ -1825,17 +1860,25 @@ await waitFor(() => [...window.document.querySelectorAll('#invoice-table tbody b
 const emailBtn = [...window.document.querySelectorAll('#invoice-table tbody button')].find((b) => b.textContent === 'Email');
 check('issued invoice renders an Email button', !!emailBtn);
 if (emailBtn) {
+  const liveBefore = byId('live-region').textContent;
   emailBtn.dispatchEvent(new window.Event('click', { bubbles: true }));
-  await waitFor(() => /billing@acme.test/.test(byId('live-region').textContent), {
-    message: 'the Email action to announce the send',
+  await waitFor(() => dialogOpen(byId('send-email-dialog')), {
+    message: 'the Email action to open the recipient dialog',
   });
-  {
-  const t = window.document.getElementById('live-region').textContent;
-  // #130 honesty: either a real send (smtp) or an explicit NOT-sent with the
-  // address — never a bare success claim when the transport is disabled.
-  check('Email button announces honestly',
-    /billing@acme.test/.test(t) && /Invoice emailed to|NOT sent \(SMTP not configured\)/.test(t));
-}
+  const recipients = [...byId('send-email-recipients').querySelectorAll('input[type="checkbox"]')];
+  check('the Email action opens the recipient dialog with the billing address checked (#139)',
+    recipients.length === 1
+    && recipients[0].value === 'billing@acme.test'
+    && recipients[0].checked === true);
+  check('opening the recipient dialog sends nothing (#139)',
+    byId('live-region').textContent === liveBefore);
+  byId('send-email-close').dispatchEvent(new window.Event('click', { bubbles: true }));
+  await waitFor(() => !dialogOpen(byId('send-email-dialog')), {
+    message: 'Cancel to dismiss the recipient dialog',
+  });
+  check('Cancel dismisses the recipient dialog without sending (#139)',
+    !dialogOpen(byId('send-email-dialog'))
+    && byId('live-region').textContent === liveBefore);
 }
 
 
@@ -1878,45 +1921,36 @@ if (emailBtn) {
     await waitFor(() => !dialogOpen(byId('message-dialog')), { message: 'Close to dismiss the delivery record' });
     check('Close dismisses the delivery record (#349)', !dialogOpen(byId('message-dialog')));
   }
-  // The panel's own Send email action: POST /invoices/{id}/email, reported
-  // honestly (the harness configures no SMTP, so the transport is disabled and
-  // the announcement must say NOT sent), then the history gains the entry
-  // without a reload.
+  // The panel's own Send email action is the same two-step flow (#139): it
+  // opens the recipient dialog rather than posting immediately. The harness
+  // configures no SMTP, so the dialog must carry the guidance notice and keep
+  // Send disabled; nothing is delivered and the history does not move.
   const sentCount = () => [...byId('ip-timeline').querySelectorAll('li')]
     .filter((li) => /^Sent invoice to/.test(li.querySelector('.ip-tl-desc').textContent)).length;
   const emailsBefore = sentCount();
   byId('ip-send').dispatchEvent(new window.Event('click', { bubbles: true }));
-  await waitFor(() => /NOT sent \(SMTP not configured\)|Invoice emailed to/.test(byId('live-region').textContent), {
-    message: 'the panel Send email action to report the transport honestly',
+  await waitFor(() => dialogOpen(byId('send-email-dialog')), {
+    message: 'the panel Send email action to open the recipient dialog',
   });
-  check('Send email from the panel reports the transport honestly (#349)',
-    /NOT sent \(SMTP not configured\)|Invoice emailed to/.test(byId('live-region').textContent));
-  // The re-render is two concurrent fetches (the timeline and the PDF). Wait for
-  // each half explicitly: a composite predicate hides which of the two stalled,
-  // and a half-rendered panel is not evidence of anything.
-  //
-  // The budget is deliberately large. Opening a panel re-renders the invoice PDF
-  // *on demand* (`GET /invoices/{id}/pdf/preview` is uncached and CPU-bound), and
-  // this suite opens a preview many times, so on a single-core CI runner a later
-  // render can queue behind earlier ones and outlast 15s. These waits assert the
-  // settled state, never latency; a render that genuinely fails still surfaces as
-  // "Preview unavailable" in `#ip-pdf-state`, which the messages below report.
-  await waitFor(() => sentCount() === emailsBefore + 1, {
-    timeoutMs: 60000,
-    message: 'the history to record the new delivery'
-      + ` (entries=${sentCount()}, state=${byId('ip-pdf-state').textContent})`,
+  await waitFor(() => byId('send-email-notice').hidden === false, {
+    message: 'the SMTP guidance to appear in the recipient dialog',
   });
-  await waitFor(
-    () => !!byId('ip-frame') && String(byId('ip-frame').getAttribute('src')).startsWith('blob:'),
-    {
-      timeoutMs: 60000,
-      message: 'the panel to re-frame the rendered PDF'
-        + ` (frame=${!!byId('ip-frame')}, state=${byId('ip-pdf-state').textContent})`,
-    },
-  );
-  const sendSettled = () => sentCount() === emailsBefore + 1
-    && !!byId('ip-frame') && String(byId('ip-frame').getAttribute('src')).startsWith('blob:');
-  check('Send email from the panel refreshes the preview and the history (#349)', sendSettled());
+  check('Send email from the panel opens the recipient dialog (#139)',
+    dialogOpen(byId('send-email-dialog'))
+    && byId('send-email-send').disabled === true
+    && /not\s+configured/i.test(byId('send-email-notice').textContent)
+    && byId('send-email-settings').dataset.route === '/settings/email');
+  check('the panel email flow sends nothing while SMTP is unconfigured (#139)',
+    sentCount() === emailsBefore
+    && !!byId('ip-frame') && String(byId('ip-frame').getAttribute('src')).startsWith('blob:'));
+  byId('send-email-close').dispatchEvent(new window.Event('click', { bubbles: true }));
+  await waitFor(() => !dialogOpen(byId('send-email-dialog')), {
+    message: 'Cancel to dismiss the recipient dialog',
+  });
+  check('Cancel returns focus to the panel action (#139)',
+    window.document.activeElement === byId('ip-send'));
+  check('opening the recipient dialog leaves the history untouched (#139)',
+    sentCount() === emailsBefore);
   // Mark as sent is idempotent: this invoice already has a delivery, so the
   // repeat must report the original timestamp and append no second entry.
   const before = byId('ip-timeline').querySelectorAll('li').length;
@@ -2337,8 +2371,15 @@ await waitFor(() => window.document.querySelectorAll('#config-table tbody tr').l
   message: 'the config table to render its whitelisted rows',
 });
 window.document.getElementById('settings-tab-security').dispatchEvent(new window.Event('click', { bubbles: true }));
+await waitFor(() => window.document.querySelectorAll('#audit-table tbody tr').length >= 1, {
+  message: 'the audit log to render its recent events',
+});
 const cfgRows = [...window.document.querySelectorAll('#config-table tbody tr')];
 check('config table renders whitelisted rows', cfgRows.length >= 5);
+const auditRows = [...window.document.querySelectorAll('#audit-table tbody tr')];
+check('Security renders the read-only audit log (SET-11)',
+  auditRows.length >= 1 && auditRows[0].cells[1].textContent.trim().length > 0
+  && window.document.getElementById('audit-card').hidden === false);
 const daysRow = cfgRows.find((r) => r.cells[0].textContent === 'reminder_days');
 check('reminder_days row shows default source', !!daysRow && daysRow.cells[2].textContent === 'default');
 if (daysRow) {
@@ -2352,6 +2393,8 @@ if (daysRow) {
   }, { message: 'the edited config row to re-render with its new value' });
   const after = [...window.document.querySelectorAll('#config-table tbody tr')].find((r) => r.cells[0].textContent === 'reminder_days');
   check('edit persists to config.json and source becomes file', after.cells[1].textContent === '12' && after.cells[2].textContent === 'file');
+  check('boot-time knobs are marked after restart (SET-04)',
+    /after restart/i.test(after.cells[3].textContent));
 }
 // Non-whitelisted keys cannot be written even via the API.
 const badCfg = await fetch(BASE + '/api/admin/config', { method: 'PUT', headers: { 'content-type': 'application/json', Cookie: SESSION_COOKIE, 'X-CSRF-Protection': '1' }, body: '{"smtp.password":"nope"}' });
@@ -2359,14 +2402,15 @@ check('secret-shaped config keys are refused', badCfg.status === 422);
 
 // ---- INVOICE TEMPLATE (#116): admin editor, cheat-sheet, rejection, preview ----
 window.document.getElementById('tab-settings').dispatchEvent(new window.Event('click', { bubbles: true }));
+window.document.getElementById('settings-tab-email').dispatchEvent(new window.Event('click', { bubbles: true }));
 await waitFor(() => /Email delivery:/i.test(byId('email-status').textContent), {
-  message: 'the Settings email transport state to render',
+  message: 'the Email section delivery state to render',
 });
-window.document.getElementById('settings-tab-security').dispatchEvent(new window.Event('click', { bubbles: true }));
-check('Settings discloses the email transport state (#130)',
-  /Email delivery:/i.test(window.document.getElementById('email-status').textContent));
+check('Email settings discloses the delivery transport state (#130)',
+  /Email delivery:/i.test(window.document.getElementById('email-status').textContent)
+  && !window.document.getElementById('settings-panel-email').hidden);
 const varRows = [...window.document.querySelectorAll('#template-vars tbody tr')];
-window.document.getElementById('settings-tab-invoice').dispatchEvent(new window.Event('click', { bubbles: true }));
+window.document.getElementById('settings-tab-invoice-template').dispatchEvent(new window.Event('click', { bubbles: true }));
 // ---- APPEARANCE & MESSAGES (#146) ----
 {
   const set = (id, v) => { const el = window.document.getElementById(id); el.value = v; };
@@ -2479,16 +2523,22 @@ check('customer invoice fields persist via the form', !!termy && termy.payment_t
     !!addrCo && addrCo.contacts.length === 1 && addrCo.contacts[0].billing === true
     && addrCo.contacts[0].email === 'ada@addrco.test');
 
-// Document preview card uses GET /invoices/{id}/document on the newest invoice.
+// The Invoice template section frames a live PDF of the *candidate* template:
+// the API renders the sample invoice, so no saved/issued invoice is required.
 window.document.getElementById('tab-settings').dispatchEvent(new window.Event('click', { bubbles: true }));
-await waitFor(() => byId('template-preview').hidden === false && byId('template-preview-subject').textContent.includes('Invoice '), {
-  message: 'the template preview card to render the subject',
+window.document.getElementById('settings-tab-invoice-template').dispatchEvent(new window.Event('click', { bubbles: true }));
+await waitFor(() => byId('template-preview-frame').getAttribute('src') === 'blob:jsdom-stub'
+  && byId('template-preview-status').textContent === 'Preview updated', {
+  message: 'the live template preview to render the sample PDF into the frame',
 });
-const prev = window.document.getElementById('template-preview');
-check('template preview card shows the rendered subject', !prev.hidden
-  && window.document.getElementById('template-preview-subject').textContent.includes('Invoice '));
-check('preview body is plain text (textContent-only rule)', window.document.getElementById('template-preview-body').children.length === 0
-  && window.document.getElementById('template-preview-body').textContent.includes('consulting work'));
+check('the Invoice template section frames a live PDF preview without a saved invoice',
+  byId('template-preview-frame').getAttribute('src') === 'blob:jsdom-stub'
+  && byId('template-preview-status').textContent === 'Preview updated');
+check('the preview frame is titled for assistive technology',
+  (byId('template-preview-frame').getAttribute('title') || '').length > 0);
+check('the toolbar offers Refresh and Open in new tab as real buttons',
+  byId('template-preview-refresh').tagName === 'BUTTON'
+  && byId('template-preview-open').tagName === 'BUTTON');
 
 // ---- PARTIAL PAYMENTS & WRITE-OFF (#114): record payment + write off via GUI ----
 const paid2028 = await (await fetch(BASE + '/api/entries', {
@@ -2823,7 +2873,9 @@ check('members can manage expense categories without admin Settings panels',
   && !memberDocument.getElementById('settings-tab-expenses').hidden
   && !memberDocument.getElementById('settings-panel-expenses').hidden
   && memberDocument.getElementById('settings-tab-security').hidden
-  && memberDocument.getElementById('settings-panel-security').hidden);
+  && memberDocument.getElementById('settings-panel-security').hidden
+  && memberDocument.getElementById('settings-tab-email').hidden
+  && memberDocument.getElementById('settings-panel-email').hidden);
 memberDom.window.close();
 
 console.log(`\n${failures === 0 ? 'ALL GUI CHECKS PASSED' : failures + ' GUI CHECK(S) FAILED'}`);

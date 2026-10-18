@@ -200,6 +200,7 @@ pub const API_ROUTES: &[(&str, &str, Tier)] = &[
     ("GET", "/api/sync/accounting", Tier::Admin),
     ("GET", "/api/admin/invoice-template", Tier::Admin),
     ("PUT", "/api/admin/invoice-template", Tier::Admin),
+    ("POST", "/api/admin/invoice-template/preview", Tier::Admin),
     ("GET", "/api/admin/org", Tier::Admin),
     ("PUT", "/api/admin/org", Tier::Admin),
     ("GET", "/api/admin/item-types", Tier::Admin),
@@ -215,6 +216,9 @@ pub const API_ROUTES: &[(&str, &str, Tier)] = &[
     ("POST", "/api/claims/{id}/decision", Tier::Admin),
     ("GET", "/api/admin/config", Tier::Admin),
     ("PUT", "/api/admin/config", Tier::Admin),
+    ("GET", "/api/admin/email", Tier::Admin),
+    ("PUT", "/api/admin/email", Tier::Admin),
+    ("POST", "/api/admin/email/test", Tier::Admin),
     ("GET", "/api/admin/secrets", Tier::Admin),
     ("PUT", "/api/admin/secrets/{key}", Tier::Admin),
     ("DELETE", "/api/admin/secrets/{key}", Tier::Admin),
@@ -274,11 +278,13 @@ const SPA_ROUTES: &[&str] = &[
     "/approvals",
     "/reports",
     "/settings",
-    "/settings/security",
     "/settings/users",
-    "/settings/invoices",
+    "/settings/company",
+    "/settings/invoice-template",
     "/settings/catalog",
     "/settings/expenses",
+    "/settings/email",
+    "/settings/security",
 ];
 
 fn spa_page(path: &str) -> bool {

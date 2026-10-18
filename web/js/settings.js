@@ -5,7 +5,8 @@
 import { api } from './api.js';
 import { showAuth } from './auth.js';
 import { refreshCatalog } from './billing.js';
-import { $, announce, askConfirm, clearFormError, el, fillSelect, formatMoney, showFormError, statusChip } from './dom.js';
+import { $, announce, askConfirm, clearFormError, el, fillSelect, formatMoney, showFormError, singleFlight, statusChip } from './dom.js';
+import { state } from './state.js';
 
 // --------------------------------------------------------------- settings --
 
@@ -212,6 +213,12 @@ export async function deleteUser(user) {
 }
 
 export async function refreshSettings() {
+  // SET-02: every loader here is admin-tier; the only member-visible Settings
+  // section is Expense categories, owned by expenses.js. A member boot used to
+  // fire six admin GETs and leave "administrator role required" in the live
+  // region (and an error in the hidden Users status line), so the whole set is
+  // gated on the role the session already told us.
+  if (!state.isAdmin) return;
   // #189: independent admin surfaces load in parallel (was a sequential
   // six-request waterfall behind the Settings tab).
   await Promise.all([
@@ -221,6 +228,8 @@ export async function refreshSettings() {
     refreshOrgProfile(),
     refreshCatalog(),
     refreshInvoiceTemplate(),
+    refreshEmailSettings(),
+    refreshAuditLog(),
   ]);
 }
 
@@ -262,6 +271,50 @@ export async function refreshSecrets() {
   }
 }
 
+// SET-11: the read-only audit log (GET /audit, admin tier). The API returns the
+// newest events first as `{ ts, event, subject }` — there is no separate actor
+// field, so the subject column shows whatever identity the event recorded
+// (an email, an id, an invoice number, a provider name). No write path exists
+// here by design: the log is append-only.
+function auditTime(ts) {
+  if (!ts) return '';
+  // The API sends RFC3339 UTC; show it locale-free so the table is stable.
+  return ts.replace('T', ' ').replace(/\.\d+Z$/, ' UTC').replace(/Z$/, ' UTC');
+}
+
+export async function refreshAuditLog() {
+  if (!state.isAdmin) return;
+  const status = $('audit-status');
+  if (!status) return;
+  status.textContent = 'Loading audit events…';
+  try {
+    const data = await api.get('/audit');
+    const events = data.events || [];
+    const tbody = $('audit-table').querySelector('tbody');
+    tbody.textContent = '';
+    for (const event of events) {
+      tbody.appendChild(
+        el('tr', {}, [
+          el('td', { attrs: { 'data-heading': 'Time' }, text: auditTime(event.ts) }),
+          el('td', { attrs: { 'data-heading': 'Event' }, text: event.event || '' }),
+          el('td', { attrs: { 'data-heading': 'Subject' }, text: event.subject || '' }),
+        ]),
+      );
+    }
+    $('audit-empty').hidden = events.length !== 0;
+    status.textContent = events.length ? `${events.length} recent events, newest first.` : '';
+  } catch (err) {
+    if (err.status === 403) {
+      // Member: the card is admin-only, so stay silent and out of the way.
+      $('audit-card').hidden = true;
+      status.textContent = '';
+      return;
+    }
+    $('audit-empty').hidden = true;
+    status.textContent = `Could not load the audit log: ${err.message}`;
+  }
+}
+
 // Effective runtime configuration card (#94). Admin surface; members get a
 // silent hide. Values resolve env > config.json > default; applying an edit
 // persists it to config.json on the data volume so restarts keep it.
@@ -274,23 +327,50 @@ export function configValueForInput(v) {
   return v;
 }
 
+// SET-04: keys the server reads once at boot and stores in a long-lived
+// component, so editing them here only takes effect after a restart. Derived
+// from the call sites: `max_docs` (Store::open), `reminder_days`
+// (EmailReminderJob), `sso_allowed_domains` (SsoRegistry at AppState::boot) and
+// the two accounting base URLs (AccountingRegistry at AppState::boot). The SSO
+// admin group, calendar redirect and OAuth client ids are resolved per request.
+export const RESTART_REQUIRED_KEYS = new Set([
+  'max_docs',
+  'reminder_days',
+  'sso_allowed_domains',
+  'qbo_base_url',
+  'xero_base_url',
+]);
+
+// SET-08: `Kind::Currency` is the one server kind whose `validate` accepts
+// `null` (meaning "clear"); every other null-defaulted kind expects a string.
+export const NULLABLE_CONFIG_KEYS = new Set(['base_currency']);
+
+// SET-15: true only once the stored config really arrived. Save stays disabled
+// otherwise, so a failed load can never be overwritten with blanks.
+let configLoaded = false;
+
 export async function refreshConfig() {
   let data;
   try {
     data = await api.get('/admin/config');
-    // #130: be honest about delivery. A 200 from the email endpoints with
-    // transport "disabled" means logged, not sent.
-    const es = $('email-status');
-    if (es) {
-      es.textContent = data.email_transport === 'smtp'
-        ? 'Email delivery: SMTP configured — invoices are actually sent.'
-        : 'Email delivery: NOT configured — messages are logged only. Set smtp.host in credentials above or TUCANO_SMTP_HOST.';
+  } catch (err) {
+    configLoaded = false;
+    $('config-save').disabled = true;
+    $('config-card').dataset.loaded = '0';
+    if (err.status === 403) {
+      // Member: the section is hidden for them; stay silent.
+      $('config-card').hidden = true;
+      $('config-form').hidden = true;
+      return;
     }
-  } catch {
-    $('config-card').hidden = true;
-    $('config-form').hidden = true;
+    announce(`Runtime configuration could not be loaded: ${err.message}. Saving is disabled until it loads.`);
     return;
   }
+  configLoaded = true;
+  $('config-card').hidden = false;
+  $('config-form').hidden = false;
+  $('config-card').dataset.loaded = '1';
+  $('config-save').disabled = false;
   configRows = data.config || [];
   const tbody = $('config-table').querySelector('tbody');
   tbody.textContent = '';
@@ -298,9 +378,14 @@ export async function refreshConfig() {
     ...configRows.map((row) =>
       el('tr', {}, [
         el('th', { attrs: { scope: 'row', title: row.description }, text: row.key }),
-        el('td', { cls: 'num', text: configValueForInput(row.value) }),
-        el('td', {}, [
+        el('td', { cls: 'num', attrs: { 'data-heading': 'Value' }, text: configValueForInput(row.value) }),
+        el('td', { attrs: { 'data-heading': 'Source' } }, [
           statusChip(row.source, row.source !== 'default'),
+        ]),
+        el('td', { attrs: { 'data-heading': 'Applies' } }, [
+          RESTART_REQUIRED_KEYS.has(row.key)
+            ? statusChip('after restart')
+            : el('span', { text: 'immediately' }),
         ]),
       ]),
     ),
@@ -317,38 +402,54 @@ export async function refreshConfig() {
 
 export async function saveConfig(evt) {
   evt.preventDefault();
-  clearFormError($('config-error'));
-  const key = $('config-key').value;
-  const raw = $('config-value').value;
-  const row = configRows.find((c) => c.key === key) || {};
-  let value = raw;
-  if (typeof row.value === 'number') {
-    if (!/^-?\d+$/.test(raw)) {
-      showFormError($('config-error'), { message: 'Enter a whole number.' });
-      return;
-    }
-    value = Number(raw);
-  } else if (typeof row.value === 'boolean') {
-    if (raw !== 'true' && raw !== 'false') {
-      showFormError($('config-error'), { message: 'Enter true or false.' });
-      return;
-    }
-    value = raw === 'true';
+  if (!configLoaded) {
+    announce('Runtime configuration is not loaded yet — reload the section before saving.');
+    return;
   }
-  try {
-    await api.request('PUT', '/admin/config', { [key]: value });
-    announce(`Saved ${key}.`);
-    await refreshConfig();
-  } catch (err) {
-    showFormError($('config-error'), err);
-  }
+  // SET-05: a double submit writes once.
+  return singleFlight($('config-save'), async () => {
+    clearFormError($('config-error'));
+    const key = $('config-key').value;
+    const raw = $('config-value').value;
+    const row = configRows.find((c) => c.key === key) || {};
+    let value = raw;
+    if (typeof row.value === 'number') {
+      if (!/^-?\d+$/.test(raw)) {
+        showFormError($('config-error'), { message: 'Enter a whole number.' });
+        return;
+      }
+      value = Number(raw);
+    } else if (typeof row.value === 'boolean') {
+      if (raw !== 'true' && raw !== 'false') {
+        showFormError($('config-error'), { message: 'Enter true or false.' });
+        return;
+      }
+      value = raw === 'true';
+    } else if (NULLABLE_CONFIG_KEYS.has(key) && raw.trim() === '') {
+      // SET-08: the API clears a Currency knob with an explicit `null` (an
+      // empty string is refused). It is the only kind that accepts null —
+      // OptionalStr/Csv rows are cleared by an empty string instead — so this
+      // stays limited to the keys the server treats as nullable.
+      value = null;
+    }
+    try {
+      await api.request('PUT', '/admin/config', { [key]: value });
+      announce(`Saved ${key}.`);
+      await refreshConfig();
+    } catch (err) {
+      showFormError($('config-error'), err);
+    }
+  });
 }
 
-// ------------------------------------------------- invoice template (#116) --
-
-export let templateVarsLoaded = false;
-
 // ------------------------------------------------- company identity (#138) --
+// The reply-to address doubles as the default recipient for the Email tab's
+// "Send test email" field; nothing else reads it here.
+export let orgReplyTo = '';
+
+// SET-15: the form is only saveable once the stored identity arrived.
+let orgLoaded = false;
+
 export async function refreshOrgProfile() {
   try {
     const o = await api.get('/admin/org');
@@ -361,9 +462,23 @@ export async function refreshOrgProfile() {
     $('org-country').value = a.country || '';
     $('org-from').value = o.from_name || '';
     $('org-reply').value = o.reply_to || '';
+    orgReplyTo = o.reply_to || '';
+    if (!$('email-test-to').value) $('email-test-to').value = orgReplyTo;
     $('org-accent').value = o.accent || '';
     paintAccent();
-  } catch { /* members cannot manage the org profile */ }
+    orgLoaded = true;
+    $('org-form').dataset.loaded = '1';
+    $('org-save').disabled = false;
+  } catch (err) {
+    orgLoaded = false;
+    $('org-form').dataset.loaded = '0';
+    $('org-save').disabled = true;
+    // A member cannot manage the org profile: silence. Any other failure is
+    // announced, because saving the blank form would overwrite stored data.
+    if (err.status !== 403) {
+      announce(`Company information could not be loaded: ${err.message}. Saving is disabled until it loads.`);
+    }
+  }
 }
 
 export function paintAccent() {
@@ -377,28 +492,35 @@ export function paintAccent() {
 
 export async function saveOrgProfile(evt) {
   evt.preventDefault();
-  clearFormError($('org-error'));
-  const street = $('org-street').value.trim();
-  const city = $('org-city').value.trim();
-  const postal = $('org-postal').value.trim();
-  const country = $('org-country').value.trim();
-  try {
-    await api.put('/admin/org', {
-      name: $('org-name').value.trim(),
-      legal_id: $('org-legal').value.trim(),
-      // #146 presentation rides the same org store — no parallel truth.
-      from_name: $('org-from').value.trim(),
-      reply_to: $('org-reply').value.trim(),
-      accent: $('org-accent').value.trim(),
-      address: street || city || postal || country
-        ? { street, city, postal_code: postal, country }
-        : null,
-    });
-    announce('Company information saved.');
-    await refreshOrgProfile();
-  } catch (err) {
-    showFormError($('org-error'), err);
+  if (!orgLoaded) {
+    announce('Company information is not loaded yet — reload the section before saving.');
+    return;
   }
+  // SET-05: a double submit writes once.
+  return singleFlight($('org-save'), async () => {
+    clearFormError($('org-error'));
+    const street = $('org-street').value.trim();
+    const city = $('org-city').value.trim();
+    const postal = $('org-postal').value.trim();
+    const country = $('org-country').value.trim();
+    try {
+      await api.put('/admin/org', {
+        name: $('org-name').value.trim(),
+        legal_id: $('org-legal').value.trim(),
+        // #146 presentation rides the same org store — no parallel truth.
+        from_name: $('org-from').value.trim(),
+        reply_to: $('org-reply').value.trim(),
+        accent: $('org-accent').value.trim(),
+        address: street || city || postal || country
+          ? { street, city, postal_code: postal, country }
+          : null,
+      });
+      announce('Company information saved.');
+      await refreshOrgProfile();
+    } catch (err) {
+      showFormError($('org-error'), err);
+    }
+  });
 }
 
 export async function refreshInvoiceTemplate() {
@@ -424,70 +546,458 @@ export async function refreshInvoiceTemplate() {
       tbody.appendChild(
         el('tr', {}, [
           el('th', { attrs: { scope: 'row' }, text: v.name }),
-          el('td', { text: v.example }),
+          el('td', { attrs: { 'data-heading': 'Example' }, text: v.example }),
         ]),
       );
     }
-    templateVarsLoaded = true;
-    await refreshTemplatePreview();
-  } catch {
-    /* members cannot see the template; tab stays hidden for them */
-  }
-}
-
-export async function refreshTemplatePreview() {
-  const card = $('template-preview');
-  try {
-    const data = await api.get('/invoices');
-    const invoices = (data.invoices || []).filter((i) => i.status !== 'draft');
-    if (invoices.length === 0) {
-      card.hidden = true;
-      return;
+    // The live preview may only render what the form actually shows, so it
+    // waits for this fill. `initTemplatePreview` renders when the section is
+    // shown; a refresh while it is already visible renders immediately.
+    templatePreviewLoaded = true;
+    $('template-form').dataset.loaded = '1';
+    $('template-save').disabled = false;
+    if (templatePanelShown()) scheduleTemplatePreview(0);
+  } catch (err) {
+    templatePreviewLoaded = false;
+    $('template-form').dataset.loaded = '0';
+    $('template-save').disabled = true;
+    // Members cannot see the template (the tab stays hidden for them): silence.
+    // Any other failure is announced, so Save cannot overwrite the stored
+    // template with the blank form.
+    if (err.status !== 403) {
+      announce(`Invoice template could not be loaded: ${err.message}. Saving is disabled until it loads.`);
     }
-    const newest = invoices[invoices.length - 1];
-    const doc = await api.get(`/invoices/${newest.id}/document`);
-    $('template-preview-subject').textContent = doc.subject || '';
-    // The server-returned HTML is reduced to plain text through the DOM (no
-    // markup is ever inserted into this page: the textContent rule holds).
-    const parsed = new DOMParser().parseFromString(doc.html || '', 'text/html');
-    $('template-preview-body').textContent = parsed.body.textContent;
-    card.hidden = false;
-  } catch {
-    card.hidden = true;
   }
 }
 
-export async function saveInvoiceTemplate(evt) {
-  evt.preventDefault();
-  clearFormError($('template-error'));
+// ------------------------------------------- live template preview (#new) --
+//
+// The Invoice template section renders the *candidate* template -- exactly what
+// Save would send -- against the API's sample invoice, so the page shows the PDF
+// while it is being edited and no invoice has to exist. The card owns one frame:
+// a render mints one object URL and revokes the one it replaced, so a document
+// the panel stopped showing never stays alive behind a pinned URL (the rule the
+// receipt and invoice previews follow, #332/#349).
+
+/// How long typing must pause before a render is requested: long enough that a
+/// burst of keystrokes costs one PDF, short enough to feel live.
+export const TEMPLATE_PREVIEW_DEBOUNCE_MS = 500;
+
+/// The controls whose edits change the rendered document. Both `input` and
+/// `change` are observed: typing fires `input`, a pick or the number spinner
+/// fires `change`.
+const TEMPLATE_PREVIEW_FIELDS = [
+  'template-subject', 'template-body', 'template-footer',
+  'template-terms', 'template-terms-days',
+  'lb-description', 'lb-quantity', 'lb-unit-price', 'lb-subtotal',
+  'lb-discount', 'lb-tax', 'lb-total',
+];
+
+/// True while the first render waits for the document's `load` event. Framing a
+/// blob-URL PDF inserts an iframe, which makes the browser lay the frame out;
+/// doing that while the page is still loading is what made Firefox log "Layout
+/// was forced before the page was fully loaded" on the next view (#365).
+let templatePreviewAwaitingLoad = false;
+/// The blob URL currently framed -- the only URL this panel may revoke.
+let templatePreviewUrl = '';
+/// The ETag of the framed bytes, or null when nothing is framed. A release
+/// drops the frame, so it also drops the ETag: answering `304` for bytes the
+/// page no longer holds would leave the frame blank.
+let templatePreviewEtag = null;
+let templatePreviewTimer = null;
+let templatePreviewInFlight = false;
+let templatePreviewPending = false;
+let templatePreviewRun = Promise.resolve();
+/// Bumped by every release: a response that arrives after the section was
+/// hidden (or the page torn down) must neither frame a document nor mint a URL.
+let templatePreviewGeneration = 0;
+/// True once the form holds the stored template: before that, a render would
+/// preview an empty form rather than what was saved.
+let templatePreviewLoaded = false;
+let templatePreviewWired = false;
+
+const templatePanel = () => $('settings-panel-invoice-template');
+const templatePanelShown = () => {
+  const panel = templatePanel();
+  return !!panel && !panel.hidden;
+};
+
+function setTemplatePreviewStatus(text) {
+  const status = $('template-preview-status');
+  if (status) status.textContent = text;
+}
+
+/// A blank copy of the shell's frame (same id, class and title, no `src`).
+/// `releaseTemplatePreview` swaps the live frame for one of these: merely
+/// clearing `src` leaves the PDF viewer's document in place, and Firefox flushes
+/// layout on it when the page is navigated away — the "Layout was forced before
+/// the page was fully loaded" warning the next view's console drain catches
+/// (#365). The invoice detail panel tears its frame down the same way (it
+/// empties its host node). The clone is taken from the markup so the attributes
+/// stay declared in one place.
+let templatePreviewFrameTemplate = null;
+
+function blankTemplatePreviewFrame() {
+  const frame = $('template-preview-frame');
+  if (!frame) return null;
+  if (!templatePreviewFrameTemplate) {
+    templatePreviewFrameTemplate = frame.cloneNode(false);
+    templatePreviewFrameTemplate.removeAttribute('src');
+  }
+  return templatePreviewFrameTemplate.cloneNode(false);
+}
+
+/// The exact payload Save sends. Building it once means the preview can never
+/// drift from what would be persisted.
+export function templatePayload() {
   const kind = $('template-terms').value;
   let payment_terms = null;
   if (kind) {
     payment_terms = { kind };
     if (kind === 'custom') payment_terms.days = Number($('template-terms-days').value);
   }
-  try {
-    await api.put('/admin/invoice-template', {
-      subject: $('template-subject').value.trim(),
-      body: $('template-body').value,
-      footer: $('template-footer').value,
-      payment_terms,
-      // #147 display labels ride the same template store (no parallel truth).
-      labels: {
-        description: $('lb-description').value.trim(),
-        quantity: $('lb-quantity').value.trim(),
-        unit_price: $('lb-unit-price').value.trim(),
-        subtotal: $('lb-subtotal').value.trim(),
-        discount: $('lb-discount').value.trim(),
-        tax: $('lb-tax').value.trim(),
-        total: $('lb-total').value.trim(),
-      },
-    });
-    announce('Invoice template saved.');
-    await refreshInvoiceTemplate();
-  } catch (err) {
-    showFormError($('template-error'), err);
+  return {
+    subject: $('template-subject').value.trim(),
+    body: $('template-body').value,
+    footer: $('template-footer').value,
+    payment_terms,
+    // #147 display labels ride the same template store (no parallel truth).
+    labels: {
+      description: $('lb-description').value.trim(),
+      quantity: $('lb-quantity').value.trim(),
+      unit_price: $('lb-unit-price').value.trim(),
+      subtotal: $('lb-subtotal').value.trim(),
+      discount: $('lb-discount').value.trim(),
+      tax: $('lb-tax').value.trim(),
+      total: $('lb-total').value.trim(),
+    },
+  };
+}
+
+/// Drop the frame and its URL. Called when the section is hidden or the page is
+/// torn down; a render still in flight is invalidated rather than applied.
+export function releaseTemplatePreview() {
+  templatePreviewGeneration += 1;
+  // A render that was waiting for `load` must not frame after the section has
+  // been left; the one-shot listener checks this flag and does nothing.
+  templatePreviewAwaitingLoad = false;
+  if (templatePreviewTimer !== null) {
+    clearTimeout(templatePreviewTimer);
+    templatePreviewTimer = null;
   }
+  templatePreviewPending = false;
+  if (templatePreviewUrl) {
+    URL.revokeObjectURL(templatePreviewUrl);
+    templatePreviewUrl = '';
+  }
+  templatePreviewEtag = null;
+  const frame = $('template-preview-frame');
+  if (!frame) return;
+  frame.removeAttribute('src');
+  // Replace the element: removing the PDF document from the DOM is what stops
+  // the viewer, and it must happen before the browser tears the page down.
+  const blank = blankTemplatePreviewFrame();
+  if (blank && frame.parentNode) frame.parentNode.replaceChild(blank, frame);
+}
+
+/// Open the framed PDF in a new tab. The current blob URL is the document on
+/// screen, so the new tab shows exactly what the preview shows.
+export function openTemplatePreviewInNewTab() {
+  if (!templatePreviewUrl) {
+    setTemplatePreviewStatus('Preview not rendered yet — edit the template or press Refresh.');
+    return;
+  }
+  const opened = window.open(templatePreviewUrl, '_blank');
+  if (opened) opened.opener = null;
+  else setTemplatePreviewStatus('The browser blocked the new tab — allow pop-ups to open the preview.');
+}
+
+/// #365: the sidebar's tab strip hides the whole Settings section without
+/// changing any inner panel's `hidden`, so the observer in `initTemplatePreview`
+/// cannot see that switch. The router calls this when Settings comes back, so a
+/// template that was already loaded renders its preview again instead of
+/// showing the frame it released when the section was hidden.
+export function resumeTemplatePreview() {
+  if (templatePreviewLoaded) scheduleTemplatePreview(0);
+}
+
+/// Request a render after the user pauses typing. `delay: 0` is used when the
+/// section becomes visible or the stored template finishes loading.
+export function scheduleTemplatePreview(delay = TEMPLATE_PREVIEW_DEBOUNCE_MS) {
+  if (!templatePanelShown()) return;
+  // #365: never frame the preview before the document has finished loading.
+  // The boot-time route selection can show this section while `readyState` is
+  // still "loading"; setting the frame's src there forces layout mid-parse and
+  // Firefox warns about it (the message surfaced on the *next* view because the
+  // console drain for this one had already run). Wait for `load`, then keep the
+  // usual debounce.
+  if (document.readyState !== 'complete') {
+    if (!templatePreviewAwaitingLoad) {
+      templatePreviewAwaitingLoad = true;
+      window.addEventListener('load', () => {
+        if (!templatePreviewAwaitingLoad) return; // released before load
+        templatePreviewAwaitingLoad = false;
+        scheduleTemplatePreview(delay);
+      }, { once: true });
+    }
+    return;
+  }
+  if (templatePreviewTimer !== null) clearTimeout(templatePreviewTimer);
+  templatePreviewTimer = setTimeout(() => {
+    templatePreviewTimer = null;
+    renderTemplatePreview();
+  }, delay);
+}
+
+/// One render, coalesced: at most one request is in flight, and edits made
+/// while it runs schedule exactly one follow-up with the newest form state.
+/// `force` skips the conditional request (the toolbar's Refresh).
+export function renderTemplatePreview({ force = false } = {}) {
+  if (!templatePanelShown()) return Promise.resolve();
+  if (templatePreviewInFlight) {
+    templatePreviewPending = true;
+    return templatePreviewRun;
+  }
+  templatePreviewInFlight = true;
+  const generation = templatePreviewGeneration;
+  templatePreviewRun = (async () => {
+    try {
+      let runForce = force;
+      do {
+        templatePreviewPending = false;
+        await renderTemplatePreviewOnce(runForce);
+        runForce = false; // only the explicit Refresh re-fetches unconditionally
+      } while (templatePreviewPending && generation === templatePreviewGeneration);
+    } finally {
+      templatePreviewInFlight = false;
+    }
+  })();
+  return templatePreviewRun;
+}
+
+async function renderTemplatePreviewOnce(force) {
+  const frame = $('template-preview-frame');
+  if (!frame) return;
+  const generation = templatePreviewGeneration;
+  setTemplatePreviewStatus('Rendering…');
+  try {
+    const result = await api.requestBlob(
+      'POST',
+      '/admin/invoice-template/preview',
+      templatePayload(),
+      { ifNoneMatch: force ? null : templatePreviewEtag },
+    );
+    if (generation !== templatePreviewGeneration) return; // section closed mid-flight
+    if (result.notModified) {
+      // The bytes on screen are still the bytes this template renders: keep the
+      // frame, say so in the live region.
+      setTemplatePreviewStatus('Preview updated');
+      return;
+    }
+    const previous = templatePreviewUrl;
+    templatePreviewUrl = URL.createObjectURL(result.blob);
+    frame.setAttribute('src', templatePreviewUrl);
+    if (previous) URL.revokeObjectURL(previous);
+    templatePreviewEtag = result.etag || null;
+    clearFormError($('template-error'));
+    setTemplatePreviewStatus('Preview updated');
+  } catch (err) {
+    if (generation !== templatePreviewGeneration) return;
+    if (err.status === 422) {
+      // Field errors belong on the form, where the user is typing; the frame
+      // keeps the last good document and nothing typed is discarded.
+      showFormError($('template-error'), err);
+      setTemplatePreviewStatus('Preview not updated — fix the highlighted fields.');
+    } else {
+      // A transient failure (403, network, 5xx) is a sentence, not an alert
+      // storm, and never blanks the document already on screen.
+      setTemplatePreviewStatus(`Preview unavailable — ${err.message}`);
+    }
+  }
+}
+
+/// Wire the preview card once. Editing any template/label control schedules a
+/// debounced render; hiding the section releases the frame and the URL.
+export function initTemplatePreview() {
+  if (templatePreviewWired) return;
+  const panel = templatePanel();
+  if (!panel) return;
+  templatePreviewWired = true;
+  for (const id of TEMPLATE_PREVIEW_FIELDS) {
+    const control = $(id);
+    if (!control) continue;
+    control.addEventListener('input', () => scheduleTemplatePreview());
+    control.addEventListener('change', () => scheduleTemplatePreview());
+  }
+  $('template-preview-refresh')?.addEventListener('click', () => {
+    renderTemplatePreview({ force: true });
+  });
+  $('template-preview-open')?.addEventListener('click', openTemplatePreviewInNewTab);
+  if (typeof MutationObserver === 'function') {
+    // The section is hidden/shown by the tab strip (router.js), not by this
+    // module; observing the attribute keeps the release and the first render
+    // tied to what the user can actually see.
+    new MutationObserver(() => {
+      if (panel.hidden) releaseTemplatePreview();
+      else if (templatePreviewLoaded) scheduleTemplatePreview(0);
+    }).observe(panel, { attributes: true, attributeFilter: ['hidden'] });
+  }
+  window.addEventListener('pagehide', releaseTemplatePreview);
+}
+
+/// SET-07: clear every label override and re-render the preview. The preview
+/// listens to `input`/`change`; assigning `.value` fires neither, so the framed
+/// document used to stay stale until the next keystroke. One explicit render
+/// keeps the card honest ("Use built-in labels" is itself an edit).
+export function resetBuiltInLabels() {
+  for (const k of ['lb-description', 'lb-quantity', 'lb-unit-price', 'lb-subtotal', 'lb-discount', 'lb-tax', 'lb-total']) {
+    $(k).value = '';
+  }
+  announce('Built-in labels restored (save the template to apply).');
+  scheduleTemplatePreview(0);
+}
+
+export async function saveInvoiceTemplate(evt) {
+  evt.preventDefault();
+  if (!templatePreviewLoaded) {
+    announce('Invoice template is not loaded yet — reload the section before saving.');
+    return;
+  }
+  // SET-05: a double submit writes once.
+  return singleFlight($('template-save'), async () => {
+    clearFormError($('template-error'));
+    try {
+      await api.put('/admin/invoice-template', templatePayload());
+      announce('Invoice template saved.');
+      await refreshInvoiceTemplate();
+    } catch (err) {
+      showFormError($('template-error'), err);
+    }
+  });
+}
+
+// ------------------------------------------------------------- email (#35) --
+// SMTP transport settings live in the vault (the password is write-only) and
+// are resolved on every send, so saving here takes effect without a restart.
+
+export let emailSettings = null;
+
+export function renderEmailStatus(data) {
+  const status = $('email-status');
+  if (!status) return;
+  status.textContent = data.configured
+    ? `Email delivery: SMTP ${data.host}:${data.port}`
+    : 'Email delivery: NOT configured — messages are only logged.';
+}
+
+function setEmailControlsEnabled(enabled) {
+  for (const id of ['email-form', 'email-test-form']) {
+    const form = $(id);
+    if (!form) continue;
+    for (const control of form.querySelectorAll('input, select, textarea, button')) {
+      control.disabled = !enabled;
+    }
+  }
+}
+
+export async function refreshEmailSettings() {
+  let data;
+  try {
+    data = await api.get('/admin/email');
+  } catch (err) {
+    // Members cannot read admin settings; every other failure is announced.
+    if (err.status !== 403) announce(err.message);
+    return;
+  }
+  emailSettings = data;
+  renderEmailStatus(data);
+  $('email-host').value = data.host || '';
+  $('email-port').value = String(data.port || 25);
+  $('email-username').value = data.username || '';
+  $('email-from').value = data.from || 'noreply@localhost';
+  // The password never reaches the DOM: only whether one is stored.
+  $('email-password').value = '';
+  $('email-password').placeholder = data.has_password
+    ? 'stored — leave blank to keep'
+    : 'No password stored';
+  if (!$('email-test-to').value) $('email-test-to').value = orgReplyTo || '';
+  const notice = $('email-vault-notice');
+  if (data.vault_enabled) {
+    notice.hidden = true;
+    notice.textContent = '';
+    setEmailControlsEnabled(true);
+  } else {
+    notice.textContent =
+      'Email settings need the credential vault. Set TUCANO_SECRET_KEY to enable encrypted storage, then restart and reload this page.';
+    notice.hidden = false;
+    setEmailControlsEnabled(false);
+  }
+}
+
+export async function saveEmailSettings(evt) {
+  evt.preventDefault();
+  // SET-05: a double submit writes once.
+  return singleFlight($('email-save'), async () => {
+    clearFormError($('email-error'));
+    const current = emailSettings || {};
+    const body = {
+      host: $('email-host').value.trim(),
+      port: Number($('email-port').value),
+    };
+    // Only changed optional values travel: an untouched username/from keeps its
+    // stored value server-side, and a blank password never wipes the stored one.
+    const username = $('email-username').value.trim();
+    if (username !== (current.username || '')) body.username = username;
+    const from = $('email-from').value.trim();
+    if (from !== (current.from || '')) body.from = from;
+    const password = $('email-password').value;
+    if (password) body.password = password;
+    try {
+      emailSettings = await api.put('/admin/email', body);
+      announce('Email settings saved; the next send uses them immediately.');
+      await refreshEmailSettings();
+    } catch (err) {
+      if (err.status === 503 || err.payload?.error?.code === 'vault_disabled') {
+        const notice = $('email-vault-notice');
+        notice.textContent =
+          'The credential vault is disabled — set TUCANO_SECRET_KEY and restart to save email settings.';
+        notice.hidden = false;
+        setEmailControlsEnabled(false);
+      }
+      showFormError($('email-error'), err);
+    }
+  });
+}
+
+export async function sendTestEmail(evt) {
+  if (evt) evt.preventDefault();
+  clearFormError($('email-test-error'));
+  $('email-test-result').textContent = '';
+  // QA-01: a double click must not send two test messages.
+  return singleFlight($('email-test-send'), async () => {
+    const to = $('email-test-to').value.trim();
+    try {
+      const res = await api.post('/admin/email/test', { to });
+      const sentTo = res.sent_to || to;
+      $('email-test-result').textContent = `Test email sent to ${sentTo}.`;
+      announce(`Test email sent to ${sentTo}.`);
+      return res;
+    } catch (err) {
+      const code = err.payload?.error?.code;
+      if (code === 'email_not_configured') {
+        const explained = new Error(
+          'Email delivery is not configured — save an SMTP host above first.',
+        );
+        explained.status = err.status;
+        explained.payload = err.payload;
+        showFormError($('email-test-error'), explained);
+      } else {
+        showFormError($('email-test-error'), err);
+      }
+      announce(err.message);
+      return undefined;
+    }
+  });
 }
 
 export async function addSecret(evt) {

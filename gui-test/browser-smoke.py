@@ -124,9 +124,15 @@ VIEWS = [
     ("/settings/users", "tab-settings", "settings-panel-users",
      "(() => { const t = document.getElementById('user-table');"
      " return !!t && !!t.tHead; })()"),
-    ("/settings/invoices", "tab-settings", "settings-panel-invoice",
+    ("/settings/company", "tab-settings", "settings-panel-company",
+     "(() => { const n = document.getElementById('org-name');"
+     " return !!n; })()"),
+    ("/settings/invoice-template", "tab-settings", "settings-panel-invoice-template",
      "(() => { const t = document.getElementById('template-vars');"
      " return !!t; })()"),
+    ("/settings/email", "tab-settings", "settings-panel-email",
+     "(() => { const f = document.getElementById('email-form');"
+     " return !!f; })()"),
     ("/settings/catalog", "tab-settings", "settings-panel-catalog",
      "(() => { const t = document.getElementById('item-table');"
      " return !!t && !!t.tHead; })()"),
@@ -1314,20 +1320,17 @@ class Gate:
             "the bespoke .field/.hint/.form-error markup is gone and the official "
             "form vocabulary is in place (#232 phase 2b)",
             counts["field"] == 0 and counts["hint"] == 0 and counts["formError"] == 0
-            # 137/132/132: 125/120/120 after #349 removed the legacy direct draft
-            # generator's three field rows (customer / from / to), plus the admin
-            # startup wizard's twelve stacked field rows (web/index.html
-            # #admin-wizard: four administrator, seven organisation, one base
-            # currency).
-            and counts["groups"] == 137 and counts["labels"] == 132
-            # 35: the pre-wizard 32 (upstream's Get paid box (#357) plus the #349
-            # invoice detail panel's history state line and delivery-record note)
-            # and the wizard's password hint, base-currency hint and aria-live
-            # step announcer.
-            and counts["controls"] == 132 and counts["help"] == 35
-            # 23: the legacy direct draft generator's #invoice-error is gone; the
-            # admin startup wizard's #aw-error is new.
-            and counts["messages"] == counts["errorGroups"] == 23,
+            # 144/139/139: the Settings split added the Email section's six
+            # stacked field rows (SMTP host/port/username/password/from and the
+            # test-email recipient).
+            and counts["groups"] == 144 and counts["labels"] == 139
+            # 45: the previous 43 (which already carried the read-only audit
+            # card's blurb and polite status line, SET-11) plus the Email
+            # section's two help texts. Mirrors the shell census in
+            # gui-test/forms.test.mjs:69, so the two suites cannot drift.
+            and counts["controls"] == 139 and counts["help"] == 45
+            # 27: the previous 25 plus #email-error and #email-test-error.
+            and counts["messages"] == counts["errorGroups"] == 27,
             f"counts={counts}",
             info=f"{counts['groups']} groups, {counts['help']} help texts, "
                  f"{counts['messages']} validation messages",
@@ -1369,7 +1372,7 @@ class Gate:
             info=f"{skin['checked']} controls match {skin['reference']}",
         )
 
-        # Sample labels that are really laid out: the two settings panels that
+        # Sample labels that are really laid out: the Settings sections that
         # render form rows on load, plus the Day-entry dialog opened for real
         # (#settings-panel-security hides its form when the vault is disabled,
         # so it is deliberately not sampled here).
@@ -1388,7 +1391,9 @@ class Gate:
             "}"
             "return JSON.stringify(bad);"
         )
-        for path, ids in (("/settings/invoices", ["org-name", "org-accent", "template-subject"]),
+        for path, ids in (("/settings/company", ["org-name", "org-accent"]),
+                          ("/settings/invoice-template", ["template-subject"]),
+                          ("/settings/email", ["email-host", "email-from"]),
                           ("/settings/catalog", ["item-name", "item-desc"])):
             self.navigate(path)
             self.wait_script(

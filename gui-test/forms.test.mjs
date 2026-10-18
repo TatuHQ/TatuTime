@@ -22,17 +22,20 @@ const vendorCss = readFileSync(new URL('../web/vendor/ubuntu/components.css', im
 // the retired classes.
 const stylesRules = stylesCss.replace(/\/\*[\s\S]*?\*\//g, '');
 
-// The 23 form/panel error messages (`<p id="…-error" role="alert">`), now the
+// The 25 form/panel error messages (`<p id="…-error" role="alert">`), now the
 // official validation message inside an `is-error` group. `#invoice-error` left
 // with the legacy direct draft generator (#349); `#aw-error` arrived with the
-// admin startup wizard.
+// admin startup wizard; `#send-email-error` (invalid extras) and
+// `#send-email-notice` (SMTP not configured) arrived with the invoice
+// recipient dialog.
 const ERROR_IDS = [
     'auth-error', 'entry-error', 'iw-error', 'ed-error',
     'rec-error', 'ret-error', 'expense-error', 'expense-category-error',
     'submission-error', 'user-error', 'user-password-error', 'secret-error',
     'config-error', 'category-error', 'org-error', 'template-error',
     'item-error', 'wz-error', 'customer-error', 'project-error', 'task-error',
-    'week-row-error', 'aw-error',
+    'week-row-error', 'aw-error', 'send-email-error', 'send-email-notice',
+    'email-error', 'email-test-error',
 ];
 
 function shell() {
@@ -55,17 +58,15 @@ window.f = { api, state, refreshCatalog, iwLoadProjects, fillSelect, $, decorate
 test('the shell ships the official form vocabulary and no bespoke class (#232 phase 2b)', () => {
     const { dom, document } = shell();
     const groups = document.querySelectorAll('.p-form__group');
-    // 137/132/132 after the admin startup wizard added its twelve stacked field
-    // rows (four administrator, seven organisation, one base currency); the
-    // pre-wizard baseline was 125/120/120 (#349 removed the legacy direct draft
-    // generator's three field rows along with its form).
-    assert.equal(groups.length, 137, 'every former .field wrapper is a p-form__group');
-    assert.equal(document.querySelectorAll('.p-form__label').length, 132, 'one official label per field row');
-    assert.equal(document.querySelectorAll('.p-form__control').length, 132, 'one official control per field row');
-    // 35: the pre-wizard 32 (upstream's Get paid box, #357, plus the #349 invoice
-    // detail lines) and the wizard's password hint, base-currency hint and
-    // aria-live step announcer.
-    assert.equal(document.querySelectorAll('.p-form-help-text').length, 35, 'the hints became p-form-help-text');
+    // 144/139/139: the Settings split added the Email section's six stacked
+    // field rows (SMTP host/port/username/password/from and the test-email
+    // recipient) to the previous 138/133/133.
+    assert.equal(groups.length, 144, 'every former .field wrapper is a p-form__group');
+    assert.equal(document.querySelectorAll('.p-form__label').length, 139, 'one official label per field row');
+    assert.equal(document.querySelectorAll('.p-form__control').length, 139, 'one official control per field row');
+    // 45: the previous 43 plus the Security panel's read-only audit card blurb
+    // and its polite status line (SET-11; both use the official help-text skin).
+    assert.equal(document.querySelectorAll('.p-form-help-text').length, 45, 'the hints became p-form-help-text');
     assert.equal(document.querySelectorAll('.p-form-validation__message').length, ERROR_IDS.length,
         'every error message is the official validation message');
     assert.equal(document.querySelectorAll('.p-form-validation.is-error').length, ERROR_IDS.length,
@@ -103,10 +104,9 @@ test('every p-form__group pairs its label with its own control (#232 phase 2b)',
         assert.ok(label.textContent.trim().length > 0, `${control.id} keeps an accessible name`);
         paired += 1;
     }
-    // 132 after the admin startup wizard added twelve label/control pairs (the
-    // pre-wizard baseline was 120; #349 removed the legacy direct draft
-    // generator's three field rows along with its form).
-    assert.equal(paired, 132, 'all 132 label/control pairs were verified');
+    // 139 after the Settings split added the Email section's six label/control
+    // pairs to the previous 133.
+    assert.equal(paired, 139, 'all 139 label/control pairs were verified');
     assert.equal(composed.length, 5, 'five composed rows have no label of their own');
     assert.equal(composed.filter((tag) => tag === 'FIELDSET').length, 4, 'four grouped fieldsets');
     assert.equal(composed.filter((tag) => tag.startsWith('DIV')).length, 1, 'the Contacts row');
@@ -208,8 +208,10 @@ test('every error stays a role=alert validation message while hidden (#232 phase
         seen.push(id);
     }
     assert.deepEqual(seen, ERROR_IDS, 'the error set is unchanged (ids are the JS contract)');
-    assert.equal(document.querySelectorAll('[role="alert"]').length, ERROR_IDS.length,
-        'no extra role=alert node appeared');
+    // #email-vault-notice is a plain role="alert" explanation (not a form
+    // validation message), so it is the one extra alert node beyond ERROR_IDS.
+    assert.equal(document.querySelectorAll('[role="alert"]').length, ERROR_IDS.length + 1,
+        'the email vault notice is the only extra role=alert node');
     dom.window.close();
 });
 
@@ -266,13 +268,12 @@ test('decoration is attribute-only and every rendered button states what it need
     const vocab = {};
     for (const b of icons) vocab[b.dataset.icon] = (vocab[b.dataset.icon] || 0) + 1;
     assert.deepEqual(vocab, { plus: 12, copy: 2, play: 2, stop: 1 }, 'the shell icon vocabulary is pinned');
-    // 34 after #349 removed the legacy direct draft generator (whose `Generate
-    // draft` carried data-positive) and the admin startup wizard added the
-    // dashboard prompt's `Finish setup` action. The count is pinned so a new
-    // positive action updates this guard on purpose: `+ Manual Invoice` is the
-    // secondary action and deliberately carries no data-positive, and the
-    // wizard dialog's `Close` is a plain secondary button, so neither adds to it.
-    assert.equal(document.querySelectorAll('button[data-positive]').length, 34,
+    // 36: the previous 35 plus the Email section's `Save email settings` submit.
+    // The count is pinned so a new positive action updates this guard on
+    // purpose: `+ Manual Invoice` is the secondary action and deliberately
+    // carries no data-positive, and each dialog's `Cancel`/`Close` is a plain
+    // secondary button, so neither adds to it.
+    assert.equal(document.querySelectorAll('button[data-positive]').length, 36,
         'every positive shell button states data-positive');
 
     // The deleted label-mutation leaves no trace: no rendered label keeps a "+".

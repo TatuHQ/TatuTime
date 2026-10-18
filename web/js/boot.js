@@ -8,11 +8,11 @@ import { $, addDays, announce, clearFormError, decorateUbuntuButton, isoDate, mo
 import { ADD_CATEGORY_VALUE, addCategory, addExpenseCategory, fillCategorySelect, refreshCategories, refreshExpenses, refreshSubmissions, resetCategoryForm, resetExpenseForm, saveExpense, submitWeek } from './expenses.js';
 import { refreshExpenseConversion, resetExpenseConversion, showConverted } from './fx.js';
 import { cancelCustomerEdit, cancelProjectEdit, cancelTaskEdit, contactRow, fillParentCustomers, fillTaskParents, prefillProjectParent, refreshCustomerPickers, refreshCustomerTable, refreshCustomersView, refreshProjectTable, refreshProjectsView, refreshTaskTable, refreshTasksView, runReport, saveCustomer, saveProject, saveTask } from './hierarchy.js';
-import { closeDeliveryRecord, closeInvoicePreview, dash, dashApplyColumns, downloadInvoicePdf, ed, edCancel, edLineRow, edOpen, edRecalc, edSave, invoicePreview, markInvoiceSent, refreshInvoiceSummary, refreshInvoices, sendInvoiceEmail } from './invoices.js';
+import { closeDeliveryRecord, closeInvoicePreview, closeSendEmailDialog, confirmSendEmail, dash, dashApplyColumns, downloadInvoicePdf, ed, edCancel, edLineRow, edOpen, edRecalc, edSave, invoicePreview, markInvoiceSent, openEmailSettings, refreshInvoiceSummary, refreshInvoices, sendInvoiceEmail } from './invoices.js';
 import { markNotificationsRead, refreshNotifications } from './notifications.js';
 import { initReceiptPreview } from './receipt.js';
 import { initRouter, initSegTabs, initSettingsTabs, initTabs, refreshTimesheetView, segActiveId, showTimesheet } from './route.js';
-import { addSecret, closeUserForm, closeUserPassword, newUserForm, paintAccent, refreshSettings, renderUsers, saveConfig, saveInvoiceTemplate, saveOrgProfile, saveUser, saveUserPassword } from './settings.js';
+import { addSecret, closeUserForm, closeUserPassword, initTemplatePreview, newUserForm, paintAccent, refreshAuditLog, refreshSettings, renderUsers, resetBuiltInLabels, saveConfig, saveEmailSettings, saveInvoiceTemplate, saveOrgProfile, saveUser, saveUserPassword, sendTestEmail } from './settings.js';
 import { customerName, fillProjectSelect, fillTaskSelect, loadCustomers, state } from './state.js';
 import { discardTimer, refreshTimer, startTimer, stopTimer } from './timer.js';
 import { commitCell, copyLastWeek, copyPreviousDay, entrySaving, navigateDay, navigateWeek, openWeekRowForm, refreshDay, refreshWeek, resetEntryForm, resetWeekRowForm, saveEntry, saveWeekRow, selectDay, showEntryForm, showWeekRowForm, weekState } from './timesheet.js';
@@ -259,11 +259,33 @@ export function wireWeekGrid() {
     if (invoicePreview) downloadInvoicePdf(invoicePreview.inv.id, invoicePreview.inv.number);
   });
   // #349: the delivery actions act on the invoice the detail panel is showing.
-  // Send email re-renders the panel (emailInvoice does), so the SENT watermark
-  // and the new history entry appear without a reload, and it reports the
-  // transport honestly (a disabled transport is announced as NOT sent).
+  // Send email opens the recipient dialog first (#139 follow-up), so the admin
+  // chooses who receives it; the dialog's Send re-renders the panel, so the
+  // SENT watermark and the new history entry appear without a reload, and it
+  // reports the transport honestly (a disabled transport is announced as NOT
+  // sent).
   $('ip-send').addEventListener('click', () => {
-    if (invoicePreview) sendInvoiceEmail(invoicePreview.inv);
+    if (invoicePreview) sendInvoiceEmail(invoicePreview.inv, $('ip-send'));
+  });
+  // The recipient dialog's own controls: Send posts the ticked list (or omits
+  // the body for the untouched default), Cancel/Escape dismiss it, and the
+  // SMTP notice's button moves to the Settings route.
+  $('send-email-send').addEventListener('click', confirmSendEmail);
+  $('send-email-close').addEventListener('click', closeSendEmailDialog);
+  $('send-email-settings').addEventListener('click', openEmailSettings);
+  // Correcting a typed address clears its inline error, like every other form.
+  $('send-email-extra').addEventListener('input', () => clearFormError($('send-email-error')));
+  $('send-email-dialog').addEventListener('cancel', (event) => {
+    // native Escape on a real browser: dismiss it, never leave it half-open.
+    event.preventDefault();
+    closeSendEmailDialog();
+  });
+  $('send-email-dialog').addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      // jsdom never fires 'cancel'; emulate it here (browsers do both).
+      event.preventDefault();
+      closeSendEmailDialog();
+    }
   });
   // Mark as sent is idempotent server-side and 409s on a draft; both answers are
   // reported plainly, never as a silent success and never as a duplicate entry.
@@ -341,10 +363,6 @@ export function wireWeekGrid() {
     $('item-currency').value = 'EUR';
     $('item-save').textContent = 'Save item';
     $('item-cancel').hidden = true;
-  });
-  $('lb-reset').addEventListener('click', () => {
-    for (const k of ['lb-description', 'lb-quantity', 'lb-unit-price', 'lb-subtotal', 'lb-discount', 'lb-tax', 'lb-total']) $(k).value = '';
-    announce('Built-in labels restored (save the template to apply).');
   });
   $('ret-form').addEventListener('submit', createRetainer);
   $('ret-detail-close').addEventListener('click', () => {
@@ -533,6 +551,8 @@ export function wireSetupPanels(today) {
   }
   $('secret-form').addEventListener('submit', addSecret);
   $('config-form').addEventListener('submit', saveConfig);
+  $('email-form').addEventListener('submit', saveEmailSettings);
+  $('email-test-form').addEventListener('submit', sendTestEmail);
   $('timer-open').addEventListener('click', () => {
     const expanded = $('timerbar').hidden;
     $('timerbar').hidden = !expanded;
@@ -560,7 +580,17 @@ export function wireSetupPanels(today) {
     // switching customer would silently reinterpret an amount already entered in
     // another currency, and blank the conversion readout under the user.
   });
+  wireSettingsControls();
+}
 
+// Settings controls that must answer a plain click (#SET-01 test email,
+// #SET-07 label reset, #SET-11 audit refresh). Exported so the jsdom suite can
+// attach the real listeners instead of calling the handlers directly — calling
+// `sendTestEmail()` itself is exactly why the dead button went unnoticed.
+export function wireSettingsControls() {
+  $('email-test-send').addEventListener('click', sendTestEmail);
+  $('lb-reset').addEventListener('click', resetBuiltInLabels);
+  $('audit-refresh').addEventListener('click', refreshAuditLog);
 }
 
 // Wires the app listeners and loads the first data. Called once authenticated.
@@ -577,6 +607,9 @@ export async function startApp() {
   initTabs();
   document.querySelectorAll('button').forEach(decorateUbuntuButton);
   initSegTabs(); // Day | Week inside the Timesheets section (#107)
+  // Before the tab strips can show the section: the preview card releases its
+  // frame when hidden and renders the stored template once it is visible.
+  initTemplatePreview();
   initSettingsTabs();
   initRouter(); // deep-link each view to a stable path (page routing)
   initWizard(); // first-run setup wizard (#111)
@@ -589,7 +622,8 @@ export async function startApp() {
   await loadCustomers();
   await refreshCustomerPickers(); // fills all four pickers, no fetches
   refreshSchedules().catch?.(() => {});
-  refreshCatalog().catch?.(() => {});
+  // SET-02: the catalog is an admin-tier read; a member boot must not fetch it.
+  if (state.isAdmin) refreshCatalog().catch?.(() => {});
   refreshRetainers().catch?.(() => {});
   // First-run trigger (#111): zero customers after a successful login opens
   // the wizard as a modal. Once a customer exists it never auto-opens — the

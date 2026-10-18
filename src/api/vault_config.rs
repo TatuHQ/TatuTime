@@ -39,8 +39,12 @@ pub async fn update_config(
     // there.
     let mut cfg =
         crate::appconfig::AppConfig::load(app.store.root()).map_err(ApiError::corrupt_document)?;
-    cfg.update(patch)
-        .map_err(|e| ApiError::validation(vec![FieldError::new("config", e)]))?;
+    cfg.update(patch).map_err(|e| {
+        ApiError::validation(vec![FieldError::new(
+            e.key.unwrap_or_else(|| "config".to_string()),
+            e.message,
+        )])
+    })?;
     // Reflect the change for request-time readers.
     app.reload_config(Arc::new(cfg));
     Ok(Json(serde_json::json!({ "ok": true })).into_response())
@@ -54,7 +58,7 @@ fn valid_secret_key(key: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
 }
 
-fn require_vault(app: &AppState) -> Result<&crate::vault::SecretVault, ApiError> {
+pub(crate) fn require_vault(app: &AppState) -> Result<&crate::vault::SecretVault, ApiError> {
     app.vault.as_deref().ok_or_else(|| {
         ApiError::new(
             StatusCode::SERVICE_UNAVAILABLE,
