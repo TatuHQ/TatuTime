@@ -1,8 +1,10 @@
 use crate::support::*;
 
-use axum::http::StatusCode;
+use axum::http::{StatusCode, header};
+use http_body_util::BodyExt;
 use serde_json::Value;
 use serde_json::json;
+use tower::ServiceExt;
 
 // ------------------------------------------------------------------ #116 ---
 
@@ -412,6 +414,300 @@ async fn customer_invoice_fields_round_trip_and_validate() {
         "skipped when absent: {}",
         u["payment_terms"]
     );
+}
+
+// ------------------------------------------- unsaved template PDF preview --
+//
+// `POST /api/admin/invoice-template/preview` renders a CANDIDATE template
+// against the shared sample (two time lines, one expense line, VAT, a due date
+// and full payment details) with no invoice in the store, so the Settings
+// editor can show what it is about to save.
+
+/// POST a JSON body and keep the raw response: the preview answers with PDF
+/// bytes, which `json_req` would turn into a string.
+async fn preview_req(
+    app: &Client,
+    body: Value,
+    cookie: Option<&str>,
+) -> (StatusCode, axum::http::HeaderMap, Vec<u8>) {
+    let mut b = axum::http::Request::builder()
+        .method("POST")
+        .uri("/api/admin/invoice-template/preview")
+        .header("x-csrf-protection", "1")
+        .header(header::CONTENT_TYPE, "application/json");
+    if let Some(c) = cookie {
+        b = b.header(header::COOKIE, c);
+    }
+    let res = app
+        .router
+        .clone()
+        .oneshot(b.body(axum::body::Body::from(body.to_string())).unwrap())
+        .await
+        .expect("oneshot");
+    let status = res.status();
+    let headers = res.headers().clone();
+    let bytes = res
+        .into_body()
+        .collect()
+        .await
+        .expect("body")
+        .to_bytes()
+        .to_vec();
+    (status, headers, bytes)
+}
+
+/// Independent parse of the preview bytes, as the PDF suite already does.
+/// The layout draws each word separately, so extracted text is normalised to
+/// single spaces before assertions about prose.
+fn pdf_text(bytes: &[u8]) -> String {
+    let doc = lopdf::Document::load_mem(bytes).expect("preview re-parses as a PDF");
+    let pages: Vec<u32> = doc.get_pages().keys().copied().collect();
+    doc.extract_text(&pages)
+        .expect("text extraction")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn pdf_pages(bytes: &[u8]) -> usize {
+    lopdf::Document::load_mem(bytes)
+        .expect("preview re-parses as a PDF")
+        .get_pages()
+        .len()
+}
+
+#[tokio::test]
+async fn template_preview_renders_a_pdf_with_no_invoice_in_the_store() {
+    let (app, _d) = app().await;
+    // The whole point: a preview exists before any invoice does.
+    let (s, list) = json_req(&app, "GET", "/api/invoices", None).await;
+    assert_eq!(s, StatusCode::OK, "{list}");
+    assert!(
+        list["invoices"].as_array().unwrap().is_empty(),
+        "the no-invoice case is explicit: {list}"
+    );
+
+    let body = json!({
+        "subject": "Invoice %invoice_number%",
+        "body": "# Preview\n\nHello %customer_name%",
+        "footer": "Thanks",
+        "payment_terms": null
+    });
+    let (status, headers, bytes) = preview_req(&app, body.clone(), Some(&app.cookie)).await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "{}",
+        String::from_utf8_lossy(&bytes)
+    );
+    assert_eq!(headers[header::CONTENT_TYPE], "application/pdf");
+    assert_eq!(
+        headers[header::CONTENT_DISPOSITION],
+        "inline; filename=\"invoice-template-preview.pdf\""
+    );
+    let etag = headers[header::ETAG].to_str().unwrap();
+    assert!(
+        etag.starts_with('"') && etag.ends_with('"') && etag.len() > 10,
+        "quoted ETag: {etag}"
+    );
+    assert!(bytes.starts_with(b"%PDF-"), "PDF magic");
+    assert!(
+        bytes.len() > 2_000,
+        "sensible preview size: {} bytes",
+        bytes.len()
+    );
+    assert_eq!(pdf_pages(&bytes), 1);
+    assert!(
+        pdf_text(&bytes).contains("INV-0000"),
+        "the sample invoice number is on the document"
+    );
+
+    // Same candidate template + org => the same ETag, so the GUI can skip a
+    // redundant render.
+    let (_, again, _) = preview_req(&app, body, Some(&app.cookie)).await;
+    assert_eq!(again[header::ETAG], headers[header::ETAG]);
+}
+
+#[tokio::test]
+async fn template_preview_reflects_the_candidate_bytes_and_text() {
+    let (app, _d) = app().await;
+    let candidate = |body: &str, footer: &str, quantity: &str| {
+        json!({
+            "subject": "Preview %invoice_number%",
+            "body": body,
+            "footer": footer,
+            "payment_terms": null,
+            "labels": {"quantity": quantity}
+        })
+    };
+    let (s1, _, first) = preview_req(
+        &app,
+        candidate(
+            "Body ALPHA preview\n\nPay to %payment_details%\n\nLines: %line_count%",
+            "Footer ALPHA",
+            "Hours",
+        ),
+        Some(&app.cookie),
+    )
+    .await;
+    assert_eq!(s1, StatusCode::OK, "{}", String::from_utf8_lossy(&first));
+    let (s2, _, second) = preview_req(
+        &app,
+        candidate("Body BETA preview", "Footer BETA", "Units"),
+        Some(&app.cookie),
+    )
+    .await;
+    assert_eq!(s2, StatusCode::OK, "{}", String::from_utf8_lossy(&second));
+
+    assert_ne!(first, second, "the candidate template changes the bytes");
+    let alpha = pdf_text(&first);
+    let beta = pdf_text(&second);
+    assert!(alpha.contains("Body ALPHA preview"), "{alpha}");
+    assert!(alpha.contains("Footer ALPHA"), "{alpha}");
+    assert!(alpha.contains("Hours"), "quantity label override: {alpha}");
+    assert!(
+        alpha.contains("Sample Bank") && alpha.contains("IBAN"),
+        "%payment_details% resolved from the sample customer: {alpha}"
+    );
+    assert!(
+        alpha.contains("Lines: 3"),
+        "%line_count% sees two time lines + one expense: {alpha}"
+    );
+    assert!(beta.contains("Body BETA preview"), "{beta}");
+    assert!(beta.contains("Units"), "quantity label override: {beta}");
+    assert!(
+        !beta.contains("Body ALPHA preview"),
+        "the render is the candidate, not the other one: {beta}"
+    );
+}
+
+#[tokio::test]
+async fn template_preview_rejects_invalid_candidates_and_persists_nothing() {
+    let (app, d) = app().await;
+    let saved = json!({
+        "subject": "SAVED %invoice_number%",
+        "body": "saved body",
+        "footer": "",
+        "payment_terms": null
+    });
+    let (s, _) = json_req(&app, "PUT", "/api/admin/invoice-template", Some(saved)).await;
+    assert_eq!(s, StatusCode::OK);
+    let (_, before) = json_req(&app, "GET", "/api/admin/invoice-template", None).await;
+
+    // Unknown %token%: the same 422 shape as PUT.
+    let (s1, _, b1) = preview_req(
+        &app,
+        json!({"subject":"ok","body":"pay %bogus% now","footer":""}),
+        Some(&app.cookie),
+    )
+    .await;
+    assert_eq!(s1, StatusCode::UNPROCESSABLE_ENTITY);
+    let e1: Value = serde_json::from_slice(&b1).unwrap();
+    assert_eq!(e1["error"]["code"], "validation_failed", "{e1}");
+    assert_eq!(e1["error"]["fields"][0]["field"], "body", "{e1}");
+    assert!(
+        e1["error"]["fields"][0]["message"]
+            .as_str()
+            .unwrap()
+            .contains("%bogus%"),
+        "{e1}"
+    );
+
+    // Oversized subject: 121 > SUBJECT_MAX.
+    let (s2, _, b2) = preview_req(
+        &app,
+        json!({"subject": "x".repeat(121), "body": "", "footer": ""}),
+        Some(&app.cookie),
+    )
+    .await;
+    assert_eq!(s2, StatusCode::UNPROCESSABLE_ENTITY);
+    let e2: Value = serde_json::from_slice(&b2).unwrap();
+    assert_eq!(e2["error"]["fields"][0]["field"], "subject", "{e2}");
+
+    // Control characters in the header-bound subject.
+    let (s3, _, _) = preview_req(
+        &app,
+        json!({"subject": "x\r\nBcc: evil@example.test", "body": "", "footer": ""}),
+        Some(&app.cookie),
+    )
+    .await;
+    assert_eq!(s3, StatusCode::UNPROCESSABLE_ENTITY);
+
+    // Unknown top-level field: deny_unknown_fields, like PUT.
+    let (s4, _, _) = preview_req(
+        &app,
+        json!({"subject": "ok", "body": "", "footer": "", "evil": true}),
+        Some(&app.cookie),
+    )
+    .await;
+    assert_eq!(s4, StatusCode::UNPROCESSABLE_ENTITY);
+
+    // Nothing persisted: the saved template is byte-for-byte unchanged.
+    let (_, after) = json_req(&app, "GET", "/api/admin/invoice-template", None).await;
+    assert_eq!(after, before, "a rejected preview saves nothing");
+    let disk = std::fs::read(d.path().join("data").join("invoice_template.json")).unwrap();
+    let disk: Value = serde_json::from_slice(&disk).unwrap();
+    assert_eq!(
+        disk, after["template"],
+        "the stored singleton is untouched on disk"
+    );
+    assert_eq!(disk["subject"], "SAVED %invoice_number%");
+}
+
+#[tokio::test]
+async fn template_preview_creates_no_invoice_archive_or_timeline() {
+    let (app, d) = app().await;
+    let (s, _, bytes) = preview_req(
+        &app,
+        json!({"subject":"Preview %invoice_number%","body":"body","footer":""}),
+        Some(&app.cookie),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{}", String::from_utf8_lossy(&bytes));
+
+    let data = d.path().join("data");
+    let invoices = data.join("invoices");
+    let invoice_files: Vec<_> = std::fs::read_dir(&invoices)
+        .map(|rd| rd.filter_map(|e| e.ok()).collect())
+        .unwrap_or_default();
+    assert!(
+        invoice_files.is_empty(),
+        "no invoice JSON, PDF archive, number ledger or timeline sidecar: {invoice_files:?}"
+    );
+    assert!(
+        !data.join("invoice_template.json").exists(),
+        "the candidate is never saved"
+    );
+    assert!(
+        !data.join("archive").exists(),
+        "no cold archive tree is created"
+    );
+    let (_, list) = json_req(&app, "GET", "/api/invoices", None).await;
+    assert!(
+        list["invoices"].as_array().unwrap().is_empty(),
+        "still no invoice: {list}"
+    );
+}
+
+#[tokio::test]
+async fn template_preview_is_admin_only() {
+    let (app, _d) = app().await;
+    let body = json!({"subject":"Preview","body":"body","footer":""});
+    // Anonymous: 401 before the handler runs.
+    let (anonymous, _, _) = preview_req(&app, body.clone(), None).await;
+    assert_eq!(anonymous, StatusCode::UNAUTHORIZED);
+
+    // Member: authenticated but not admin => 403.
+    json_req(
+        &app,
+        "POST",
+        "/api/users",
+        Some(json!({"name":"Eve","email":"eve-preview@test.local","password":"evepass123","role":"member"})),
+    )
+    .await;
+    let cookie = login_cookie(&app.router, "eve-preview@test.local", "evepass123").await;
+    let (member, _, _) = preview_req(&app, body, Some(&cookie)).await;
+    assert_eq!(member, StatusCode::FORBIDDEN);
 }
 
 // ------------------------------------------------------------------ #S1 ---

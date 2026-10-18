@@ -9,6 +9,7 @@ mod email;
 mod lifecycle;
 mod manual;
 mod org;
+mod preview;
 mod sync;
 
 use crate::api::{
@@ -33,6 +34,7 @@ pub use manual::{
     update_invoice_draft,
 };
 pub use org::{org_get, org_put};
+pub use preview::invoice_template_preview;
 pub use sync::{SyncInput, sync_invoice, sync_status};
 
 pub(crate) use document::{content_for, invoice_pdf_for_delivery, load_template, resolve_due_date};

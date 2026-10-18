@@ -8055,6 +8055,65 @@
         }
       }
     },
+    "/api/admin/invoice-template/preview": {
+      "post": {
+        "operationId": "previewInvoiceTemplate",
+        "x-admin-only": true,
+        "tags": [
+          "invoices"
+        ],
+        "summary": "Preview an unsaved invoice template as a PDF (#116); admin only",
+        "description": "Renders the CANDIDATE template from the request body against the shared sample invoice, the saved org profile (branding/accent/sender) and the sample customer's payment details, returning the PDF inline. Validates exactly like PUT (unknown %variables%, oversized fields, control characters in the subject, malformed payment terms) with the same 422 shape and persists nothing: no template, invoice, PDF archive or timeline entry. A command on existing configuration, so 200. The ETag is the SHA-256 of the rendered bytes, a fingerprint of template + org the GUI can compare to skip a redundant render.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InvoiceTemplate"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
+        "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "200": {
+            "description": "Rendered preview PDF of the candidate template.",
+            "headers": {
+              "ETag": {
+                "description": "SHA-256 of the rendered bytes, quoted."
+              },
+              "Content-Disposition": {
+                "description": "inline; filename=\"invoice-template-preview.pdf\""
+              }
+            },
+            "content": {
+              "application/pdf": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          }
+        }
+      }
+    },
     "/api/invoices/{id}/document": {
       "parameters": [
         {

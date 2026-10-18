@@ -211,73 +211,22 @@ pub async fn invoice_template_get(State(app): State<AppState>) -> ApiResult {
 }
 
 /// `PUT /admin/invoice-template` — validate fail-loud (unknown `%tokens%`,
-/// oversized fields, malformed payment terms), render the pieces against a
-/// synthetic invoice as an extra gauntlet, then persist atomically. A
+/// oversized fields, malformed payment terms), render the pieces against the
+/// shared sample invoice as an extra gauntlet, then persist atomically. A
 /// rejection persists nothing.
+///
+/// Validation and the sample live in [`super::preview`], so the preview
+/// endpoint and this save path agree by construction on what a valid template
+/// is and what it renders against.
 pub async fn invoice_template_put(
     State(app): State<AppState>,
     ValidJson(template): ValidJson<crate::domain::InvoiceTemplate>,
 ) -> ApiResult {
-    let mut errors = Vec::new();
-    crate::template::validate_field(
-        "subject",
-        &template.subject,
-        crate::template::SUBJECT_MAX,
-        &mut errors,
-    );
-    // #S1: the subject is header-bound, so a CR/LF/NUL in it could fold a
-    // header into the invoice email. Refused on write, never stripped. The body
-    // and footer are document text (multi-line by design) and are untouched.
-    if crate::email::has_control_characters(&template.subject) {
-        errors.push(FieldError::new(
-            "subject",
-            "must be a single line without control characters",
-        ));
-    }
-    crate::template::validate_field(
-        "body",
-        &template.body,
-        crate::template::BODY_MAX,
-        &mut errors,
-    );
-    crate::template::validate_field(
-        "footer",
-        &template.footer,
-        crate::template::FOOTER_MAX,
-        &mut errors,
-    );
-    crate::domain::validate_payment_terms(template.payment_terms.as_ref(), &mut errors);
-    template.labels.validate(&mut errors);
+    let errors = super::preview::validate_template(&template);
     if errors.is_empty() {
-        // Render against a synthetic sample: anything that fails here would
+        // Build the sample document: anything that cannot render here would
         // fail on a real invoice later. Never persists a broken template.
-        let sample = Invoice {
-            id: Uuid::nil(),
-            number: "INV-0000".into(),
-            customer_id: Uuid::nil(),
-            currency: crate::domain::Currency("EUR".into()),
-            period_from: chrono::NaiveDate::MIN + chrono::Duration::days(1),
-            period_to: chrono::NaiveDate::MIN + chrono::Duration::days(2),
-            lines: vec![],
-            total_minor: 0,
-            status: crate::domain::InvoiceStatus::Draft,
-            created_at: chrono::DateTime::from_timestamp(0, 0).unwrap(),
-            issued_at: None,
-            due_date: None,
-            paid_at: None,
-            payment_reference: String::new(),
-            pdf: None,
-            payments: vec![],
-            write_off_reason: String::new(),
-            written_off_at: None,
-            tax_hundredths: 0,
-            discount_hundredths: 0,
-        };
-        let sample_customer = synthetic_customer();
-        let vars = crate::template::vars_for(&sample, &sample_customer, None);
-        // interpolate/parse cannot fail by design; the call is the assertion
-        // that no panic escapes for this template.
-        let _ = crate::template::doc_content(&template, &sample_customer, &vars);
+        let _ = super::preview::sample_document(&template, &crate::pdf::Org::named("Sample Org"));
     }
     if !errors.is_empty() {
         return Err(ApiError::validation(errors));
@@ -285,25 +234,6 @@ pub async fn invoice_template_put(
     app.store
         .write_json_rel("invoice_template.json", &template)?;
     Ok(Json(template).into_response())
-}
-
-fn synthetic_customer() -> crate::domain::Customer {
-    crate::domain::Customer {
-        id: Uuid::nil(),
-        name: "Sample Customer".into(),
-        currency: crate::domain::Currency("EUR".into()),
-        default_rate_minor: 0,
-        active: true,
-        email: String::new(),
-        payment_terms: None,
-        invoice_notes: String::new(),
-        invoice_subject: String::new(),
-        address: None,
-        contacts: vec![],
-        tax_hundredths: 0,
-        discount_hundredths: 0,
-        payment_details: None,
-    }
 }
 
 /// `GET /invoices/{id}/document` — the live `{subject, html}` preview:
