@@ -593,6 +593,11 @@ const TEMPLATE_PREVIEW_FIELDS = [
   'lb-discount', 'lb-tax', 'lb-total',
 ];
 
+/// True while the first render waits for the document's `load` event. Framing a
+/// blob-URL PDF inserts an iframe, which makes the browser lay the frame out;
+/// doing that while the page is still loading is what made Firefox log "Layout
+/// was forced before the page was fully loaded" on the next view (#365).
+let templatePreviewAwaitingLoad = false;
 /// The blob URL currently framed -- the only URL this panel may revoke.
 let templatePreviewUrl = '';
 /// The ETag of the framed bytes, or null when nothing is framed. A release
@@ -653,6 +658,9 @@ export function templatePayload() {
 /// torn down; a render still in flight is invalidated rather than applied.
 export function releaseTemplatePreview() {
   templatePreviewGeneration += 1;
+  // A render that was waiting for `load` must not frame after the section has
+  // been left; the one-shot listener checks this flag and does nothing.
+  templatePreviewAwaitingLoad = false;
   if (templatePreviewTimer !== null) {
     clearTimeout(templatePreviewTimer);
     templatePreviewTimer = null;
@@ -679,10 +687,36 @@ export function openTemplatePreviewInNewTab() {
   else setTemplatePreviewStatus('The browser blocked the new tab — allow pop-ups to open the preview.');
 }
 
+/// #365: the sidebar's tab strip hides the whole Settings section without
+/// changing any inner panel's `hidden`, so the observer in `initTemplatePreview`
+/// cannot see that switch. The router calls this when Settings comes back, so a
+/// template that was already loaded renders its preview again instead of
+/// showing the frame it released when the section was hidden.
+export function resumeTemplatePreview() {
+  if (templatePreviewLoaded) scheduleTemplatePreview(0);
+}
+
 /// Request a render after the user pauses typing. `delay: 0` is used when the
 /// section becomes visible or the stored template finishes loading.
 export function scheduleTemplatePreview(delay = TEMPLATE_PREVIEW_DEBOUNCE_MS) {
   if (!templatePanelShown()) return;
+  // #365: never frame the preview before the document has finished loading.
+  // The boot-time route selection can show this section while `readyState` is
+  // still "loading"; setting the frame's src there forces layout mid-parse and
+  // Firefox warns about it (the message surfaced on the *next* view because the
+  // console drain for this one had already run). Wait for `load`, then keep the
+  // usual debounce.
+  if (document.readyState !== 'complete') {
+    if (!templatePreviewAwaitingLoad) {
+      templatePreviewAwaitingLoad = true;
+      window.addEventListener('load', () => {
+        if (!templatePreviewAwaitingLoad) return; // released before load
+        templatePreviewAwaitingLoad = false;
+        scheduleTemplatePreview(delay);
+      }, { once: true });
+    }
+    return;
+  }
   if (templatePreviewTimer !== null) clearTimeout(templatePreviewTimer);
   templatePreviewTimer = setTimeout(() => {
     templatePreviewTimer = null;

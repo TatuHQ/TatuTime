@@ -341,6 +341,41 @@ async function openPreview(t, window, document) {
     window.revokedUrls.length = 0;
 }
 
+// #365: the smoke run caught Firefox's "Layout was forced before the page was
+// fully loaded" on the view *after* the Invoice template section: the framed
+// blob PDF was still live across the route change because the observer that
+// releases it only runs as a microtask. Leaving the section must drop the frame
+// and revoke its URL in the same tick as the tab switch.
+test('leaving the Invoice template section releases the framed preview synchronously (#365)', async () => {
+    const { dom, document, window, t } = setup();
+    await openPreview(t, window, document);
+    const frame = document.getElementById('template-preview-frame');
+    const framed = frame.getAttribute('src');
+    assert.ok(framed, 'the preview is framed before the switch');
+
+    document.getElementById('settings-tab-users').click();
+
+    assert.equal(frame.getAttribute('src'), null, 'the frame is released in the same tick');
+    assert.ok(window.revokedUrls.includes(framed), 'the blob URL is revoked in the same tick');
+    dom.window.close();
+});
+
+test('returning to the Invoice template section re-renders the released preview (#365)', async () => {
+    const { dom, document, window, t } = setup();
+    await openPreview(t, window, document);
+    const frame = document.getElementById('template-preview-frame');
+    const framed = frame.getAttribute('src');
+
+    document.getElementById('settings-tab-users').click();
+    assert.equal(frame.getAttribute('src'), null, 'the frame is released in the same tick');
+
+    document.getElementById('settings-tab-invoice-template').click();
+    await waitFor(() => frame.getAttribute('src') !== null && frame.getAttribute('src') !== framed, {
+        message: 'the re-shown section to render a fresh preview',
+    });
+    dom.window.close();
+});
+
 test('typing in the body and labels debounces one preview POST with the form payload', async () => {
     const { dom, document, window, t } = setup();
     await openPreview(t, window, document);

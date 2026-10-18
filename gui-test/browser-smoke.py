@@ -1324,9 +1324,11 @@ class Gate:
             # stacked field rows (SMTP host/port/username/password/from and the
             # test-email recipient).
             and counts["groups"] == 144 and counts["labels"] == 139
-            # 43: the previous 41 plus the read-only audit card's blurb and its
-            # polite status line (SET-11).
-            and counts["controls"] == 139 and counts["help"] == 43
+            # 45: the previous 43 (which already carried the read-only audit
+            # card's blurb and polite status line, SET-11) plus the Email
+            # section's two help texts. Mirrors the shell census in
+            # gui-test/forms.test.mjs:69, so the two suites cannot drift.
+            and counts["controls"] == 139 and counts["help"] == 45
             # 27: the previous 25 plus #email-error and #email-test-error.
             and counts["messages"] == counts["errorGroups"] == 27,
             f"counts={counts}",
