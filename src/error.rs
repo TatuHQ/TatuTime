@@ -66,6 +66,17 @@ impl ApiError {
         )
     }
 
+    /// No SMTP host is resolvable, so a test message cannot be sent (`POST
+    /// /api/admin/email/test`). Distinct from `vault_disabled`: the vault may
+    /// be fine and simply hold no `smtp.host` yet.
+    pub fn email_not_configured() -> Self {
+        Self::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "email_not_configured",
+            "email is not configured; set an SMTP host first",
+        )
+    }
+
     /// The exchange-rate reference table could not be loaded (offline, an
     /// unreadable file, a malformed document). Fail-closed like the vault and
     /// the SSO allow-list: the rate is never guessed, so the caller can type
@@ -183,6 +194,8 @@ pub const CODE_VOCABULARY: &[&str] = &[
     "calendar_not_configured",
     "calendar_fetch",
     "email_failed",
+    // An admin test send with no SMTP host configured.
+    "email_not_configured",
     "oauth_exchange",
     // QA-05: a write refused because its collection is at MAX_DOCS.
     "collection_full",

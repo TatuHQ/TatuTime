@@ -243,7 +243,7 @@ impl Job for EmailReminderJob {
                 payment.as_deref(),
             );
             let msg = EmailMessage {
-                to: billing_email,
+                to: vec![billing_email],
                 subject: format!("Overdue invoice {}", inv.number),
                 text,
                 html: None,

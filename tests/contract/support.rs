@@ -177,6 +177,31 @@ pub(crate) async fn app() -> (Client, tempfile::TempDir) {
     (Client::new(store, None).await, dir)
 }
 
+/// Wrap a **pre-built** `AppState` in a router plus an authenticated admin
+/// session. Vault-enabled tests build their own state through
+/// `AppState::boot(...)` and hand it here; `recorder` is the transport they
+/// injected with `with_email` (or a detached one when they injected none).
+pub(crate) async fn client_for_state(
+    state: AppState,
+    recorder: Arc<tucano_time::email::RecordingEmailSender>,
+) -> Client {
+    let router = tucano_time::build_router(state);
+    let _ = raw(
+        &router,
+        "POST",
+        "/api/auth/bootstrap",
+        Some(json!({"name":"Admin","email":ADMIN_EMAIL,"password":ADMIN_PW})),
+        None,
+    )
+    .await;
+    let cookie = login_cookie(&router, ADMIN_EMAIL, ADMIN_PW).await;
+    Client {
+        router,
+        cookie,
+        email: recorder,
+    }
+}
+
 pub(crate) async fn app_locked(dir_path: &std::path::Path, locks: Arc<dyn EntryLock>) -> Client {
     let store = Store::open(dir_path.join("data")).expect("store");
     Client::new(store, Some(locks)).await

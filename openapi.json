@@ -117,6 +117,7 @@
                   "calendar_not_configured",
                   "calendar_fetch",
                   "email_failed",
+                  "email_not_configured",
                   "oauth_exchange",
                   "collection_full",
                   "draft_out_of_date",
@@ -5932,7 +5933,30 @@
         "tags": [
           "invoices"
         ],
-        "summary": "Email an issued invoice to the customer's billing address (#35)",
+        "summary": "Email an issued invoice to the customer's billing address, or to an explicit recipient list (#35)",
+        "description": "Admin only. The body is optional: without it (or with an empty `recipients` list) the invoice goes to the customer's single billing address. An explicit list is used in the given order, de-duplicated case-insensitively, validated before anything is sent (one '@', no control characters, at most 320 characters each, at most 10 recipients), and recorded on the invoice timeline. Drafts are refused with 409; a missing billing email with 422.",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "recipients": {
+                    "type": "array",
+                    "maxItems": 10,
+                    "items": {
+                      "type": "string",
+                      "maxLength": 320
+                    },
+                    "description": "Explicit recipients. Absent or empty keeps the customer's billing address."
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
         "parameters": [
           {
             "$ref": "#/components/parameters/CsrfProtection"
@@ -5950,11 +5974,21 @@
                   "type": "object",
                   "required": [
                     "sent_to",
+                    "recipients",
                     "transport"
                   ],
                   "properties": {
                     "sent_to": {
-                      "type": "string"
+                      "type": "string",
+                      "description": "Comma-joined recipients (kept for compatibility)."
+                    },
+                    "recipients": {
+                      "type": "array",
+                      "minItems": 1,
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "The resolved recipients, in delivery order."
                     },
                     "transport": {
                       "type": "string",
@@ -7122,6 +7156,283 @@
           },
           "413": {
             "$ref": "#/components/responses/PayloadTooLarge"
+          }
+        }
+      }
+    },
+    "/api/admin/email": {
+      "get": {
+        "operationId": "adminEmailSettings",
+        "x-admin-only": true,
+        "tags": [
+          "admin"
+        ],
+        "summary": "Effective SMTP delivery settings; the password is never returned, only has_password",
+        "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "200": {
+            "description": "Resolved settings. `configured` is true only when an SMTP host resolves; `transport` mirrors it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "vault_enabled",
+                    "configured",
+                    "transport",
+                    "host",
+                    "port",
+                    "username",
+                    "from",
+                    "has_password"
+                  ],
+                  "properties": {
+                    "vault_enabled": {
+                      "type": "boolean"
+                    },
+                    "configured": {
+                      "type": "boolean"
+                    },
+                    "transport": {
+                      "type": "string",
+                      "enum": [
+                        "smtp",
+                        "disabled"
+                      ]
+                    },
+                    "host": {
+                      "type": "string"
+                    },
+                    "port": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 65535
+                    },
+                    "username": {
+                      "type": "string"
+                    },
+                    "from": {
+                      "type": "string"
+                    },
+                    "has_password": {
+                      "type": "boolean",
+                      "description": "Whether a password is stored. The value itself is never serialised."
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      },
+      "put": {
+        "operationId": "updateAdminEmailSettings",
+        "x-admin-only": true,
+        "tags": [
+          "admin"
+        ],
+        "summary": "Validate and store SMTP settings as vault keys; the next send picks them up without a restart",
+        "description": "Writes smtp.host, smtp.port and, when supplied, smtp.username/smtp.password/smtp.from as one encrypted vault write. Omitted optional fields keep their stored value, so editing settings without a password never wipes it. With the vault disabled this answers 503 vault_disabled and mutates nothing; an invalid field answers 422 and mutates nothing.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "host",
+                  "port"
+                ],
+                "properties": {
+                  "host": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "SMTP hostname or address; no spaces or control characters."
+                  },
+                  "port": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 65535
+                  },
+                  "username": {
+                    "type": "string",
+                    "description": "Optional; omitted keeps the stored username."
+                  },
+                  "password": {
+                    "type": "string",
+                    "description": "Write-only. Omitted keeps the stored password; never returned."
+                  },
+                  "from": {
+                    "type": "string",
+                    "format": "email",
+                    "description": "Optional envelope sender; omitted keeps the stored value."
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
+        "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "200": {
+            "description": "Stored; returns the same shape as GET.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "vault_enabled",
+                    "configured",
+                    "transport",
+                    "host",
+                    "port",
+                    "username",
+                    "from",
+                    "has_password"
+                  ],
+                  "properties": {
+                    "vault_enabled": {
+                      "type": "boolean"
+                    },
+                    "configured": {
+                      "type": "boolean"
+                    },
+                    "transport": {
+                      "type": "string",
+                      "enum": [
+                        "smtp",
+                        "disabled"
+                      ]
+                    },
+                    "host": {
+                      "type": "string"
+                    },
+                    "port": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 65535
+                    },
+                    "username": {
+                      "type": "string"
+                    },
+                    "from": {
+                      "type": "string"
+                    },
+                    "has_password": {
+                      "type": "boolean",
+                      "description": "Whether a password is stored. The value itself is never serialised."
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "503": {
+            "$ref": "#/components/responses/VaultUnavailable"
+          }
+        }
+      }
+    },
+    "/api/admin/email/test": {
+      "post": {
+        "operationId": "sendAdminEmailTest",
+        "x-admin-only": true,
+        "tags": [
+          "admin"
+        ],
+        "summary": "Send one short test message through the currently resolved transport",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "to"
+                ],
+                "properties": {
+                  "to": {
+                    "type": "string",
+                    "description": "Recipient address, validated like invoice recipients."
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "200": {
+            "description": "Test message handed to the transport.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "sent_to",
+                    "transport"
+                  ],
+                  "properties": {
+                    "sent_to": {
+                      "type": "string"
+                    },
+                    "transport": {
+                      "type": "string",
+                      "enum": [
+                        "smtp",
+                        "disabled"
+                      ]
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "422": {
+            "description": "`to` is invalid (validation_failed) or no SMTP host is resolvable (email_not_configured). Nothing is sent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "$ref": "#/components/responses/BadGateway"
           }
         }
       }

@@ -243,6 +243,17 @@ pub fn build_router(state: AppState) -> Router {
             "/admin/config",
             get(api::admin_config).put(api::update_config),
         )
+        // SMTP delivery settings (#35 follow-up): admin-read config, a test
+        // send, and a vault-backed write that the dynamic transport picks up
+        // without a restart.
+        .route(
+            "/admin/email",
+            get(api::admin_email_get).put(api::admin_email_put),
+        )
+        .route(
+            "/admin/email/test",
+            axum::routing::post(api::admin_email_test),
+        )
         .route("/admin/secrets", get(api::list_secrets))
         .route(
             "/admin/secrets/{key}",

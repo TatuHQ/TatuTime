@@ -54,7 +54,7 @@ fn valid_secret_key(key: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
 }
 
-fn require_vault(app: &AppState) -> Result<&crate::vault::SecretVault, ApiError> {
+pub(crate) fn require_vault(app: &AppState) -> Result<&crate::vault::SecretVault, ApiError> {
     app.vault.as_deref().ok_or_else(|| {
         ApiError::new(
             StatusCode::SERVICE_UNAVAILABLE,

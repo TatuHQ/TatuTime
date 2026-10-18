@@ -27,29 +27,48 @@ pub fn money_for_email(minor: u64, currency: &str) -> String {
     format!("{grouped}.{:02} {currency}", frac)
 }
 
-/// Emails an issued invoice to the customer's billing address (#35). Admin
-/// only (invoices are admin surface). Non-blocking: the transport runs on a
-/// blocking thread so a slow relay never stalls the request. The archived
-/// PDF rides along as an `application/pdf` attachment (#113).
+/// Optional body for `POST /invoices/{id}/email`: an explicit recipient list.
+/// Absent (or an empty list) keeps the historical single billing-address send.
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct InvoiceEmailInput {
+    #[serde(default)]
+    pub recipients: Vec<String>,
+}
+
+/// Emails an issued invoice to the customer's billing address (#35), or to an
+/// explicit recipient list when the request carries one. Admin only (invoices
+/// are admin surface). Non-blocking: the transport runs on a blocking thread so
+/// a slow relay never stalls the request. The archived PDF rides along as an
+/// `application/pdf` attachment (#113).
+///
+/// All recipients are resolved and validated **before** anything is sent, so a
+/// rejected list never produces a partial delivery.
 pub async fn send_invoice_email(
     State(app): State<AppState>,
     actor: AuthUser,
     Path(id): Path<Uuid>,
+    OptionalValidJson(input): OptionalValidJson<InvoiceEmailInput>,
 ) -> ApiResult {
     let invoice = get_invoice_or_404(&app, id)?;
     if invoice.status == crate::domain::InvoiceStatus::Draft {
         return Err(ApiError::conflict("issue the invoice before emailing it"));
     }
     let customer = get_customer(&app.store, invoice.customer_id)?;
-    // #139: the flagged billing contact receives it; the legacy top-level
-    // email still works for customers without contacts.
-    let billing_email = customer.billing_email().to_string();
-    if billing_email.is_empty() {
-        return Err(ApiError::validation(vec![FieldError::new(
-            "email",
-            "customer has no billing email on file",
-        )]));
-    }
+    // #139: no explicit list -> the flagged billing contact; the legacy
+    // top-level email still works for customers without contacts. An explicit
+    // list is used verbatim (order preserved, case-insensitive de-duplication)
+    // and does not require the customer to have a billing address.
+    let requested = input.map(|body| body.recipients).unwrap_or_default();
+    let recipients = crate::email::resolve_recipients(&requested, Some(customer.billing_email()))
+        .map_err(|errors| {
+        ApiError::validation(
+            errors
+                .into_iter()
+                .map(|(field, message)| FieldError::new(field, message))
+                .collect(),
+        )
+    })?;
     let (filename, pdf) = invoice_pdf_for_delivery(&app, &invoice)?;
     let amount = money_for_email(invoice.total_minor, &invoice.currency.0);
     let due = invoice.due_date.map(|d| d.to_string());
@@ -80,7 +99,7 @@ pub async fn send_invoice_email(
     let html = crate::template::email_html(&content);
     let profile = load_org(&app)?;
     let msg = crate::email::EmailMessage {
-        to: billing_email,
+        to: recipients.clone(),
         subject,
         text,
         html,
@@ -88,9 +107,12 @@ pub async fn send_invoice_email(
         from_name: sender_field(&profile.from_name),
         reply_to: sender_field(&profile.reply_to),
     };
-    let sent_to = msg.to.clone();
+    // Compatibility: `sent_to` stays a string (comma-joined when several);
+    // `recipients` carries the same list as an array.
+    let sent_to = recipients.join(", ");
     let timeline_subject = msg.subject.clone();
     let sender = app.email.clone();
+    let transport = app.email.transport();
     // A slow relay must not stall the async request thread (#35).
     blocking("email send", move || {
         sender.send(&msg).map_err(|e| {
@@ -125,15 +147,16 @@ pub async fn send_invoice_email(
     };
     let mut meta = serde_json::Map::new();
     meta.insert("to".into(), serde_json::Value::from(sent_to.clone()));
+    meta.insert(
+        "recipients".into(),
+        serde_json::Value::from(recipients.clone()),
+    );
     meta.insert("subject".into(), serde_json::Value::from(timeline_subject));
     meta.insert("from_name".into(), serde_json::Value::from(from_name));
     if !from_email.is_empty() {
         meta.insert("from_email".into(), serde_json::Value::from(from_email));
     }
-    meta.insert(
-        "transport".into(),
-        serde_json::Value::from(app.email.transport()),
-    );
+    meta.insert("transport".into(), serde_json::Value::from(transport));
     record_timeline(
         &app,
         invoice.id,
@@ -146,10 +169,12 @@ pub async fn send_invoice_email(
     // Honest delivery state (#130): with no SMTP configured the transport
     // succeeds silently — clients must not read a 200 as "the customer got
     // an email". `transport` is "smtp" only when a relay accepted the send.
-    Ok(
-        Json(serde_json::json!({ "sent_to": sent_to, "transport": app.email.transport() }))
-            .into_response(),
-    )
+    Ok(Json(serde_json::json!({
+        "sent_to": sent_to,
+        "recipients": recipients,
+        "transport": transport,
+    }))
+    .into_response())
 }
 
 /// Body for `POST /invoices/{id}/email-copy` (#112).
@@ -213,7 +238,7 @@ pub async fn send_invoice_email_copy(
     );
     let profile = load_org(&app)?;
     let msg = crate::email::EmailMessage {
-        to: to.clone(),
+        to: vec![to.clone()],
         subject,
         text,
         html: None,

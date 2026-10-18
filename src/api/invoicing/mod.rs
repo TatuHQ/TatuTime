@@ -20,7 +20,9 @@ pub use catalog::{create_item_type, delete_item_type, list_item_types, update_it
 pub use document::{
     invoice_document, invoice_pdf, invoice_pdf_preview, invoice_template_get, invoice_template_put,
 };
-pub use email::{EmailCopyInput, money_for_email, send_invoice_email, send_invoice_email_copy};
+pub use email::{
+    EmailCopyInput, InvoiceEmailInput, money_for_email, send_invoice_email, send_invoice_email_copy,
+};
 pub use lifecycle::{
     PayInput, WriteOffInput, create_invoice, delete_invoice, get_invoice_handler,
     invoice_export_csv, invoice_report_handler, invoice_summary, invoice_timeline, issue_invoice,
