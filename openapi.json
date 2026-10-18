@@ -1209,7 +1209,7 @@
           "include_expenses": {
             "type": "boolean",
             "default": true,
-            "description": "Roll billable expenses in (#25)."
+            "description": "Roll billable expenses into the invoice."
           },
           "project_codes": {
             "type": "array",

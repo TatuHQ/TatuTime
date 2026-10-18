@@ -7,11 +7,17 @@ import { catalogItems } from './billing.js';
 import { startApp, switchTab } from './boot.js';
 import { $, announce, askConfirm, askPrompt, clearFormError, el, formatMoney, panelRefresh, rowAction, showFormError, singleFlight, statusChip } from './dom.js';
 import { convertMinor, currencyCode, fetchRateQuote } from './fx.js';
+import { applyRoute, normaliseRoute } from './route.js';
 import { createSeqGuard } from './seq.js';
 import { customerName, state } from './state.js';
 import { MONTH_NAMES, invalidateLockCache } from './timesheet.js';
 
 const invoiceSeq = createSeqGuard();
+
+// The Settings view that owns SMTP configuration. Kept in ONE place so the
+// next subtask can point it at the new /settings/email view without touching
+// the recipient dialog.
+export const EMAIL_SETTINGS_ROUTE = '/settings/security';
 
 // -------------------------------------------------------------- invoices ---
 
@@ -54,8 +60,8 @@ async function refreshInvoicesBody() {
 
         action('link', 'PDF', () => downloadInvoicePdf(inv.id, inv.number),
           'Download the archived invoice PDF'),
-        action('link', 'Email', () => emailInvoice(inv.id),
-          'Send this invoice (PDF attached) to the customer billing email'),
+        action('link', 'Email', (evt) => emailInvoice(inv, evt.currentTarget),
+          'Choose recipients and send this invoice (PDF attached)'),
         action('link', 'Email copy', () => emailInvoiceCopy(inv.id),
           'Send a PDF copy to another address, e.g. the accountant'),
         action('danger', 'Write off', () => writeOffInvoice(inv, balance),
@@ -65,8 +71,8 @@ async function refreshInvoicesBody() {
       actions.push(
         action('link', 'PDF', () => downloadInvoicePdf(inv.id, inv.number),
           'Download the archived invoice PDF'),
-        action('link', 'Email', () => emailInvoice(inv.id),
-          'Send this invoice (PDF attached) to the customer billing email'),
+        action('link', 'Email', (evt) => emailInvoice(inv, evt.currentTarget),
+          'Choose recipients and send this invoice (PDF attached)'),
         action('link', 'Email copy', () => emailInvoiceCopy(inv.id),
           'Send a PDF copy to another address, e.g. the accountant'),
       );
@@ -275,18 +281,253 @@ export function emailOutcome(res, base) {
     : `NOT sent (SMTP not configured) — would go to ${res.sent_to}. Set smtp.host in Settings.`;
 }
 
-export async function emailInvoice(id) {
+// ------------------------------------------- invoice email recipients ---
+//
+// #139 follow-up: choosing who receives an invoice. Both delivery entry points
+// -- the detail panel's `Send email` and the register's Email row action --
+// open this dialog instead of posting immediately, so the admin sees which
+// addresses are on file, can tick more than one and can add one that is not.
+//
+// The SMTP probe is advisory: when the transport is not configured the server
+// would only log the message, so the dialog says so, disables Send and links
+// to Settings rather than pretending a delivery happened.
+const sendEmail = {
+  invoice: null,
+  opener: null,
+  defaultRecipient: '',
+  configured: true,
+};
+
+/// Addresses known for a customer, billing first. The flagged billing contact
+/// wins; without one the legacy `email` is the default. Duplicates collapse
+/// case-insensitively onto the first spelling.
+export function emailCandidates(customer) {
+  const seen = new Set();
+  const list = [];
+  const add = (email, label, checked) => {
+    const address = String(email || '').trim();
+    const key = address.toLowerCase();
+    if (!address || seen.has(key)) return;
+    seen.add(key);
+    list.push({ email: address, label, checked });
+  };
+  const contactLabel = (contact, billing) => {
+    const name = String(contact.name || '').trim() || contact.email;
+    const role = String(contact.role || '').trim();
+    return `${name}${role ? ` — ${role}` : ''}${billing ? ' (billing)' : ''}`;
+  };
+  const contacts = (customer?.contacts || []).filter((c) => c && String(c.email || '').trim());
+  // At most one contact is flagged billing (domain::validate_customer_input).
+  const billing = contacts.find((c) => c.billing) || null;
+  if (billing) add(billing.email, contactLabel(billing, true), true);
+  else if (String(customer?.email || '').trim()) add(customer.email, 'Billing email', true);
+  for (const contact of contacts) {
+    if (contact !== billing) add(contact.email, contactLabel(contact, contact.billing), false);
+  }
+  // The legacy top-level address stays selectable even when a contact is
+  // flagged, unless it is the same address the contact already contributed.
+  if (String(customer?.email || '').trim()) add(customer.email, 'Customer email', false);
+  return list;
+}
+
+/// Split the comma-separated "Add another email" field. Every entry must be
+/// non-empty, carry exactly one `@` and no whitespace or control characters;
+/// the first invalid entry names itself in the returned error.
+export function parseExtraEmails(raw) {
+  const parts = String(raw || '').split(',').map((s) => s.trim()).filter(Boolean);
+  const emails = [];
+  for (const address of parts) {
+    const [local, domain, ...rest] = address.split('@');
+    const invalid = !local || !domain || rest.length > 0
+      || /\s/.test(address)
+      || /[\u0000-\u001f\u007f]/.test(address)
+      || address.length > 320;
+    if (invalid) return { emails: [], error: `“${address}” is not a valid email address.` };
+    emails.push(address);
+  }
+  return { emails, error: '' };
+}
+
+// Case-insensitive de-duplication: first spelling and first order win, the
+// same rule the server applies to the list it receives.
+function uniqueRecipients(list) {
+  const seen = new Set();
+  const out = [];
+  for (const address of list) {
+    const key = String(address).trim().toLowerCase();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(String(address).trim());
+  }
+  return out;
+}
+
+function renderSendEmailCandidates(candidates) {
+  const host = $('send-email-recipients');
+  host.textContent = '';
+  candidates.forEach((candidate, index) => {
+    const id = `send-email-r-${index}`;
+    const box = el('input', {
+      attrs: { type: 'checkbox', id, value: candidate.email },
+      on: { change: () => clearFormError($('send-email-error')) },
+    });
+    box.checked = candidate.checked;
+    // The label owns the box (`for`/`id`), and the address itself is the
+    // supporting text so the admin never ticks an address they cannot see.
+    host.appendChild(el('label', { attrs: { for: id } }, [
+      box,
+      el('span', {}, [
+        el('span', { text: candidate.label }),
+        el('span', { cls: 'send-email-contact-meta', text: ` — ${candidate.email}` }),
+      ]),
+    ]));
+  });
+  $('send-email-empty').hidden = candidates.length !== 0;
+}
+
+async function resolveCustomer(customerId) {
+  const known = state.customers.find((c) => c.id === customerId);
+  if (known) return known;
   try {
-    const res = await api.post(`/invoices/${id}/email`);
-    announce(emailOutcome(res, `Invoice emailed to ${res.sent_to} (PDF attached).`));
+    return await api.get(`/customers/${customerId}`);
+  } catch {
+    return null; // the dialog still opens: the extra-address field works
+  }
+}
+
+/// Open the recipient dialog for `inv`. `opener` is the control focus returns
+/// to on close; the register passes its row button, the panel passes `#ip-send`.
+export async function openSendEmailDialog(inv, opener = null) {
+  const dlg = $('send-email-dialog');
+  if (!dlg || !inv) return;
+  sendEmail.invoice = inv;
+  sendEmail.opener = opener || (document.activeElement !== document.body ? document.activeElement : null);
+  clearFormError($('send-email-error'));
+  $('send-email-result').hidden = true;
+  $('send-email-result').textContent = '';
+  $('send-email-notice').hidden = true;
+  $('send-email-extra').value = '';
+  $('send-email-settings').dataset.route = EMAIL_SETTINGS_ROUTE;
+  $('send-email-invoice').textContent = `${inv.number || 'Draft'} — ${customerName(inv.customer_id)}`;
+  const customer = await resolveCustomer(inv.customer_id);
+  const candidates = emailCandidates(customer);
+  sendEmail.defaultRecipient = (candidates.find((c) => c.checked) || {}).email || '';
+  renderSendEmailCandidates(candidates);
+  if (!(dlg.open === true || dlg.hasAttribute('open'))) {
+    if (typeof dlg.showModal === 'function') dlg.showModal();
+    else dlg.setAttribute('open', '');
+  }
+  // Focus moves into the dialog: the first checkbox, or Send when the customer
+  // has no address on file.
+  const first = $('send-email-recipients').querySelector('input[type="checkbox"]');
+  (first || $('send-email-send') || $('send-email-close')).focus();
+  refreshSendEmailNotice();
+}
+
+async function refreshSendEmailNotice() {
+  let settings = null;
+  try {
+    settings = await api.get('/admin/email');
   } catch (err) {
-    announce(`Email failed: ${err.message}`);
+    // Advice only for the fail-closed vault answer (503); any other failure
+    // leaves Send usable, where the send itself reports the problem.
+    if (err?.status !== 503) return;
+    settings = { configured: false };
+  }
+  if (!sendEmail.invoice) return; // closed while the probe was in flight
+  const configured = !settings || settings.configured !== false;
+  sendEmail.configured = configured;
+  $('send-email-notice').hidden = configured;
+  $('send-email-send').disabled = !configured;
+  if (configured) $('send-email-send').removeAttribute('aria-disabled');
+  else $('send-email-send').setAttribute('aria-disabled', 'true');
+}
+
+export function closeSendEmailDialog() {
+  const dlg = $('send-email-dialog');
+  if (!dlg) return;
+  const opener = sendEmail.opener;
+  sendEmail.invoice = null;
+  sendEmail.opener = null;
+  $('send-email-send').disabled = false;
+  $('send-email-send').removeAttribute('aria-disabled');
+  $('send-email-error').hidden = true;
+  $('send-email-error').textContent = '';
+  if (dlg.open === true || dlg.hasAttribute('open')) {
+    if (typeof dlg.close === 'function') dlg.close();
+    else dlg.removeAttribute('open');
+  }
+  if (opener && opener.isConnected && typeof opener.focus === 'function') opener.focus();
+}
+
+/// `Open Settings` from the SMTP notice. One route constant decides the target.
+export function openEmailSettings() {
+  closeSendEmailDialog();
+  const route = normaliseRoute(EMAIL_SETTINGS_ROUTE) || EMAIL_SETTINGS_ROUTE;
+  if (!applyRoute(route)) announce('Settings are not available for this account.');
+}
+
+/// Send to the checked addresses plus the typed extras. A single, untouched
+/// default selection omits the body entirely, which keeps the historical
+/// server-side billing-address default (and is byte-for-byte the old request).
+export async function confirmSendEmail() {
+  const inv = sendEmail.invoice;
+  if (!inv) return;
+  clearFormError($('send-email-error'));
+  const extra = parseExtraEmails($('send-email-extra').value);
+  if (extra.error) {
+    showFormError($('send-email-error'), new Error(extra.error));
     return;
   }
-  // #349: a delivery changes both surfaces of the detail panel -- the timeline
-  // gains its `email_sent` entry and the preview's watermark advances to SENT --
-  // so re-render instead of leaving the panel on the pre-send state.
-  await refreshInvoices();
+  const checked = [...$('send-email-recipients').querySelectorAll('input[type="checkbox"]:checked')]
+    .map((box) => box.value);
+  const recipients = uniqueRecipients([...checked, ...extra.emails]);
+  if (!recipients.length) {
+    showFormError($('send-email-error'), new Error('Choose at least one recipient.'));
+    return;
+  }
+  if (recipients.length > 10) {
+    showFormError($('send-email-error'), new Error('At most 10 recipients can be emailed at once.'));
+    return;
+  }
+  const onlyDefault = recipients.length === 1
+    && extra.emails.length === 0
+    && sendEmail.defaultRecipient !== ''
+    && recipients[0].toLowerCase() === sendEmail.defaultRecipient.toLowerCase();
+  let res;
+  try {
+    res = await singleFlight($('send-email-send'), () => api.post(
+      `/invoices/${inv.id}/email`,
+      onlyDefault ? undefined : { recipients },
+    ));
+  } catch (err) {
+    // 409 draft, 422 validation/no billing email and 502 transport failures all
+    // render inline in the dialog's existing error shape; nothing is closed.
+    showFormError($('send-email-error'), err);
+    return;
+  }
+  if (!res) return; // a second click while the first request was in flight
+  const delivered = Array.isArray(res.recipients) && res.recipients.length
+    ? res.recipients.join(', ')
+    : res.sent_to;
+  const message = emailOutcome(res, `Invoice emailed to ${delivered} (PDF attached).`);
+  $('send-email-result').textContent = message;
+  $('send-email-result').hidden = false;
+  announce(message);
+  if (res.transport !== 'smtp') {
+    // The race the transport contract allows: the probe said configured but
+    // this send was a logged no-op. Keep the settings link in reach.
+    $('send-email-notice').hidden = false;
+    $('send-email-send').disabled = true;
+  }
+  // #349: the delivery updates the panel's history and watermark; re-render
+  // behind the dialog instead of closing it under the admin.
+  refreshInvoices().catch(() => {});
+}
+
+/// The register's Email row action: choose recipients before sending.
+export function emailInvoice(inv, opener = null) {
+  return openSendEmailDialog(inv, opener);
 }
 
 // Sends a PDF copy of the invoice to any address — e.g. the accountant
@@ -1001,20 +1242,11 @@ export async function focusInvoice(id) {
   }
 }
 
-/// `Send email` in the detail panel: POST /invoices/{id}/email. The transport is
-/// reported honestly (#130) -- a disabled transport is a logged no-op, so the
-/// announcement says NOT sent rather than claiming the customer got it -- and
-/// the panel is re-rendered so the new `email_sent` entry and the SENT
-/// watermark appear without a reload.
-export async function sendInvoiceEmail(inv) {
-  try {
-    const res = await api.post(`/invoices/${inv.id}/email`);
-    announce(emailOutcome(res, `Invoice emailed to ${res.sent_to} (PDF attached).`));
-  } catch (err) {
-    announce(`Email failed: ${err.message}`);
-    return;
-  }
-  await refreshInvoices();
+/// `Send email` in the detail panel opens the recipient dialog; the POST (and
+/// its honest transport reporting, #130) happens on the dialog's Send so the
+/// admin sees who will receive the invoice first.
+export function sendInvoiceEmail(inv, opener = null) {
+  return openSendEmailDialog(inv, opener);
 }
 
 /// `Mark as sent`: POST /invoices/{id}/sent. A **409** (a draft) is reported as

@@ -8,7 +8,7 @@ import { $, addDays, announce, clearFormError, decorateUbuntuButton, isoDate, mo
 import { ADD_CATEGORY_VALUE, addCategory, addExpenseCategory, fillCategorySelect, refreshCategories, refreshExpenses, refreshSubmissions, resetCategoryForm, resetExpenseForm, saveExpense, submitWeek } from './expenses.js';
 import { refreshExpenseConversion, resetExpenseConversion, showConverted } from './fx.js';
 import { cancelCustomerEdit, cancelProjectEdit, cancelTaskEdit, contactRow, fillParentCustomers, fillTaskParents, prefillProjectParent, refreshCustomerPickers, refreshCustomerTable, refreshCustomersView, refreshProjectTable, refreshProjectsView, refreshTaskTable, refreshTasksView, runReport, saveCustomer, saveProject, saveTask } from './hierarchy.js';
-import { closeDeliveryRecord, closeInvoicePreview, dash, dashApplyColumns, downloadInvoicePdf, ed, edCancel, edLineRow, edOpen, edRecalc, edSave, invoicePreview, markInvoiceSent, refreshInvoiceSummary, refreshInvoices, sendInvoiceEmail } from './invoices.js';
+import { closeDeliveryRecord, closeInvoicePreview, closeSendEmailDialog, confirmSendEmail, dash, dashApplyColumns, downloadInvoicePdf, ed, edCancel, edLineRow, edOpen, edRecalc, edSave, invoicePreview, markInvoiceSent, openEmailSettings, refreshInvoiceSummary, refreshInvoices, sendInvoiceEmail } from './invoices.js';
 import { markNotificationsRead, refreshNotifications } from './notifications.js';
 import { initReceiptPreview } from './receipt.js';
 import { initRouter, initSegTabs, initSettingsTabs, initTabs, refreshTimesheetView, segActiveId, showTimesheet } from './route.js';
@@ -259,11 +259,33 @@ export function wireWeekGrid() {
     if (invoicePreview) downloadInvoicePdf(invoicePreview.inv.id, invoicePreview.inv.number);
   });
   // #349: the delivery actions act on the invoice the detail panel is showing.
-  // Send email re-renders the panel (emailInvoice does), so the SENT watermark
-  // and the new history entry appear without a reload, and it reports the
-  // transport honestly (a disabled transport is announced as NOT sent).
+  // Send email opens the recipient dialog first (#139 follow-up), so the admin
+  // chooses who receives it; the dialog's Send re-renders the panel, so the
+  // SENT watermark and the new history entry appear without a reload, and it
+  // reports the transport honestly (a disabled transport is announced as NOT
+  // sent).
   $('ip-send').addEventListener('click', () => {
-    if (invoicePreview) sendInvoiceEmail(invoicePreview.inv);
+    if (invoicePreview) sendInvoiceEmail(invoicePreview.inv, $('ip-send'));
+  });
+  // The recipient dialog's own controls: Send posts the ticked list (or omits
+  // the body for the untouched default), Cancel/Escape dismiss it, and the
+  // SMTP notice's button moves to the Settings route.
+  $('send-email-send').addEventListener('click', confirmSendEmail);
+  $('send-email-close').addEventListener('click', closeSendEmailDialog);
+  $('send-email-settings').addEventListener('click', openEmailSettings);
+  // Correcting a typed address clears its inline error, like every other form.
+  $('send-email-extra').addEventListener('input', () => clearFormError($('send-email-error')));
+  $('send-email-dialog').addEventListener('cancel', (event) => {
+    // native Escape on a real browser: dismiss it, never leave it half-open.
+    event.preventDefault();
+    closeSendEmailDialog();
+  });
+  $('send-email-dialog').addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      // jsdom never fires 'cancel'; emulate it here (browsers do both).
+      event.preventDefault();
+      closeSendEmailDialog();
+    }
   });
   // Mark as sent is idempotent server-side and 409s on a draft; both answers are
   // reported plainly, never as a silent success and never as a duplicate entry.

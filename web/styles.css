@@ -712,6 +712,15 @@ caption { padding-bottom: .35rem; }
 /* #349: the wizard is a p-modal dialog; it follows the app's per-dialog width
    convention (dialog.p-modal itself is uncapped, web/styles.css above). */
 #invoice-wizard .p-modal__dialog { max-width: 44rem; }
+/* Recipient picker (#139 follow-up): one labelled checkbox row per on-file
+   address, the address itself as supporting text. The dialog stays narrower
+   than the wizard because its content is a short list. */
+#send-email-dialog .p-modal__dialog { max-width: 34rem; }
+#send-email-recipients { display: grid; gap: .25rem; margin: .25rem 0 .5rem; }
+#send-email-recipients label { display: flex; align-items: flex-start; gap: .45rem; }
+#send-email-recipients input[type="checkbox"] { min-height: 0; width: 1rem; height: 1rem; margin-top: .15rem; }
+#send-email-recipients .send-email-contact-meta { opacity: .75; }
+#send-email-invoice { margin-top: 0; }
 #iw-projects { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .2rem .75rem; }
 /* #F: the year stepper (.day-nav), the chart and its one-line note are a
    single column, so the caption and the rate line stay aligned with the chart

@@ -646,7 +646,7 @@
           <div id="iw-step1">
             <div class="p-form__group"><label class="p-form__label" for="iw-customer">Customer</label><select class="p-form__control" id="iw-customer"></select></div>
             <div class="p-form__group"><label class="p-form__label" for="iw-expenses"><input class="p-form__control" type="checkbox" id="iw-expenses" checked>
-              Include billable expenses (#25)</label></div>
+              Include billable expenses</label></div>
           </div>
           <div id="iw-step2" hidden>
             <div class="p-form__group"><label class="p-form__label" for="iw-preset">Period</label><select class="p-form__control" id="iw-preset">
@@ -729,6 +729,48 @@
           <p id="message-note" class="p-form-help-text"></p>
           <footer class="buttons p-modal__footer">
             <button type="button" class="secondary" id="message-close">Close</button>
+          </footer>
+        </div>
+      </dialog>
+      <!-- Invoice email recipients (#139 follow-up). Opened by BOTH delivery
+           entry points -- `#ip-send` in the detail panel and the register's
+           Email row action -- so the admin chooses who receives the invoice
+           before anything is sent. The candidates are the customer's on-file
+           addresses (the flagged billing contact first, checked by default),
+           the admin may tick more than one, and an address that is not on file
+           can be typed in. Sending posts the explicit list, or omits the body
+           to keep the server-side billing-email default. The SMTP notice is a
+           role=alert: when delivery is not configured it explains why Send is
+           disabled and links to the Settings route (EMAIL_SETTINGS_ROUTE in
+           web/js/invoices.js). Escape, the focus trap and the return of focus
+           to the opener come from the native <dialog> plus
+           dom.js initDialogFocusReturn. -->
+      <dialog id="send-email-dialog" class="p-modal" aria-modal="true" aria-labelledby="send-email-title">
+        <div class="p-modal__dialog">
+          <header class="p-modal__header">
+            <h2 class="p-modal__title" id="send-email-title">Email invoice</h2>
+          </header>
+          <p class="p-form-help-text" id="send-email-invoice"></p>
+          <div id="send-email-recipients-group" role="group" aria-labelledby="send-email-recipients-title">
+            <h3 id="send-email-recipients-title">Recipients</h3>
+            <div id="send-email-recipients"></div>
+            <p class="p-form-help-text" id="send-email-empty" hidden>No email address is on file for this customer. Type one below, or add it on the customer form.</p>
+          </div>
+          <div class="p-form__group">
+            <label class="p-form__label" for="send-email-extra">Add another email (comma-separated)</label>
+            <input class="p-form__control" id="send-email-extra" type="text" inputmode="email" autocomplete="off" placeholder="name@example.com">
+          </div>
+          <div class="p-form-validation is-error">
+            <p class="p-form-validation__message" id="send-email-error" role="alert" hidden></p>
+          </div>
+          <div class="p-form-validation is-error">
+            <p class="p-form-validation__message" id="send-email-notice" role="alert" hidden>Email delivery is not configured, so sending would only be logged. Set up SMTP in Settings, then come back here.</p>
+            <button type="button" class="link secondary" id="send-email-settings">Open Settings</button>
+          </div>
+          <p class="p-form-help-text" id="send-email-result" role="status" aria-live="polite" hidden></p>
+          <footer class="buttons p-modal__footer">
+            <button type="button" id="send-email-send" class="primary" data-positive="1">Send</button>
+            <button type="button" class="secondary" id="send-email-close">Cancel</button>
           </footer>
         </div>
       </dialog>

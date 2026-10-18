@@ -1815,7 +1815,11 @@ const emailRes = await fetch(`${BASE}/api/invoices/${acmeInv.id}/email`, { metho
 const emailBody = await emailRes.json();
 check('invoice email endpoint sends to the billing address', emailRes.status === 200 && emailBody.sent_to === 'billing@acme.test');
 
-// The GUI shows an Email button on the issued invoice and announces the send.
+// The GUI shows an Email button on the issued invoice. It is now a two-step
+// flow (#139): the row action opens the recipient dialog with the customer's
+// on-file address pre-ticked and sends nothing; the dialog's own Send is what
+// posts. Opening + cancelling, then, must leave the live region and the history
+// exactly as they were.
 window.document.getElementById('tab-invoices').dispatchEvent(new window.Event('click', { bubbles: true }));
 // Tab is shown -> refreshInvoices() re-pulls; wait for the issued-state Email
 // action instead of racing the refresh (#265).
@@ -1825,17 +1829,25 @@ await waitFor(() => [...window.document.querySelectorAll('#invoice-table tbody b
 const emailBtn = [...window.document.querySelectorAll('#invoice-table tbody button')].find((b) => b.textContent === 'Email');
 check('issued invoice renders an Email button', !!emailBtn);
 if (emailBtn) {
+  const liveBefore = byId('live-region').textContent;
   emailBtn.dispatchEvent(new window.Event('click', { bubbles: true }));
-  await waitFor(() => /billing@acme.test/.test(byId('live-region').textContent), {
-    message: 'the Email action to announce the send',
+  await waitFor(() => dialogOpen(byId('send-email-dialog')), {
+    message: 'the Email action to open the recipient dialog',
   });
-  {
-  const t = window.document.getElementById('live-region').textContent;
-  // #130 honesty: either a real send (smtp) or an explicit NOT-sent with the
-  // address — never a bare success claim when the transport is disabled.
-  check('Email button announces honestly',
-    /billing@acme.test/.test(t) && /Invoice emailed to|NOT sent \(SMTP not configured\)/.test(t));
-}
+  const recipients = [...byId('send-email-recipients').querySelectorAll('input[type="checkbox"]')];
+  check('the Email action opens the recipient dialog with the billing address checked (#139)',
+    recipients.length === 1
+    && recipients[0].value === 'billing@acme.test'
+    && recipients[0].checked === true);
+  check('opening the recipient dialog sends nothing (#139)',
+    byId('live-region').textContent === liveBefore);
+  byId('send-email-close').dispatchEvent(new window.Event('click', { bubbles: true }));
+  await waitFor(() => !dialogOpen(byId('send-email-dialog')), {
+    message: 'Cancel to dismiss the recipient dialog',
+  });
+  check('Cancel dismisses the recipient dialog without sending (#139)',
+    !dialogOpen(byId('send-email-dialog'))
+    && byId('live-region').textContent === liveBefore);
 }
 
 
@@ -1878,45 +1890,36 @@ if (emailBtn) {
     await waitFor(() => !dialogOpen(byId('message-dialog')), { message: 'Close to dismiss the delivery record' });
     check('Close dismisses the delivery record (#349)', !dialogOpen(byId('message-dialog')));
   }
-  // The panel's own Send email action: POST /invoices/{id}/email, reported
-  // honestly (the harness configures no SMTP, so the transport is disabled and
-  // the announcement must say NOT sent), then the history gains the entry
-  // without a reload.
+  // The panel's own Send email action is the same two-step flow (#139): it
+  // opens the recipient dialog rather than posting immediately. The harness
+  // configures no SMTP, so the dialog must carry the guidance notice and keep
+  // Send disabled; nothing is delivered and the history does not move.
   const sentCount = () => [...byId('ip-timeline').querySelectorAll('li')]
     .filter((li) => /^Sent invoice to/.test(li.querySelector('.ip-tl-desc').textContent)).length;
   const emailsBefore = sentCount();
   byId('ip-send').dispatchEvent(new window.Event('click', { bubbles: true }));
-  await waitFor(() => /NOT sent \(SMTP not configured\)|Invoice emailed to/.test(byId('live-region').textContent), {
-    message: 'the panel Send email action to report the transport honestly',
+  await waitFor(() => dialogOpen(byId('send-email-dialog')), {
+    message: 'the panel Send email action to open the recipient dialog',
   });
-  check('Send email from the panel reports the transport honestly (#349)',
-    /NOT sent \(SMTP not configured\)|Invoice emailed to/.test(byId('live-region').textContent));
-  // The re-render is two concurrent fetches (the timeline and the PDF). Wait for
-  // each half explicitly: a composite predicate hides which of the two stalled,
-  // and a half-rendered panel is not evidence of anything.
-  //
-  // The budget is deliberately large. Opening a panel re-renders the invoice PDF
-  // *on demand* (`GET /invoices/{id}/pdf/preview` is uncached and CPU-bound), and
-  // this suite opens a preview many times, so on a single-core CI runner a later
-  // render can queue behind earlier ones and outlast 15s. These waits assert the
-  // settled state, never latency; a render that genuinely fails still surfaces as
-  // "Preview unavailable" in `#ip-pdf-state`, which the messages below report.
-  await waitFor(() => sentCount() === emailsBefore + 1, {
-    timeoutMs: 60000,
-    message: 'the history to record the new delivery'
-      + ` (entries=${sentCount()}, state=${byId('ip-pdf-state').textContent})`,
+  await waitFor(() => byId('send-email-notice').hidden === false, {
+    message: 'the SMTP guidance to appear in the recipient dialog',
   });
-  await waitFor(
-    () => !!byId('ip-frame') && String(byId('ip-frame').getAttribute('src')).startsWith('blob:'),
-    {
-      timeoutMs: 60000,
-      message: 'the panel to re-frame the rendered PDF'
-        + ` (frame=${!!byId('ip-frame')}, state=${byId('ip-pdf-state').textContent})`,
-    },
-  );
-  const sendSettled = () => sentCount() === emailsBefore + 1
-    && !!byId('ip-frame') && String(byId('ip-frame').getAttribute('src')).startsWith('blob:');
-  check('Send email from the panel refreshes the preview and the history (#349)', sendSettled());
+  check('Send email from the panel opens the recipient dialog (#139)',
+    dialogOpen(byId('send-email-dialog'))
+    && byId('send-email-send').disabled === true
+    && /not\s+configured/i.test(byId('send-email-notice').textContent)
+    && byId('send-email-settings').dataset.route === '/settings/security');
+  check('the panel email flow sends nothing while SMTP is unconfigured (#139)',
+    sentCount() === emailsBefore
+    && !!byId('ip-frame') && String(byId('ip-frame').getAttribute('src')).startsWith('blob:'));
+  byId('send-email-close').dispatchEvent(new window.Event('click', { bubbles: true }));
+  await waitFor(() => !dialogOpen(byId('send-email-dialog')), {
+    message: 'Cancel to dismiss the recipient dialog',
+  });
+  check('Cancel returns focus to the panel action (#139)',
+    window.document.activeElement === byId('ip-send'));
+  check('opening the recipient dialog leaves the history untouched (#139)',
+    sentCount() === emailsBefore);
   // Mark as sent is idempotent: this invoice already has a delivery, so the
   // repeat must report the original timestamp and append no second entry.
   const before = byId('ip-timeline').querySelectorAll('li').length;
