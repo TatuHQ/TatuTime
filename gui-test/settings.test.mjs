@@ -64,11 +64,29 @@ const TEMPLATE = {
     ],
 };
 
+// SET-04/SET-08: a representative /admin/config payload — a numeric knob, a
+// Currency knob (the only null-accepting kind) and a restart-required key.
+const CONFIG = [
+    { key: 'reminder_days', value: 7, source: 'default', default: 7, description: 'Days between reminders' },
+    { key: 'base_currency', value: 'EUR', source: 'file', default: null, description: 'Base currency' },
+    { key: 'sso_admin_group', value: '', source: 'default', default: '', description: 'SSO admin group' },
+];
+
+const AUDIT = {
+    events: [
+        { ts: '2026-10-18T20:00:00Z', event: 'login_ok', subject: 'admin@acme.test' },
+        { ts: '2026-10-18T19:59:00Z', event: 'user_created', subject: 'qa@acme.test' },
+    ],
+};
+
 function setup({
     email = EMAIL,
     putError = null,
     postResult = { sent_to: 'qa@acme.test', transport: 'smtp' },
     postError = null,
+    getError = null,
+    config = CONFIG,
+    audit = AUDIT,
 } = {}) {
     const dom = new JSDOM(html, { runScripts: 'outside-only', url: 'http://localhost/settings/users' });
     const { window } = dom;
@@ -81,10 +99,13 @@ function setup({
         this.removeAttribute('open');
     };
     const prelude = `
-      window.calls = { get: [], put: [], post: [], preview: [] };
+      window.calls = { get: [], put: [], post: [], request: [], preview: [] };
       window.__email = ${JSON.stringify(email)};
       window.__org = ${JSON.stringify(ORG)};
       window.__template = ${JSON.stringify(TEMPLATE)};
+      window.__config = ${JSON.stringify(config)};
+      window.__audit = ${JSON.stringify(audit)};
+      window.__getError = ${JSON.stringify(getError)};
       window.__putError = ${JSON.stringify(putError)};
       window.__postResult = ${JSON.stringify(postResult)};
       window.__postError = ${JSON.stringify(postError)};
@@ -93,12 +114,21 @@ function setup({
       window.__previewHandler = null;
       api.get = async (path) => {
         window.calls.get.push(path);
+        if (window.__getError && window.__getError[path]) {
+          const raw = window.__getError[path];
+          const err = new Error(raw.message);
+          err.status = raw.status;
+          err.payload = { error: { code: raw.code || 'error', message: raw.message } };
+          throw err;
+        }
         if (path === '/auth/status') return { initialised: true };
         if (path === '/auth/sso/providers') return { providers: [] };
         if (path === '/auth/me') throw new Error('no session');
         if (path === '/admin/email') return window.__email;
         if (path === '/admin/org') return window.__org;
         if (path === '/admin/invoice-template') return window.__template;
+        if (path === '/admin/config') return { config: window.__config };
+        if (path === '/audit') return window.__audit;
         return {};
       };
       api.put = async (path, body) => {
@@ -112,6 +142,20 @@ function setup({
         }
         if (path === '/admin/email') return { ...window.__email, ...body, configured: true };
         return body;
+      };
+      api.request = async (method, path, body) => {
+        window.calls.request.push({ method, path, body });
+        if (method === 'PUT' && path === '/admin/config') {
+          for (const [k, v] of Object.entries(body || {})) {
+            const row = window.__config.find((entry) => entry.key === k);
+            if (row) {
+              row.value = v;
+              row.source = v === null ? 'default' : 'file';
+            }
+          }
+          return { ok: true };
+        }
+        return {};
       };
       api.post = async (path, body) => {
         window.calls.post.push({ path, body });
@@ -143,14 +187,16 @@ function setup({
       URL.revokeObjectURL = (url) => window.revokedUrls.push(url);
       initTabs();
       initSettingsTabs();
+      wireSettingsControls();
     `;
     window.eval(`${app}\n${prelude}\nwindow.t = {
       applyRoute, normaliseRoute, showAccount, initSettingsTabs,
+      refreshSettings, refreshConfig, saveConfig, refreshAuditLog, resetBuiltInLabels,
       refreshOrgProfile, saveOrgProfile, refreshInvoiceTemplate, saveInvoiceTemplate,
       refreshEmailSettings, saveEmailSettings, sendTestEmail, EMAIL_SETTINGS_ROUTE,
       initTemplatePreview, renderTemplatePreview, scheduleTemplatePreview,
       releaseTemplatePreview, openTemplatePreviewInNewTab, templatePayload,
-      TEMPLATE_PREVIEW_DEBOUNCE_MS,
+      TEMPLATE_PREVIEW_DEBOUNCE_MS, RESTART_REQUIRED_KEYS, NULLABLE_CONFIG_KEYS, state,
       calls: () => window.calls,
     };`);
     return { dom, document: window.document, window, t: window.t };
@@ -618,6 +664,197 @@ test('502 email_failed shows the relay failure', async () => {
     assert.match(error.textContent, /relay refused the message/);
     assert.equal(error.dataset.errorCode, 'email_failed');
     assert.match(window.document.getElementById('live-region').textContent, /relay refused/);
+    dom.window.close();
+});
+
+// ------------------------------------------------- SET-01: the click path --
+//
+// The old suite called sendTestEmail() directly, so the dead button (a
+// `type="button"` with no click listener) went unnoticed. These drive the
+// control the user actually presses.
+
+test('SET-01: clicking Send test email issues exactly one POST', async () => {
+    const { dom, document, t } = setup();
+    await t.refreshEmailSettings();
+    setValue(document, 'email-test-to', 'qa@acme.test');
+    document.getElementById('email-test-send').click();
+    await waitFor(() => t.calls().post.length === 1, { message: 'the clicked button to send' });
+    // One event-loop turn: a stray submit listener would have fired by now.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(t.calls().post.length, 1, 'the click sends once, never twice');
+    assert.deepEqual(JSON.parse(JSON.stringify(t.calls().post[0])),
+        { path: '/admin/email/test', body: { to: 'qa@acme.test' } });
+    dom.window.close();
+});
+
+// ------------------------------------------------- SET-02: member gating ---
+
+test('SET-02: a member boot loads no admin surface and announces no role error', async () => {
+    const { dom, document, window, t } = setup();
+    t.showAccount({ role: 'member', name: 'Mem' });
+    assert.equal(t.state.isAdmin, false);
+    await t.refreshSettings();
+    const paths = t.calls().get.map((path) => String(path));
+    assert.equal(paths.filter((path) => path.startsWith('/admin/')).length, 0,
+        'no /api/admin/* GET is issued for a member');
+    assert.equal(paths.filter((path) => path === '/users').length, 0, 'no /api/users GET is issued for a member');
+    assert.equal(document.getElementById('user-list-status').textContent, '',
+        'the hidden Users status carries no error text');
+    assert.doesNotMatch(window.document.getElementById('live-region').textContent, /administrator role required/i);
+    dom.window.close();
+});
+
+// ------------------------------------------------- SET-05: double submits --
+
+test('SET-05: the four Settings saves ignore a double submit', async () => {
+    const evt = () => ({ preventDefault() { } });
+
+    // Save email settings
+    {
+        const { dom, document, t } = setup();
+        await t.refreshEmailSettings();
+        setValue(document, 'email-host', 'smtp.new.test');
+        await Promise.all([t.saveEmailSettings(evt()), t.saveEmailSettings(evt())]);
+        assert.equal(t.calls().put.filter((call) => call.path === '/admin/email').length, 1,
+            'a double click writes the email settings once');
+        dom.window.close();
+    }
+
+    // Save company info
+    {
+        const { dom, document, t } = setup();
+        await t.refreshOrgProfile();
+        setValue(document, 'org-name', 'Acme Invoice Co');
+        await Promise.all([t.saveOrgProfile(evt()), t.saveOrgProfile(evt())]);
+        assert.equal(t.calls().put.filter((call) => call.path === '/admin/org').length, 1,
+            'a double click writes the org profile once');
+        dom.window.close();
+    }
+
+    // Save template
+    {
+        const { dom, document, t } = setup();
+        await t.refreshInvoiceTemplate();
+        setValue(document, 'lb-total', 'Amount due');
+        await Promise.all([t.saveInvoiceTemplate(evt()), t.saveInvoiceTemplate(evt())]);
+        assert.equal(t.calls().put.filter((call) => call.path === '/admin/invoice-template').length, 1,
+            'a double click writes the template once');
+        dom.window.close();
+    }
+
+    // Apply to config.json
+    {
+        const { dom, document, t } = setup();
+        await t.refreshConfig();
+        setValue(document, 'config-value', '12');
+        await Promise.all([t.saveConfig(evt()), t.saveConfig(evt())]);
+        assert.equal(t.calls().request.filter((call) => call.method === 'PUT' && call.path === '/admin/config').length, 1,
+            'a double click writes the config once');
+        dom.window.close();
+    }
+});
+
+// ------------------------------------------ SET-07: reset re-renders ------
+
+test('SET-07: Use built-in labels re-renders the preview with empty labels', async () => {
+    const { dom, document, window, t } = setup();
+    await openPreview(t, window, document);
+    document.getElementById('lb-reset').click();
+    await waitFor(() => t.calls().preview.length === 1, {
+        message: 'the label reset to request a fresh preview',
+    });
+    const labels = t.calls().preview[0].body.labels;
+    assert.deepEqual(Object.values(labels), ['', '', '', '', '', '', ''],
+        'the preview is rendered from the cleared labels, not the stale frame');
+    assert.match(window.document.getElementById('live-region').textContent, /Built-in labels restored/);
+    dom.window.close();
+});
+
+// --------------------------------- SET-04/SET-08: currency + restart badge --
+
+test('SET-08: clearing the Currency value sends null and the row clears', async () => {
+    const { dom, document, t } = setup();
+    await t.refreshConfig();
+    const select = document.getElementById('config-key');
+    select.value = 'base_currency';
+    select.dispatchEvent(new dom.window.Event('change'));
+    assert.equal(document.getElementById('config-value').value, 'EUR');
+    setValue(document, 'config-value', '');
+    await t.saveConfig({ preventDefault() { } });
+    const call = t.calls().request.find((entry) => entry.path === '/admin/config');
+    assert.deepEqual(JSON.parse(JSON.stringify(call.body)), { base_currency: null },
+        'an emptied Currency is cleared with null, never an empty string');
+    const row = [...document.querySelectorAll('#config-table tbody tr')]
+        .find((r) => r.cells[0].textContent === 'base_currency');
+    assert.equal(row.cells[1].textContent, '', 'the cleared row renders empty');
+    dom.window.close();
+});
+
+test('SET-04: boot-time knobs carry the after-restart mark', async () => {
+    const { dom, document, t } = setup();
+    await t.refreshConfig();
+    const rows = [...document.querySelectorAll('#config-table tbody tr')];
+    const days = rows.find((r) => r.cells[0].textContent === 'reminder_days');
+    const currency = rows.find((r) => r.cells[0].textContent === 'base_currency');
+    assert.match(days.cells[3].textContent, /after restart/i, 'reminder_days is read once at boot');
+    assert.match(currency.cells[3].textContent, /immediately/i, 'base_currency applies to the next request');
+    dom.window.close();
+});
+
+// ------------------------------------------------- SET-11: audit card ------
+
+test('SET-11: the audit card lists events, its empty state and an inline error', async () => {
+    const { dom, document, window, t } = setup();
+    t.showAccount({ role: 'admin', name: 'Admin' });
+    await t.refreshAuditLog();
+    const rows = [...document.querySelectorAll('#audit-table tbody tr')];
+    assert.equal(rows.length, 2, 'both events render, newest first as the API returns them');
+    assert.deepEqual([...rows[0].querySelectorAll('td')].map((td) => td.textContent),
+        ['2026-10-18 20:00:00 UTC', 'login_ok', 'admin@acme.test']);
+    assert.equal(document.getElementById('audit-empty').hidden, true);
+
+    window.__audit = { events: [] };
+    await t.refreshAuditLog();
+    assert.equal(document.querySelectorAll('#audit-table tbody tr').length, 0);
+    assert.equal(document.getElementById('audit-empty').hidden, false, 'the empty state is shown');
+
+    window.__getError = { '/audit': { status: 500, message: 'audit log unreadable' } };
+    await t.refreshAuditLog();
+    assert.match(document.getElementById('audit-status').textContent, /Could not load the audit log/,
+        'a non-403 failure surfaces inline');
+
+    window.__getError = { '/audit': { status: 403, message: 'administrator role required' } };
+    await t.refreshAuditLog();
+    assert.equal(document.getElementById('audit-status').textContent, '', '403 stays silent');
+    assert.equal(document.getElementById('audit-card').hidden, true, '403 hides the admin-only card');
+    dom.window.close();
+});
+
+// ------------------------------------------------- SET-15: load failures ---
+
+test('SET-15: a 500 on load announces the failure and disables Save', async () => {
+    const { dom, document, window, t } = setup({
+        getError: { '/admin/org': { status: 500, message: 'corrupt store' } },
+    });
+    const save = document.getElementById('org-save');
+    assert.equal(save.disabled, true, 'Save ships disabled until the stored identity loads');
+    await t.refreshOrgProfile();
+    assert.equal(save.disabled, true, 'a failed load never enables Save');
+    assert.equal(document.getElementById('org-form').dataset.loaded, '0', 'the section is marked not loaded');
+    assert.match(window.document.getElementById('live-region').textContent,
+        /Company information could not be loaded/, 'the failure is announced, not swallowed');
+    dom.window.close();
+});
+
+test('SET-15: a 403 load stays silent and keeps Save disabled', async () => {
+    const { dom, document, window, t } = setup({
+        getError: { '/admin/invoice-template': { status: 403, message: 'administrator role required' } },
+    });
+    await t.refreshInvoiceTemplate();
+    assert.equal(document.getElementById('template-save').disabled, true);
+    assert.equal(document.getElementById('template-form').dataset.loaded, '0');
+    assert.equal(window.document.getElementById('live-region').textContent, '',
+        'a member gets no role error announcement');
     dom.window.close();
 });
 

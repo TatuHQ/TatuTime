@@ -1324,9 +1324,9 @@ class Gate:
             # stacked field rows (SMTP host/port/username/password/from and the
             # test-email recipient).
             and counts["groups"] == 144 and counts["labels"] == 139
-            # 41: the previous 38 plus the Email section's delivery/instruction
-            # note, its vault notice and its test-send result line.
-            and counts["controls"] == 139 and counts["help"] == 41
+            # 43: the previous 41 plus the read-only audit card's blurb and its
+            # polite status line (SET-11).
+            and counts["controls"] == 139 and counts["help"] == 43
             # 27: the previous 25 plus #email-error and #email-test-error.
             and counts["messages"] == counts["errorGroups"] == 27,
             f"counts={counts}",

@@ -6,6 +6,7 @@ import { api } from './api.js';
 import { showAuth } from './auth.js';
 import { refreshCatalog } from './billing.js';
 import { $, announce, askConfirm, clearFormError, el, fillSelect, formatMoney, showFormError, singleFlight, statusChip } from './dom.js';
+import { state } from './state.js';
 
 // --------------------------------------------------------------- settings --
 
@@ -212,6 +213,12 @@ export async function deleteUser(user) {
 }
 
 export async function refreshSettings() {
+  // SET-02: every loader here is admin-tier; the only member-visible Settings
+  // section is Expense categories, owned by expenses.js. A member boot used to
+  // fire six admin GETs and leave "administrator role required" in the live
+  // region (and an error in the hidden Users status line), so the whole set is
+  // gated on the role the session already told us.
+  if (!state.isAdmin) return;
   // #189: independent admin surfaces load in parallel (was a sequential
   // six-request waterfall behind the Settings tab).
   await Promise.all([
@@ -222,6 +229,7 @@ export async function refreshSettings() {
     refreshCatalog(),
     refreshInvoiceTemplate(),
     refreshEmailSettings(),
+    refreshAuditLog(),
   ]);
 }
 
@@ -263,6 +271,50 @@ export async function refreshSecrets() {
   }
 }
 
+// SET-11: the read-only audit log (GET /audit, admin tier). The API returns the
+// newest events first as `{ ts, event, subject }` — there is no separate actor
+// field, so the subject column shows whatever identity the event recorded
+// (an email, an id, an invoice number, a provider name). No write path exists
+// here by design: the log is append-only.
+function auditTime(ts) {
+  if (!ts) return '';
+  // The API sends RFC3339 UTC; show it locale-free so the table is stable.
+  return ts.replace('T', ' ').replace(/\.\d+Z$/, ' UTC').replace(/Z$/, ' UTC');
+}
+
+export async function refreshAuditLog() {
+  if (!state.isAdmin) return;
+  const status = $('audit-status');
+  if (!status) return;
+  status.textContent = 'Loading audit events…';
+  try {
+    const data = await api.get('/audit');
+    const events = data.events || [];
+    const tbody = $('audit-table').querySelector('tbody');
+    tbody.textContent = '';
+    for (const event of events) {
+      tbody.appendChild(
+        el('tr', {}, [
+          el('td', { attrs: { 'data-heading': 'Time' }, text: auditTime(event.ts) }),
+          el('td', { attrs: { 'data-heading': 'Event' }, text: event.event || '' }),
+          el('td', { attrs: { 'data-heading': 'Subject' }, text: event.subject || '' }),
+        ]),
+      );
+    }
+    $('audit-empty').hidden = events.length !== 0;
+    status.textContent = events.length ? `${events.length} recent events, newest first.` : '';
+  } catch (err) {
+    if (err.status === 403) {
+      // Member: the card is admin-only, so stay silent and out of the way.
+      $('audit-card').hidden = true;
+      status.textContent = '';
+      return;
+    }
+    $('audit-empty').hidden = true;
+    status.textContent = `Could not load the audit log: ${err.message}`;
+  }
+}
+
 // Effective runtime configuration card (#94). Admin surface; members get a
 // silent hide. Values resolve env > config.json > default; applying an edit
 // persists it to config.json on the data volume so restarts keep it.
@@ -275,15 +327,50 @@ export function configValueForInput(v) {
   return v;
 }
 
+// SET-04: keys the server reads once at boot and stores in a long-lived
+// component, so editing them here only takes effect after a restart. Derived
+// from the call sites: `max_docs` (Store::open), `reminder_days`
+// (EmailReminderJob), `sso_allowed_domains` (SsoRegistry at AppState::boot) and
+// the two accounting base URLs (AccountingRegistry at AppState::boot). The SSO
+// admin group, calendar redirect and OAuth client ids are resolved per request.
+export const RESTART_REQUIRED_KEYS = new Set([
+  'max_docs',
+  'reminder_days',
+  'sso_allowed_domains',
+  'qbo_base_url',
+  'xero_base_url',
+]);
+
+// SET-08: `Kind::Currency` is the one server kind whose `validate` accepts
+// `null` (meaning "clear"); every other null-defaulted kind expects a string.
+export const NULLABLE_CONFIG_KEYS = new Set(['base_currency']);
+
+// SET-15: true only once the stored config really arrived. Save stays disabled
+// otherwise, so a failed load can never be overwritten with blanks.
+let configLoaded = false;
+
 export async function refreshConfig() {
   let data;
   try {
     data = await api.get('/admin/config');
-  } catch {
-    $('config-card').hidden = true;
-    $('config-form').hidden = true;
+  } catch (err) {
+    configLoaded = false;
+    $('config-save').disabled = true;
+    $('config-card').dataset.loaded = '0';
+    if (err.status === 403) {
+      // Member: the section is hidden for them; stay silent.
+      $('config-card').hidden = true;
+      $('config-form').hidden = true;
+      return;
+    }
+    announce(`Runtime configuration could not be loaded: ${err.message}. Saving is disabled until it loads.`);
     return;
   }
+  configLoaded = true;
+  $('config-card').hidden = false;
+  $('config-form').hidden = false;
+  $('config-card').dataset.loaded = '1';
+  $('config-save').disabled = false;
   configRows = data.config || [];
   const tbody = $('config-table').querySelector('tbody');
   tbody.textContent = '';
@@ -291,9 +378,14 @@ export async function refreshConfig() {
     ...configRows.map((row) =>
       el('tr', {}, [
         el('th', { attrs: { scope: 'row', title: row.description }, text: row.key }),
-        el('td', { cls: 'num', text: configValueForInput(row.value) }),
-        el('td', {}, [
+        el('td', { cls: 'num', attrs: { 'data-heading': 'Value' }, text: configValueForInput(row.value) }),
+        el('td', { attrs: { 'data-heading': 'Source' } }, [
           statusChip(row.source, row.source !== 'default'),
+        ]),
+        el('td', { attrs: { 'data-heading': 'Applies' } }, [
+          RESTART_REQUIRED_KEYS.has(row.key)
+            ? statusChip('after restart')
+            : el('span', { text: 'immediately' }),
         ]),
       ]),
     ),
@@ -310,37 +402,53 @@ export async function refreshConfig() {
 
 export async function saveConfig(evt) {
   evt.preventDefault();
-  clearFormError($('config-error'));
-  const key = $('config-key').value;
-  const raw = $('config-value').value;
-  const row = configRows.find((c) => c.key === key) || {};
-  let value = raw;
-  if (typeof row.value === 'number') {
-    if (!/^-?\d+$/.test(raw)) {
-      showFormError($('config-error'), { message: 'Enter a whole number.' });
-      return;
-    }
-    value = Number(raw);
-  } else if (typeof row.value === 'boolean') {
-    if (raw !== 'true' && raw !== 'false') {
-      showFormError($('config-error'), { message: 'Enter true or false.' });
-      return;
-    }
-    value = raw === 'true';
+  if (!configLoaded) {
+    announce('Runtime configuration is not loaded yet — reload the section before saving.');
+    return;
   }
-  try {
-    await api.request('PUT', '/admin/config', { [key]: value });
-    announce(`Saved ${key}.`);
-    await refreshConfig();
-  } catch (err) {
-    showFormError($('config-error'), err);
-  }
+  // SET-05: a double submit writes once.
+  return singleFlight($('config-save'), async () => {
+    clearFormError($('config-error'));
+    const key = $('config-key').value;
+    const raw = $('config-value').value;
+    const row = configRows.find((c) => c.key === key) || {};
+    let value = raw;
+    if (typeof row.value === 'number') {
+      if (!/^-?\d+$/.test(raw)) {
+        showFormError($('config-error'), { message: 'Enter a whole number.' });
+        return;
+      }
+      value = Number(raw);
+    } else if (typeof row.value === 'boolean') {
+      if (raw !== 'true' && raw !== 'false') {
+        showFormError($('config-error'), { message: 'Enter true or false.' });
+        return;
+      }
+      value = raw === 'true';
+    } else if (NULLABLE_CONFIG_KEYS.has(key) && raw.trim() === '') {
+      // SET-08: the API clears a Currency knob with an explicit `null` (an
+      // empty string is refused). It is the only kind that accepts null —
+      // OptionalStr/Csv rows are cleared by an empty string instead — so this
+      // stays limited to the keys the server treats as nullable.
+      value = null;
+    }
+    try {
+      await api.request('PUT', '/admin/config', { [key]: value });
+      announce(`Saved ${key}.`);
+      await refreshConfig();
+    } catch (err) {
+      showFormError($('config-error'), err);
+    }
+  });
 }
 
 // ------------------------------------------------- company identity (#138) --
 // The reply-to address doubles as the default recipient for the Email tab's
 // "Send test email" field; nothing else reads it here.
 export let orgReplyTo = '';
+
+// SET-15: the form is only saveable once the stored identity arrived.
+let orgLoaded = false;
 
 export async function refreshOrgProfile() {
   try {
@@ -358,7 +466,19 @@ export async function refreshOrgProfile() {
     if (!$('email-test-to').value) $('email-test-to').value = orgReplyTo;
     $('org-accent').value = o.accent || '';
     paintAccent();
-  } catch { /* members cannot manage the org profile */ }
+    orgLoaded = true;
+    $('org-form').dataset.loaded = '1';
+    $('org-save').disabled = false;
+  } catch (err) {
+    orgLoaded = false;
+    $('org-form').dataset.loaded = '0';
+    $('org-save').disabled = true;
+    // A member cannot manage the org profile: silence. Any other failure is
+    // announced, because saving the blank form would overwrite stored data.
+    if (err.status !== 403) {
+      announce(`Company information could not be loaded: ${err.message}. Saving is disabled until it loads.`);
+    }
+  }
 }
 
 export function paintAccent() {
@@ -372,28 +492,35 @@ export function paintAccent() {
 
 export async function saveOrgProfile(evt) {
   evt.preventDefault();
-  clearFormError($('org-error'));
-  const street = $('org-street').value.trim();
-  const city = $('org-city').value.trim();
-  const postal = $('org-postal').value.trim();
-  const country = $('org-country').value.trim();
-  try {
-    await api.put('/admin/org', {
-      name: $('org-name').value.trim(),
-      legal_id: $('org-legal').value.trim(),
-      // #146 presentation rides the same org store — no parallel truth.
-      from_name: $('org-from').value.trim(),
-      reply_to: $('org-reply').value.trim(),
-      accent: $('org-accent').value.trim(),
-      address: street || city || postal || country
-        ? { street, city, postal_code: postal, country }
-        : null,
-    });
-    announce('Company information saved.');
-    await refreshOrgProfile();
-  } catch (err) {
-    showFormError($('org-error'), err);
+  if (!orgLoaded) {
+    announce('Company information is not loaded yet — reload the section before saving.');
+    return;
   }
+  // SET-05: a double submit writes once.
+  return singleFlight($('org-save'), async () => {
+    clearFormError($('org-error'));
+    const street = $('org-street').value.trim();
+    const city = $('org-city').value.trim();
+    const postal = $('org-postal').value.trim();
+    const country = $('org-country').value.trim();
+    try {
+      await api.put('/admin/org', {
+        name: $('org-name').value.trim(),
+        legal_id: $('org-legal').value.trim(),
+        // #146 presentation rides the same org store — no parallel truth.
+        from_name: $('org-from').value.trim(),
+        reply_to: $('org-reply').value.trim(),
+        accent: $('org-accent').value.trim(),
+        address: street || city || postal || country
+          ? { street, city, postal_code: postal, country }
+          : null,
+      });
+      announce('Company information saved.');
+      await refreshOrgProfile();
+    } catch (err) {
+      showFormError($('org-error'), err);
+    }
+  });
 }
 
 export async function refreshInvoiceTemplate() {
@@ -419,7 +546,7 @@ export async function refreshInvoiceTemplate() {
       tbody.appendChild(
         el('tr', {}, [
           el('th', { attrs: { scope: 'row' }, text: v.name }),
-          el('td', { text: v.example }),
+          el('td', { attrs: { 'data-heading': 'Example' }, text: v.example }),
         ]),
       );
     }
@@ -427,9 +554,19 @@ export async function refreshInvoiceTemplate() {
     // waits for this fill. `initTemplatePreview` renders when the section is
     // shown; a refresh while it is already visible renders immediately.
     templatePreviewLoaded = true;
+    $('template-form').dataset.loaded = '1';
+    $('template-save').disabled = false;
     if (templatePanelShown()) scheduleTemplatePreview(0);
-  } catch {
-    /* members cannot see the template; tab stays hidden for them */
+  } catch (err) {
+    templatePreviewLoaded = false;
+    $('template-form').dataset.loaded = '0';
+    $('template-save').disabled = true;
+    // Members cannot see the template (the tab stays hidden for them): silence.
+    // Any other failure is announced, so Save cannot overwrite the stored
+    // template with the blank form.
+    if (err.status !== 403) {
+      announce(`Invoice template could not be loaded: ${err.message}. Saving is disabled until it loads.`);
+    }
   }
 }
 
@@ -649,16 +786,35 @@ export function initTemplatePreview() {
   window.addEventListener('pagehide', releaseTemplatePreview);
 }
 
+/// SET-07: clear every label override and re-render the preview. The preview
+/// listens to `input`/`change`; assigning `.value` fires neither, so the framed
+/// document used to stay stale until the next keystroke. One explicit render
+/// keeps the card honest ("Use built-in labels" is itself an edit).
+export function resetBuiltInLabels() {
+  for (const k of ['lb-description', 'lb-quantity', 'lb-unit-price', 'lb-subtotal', 'lb-discount', 'lb-tax', 'lb-total']) {
+    $(k).value = '';
+  }
+  announce('Built-in labels restored (save the template to apply).');
+  scheduleTemplatePreview(0);
+}
+
 export async function saveInvoiceTemplate(evt) {
   evt.preventDefault();
-  clearFormError($('template-error'));
-  try {
-    await api.put('/admin/invoice-template', templatePayload());
-    announce('Invoice template saved.');
-    await refreshInvoiceTemplate();
-  } catch (err) {
-    showFormError($('template-error'), err);
+  if (!templatePreviewLoaded) {
+    announce('Invoice template is not loaded yet — reload the section before saving.');
+    return;
   }
+  // SET-05: a double submit writes once.
+  return singleFlight($('template-save'), async () => {
+    clearFormError($('template-error'));
+    try {
+      await api.put('/admin/invoice-template', templatePayload());
+      announce('Invoice template saved.');
+      await refreshInvoiceTemplate();
+    } catch (err) {
+      showFormError($('template-error'), err);
+    }
+  });
 }
 
 // ------------------------------------------------------------- email (#35) --
@@ -721,34 +877,37 @@ export async function refreshEmailSettings() {
 
 export async function saveEmailSettings(evt) {
   evt.preventDefault();
-  clearFormError($('email-error'));
-  const current = emailSettings || {};
-  const body = {
-    host: $('email-host').value.trim(),
-    port: Number($('email-port').value),
-  };
-  // Only changed optional values travel: an untouched username/from keeps its
-  // stored value server-side, and a blank password never wipes the stored one.
-  const username = $('email-username').value.trim();
-  if (username !== (current.username || '')) body.username = username;
-  const from = $('email-from').value.trim();
-  if (from !== (current.from || '')) body.from = from;
-  const password = $('email-password').value;
-  if (password) body.password = password;
-  try {
-    emailSettings = await api.put('/admin/email', body);
-    announce('Email settings saved; the next send uses them immediately.');
-    await refreshEmailSettings();
-  } catch (err) {
-    if (err.status === 503 || err.payload?.error?.code === 'vault_disabled') {
-      const notice = $('email-vault-notice');
-      notice.textContent =
-        'The credential vault is disabled — set TUCANO_SECRET_KEY and restart to save email settings.';
-      notice.hidden = false;
-      setEmailControlsEnabled(false);
+  // SET-05: a double submit writes once.
+  return singleFlight($('email-save'), async () => {
+    clearFormError($('email-error'));
+    const current = emailSettings || {};
+    const body = {
+      host: $('email-host').value.trim(),
+      port: Number($('email-port').value),
+    };
+    // Only changed optional values travel: an untouched username/from keeps its
+    // stored value server-side, and a blank password never wipes the stored one.
+    const username = $('email-username').value.trim();
+    if (username !== (current.username || '')) body.username = username;
+    const from = $('email-from').value.trim();
+    if (from !== (current.from || '')) body.from = from;
+    const password = $('email-password').value;
+    if (password) body.password = password;
+    try {
+      emailSettings = await api.put('/admin/email', body);
+      announce('Email settings saved; the next send uses them immediately.');
+      await refreshEmailSettings();
+    } catch (err) {
+      if (err.status === 503 || err.payload?.error?.code === 'vault_disabled') {
+        const notice = $('email-vault-notice');
+        notice.textContent =
+          'The credential vault is disabled — set TUCANO_SECRET_KEY and restart to save email settings.';
+        notice.hidden = false;
+        setEmailControlsEnabled(false);
+      }
+      showFormError($('email-error'), err);
     }
-    showFormError($('email-error'), err);
-  }
+  });
 }
 
 export async function sendTestEmail(evt) {

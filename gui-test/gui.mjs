@@ -2363,8 +2363,15 @@ await waitFor(() => window.document.querySelectorAll('#config-table tbody tr').l
   message: 'the config table to render its whitelisted rows',
 });
 window.document.getElementById('settings-tab-security').dispatchEvent(new window.Event('click', { bubbles: true }));
+await waitFor(() => window.document.querySelectorAll('#audit-table tbody tr').length >= 1, {
+  message: 'the audit log to render its recent events',
+});
 const cfgRows = [...window.document.querySelectorAll('#config-table tbody tr')];
 check('config table renders whitelisted rows', cfgRows.length >= 5);
+const auditRows = [...window.document.querySelectorAll('#audit-table tbody tr')];
+check('Security renders the read-only audit log (SET-11)',
+  auditRows.length >= 1 && auditRows[0].cells[1].textContent.trim().length > 0
+  && window.document.getElementById('audit-card').hidden === false);
 const daysRow = cfgRows.find((r) => r.cells[0].textContent === 'reminder_days');
 check('reminder_days row shows default source', !!daysRow && daysRow.cells[2].textContent === 'default');
 if (daysRow) {
@@ -2378,6 +2385,8 @@ if (daysRow) {
   }, { message: 'the edited config row to re-render with its new value' });
   const after = [...window.document.querySelectorAll('#config-table tbody tr')].find((r) => r.cells[0].textContent === 'reminder_days');
   check('edit persists to config.json and source becomes file', after.cells[1].textContent === '12' && after.cells[2].textContent === 'file');
+  check('boot-time knobs are marked after restart (SET-04)',
+    /after restart/i.test(after.cells[3].textContent));
 }
 // Non-whitelisted keys cannot be written even via the API.
 const badCfg = await fetch(BASE + '/api/admin/config', { method: 'PUT', headers: { 'content-type': 'application/json', Cookie: SESSION_COOKIE, 'X-CSRF-Protection': '1' }, body: '{"smtp.password":"nope"}' });

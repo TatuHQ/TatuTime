@@ -12,7 +12,7 @@ import { closeDeliveryRecord, closeInvoicePreview, closeSendEmailDialog, confirm
 import { markNotificationsRead, refreshNotifications } from './notifications.js';
 import { initReceiptPreview } from './receipt.js';
 import { initRouter, initSegTabs, initSettingsTabs, initTabs, refreshTimesheetView, segActiveId, showTimesheet } from './route.js';
-import { addSecret, closeUserForm, closeUserPassword, initTemplatePreview, newUserForm, paintAccent, refreshSettings, renderUsers, saveConfig, saveEmailSettings, saveInvoiceTemplate, saveOrgProfile, saveUser, saveUserPassword, sendTestEmail } from './settings.js';
+import { addSecret, closeUserForm, closeUserPassword, initTemplatePreview, newUserForm, paintAccent, refreshAuditLog, refreshSettings, renderUsers, resetBuiltInLabels, saveConfig, saveEmailSettings, saveInvoiceTemplate, saveOrgProfile, saveUser, saveUserPassword, sendTestEmail } from './settings.js';
 import { customerName, fillProjectSelect, fillTaskSelect, loadCustomers, state } from './state.js';
 import { discardTimer, refreshTimer, startTimer, stopTimer } from './timer.js';
 import { commitCell, copyLastWeek, copyPreviousDay, entrySaving, navigateDay, navigateWeek, openWeekRowForm, refreshDay, refreshWeek, resetEntryForm, resetWeekRowForm, saveEntry, saveWeekRow, selectDay, showEntryForm, showWeekRowForm, weekState } from './timesheet.js';
@@ -364,10 +364,6 @@ export function wireWeekGrid() {
     $('item-save').textContent = 'Save item';
     $('item-cancel').hidden = true;
   });
-  $('lb-reset').addEventListener('click', () => {
-    for (const k of ['lb-description', 'lb-quantity', 'lb-unit-price', 'lb-subtotal', 'lb-discount', 'lb-tax', 'lb-total']) $(k).value = '';
-    announce('Built-in labels restored (save the template to apply).');
-  });
   $('ret-form').addEventListener('submit', createRetainer);
   $('ret-detail-close').addEventListener('click', () => {
     $('ret-detail').hidden = true;
@@ -584,7 +580,17 @@ export function wireSetupPanels(today) {
     // switching customer would silently reinterpret an amount already entered in
     // another currency, and blank the conversion readout under the user.
   });
+  wireSettingsControls();
+}
 
+// Settings controls that must answer a plain click (#SET-01 test email,
+// #SET-07 label reset, #SET-11 audit refresh). Exported so the jsdom suite can
+// attach the real listeners instead of calling the handlers directly — calling
+// `sendTestEmail()` itself is exactly why the dead button went unnoticed.
+export function wireSettingsControls() {
+  $('email-test-send').addEventListener('click', sendTestEmail);
+  $('lb-reset').addEventListener('click', resetBuiltInLabels);
+  $('audit-refresh').addEventListener('click', refreshAuditLog);
 }
 
 // Wires the app listeners and loads the first data. Called once authenticated.
@@ -616,7 +622,8 @@ export async function startApp() {
   await loadCustomers();
   await refreshCustomerPickers(); // fills all four pickers, no fetches
   refreshSchedules().catch?.(() => {});
-  refreshCatalog().catch?.(() => {});
+  // SET-02: the catalog is an admin-tier read; a member boot must not fetch it.
+  if (state.isAdmin) refreshCatalog().catch?.(() => {});
   refreshRetainers().catch?.(() => {});
   // First-run trigger (#111): zero customers after a successful login opens
   // the wizard as a modal. Once a customer exists it never auto-opens — the

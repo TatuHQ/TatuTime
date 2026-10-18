@@ -64,9 +64,9 @@ test('the shell ships the official form vocabulary and no bespoke class (#232 ph
     assert.equal(groups.length, 144, 'every former .field wrapper is a p-form__group');
     assert.equal(document.querySelectorAll('.p-form__label').length, 139, 'one official label per field row');
     assert.equal(document.querySelectorAll('.p-form__control').length, 139, 'one official control per field row');
-    // 43: the previous 41 plus the live template preview's introductory line
-    // and its polite status line (both use the official help-text skin).
-    assert.equal(document.querySelectorAll('.p-form-help-text').length, 43, 'the hints became p-form-help-text');
+    // 45: the previous 43 plus the Security panel's read-only audit card blurb
+    // and its polite status line (SET-11; both use the official help-text skin).
+    assert.equal(document.querySelectorAll('.p-form-help-text').length, 45, 'the hints became p-form-help-text');
     assert.equal(document.querySelectorAll('.p-form-validation__message').length, ERROR_IDS.length,
         'every error message is the official validation message');
     assert.equal(document.querySelectorAll('.p-form-validation.is-error').length, ERROR_IDS.length,

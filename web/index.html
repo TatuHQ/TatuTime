@@ -1042,7 +1042,7 @@
                 <tbody></tbody>
               </table>
             </div>
-            <p id="user-empty" hidden>No users found.</p>
+            <p id="user-empty" class="workspace-empty" hidden>No users found.</p>
           </div>
         </div>
       </section>
@@ -1089,7 +1089,7 @@
                 <tbody></tbody>
               </table>
             </div>
-            <p id="secret-empty" hidden>No credentials stored yet.</p>
+            <p id="secret-empty" class="workspace-empty" hidden>No credentials stored yet.</p>
           </div>
         </div>
         <div class="p-card" id="config-card">
@@ -1097,16 +1097,19 @@
             <h2>Runtime configuration <span class="beta">Beta</span></h2>
           </div>
           <div class="p-card__content">
-            <p class="p-form-help-text">Effective settings, resolved <strong>env &gt; config.json &gt;
-                default</strong> and stored on the data volume — a restart or image update keeps them (#94).</p>
+            <p class="p-form-help-text">Externalised settings, resolved <strong>env &gt; config.json &gt;
+                default</strong> and stored on the data volume — a restart or image update keeps them (#94).
+                Rows marked <strong>after restart</strong> are read once at boot (reminder and retention
+                scheduling, the provider registries); every other row applies to the next request.</p>
             <div class="table-scroll">
-              <table id="config-table">
+              <table id="config-table" class="p-table--mobile-card">
                 <caption class="sr-only">Effective runtime configuration</caption>
                 <thead>
                   <tr>
                     <th scope="col">Setting</th>
                     <th scope="col">Value</th>
                     <th scope="col">Source</th>
+                    <th scope="col">Applies</th>
                   </tr>
                 </thead>
                 <tbody></tbody>
@@ -1126,10 +1129,36 @@
             <div class="p-form-validation is-error">
               <p class="p-form-validation__message" id="config-error" role="alert" hidden></p>
             </div>
-            <div class="buttons"><button data-positive="1" type="submit" id="config-save">Apply to
+            <div class="buttons"><button data-positive="1" type="submit" id="config-save" disabled>Apply to
                 config.json</button></div>
           </div>
         </form>
+        <div class="p-card" id="audit-card">
+          <div class="p-card__header">
+            <h2>Audit log</h2>
+          </div>
+          <div class="p-card__content">
+            <p class="p-form-help-text">The most recent security events, newest first — sign-ins, user and
+              secret changes, invoice deliveries. Read-only: the log is append-only, so nothing here can be
+              edited or deleted.</p>
+            <div class="buttons"><button type="button" id="audit-refresh">Refresh</button></div>
+            <div class="table-scroll">
+              <table id="audit-table" class="p-table--mobile-card">
+                <caption class="sr-only">Recent security audit events</caption>
+                <thead>
+                  <tr>
+                    <th scope="col">Time</th>
+                    <th scope="col">Event</th>
+                    <th scope="col">Subject</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+            <p id="audit-empty" class="workspace-empty" hidden>No audit events recorded yet.</p>
+            <p id="audit-status" class="p-form-help-text" role="status" aria-live="polite"></p>
+          </div>
+        </div>
       </section>
 
       <section id="settings-panel-expenses" class="settings-panel" role="tabpanel"
@@ -1200,7 +1229,7 @@
             <div class="p-form-validation is-error">
               <p class="p-form-validation__message" id="org-error" role="alert" hidden></p>
             </div>
-            <div class="buttons"><button data-positive="1" type="submit" id="org-save">Save company
+            <div class="buttons"><button data-positive="1" type="submit" id="org-save" disabled>Save company
                 info</button></div>
           </div>
         </form>
@@ -1286,7 +1315,7 @@
             <div class="p-form-validation is-error">
               <p class="p-form-validation__message" id="template-error" role="alert" hidden></p>
             </div>
-            <div class="buttons"><button data-positive="1" type="submit" id="template-save">Save
+            <div class="buttons"><button data-positive="1" type="submit" id="template-save" disabled>Save
                 template</button></div>
           </div>
         </form>
@@ -1296,7 +1325,7 @@
           </div>
           <div class="p-card__content">
             <div class="table-scroll">
-              <table id="template-vars">
+              <table id="template-vars" class="p-table--mobile-card">
                 <caption class="sr-only">Available %variable% placeholders</caption>
                 <thead>
                   <tr>
@@ -1383,7 +1412,7 @@
                 <tbody></tbody>
               </table>
             </div>
-            <p id="item-empty" hidden>No catalog items yet.</p>
+            <p id="item-empty" class="workspace-empty" hidden>No catalog items yet.</p>
           </div>
         </div>
       </section>
