@@ -123,11 +123,13 @@ export const TAB_ROUTES = {
   'tab-submissions': '/approvals',
   'tab-reports': '/reports',
   'tab-settings': {
-    'settings-tab-security': '/settings/security',
     'settings-tab-users': '/settings/users',
-    'settings-tab-invoice': '/settings/invoices',
+    'settings-tab-company': '/settings/company',
+    'settings-tab-invoice-template': '/settings/invoice-template',
     'settings-tab-catalog': '/settings/catalog',
     'settings-tab-expenses': '/settings/expenses',
+    'settings-tab-email': '/settings/email',
+    'settings-tab-security': '/settings/security',
   },
 };
 export const KNOWN_ROUTES = new Set(
@@ -194,11 +196,13 @@ export function applyRoute(route) {
     activateSeg(seg || 'ts-day', false);
   } else if (tabFor === 'tab-settings') {
     const settingsId = {
-      security: 'settings-tab-security',
       users: 'settings-tab-users',
-      invoices: 'settings-tab-invoice',
+      company: 'settings-tab-company',
+      'invoice-template': 'settings-tab-invoice-template',
       catalog: 'settings-tab-catalog',
       expenses: 'settings-tab-expenses',
+      email: 'settings-tab-email',
+      security: 'settings-tab-security',
     }[sub || 'security'];
     const target = $(settingsId || 'settings-tab-security');
     if (target && !target.hidden) target.click();

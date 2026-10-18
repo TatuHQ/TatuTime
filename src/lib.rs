@@ -278,11 +278,13 @@ const SPA_ROUTES: &[&str] = &[
     "/approvals",
     "/reports",
     "/settings",
-    "/settings/security",
     "/settings/users",
-    "/settings/invoices",
+    "/settings/company",
+    "/settings/invoice-template",
     "/settings/catalog",
     "/settings/expenses",
+    "/settings/email",
+    "/settings/security",
 ];
 
 fn spa_page(path: &str) -> bool {

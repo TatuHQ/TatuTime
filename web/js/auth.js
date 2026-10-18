@@ -38,6 +38,9 @@ export function showAccount(me) {
   const admin = me.role === 'admin';
   state.isAdmin = admin; // #188: boot must skip admin-tier panels for members
   document.querySelectorAll('#settings-tabs [role="tab"]').forEach((tab) => {
+    // Members own only Expense categories; every other Settings section
+    // (Users, Company, Invoice template, Products & services, Email,
+    // Security & runtime) is admin-tier.
     tab.hidden = !admin && tab.id !== 'settings-tab-expenses';
   });
   if (!admin) {

@@ -12,7 +12,7 @@ import { closeDeliveryRecord, closeInvoicePreview, closeSendEmailDialog, confirm
 import { markNotificationsRead, refreshNotifications } from './notifications.js';
 import { initReceiptPreview } from './receipt.js';
 import { initRouter, initSegTabs, initSettingsTabs, initTabs, refreshTimesheetView, segActiveId, showTimesheet } from './route.js';
-import { addSecret, closeUserForm, closeUserPassword, newUserForm, paintAccent, refreshSettings, renderUsers, saveConfig, saveInvoiceTemplate, saveOrgProfile, saveUser, saveUserPassword } from './settings.js';
+import { addSecret, closeUserForm, closeUserPassword, newUserForm, paintAccent, refreshSettings, renderUsers, saveConfig, saveEmailSettings, saveInvoiceTemplate, saveOrgProfile, saveUser, saveUserPassword, sendTestEmail } from './settings.js';
 import { customerName, fillProjectSelect, fillTaskSelect, loadCustomers, state } from './state.js';
 import { discardTimer, refreshTimer, startTimer, stopTimer } from './timer.js';
 import { commitCell, copyLastWeek, copyPreviousDay, entrySaving, navigateDay, navigateWeek, openWeekRowForm, refreshDay, refreshWeek, resetEntryForm, resetWeekRowForm, saveEntry, saveWeekRow, selectDay, showEntryForm, showWeekRowForm, weekState } from './timesheet.js';
@@ -555,6 +555,8 @@ export function wireSetupPanels(today) {
   }
   $('secret-form').addEventListener('submit', addSecret);
   $('config-form').addEventListener('submit', saveConfig);
+  $('email-form').addEventListener('submit', saveEmailSettings);
+  $('email-test-form').addEventListener('submit', sendTestEmail);
   $('timer-open').addEventListener('click', () => {
     const expanded = $('timerbar').hidden;
     $('timerbar').hidden = !expanded;

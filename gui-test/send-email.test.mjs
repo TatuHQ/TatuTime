@@ -221,7 +221,7 @@ test('an unconfigured SMTP transport disables Send and points at the Settings ro
     assert.equal(document.getElementById('send-email-send').disabled, true, 'Send is disabled while unconfigured');
     assert.equal(document.getElementById('send-email-settings').dataset.route, t.EMAIL_SETTINGS_ROUTE,
         'Open Settings points at the single route constant');
-    assert.equal(t.EMAIL_SETTINGS_ROUTE, '/settings/security', 'the constant still names the current Settings view');
+    assert.equal(t.EMAIL_SETTINGS_ROUTE, '/settings/email', 'the constant names the Email Settings view');
     assert.equal(t.calls().length, 0);
     // A 503 vault_disabled answer is the same guidance, not a dialog crash.
     const second = setup({ adminEmail: 503 });

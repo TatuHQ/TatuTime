@@ -15,9 +15,8 @@ import { MONTH_NAMES, invalidateLockCache } from './timesheet.js';
 const invoiceSeq = createSeqGuard();
 
 // The Settings view that owns SMTP configuration. Kept in ONE place so the
-// next subtask can point it at the new /settings/email view without touching
-// the recipient dialog.
-export const EMAIL_SETTINGS_ROUTE = '/settings/security';
+// recipient dialog's "Open Settings" lands on the Email section.
+export const EMAIL_SETTINGS_ROUTE = '/settings/email';
 
 // -------------------------------------------------------------- invoices ---
 

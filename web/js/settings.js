@@ -5,7 +5,7 @@
 import { api } from './api.js';
 import { showAuth } from './auth.js';
 import { refreshCatalog } from './billing.js';
-import { $, announce, askConfirm, clearFormError, el, fillSelect, formatMoney, showFormError, statusChip } from './dom.js';
+import { $, announce, askConfirm, clearFormError, el, fillSelect, formatMoney, showFormError, singleFlight, statusChip } from './dom.js';
 
 // --------------------------------------------------------------- settings --
 
@@ -221,6 +221,7 @@ export async function refreshSettings() {
     refreshOrgProfile(),
     refreshCatalog(),
     refreshInvoiceTemplate(),
+    refreshEmailSettings(),
   ]);
 }
 
@@ -278,14 +279,6 @@ export async function refreshConfig() {
   let data;
   try {
     data = await api.get('/admin/config');
-    // #130: be honest about delivery. A 200 from the email endpoints with
-    // transport "disabled" means logged, not sent.
-    const es = $('email-status');
-    if (es) {
-      es.textContent = data.email_transport === 'smtp'
-        ? 'Email delivery: SMTP configured — invoices are actually sent.'
-        : 'Email delivery: NOT configured — messages are logged only. Set smtp.host in credentials above or TUCANO_SMTP_HOST.';
-    }
   } catch {
     $('config-card').hidden = true;
     $('config-form').hidden = true;
@@ -344,11 +337,11 @@ export async function saveConfig(evt) {
   }
 }
 
-// ------------------------------------------------- invoice template (#116) --
-
-export let templateVarsLoaded = false;
-
 // ------------------------------------------------- company identity (#138) --
+// The reply-to address doubles as the default recipient for the Email tab's
+// "Send test email" field; nothing else reads it here.
+export let orgReplyTo = '';
+
 export async function refreshOrgProfile() {
   try {
     const o = await api.get('/admin/org');
@@ -361,6 +354,8 @@ export async function refreshOrgProfile() {
     $('org-country').value = a.country || '';
     $('org-from').value = o.from_name || '';
     $('org-reply').value = o.reply_to || '';
+    orgReplyTo = o.reply_to || '';
+    if (!$('email-test-to').value) $('email-test-to').value = orgReplyTo;
     $('org-accent').value = o.accent || '';
     paintAccent();
   } catch { /* members cannot manage the org profile */ }
@@ -428,7 +423,6 @@ export async function refreshInvoiceTemplate() {
         ]),
       );
     }
-    templateVarsLoaded = true;
     await refreshTemplatePreview();
   } catch {
     /* members cannot see the template; tab stays hidden for them */
@@ -488,6 +482,127 @@ export async function saveInvoiceTemplate(evt) {
   } catch (err) {
     showFormError($('template-error'), err);
   }
+}
+
+// ------------------------------------------------------------- email (#35) --
+// SMTP transport settings live in the vault (the password is write-only) and
+// are resolved on every send, so saving here takes effect without a restart.
+
+export let emailSettings = null;
+
+export function renderEmailStatus(data) {
+  const status = $('email-status');
+  if (!status) return;
+  status.textContent = data.configured
+    ? `Email delivery: SMTP ${data.host}:${data.port}`
+    : 'Email delivery: NOT configured — messages are only logged.';
+}
+
+function setEmailControlsEnabled(enabled) {
+  for (const id of ['email-form', 'email-test-form']) {
+    const form = $(id);
+    if (!form) continue;
+    for (const control of form.querySelectorAll('input, select, textarea, button')) {
+      control.disabled = !enabled;
+    }
+  }
+}
+
+export async function refreshEmailSettings() {
+  let data;
+  try {
+    data = await api.get('/admin/email');
+  } catch (err) {
+    // Members cannot read admin settings; every other failure is announced.
+    if (err.status !== 403) announce(err.message);
+    return;
+  }
+  emailSettings = data;
+  renderEmailStatus(data);
+  $('email-host').value = data.host || '';
+  $('email-port').value = String(data.port || 25);
+  $('email-username').value = data.username || '';
+  $('email-from').value = data.from || 'noreply@localhost';
+  // The password never reaches the DOM: only whether one is stored.
+  $('email-password').value = '';
+  $('email-password').placeholder = data.has_password
+    ? 'stored — leave blank to keep'
+    : 'No password stored';
+  if (!$('email-test-to').value) $('email-test-to').value = orgReplyTo || '';
+  const notice = $('email-vault-notice');
+  if (data.vault_enabled) {
+    notice.hidden = true;
+    notice.textContent = '';
+    setEmailControlsEnabled(true);
+  } else {
+    notice.textContent =
+      'Email settings need the credential vault. Set TUCANO_SECRET_KEY to enable encrypted storage, then restart and reload this page.';
+    notice.hidden = false;
+    setEmailControlsEnabled(false);
+  }
+}
+
+export async function saveEmailSettings(evt) {
+  evt.preventDefault();
+  clearFormError($('email-error'));
+  const current = emailSettings || {};
+  const body = {
+    host: $('email-host').value.trim(),
+    port: Number($('email-port').value),
+  };
+  // Only changed optional values travel: an untouched username/from keeps its
+  // stored value server-side, and a blank password never wipes the stored one.
+  const username = $('email-username').value.trim();
+  if (username !== (current.username || '')) body.username = username;
+  const from = $('email-from').value.trim();
+  if (from !== (current.from || '')) body.from = from;
+  const password = $('email-password').value;
+  if (password) body.password = password;
+  try {
+    emailSettings = await api.put('/admin/email', body);
+    announce('Email settings saved; the next send uses them immediately.');
+    await refreshEmailSettings();
+  } catch (err) {
+    if (err.status === 503 || err.payload?.error?.code === 'vault_disabled') {
+      const notice = $('email-vault-notice');
+      notice.textContent =
+        'The credential vault is disabled — set TUCANO_SECRET_KEY and restart to save email settings.';
+      notice.hidden = false;
+      setEmailControlsEnabled(false);
+    }
+    showFormError($('email-error'), err);
+  }
+}
+
+export async function sendTestEmail(evt) {
+  if (evt) evt.preventDefault();
+  clearFormError($('email-test-error'));
+  $('email-test-result').textContent = '';
+  // QA-01: a double click must not send two test messages.
+  return singleFlight($('email-test-send'), async () => {
+    const to = $('email-test-to').value.trim();
+    try {
+      const res = await api.post('/admin/email/test', { to });
+      const sentTo = res.sent_to || to;
+      $('email-test-result').textContent = `Test email sent to ${sentTo}.`;
+      announce(`Test email sent to ${sentTo}.`);
+      return res;
+    } catch (err) {
+      const code = err.payload?.error?.code;
+      if (code === 'email_not_configured') {
+        const explained = new Error(
+          'Email delivery is not configured — save an SMTP host above first.',
+        );
+        explained.status = err.status;
+        explained.payload = err.payload;
+        showFormError($('email-test-error'), explained);
+      } else {
+        showFormError($('email-test-error'), err);
+      }
+      announce(err.message);
+      return undefined;
+    }
+  });
 }
 
 export async function addSecret(evt) {

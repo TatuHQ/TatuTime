@@ -145,7 +145,7 @@ body {
 .ts-head .p-tabs__list, .settings-head .p-tabs__list { width: auto; margin: 0; }
 #ts-seg .p-tabs__item:last-child, .settings-tabs .p-tabs__item:last-child { margin-right: 0; }
 #ts-seg .p-tabs__link { min-width: 8.5ch; }
-.settings-tabs .p-tabs__link { min-width: 9rem; }
+.settings-tabs .p-tabs__link { min-width: 7.5rem; }
 .account { display: flex; align-items: center; justify-content: space-between; gap: .5rem; padding: .5rem; border-top: 1px solid var(--line); color: var(--muted); }
 .account .who { font-size: .85rem; overflow: hidden; text-overflow: ellipsis; }
 .more-tools-group { border-top: 1px solid var(--line); margin-top: .45rem; padding-top: .4rem; }
@@ -264,7 +264,7 @@ td.num, th.num, .ws-total.num { text-align: right; font-variant-numeric: tabular
    are Vanilla p-card shells — the card owns the frame and header rule, so the
    heading slot (and submit/report bars) drops its bottom margin; dense registers
    use p-table--mobile-card (data-heading) and summaries keep a plain table. */
-.p-card__header.panel-heading-row, #report-form.bar, #submission-form.bar { margin-bottom: 0; }
+#report-form.bar, #submission-form.bar { margin-bottom: 0; }
 
 /* #232 phase 2b: errors are the official `p-form-validation__message` (inside a
    `p-form-validation is-error` wrapper) and hints are `p-form-help-text`, so the
@@ -499,7 +499,6 @@ dialog.p-modal::backdrop { background: transparent; }
 .settings-head { display: flex; align-items: center; justify-content: flex-start; gap: 1rem; flex-wrap: wrap; margin-bottom: .9rem; }
 .settings-tabs { flex-wrap: wrap; }
 .settings-panel { min-width: 0; }
-.settings-panel > h2:first-child { margin-top: .4rem; }
 .seg {
   display: inline-flex; overflow: hidden;
   border: 1px solid var(--line); border-radius: var(--radius);
@@ -686,8 +685,6 @@ caption { padding-bottom: .35rem; }
 .invoice-table-scroll { display: block; max-width: 100%; overflow-x: auto; }
 .customer-extra-details { margin: .25rem 0 .8rem; border-top: 1px solid var(--line); }
 .customer-extra-details fieldset.p-form__group { margin-top: .5rem; }
-.panel-heading-row { display: flex; align-items: center; justify-content: flex-start; gap: 1rem; margin-bottom: .65rem; }
-.panel-heading-row h2 { margin: 0; }
 .chip-edit { border: 0; background: transparent; color: var(--brand-deep); padding: .1rem .25rem; font-size: .8rem; }
 .chip-edit:hover { text-decoration: underline; }
 

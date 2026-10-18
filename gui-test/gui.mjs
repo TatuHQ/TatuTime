@@ -1255,15 +1255,16 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
 {
   window.document.getElementById('tab-settings').dispatchEvent(new window.Event('click', { bubbles: true }));
   await waitFor(() => [...window.document.querySelectorAll('#settings-tabs [role="tab"]')].map((tab) => tab.id).join(',') ===
-    'settings-tab-security,settings-tab-users,settings-tab-invoice,settings-tab-catalog,settings-tab-expenses', {
+    'settings-tab-users,settings-tab-company,settings-tab-invoice-template,settings-tab-catalog,settings-tab-expenses,settings-tab-email,settings-tab-security', {
     message: 'the Settings section to render its tab bar',
   });
-  check('Settings tab bar includes Users, Security, Invoice documents, and Products & services',
+  check('Settings tab bar lists the seven focused sections in order',
     [...window.document.querySelectorAll('#settings-tabs [role="tab"]')].map((tab) => tab.id).join(',') ===
-    'settings-tab-security,settings-tab-users,settings-tab-invoice,settings-tab-catalog,settings-tab-expenses');
-  check('Settings opens on Security & runtime by default',
-    window.document.getElementById('settings-tab-security').getAttribute('aria-selected') === 'true'
-    && !window.document.getElementById('settings-panel-security').hidden);
+    'settings-tab-users,settings-tab-company,settings-tab-invoice-template,settings-tab-catalog,settings-tab-expenses,settings-tab-email,settings-tab-security');
+  check('Settings opens on Users by default',
+    window.document.getElementById('settings-tab-users').getAttribute('aria-selected') === 'true'
+    && !window.document.getElementById('settings-panel-users').hidden
+    && window.document.getElementById('settings-panel-security').hidden);
   window.document.getElementById('settings-tab-users').dispatchEvent(new window.Event('click', { bubbles: true }));
   check('Users tab shows the admin-management table',
     window.document.getElementById('settings-tab-users').getAttribute('aria-selected') === 'true'
@@ -1358,7 +1359,7 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
   check('Products & services tab shows the catalog only',
     window.document.getElementById('settings-tab-catalog').getAttribute('aria-selected') === 'true'
     && !window.document.getElementById('settings-panel-catalog').hidden
-    && window.document.getElementById('settings-panel-invoice').hidden);
+    && window.document.getElementById('settings-panel-invoice-template').hidden);
   window.document.getElementById('item-name').value = 'Site visit';
   window.document.getElementById('item-kind').value = 'service';
   window.document.getElementById('item-desc').value = 'On-site engineering visit';
@@ -1367,10 +1368,10 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
   await settle('the catalog item form to save Site visit');
   const cat = (await (await fetch(BASE + '/api/admin/item-types', { headers: { Cookie: SESSION_COOKIE } })).json()).item_types;
   check('catalog item created via the form (#147)', cat.length === 1 && cat[0].name === 'Site visit' && cat[0].default_price_minor === 12000);
-  window.document.getElementById('settings-tab-invoice').dispatchEvent(new window.Event('click', { bubbles: true }));
-  check('Invoice documents tab shows template and field-label settings',
-    window.document.getElementById('settings-tab-invoice').getAttribute('aria-selected') === 'true'
-    && !window.document.getElementById('settings-panel-invoice').hidden
+  window.document.getElementById('settings-tab-invoice-template').dispatchEvent(new window.Event('click', { bubbles: true }));
+  check('Invoice template tab shows template and field-label settings',
+    window.document.getElementById('settings-tab-invoice-template').getAttribute('aria-selected') === 'true'
+    && !window.document.getElementById('settings-panel-invoice-template').hidden
     && window.document.getElementById('settings-panel-catalog').hidden);
   window.document.getElementById('lb-total').value = 'Amount due';
   window.document.getElementById('lb-description').value = 'Work performed';
@@ -1908,7 +1909,7 @@ if (emailBtn) {
     dialogOpen(byId('send-email-dialog'))
     && byId('send-email-send').disabled === true
     && /not\s+configured/i.test(byId('send-email-notice').textContent)
-    && byId('send-email-settings').dataset.route === '/settings/security');
+    && byId('send-email-settings').dataset.route === '/settings/email');
   check('the panel email flow sends nothing while SMTP is unconfigured (#139)',
     sentCount() === emailsBefore
     && !!byId('ip-frame') && String(byId('ip-frame').getAttribute('src')).startsWith('blob:'));
@@ -2362,12 +2363,13 @@ check('secret-shaped config keys are refused', badCfg.status === 422);
 
 // ---- INVOICE TEMPLATE (#116): admin editor, cheat-sheet, rejection, preview ----
 window.document.getElementById('tab-settings').dispatchEvent(new window.Event('click', { bubbles: true }));
+window.document.getElementById('settings-tab-email').dispatchEvent(new window.Event('click', { bubbles: true }));
 await waitFor(() => /Email delivery:/i.test(byId('email-status').textContent), {
-  message: 'the Settings email transport state to render',
+  message: 'the Email section delivery state to render',
 });
-window.document.getElementById('settings-tab-security').dispatchEvent(new window.Event('click', { bubbles: true }));
-check('Settings discloses the email transport state (#130)',
-  /Email delivery:/i.test(window.document.getElementById('email-status').textContent));
+check('Email settings discloses the delivery transport state (#130)',
+  /Email delivery:/i.test(window.document.getElementById('email-status').textContent)
+  && !window.document.getElementById('settings-panel-email').hidden);
 const varRows = [...window.document.querySelectorAll('#template-vars tbody tr')];
 window.document.getElementById('settings-tab-invoice').dispatchEvent(new window.Event('click', { bubbles: true }));
 // ---- APPEARANCE & MESSAGES (#146) ----
@@ -2826,7 +2828,9 @@ check('members can manage expense categories without admin Settings panels',
   && !memberDocument.getElementById('settings-tab-expenses').hidden
   && !memberDocument.getElementById('settings-panel-expenses').hidden
   && memberDocument.getElementById('settings-tab-security').hidden
-  && memberDocument.getElementById('settings-panel-security').hidden);
+  && memberDocument.getElementById('settings-panel-security').hidden
+  && memberDocument.getElementById('settings-tab-email').hidden
+  && memberDocument.getElementById('settings-panel-email').hidden);
 memberDom.window.close();
 
 console.log(`\n${failures === 0 ? 'ALL GUI CHECKS PASSED' : failures + ' GUI CHECK(S) FAILED'}`);

@@ -85,16 +85,16 @@ test('horizontal tablist still moves on ArrowLeft/ArrowRight (#258)', () => {
     // The settings section owns this tablist and is hidden until shown; reveal it
     // so its tabs are focusable, as they are for a user on the Settings view.
     document.getElementById('panel-settings').hidden = false;
-    document.getElementById('settings-tab-security').focus();
-    assert.equal(activeId(document), 'settings-tab-security', 'starts on the first settings tab');
+    document.getElementById('settings-tab-users').focus();
+    assert.equal(activeId(document), 'settings-tab-users', 'starts on the first settings tab');
     press(dom, 'ArrowRight');
-    assert.equal(activeId(document), 'settings-tab-users', 'ArrowRight → next settings tab');
+    assert.equal(activeId(document), 'settings-tab-company', 'ArrowRight → next settings tab');
     press(dom, 'ArrowLeft');
-    assert.equal(activeId(document), 'settings-tab-security', 'ArrowLeft → previous settings tab');
+    assert.equal(activeId(document), 'settings-tab-users', 'ArrowLeft → previous settings tab');
     press(dom, 'ArrowDown');
     assert.equal(
         activeId(document),
-        'settings-tab-security',
+        'settings-tab-users',
         'ArrowDown is ignored on a horizontal tablist',
     );
     dom.window.close();
