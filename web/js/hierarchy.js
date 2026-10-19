@@ -25,8 +25,10 @@ export async function refreshCustomerTable() {
         el('th', { attrs: { scope: 'row' } }, [
           // #182: no selection state — the action opens the Projects section
           // filtered to this customer.
-          el('button', { type: 'button', cls: 'link', text: c.name,
-            on: { click: () => openProjectsFor(c.id) } }),
+          el('button', {
+            type: 'button', cls: 'link', text: c.name,
+            on: { click: () => openProjectsFor(c.id) }
+          }),
         ]),
         // No `num` here: the rate column reads left-aligned with its header
         // (the `num` utility right-aligns, which left the values stranded).
@@ -86,6 +88,7 @@ export function startCustomerEdit(c) {
   $('customer-terms-days-field').hidden = !terms || terms.kind !== 'custom';
   $('customer-subject').value = c.invoice_subject || '';
   $('customer-notes').value = c.invoice_notes || '';
+  $('customer-legal-id').value = c.legal_id || '';
   const a = c.address || {};
   $('cust-street').value = a.street || '';
   $('cust-city').value = a.city || '';
@@ -103,6 +106,9 @@ export function startCustomerEdit(c) {
   $('pay-bic').value = pd.bic || '';
   $('pay-reference').value = pd.reference || '';
   $('pay-instructions').value = pd.instructions || '';
+  // Multi-currency rails (#354): a legacy document has none, which is exactly
+  // the single-rail default above.
+  setPaymentRails(Array.isArray(pd.rails) ? pd.rails : []);
   setContacts(c.contacts || []);
   $('customer-save').textContent = 'Update customer';
   $('customer-dialog-title').textContent = 'Edit customer';
@@ -146,6 +152,210 @@ export function setContacts(list) {
   for (const c of list) $('contact-rows').appendChild(contactRow(c));
 }
 
+// ------------------------------------- payment rails (multi-currency, #354) --
+//
+// `PaymentDetails.rails` holds one account per currency. The flat fields above
+// stay the default single-rail block and are never renamed; these rows are
+// additive display data printed after them. Every control is labelled (a real
+// <label for>), every row is a fieldset whose legend names it, and the
+// add/remove controls are real <button>s, so the list is keyboard operable
+// without a mouse. Nothing here calls innerHTML: values only ever reach the DOM
+// through `el`/`textContent`.
+
+export const MAX_PAYMENT_RAILS = 4;
+
+/// The rail fields in the order the dialog asks for them. `key` is the stored
+/// JSON name, so the ids `pay-rail-<i>-<key>` line up with the API's
+/// `payment_details.rails[i].<key>` error fields (see dom.js fieldControlIds).
+export const PAYMENT_RAIL_FIELDS = [
+  ['currency', 'Currency (ISO-4217)', 3, 'EUR'],
+  ['account_name', 'Account name', 120, ''],
+  ['account_number', 'Account number', 64, ''],
+  ['account_type', 'Account type', 40, 'Checking'],
+  ['iban', 'IBAN', 34, 'EX000000000000000000'],
+  ['bic', 'BIC/SWIFT', 11, ''],
+  ['bank_name', 'Bank name', 120, ''],
+  ['bank_address', 'Bank address', 200, ''],
+  ['routing_number', 'Routing number', 40, ''],
+  ['swift', 'SWIFT', 11, ''],
+];
+
+export function paymentRailRows() {
+  return [...$('pay-rails').children];
+}
+
+/// Renumber after an add/remove: ids, label targets, legends and the remove
+/// button's accessible name all follow the row's position, so an error field
+/// like `payment_details.rails[1].iban` always finds the visible second row.
+export function renumberPaymentRails() {
+  const rows = paymentRailRows();
+  rows.forEach((row, index) => {
+    row.dataset.railIndex = String(index);
+    row.__legend.textContent = `Payment rail ${index + 1}`;
+    for (const { key, label, control } of row.__fields) {
+      control.id = `pay-rail-${index}-${key.replace(/_/g, '-')}`;
+      label.setAttribute('for', control.id);
+    }
+    row.__remove.setAttribute('aria-label', `Remove payment rail ${index + 1}`);
+  });
+  const add = $('pay-rail-add');
+  if (add) add.disabled = rows.length >= MAX_PAYMENT_RAILS;
+  const status = $('pay-rails-status');
+  if (status) {
+    status.textContent = rows.length >= MAX_PAYMENT_RAILS
+      ? `All ${MAX_PAYMENT_RAILS} payment rails are in use. Remove one to add another.`
+      : '';
+  }
+}
+
+/// One rail row. `rail` is a stored `PaymentRail` (object) or `{}` for a new
+/// row; `__read()` returns the payload shape, omitting blank optional fields so
+/// the server stores `None` rather than empty strings.
+export function paymentRailRow(rail = {}) {
+  const legend = el('legend', { text: 'Payment rail' });
+  const fields = [];
+  const children = [legend];
+  for (const [key, text, maxlength, placeholder] of PAYMENT_RAIL_FIELDS) {
+    const group = el('div', { cls: 'p-form__group' });
+    const label = el('label', { cls: 'p-form__label', text });
+    const attrs = { type: 'text', maxlength: String(maxlength), autocomplete: 'off' };
+    if (placeholder) attrs.placeholder = placeholder;
+    if (key === 'currency') attrs.list = 'pay-rail-currencies';
+    const control = el('input', { cls: 'p-form__control', attrs });
+    control.dataset.railField = key;
+    control.value = rail[key] == null ? '' : String(rail[key]);
+    group.append(label, control);
+    children.push(group);
+    fields.push({ key, label, control });
+  }
+  const instructionsGroup = el('div', { cls: 'p-form__group' });
+  const instructionsLabel = el('label', { cls: 'p-form__label', text: 'Instructions (shown last)' });
+  const instructions = el('textarea', {
+    cls: 'p-form__control',
+    attrs: { maxlength: '500', rows: '2' },
+  });
+  instructions.dataset.railField = 'instructions';
+  instructions.value = rail.instructions == null ? '' : String(rail.instructions);
+  instructionsGroup.append(instructionsLabel, instructions);
+  children.push(instructionsGroup);
+  fields.push({ key: 'instructions', label: instructionsLabel, control: instructions });
+
+  const remove = el('button', {
+    type: 'button',
+    cls: 'link danger',
+    text: 'Remove rail',
+    on: { click: () => removePaymentRail(row) },
+  });
+  children.push(el('div', { cls: 'buttons' }, [remove]));
+
+  const row = el('fieldset', { cls: 'payment-rail' }, children);
+  row.__legend = legend;
+  row.__fields = fields;
+  row.__remove = remove;
+  row.__read = () => {
+    const value = (key) => row.__fields.find((f) => f.key === key).control.value.trim();
+    const out = {
+      currency: value('currency').toUpperCase(),
+      // The struct requires this key even when the rail carries an IBAN and no
+      // local account; an empty string is the honest "not provided".
+      account_name: value('account_name'),
+    };
+    for (const key of ['account_number', 'account_type', 'iban', 'bic', 'bank_name',
+      'bank_address', 'routing_number', 'swift', 'instructions']) {
+      const v = value(key);
+      if (v) out[key] = v;
+    }
+    return out;
+  };
+  return row;
+}
+
+export function setPaymentRails(list) {
+  $('pay-rails').textContent = '';
+  for (const rail of (Array.isArray(list) ? list : []).slice(0, MAX_PAYMENT_RAILS)) {
+    $('pay-rails').appendChild(paymentRailRow(rail && typeof rail === 'object' ? rail : {}));
+  }
+  renumberPaymentRails();
+}
+
+export function addPaymentRail() {
+  if (paymentRailRows().length >= MAX_PAYMENT_RAILS) {
+    announce(`At most ${MAX_PAYMENT_RAILS} payment rails.`);
+    return null;
+  }
+  const row = paymentRailRow({});
+  $('pay-rails').appendChild(row);
+  renumberPaymentRails();
+  row.__fields[0].control.focus();
+  announce(`Payment rail ${paymentRailRows().length} added.`);
+  return row;
+}
+
+export function removePaymentRail(row) {
+  if (!row || !row.parentNode) return;
+  row.remove();
+  renumberPaymentRails();
+  $('pay-rail-add').focus();
+  announce('Payment rail removed.');
+}
+
+export function readPaymentRails() {
+  // Every visible row, including a blank one: keeping the row indexes aligned
+  // is what lets a server/client error name `rails[1]` and mark the second
+  // visible row's input. The save path drops fully blank rows afterwards.
+  return paymentRailRows().map((row) => row.__read());
+}
+
+/// A row with no values at all is an untouched "Add payment rail" click, not a
+/// rail: it is neither validated nor sent.
+export function railHasContent(rail) {
+  return Object.values(rail).some((value) => value !== '');
+}
+
+/// The client-side half of the server's rail rules: currency is a 3-letter
+/// uppercase ISO code, IBAN 5-34 alphanumerics, BIC/SWIFT exactly 8 or 11.
+/// Returns the same `{field, message}` shape the API sends, so showFormError
+/// marks the right control and the message reads like any other 422.
+export function paymentRailError(index, field, message) {
+  const name = `payment_details.rails[${index}].${field}`;
+  return {
+    message: `${name}: ${message}`,
+    payload: {
+      error: {
+        code: 'validation_failed',
+        message: 'Payment details are invalid.',
+        fields: [{ field: name, message }],
+      },
+    },
+  };
+}
+
+export function validatePaymentRails(rails) {
+  for (let index = 0; index < rails.length; index += 1) {
+    const rail = rails[index];
+    if (!railHasContent(rail)) continue;
+    if (!/^[A-Z]{3}$/.test(rail.currency || '')) {
+      return paymentRailError(index, 'currency', 'required, a 3-letter uppercase ISO code');
+    }
+    // Required on a rail, exactly as the API enforces it: a rail that names no
+    // account holder cannot be paid into.
+    if (!(rail.account_name || '').trim()) {
+      return paymentRailError(index, 'account_name', 'required, at most 120 characters');
+    }
+    const iban = rail.iban || '';
+    if (iban && !/^[A-Za-z0-9]{5,34}$/.test(iban)) {
+      return paymentRailError(index, 'iban', 'must be 5-34 letters/digits');
+    }
+    for (const key of ['bic', 'swift']) {
+      const code = rail[key] || '';
+      if (code && !/^[A-Za-z0-9]{8}(?:[A-Za-z0-9]{3})?$/.test(code)) {
+        return paymentRailError(index, key, 'must be 8 or 11 letters/digits');
+      }
+    }
+  }
+  return null;
+}
+
 export async function saveCustomer(evt) {
   evt.preventDefault();
   // QA-01: a double click must not create two customers.
@@ -177,13 +387,24 @@ async function saveCustomerBody() {
     reference: $('pay-reference').value.trim(),
     instructions: $('pay-instructions').value.trim(),
   };
-  const hasPay = Object.values(pay).some((v) => v);
+  // Rails first, against the visible rows (so an error names the row the user
+  // is looking at), then the payload carries only the rows with content.
+  const railRows = readPaymentRails();
+  const railProblem = validatePaymentRails(railRows);
+  if (railProblem) {
+    showFormError($('customer-error'), railProblem);
+    $('customer-form').querySelector('[aria-invalid="true"]')?.focus();
+    return;
+  }
+  const rails = railRows.filter((rail) => railHasContent(rail));
+  const hasPay = Object.values(pay).some((v) => v) || rails.length > 0;
   const body = {
     name: $('customer-name').value.trim(),
     currency: $('customer-currency').value.trim().toUpperCase(),
     default_rate_minor: Math.round(Number($('customer-rate').value) * 100),
     active: $('customer-active').checked,
     email: $('customer-email').value.trim(),
+    legal_id: $('customer-legal-id').value.trim(),
     payment_terms,
     invoice_subject: $('customer-subject').value.trim(),
     invoice_notes: $('customer-notes').value.trim(),
@@ -192,7 +413,7 @@ async function saveCustomerBody() {
     contacts: readContacts(),
     tax_hundredths: Math.round(Number($('cust-tax').value || 0) * 100),
     discount_hundredths: Math.round(Number($('cust-discount').value || 0) * 100),
-    payment_details: hasPay ? pay : null,
+    payment_details: hasPay ? { ...pay, rails } : null,
   };
   try {
     if (id) await api.put(`/customers/${id}`, body);
@@ -213,6 +434,7 @@ export function cancelCustomerEdit() {
   $('customer-active').checked = true;
   $('customer-terms-days-field').hidden = true;
   setContacts([]);
+  setPaymentRails([]);
   $('customer-save').textContent = 'Add customer';
   $('customer-dialog-title').textContent = 'Add customer';
   $('customer-dialog').close();
@@ -301,9 +523,11 @@ export async function refreshProjectTable() {
     tbody.appendChild(
       el('tr', {}, [
         el('th', { attrs: { scope: 'row' } }, [
-          el('button', { type: 'button', cls: 'link', text: p.code,
+          el('button', {
+            type: 'button', cls: 'link', text: p.code,
             attrs: { title: `Manage tasks for ${p.code}` },
-            on: { click: () => openTasksFor(cid, p.code) } }),
+            on: { click: () => openTasksFor(cid, p.code) }
+          }),
         ]),
         el('td', { attrs: { 'data-heading': 'Customer' }, text: customerName(cid) }),
         el('td', { attrs: { 'data-heading': 'Name' }, text: p.name }),
@@ -692,7 +916,7 @@ export function runReport(evt) {
   evt.preventDefault();
   // QA-10: a failed report fetch keeps the previous rows and shows the banner.
   // The form listener has no caller to hand the rejection to, so it stops here.
-  return panelRefresh('panel-reports', 'the report', runReportBody).catch(() => {});
+  return panelRefresh('panel-reports', 'the report', runReportBody).catch(() => { });
 }
 
 async function runReportBody() {

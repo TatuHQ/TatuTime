@@ -210,8 +210,22 @@ button.danger { background: none; border: none; color: var(--danger); padding: .
    above it; the app also uses the class for panel/dialog copy that follows a
    heading or a card edge (and panel copy such as the calendar footer note), so it keeps the
    natural block rhythm. Vanilla still owns the class's size/colour. Flagged
-   for maintainer visual sign-off. */
+   for maintainer visual sign-off.
+   This does NOT cover a card body's first paragraph: Vanilla also ships
+   `[class*=p-card] > p:not([class*=p-heading--]):first-child { margin-top:
+   -.5rem }`, and that substring selector matches `.p-card__content` too. At
+   (0,3,1) it out-specifies this rule (0,1,0), so the first paragraph of every
+   card body was pulled -.5rem up into the `p-card__header` border — the
+   Company intro text overlapped the divider while the Users filters bar (a
+   div, not a p) sat correctly below it. The one shared answer is below. */
 .p-form-help-text { margin: revert; }
+/* Card-body lead: answer the Vanilla first-child pull-up once, at the same
+   (0,3,1) specificity (this sheet loads after the bundle, so it wins), for
+   every card body — no per-view margin. A lead paragraph starts 1rem below
+   the header rule, the same rhythm the Users `.user-filters` row already had,
+   so text sits below the divider in every settings card. Non-<p> first blocks
+   were never affected (the Vanilla rule only targets p). */
+.p-card__content > p:not([class*="p-heading--"]):first-child { margin-top: 1rem; }
 /* Tick boxes keep the pre-migration 1rem box (the base width:100% rule does not
    cover checkboxes); `.theme-switch` keeps its own sizing too. */
 .p-form__group input[type="checkbox"], .theme-switch input { min-height: 0; width: 1rem; height: 1rem; }
@@ -574,7 +588,12 @@ dialog.p-modal::backdrop { background: transparent; }
 /* ---- invoice document preview (#133) ---- */
 #invoice-preview { margin-top: .8rem; }
 .ip-head { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; }
+.ip-title-wrap { min-width: 0; }
 .ip-title { margin: 0 0 .5rem; font-size: 1.05rem; }
+/* The frozen subject (#354) reads as the document's subtitle: plain text from
+   Invoice.subject, quiet enough not to compete with the document itself. */
+.ip-subject { margin: -.35rem 0 .5rem; color: var(--muted); font-weight: 600; overflow-wrap: anywhere; }
+#ip-document-note { margin: .2rem 0 .5rem; }
 .ip-facts { display: grid; grid-template-columns: auto 1fr; gap: .15rem .9rem; margin: .3rem 0 .7rem; }
 .ip-facts dt { color: var(--muted); font-weight: 600; }
 .ip-facts dd { margin: 0; }
@@ -591,6 +610,9 @@ dialog.p-modal::backdrop { background: transparent; }
 .ip-tl-actor, .ip-tl-when { margin: 0; color: var(--muted); }
 #invoice-table tbody tr { cursor: default; }
 #invoice-table tbody tr[tabindex="0"]:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+/* The frozen subject under the invoice number (#354): a quiet subtitle in the
+   Number cell, never a new sortable column. */
+.inv-row-subject { display: block; color: var(--muted); font-size: .8rem; font-weight: 400; overflow-wrap: anywhere; }
 
 /* ---- live invoice-template preview ---- */
 /* The frame gets a fixed, viewport-bounded height so the toolbar stays on
@@ -696,6 +718,14 @@ caption { padding-bottom: .35rem; }
 .invoice-table-scroll { display: block; max-width: 100%; overflow-x: auto; }
 .customer-extra-details { margin: .25rem 0 .8rem; border-top: 1px solid var(--line); }
 .customer-extra-details fieldset.p-form__group { margin-top: .5rem; }
+/* One multi-currency payment rail (#354). The row is a fieldset so its legend
+   names the group for assistive technology; the frame only separates it from
+   the flat default account above. */
+.payment-rail {
+  margin: 0 0 .65rem; padding: .55rem .7rem .15rem;
+  border: 1px solid var(--line); border-radius: var(--radius);
+}
+.payment-rail > legend { padding: 0 .25rem; font-weight: 700; color: var(--muted); }
 .chip-edit { border: 0; background: transparent; color: var(--brand-deep); padding: .1rem .25rem; font-size: .8rem; }
 .chip-edit:hover { text-decoration: underline; }
 

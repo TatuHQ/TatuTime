@@ -317,7 +317,7 @@ function showPanelBanner(view, err) {
     retry.setAttribute('aria-busy', 'true');
     // A retry either clears the banner (success) or replaces it (still
     // failing), so the busy button is never left behind in either case.
-    panelRefresh(view.panelId, view.label, view.run).catch(() => {});
+    panelRefresh(view.panelId, view.label, view.run).catch(() => { });
   });
   const banner = el('div', {
     cls: 'p-notification p-notification--caution',
@@ -362,6 +362,29 @@ export async function panelRefresh(panelId, label, run) {
 /// hunting for a typo in the dialog and a restart.
 const UNKNOWN_FIELD = 'unknown field';
 
+/// Candidate control ids for one server field path, keyed on the error
+/// element's own id (its `-error` suffix names the form: `customer-error` →
+/// `customer-…`). Explicit aliases keep the ids the app already had (the rate
+/// inputs dropped their `_minor` suffix); the payment block resolves to the
+/// Get-paid inputs and the structured rails to `pay-rail-<i>-<field>`, so an
+/// API field path always marks the control the user must fix (#354).
+function fieldControlIds(errorId, field) {
+  const rail = /^payment_details\.rails\[(\d+)\]\.(.+)$/.exec(field);
+  if (rail) return [`pay-rail-${rail[1]}-${rail[2].replace(/_/g, '-')}`];
+  if (field.startsWith('payment_details.')) {
+    return [`pay-${field.slice('payment_details.'.length).replace(/_/g, '-')}`];
+  }
+  const prefix = errorId.replace(/-error$/, '');
+  const aliases = {
+    default_rate_minor: 'default-rate',
+    cost_rate_minor: 'cost-rate',
+    rate_minor: 'rate',
+    // The org's printed label is the control beside `org-legal` (#354).
+    legal_id_label: 'legal-label',
+  };
+  return [`${prefix}-${aliases[field] || field.replace(/_/g, '-')}`];
+}
+
 export function showFormError(el, err) {
   const fields = err.payload?.error?.fields;
   const code = err.payload?.error?.code;
@@ -393,11 +416,9 @@ export function showFormError(el, err) {
   el.hidden = false;
   const form = el.closest('form');
   if (form && Array.isArray(fields)) {
-    const prefix = el.id.replace(/-error$/, '');
-    const aliases = { default_rate_minor: 'default-rate', cost_rate_minor: 'cost-rate', rate_minor: 'rate' };
     for (const field of fields) {
-      const suffix = aliases[field.field] || field.field.replaceAll('_', '-');
-      const input = [...form.elements].find((control) => control.name === field.field || control.id === `${prefix}-${suffix}`);
+      const input = [...form.elements].find((control) =>
+        control.name === field.field || fieldControlIds(el.id, field.field).includes(control.id));
       if (!input) continue;
       input.setAttribute('aria-invalid', 'true');
       const descriptions = new Set((input.getAttribute('aria-describedby') || '').split(' ').filter(Boolean));

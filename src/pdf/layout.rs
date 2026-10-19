@@ -11,13 +11,28 @@ const MARGIN: i32 = 50;
 const CONTENT_W: i32 = PAGE_W - 2 * MARGIN;
 /// Content stops here; below is footer whitespace, above triggers a page break.
 const BOTTOM: i32 = MARGIN + 40;
+/// Baseline of the `Page N of M` footer, inside the bottom margin.
+const FOOTER_Y: i32 = PAGE_H - MARGIN + 18;
 
-// Table columns (sum = CONTENT_W).
-const COL_DATE: i32 = 70;
-pub(super) const COL_DESC: i32 = 195;
-const COL_HOURS: i32 = 55;
-const COL_RATE: i32 = 75;
-const COL_AMOUNT: i32 = 100;
+// Table columns (sum = CONTENT_W): the `Item type` column replaces the old
+// per-line `Date` column, which the metadata block now owns.
+const COL_ITEM: i32 = 62;
+pub(super) const COL_DESC: i32 = 228;
+const COL_QTY: i32 = 55;
+const COL_UNIT: i32 = 70;
+const COL_AMOUNT: i32 = 80;
+
+// Right metadata column: the subject and invoice identity beside the issuer
+// block, like the reference document.
+const META_X: i32 = MARGIN + 285;
+const META_W: i32 = CONTENT_W - 285;
+const META_LABEL_W: i32 = 72;
+const META_SIZE: i32 = 9;
+const META_LINE: i32 = 12;
+/// The left header column stops 15pt before the metadata column: the
+/// `From` / `Invoice for` blocks wrap here so a long name, address line or
+/// legal id can never run into the subject or date rows.
+const HEADER_W: i32 = META_X - MARGIN - 15;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Face {
@@ -201,15 +216,40 @@ pub(super) fn layout(doc: &Doc) -> Vec<Vec<Op>> {
     });
     p.advance(10);
 
-    // Header key/values, then free blocks.
+    // Two columns share the same top edge: the metadata on the right is
+    // placed with its own cursor, the issuer/customer blocks flow on the left.
+    let top = p.y;
+    let pages_before = p.pages.len();
+    let meta_bottom = emit_meta(&mut p, &doc.meta, top);
     for b in &doc.header {
-        emit_block(&mut p, b, 10, 0);
+        emit_block_in(&mut p, b, 10, 0, HEADER_W);
+    }
+    // Only lift the flow cursor when the left column did not page-break (a
+    // break has already moved it back to the page top).
+    if p.pages.len() == pages_before && p.y < meta_bottom {
+        p.y = meta_bottom;
     }
     p.advance(8);
+
+    // Free blocks (template body).
     for b in &doc.blocks {
         emit_block(&mut p, b, 10, 0);
     }
     p.advance(10);
+
+    // Derived total hours, immediately above the table (integer hundredths).
+    if let Some(hours) = &doc.total_hours {
+        emit_block(
+            &mut p,
+            &Block::KeyVal {
+                key: "Total hours".to_string(),
+                spans: vec![Span::text(hours.clone())],
+            },
+            10,
+            0,
+        );
+        p.advance(4);
+    }
 
     // Line table with a repeating header.
     if !doc.lines.is_empty() {
@@ -220,7 +260,7 @@ pub(super) fn layout(doc: &Doc) -> Vec<Vec<Op>> {
         p.advance(6);
     }
 
-    // Totals (bold rule above; prints total_minor, never a re-sum).
+    // Totals (bold rule above; prints persisted minor units, never a re-sum).
     // #146: the configured accent paints the money section only.
     if let Some(rgb) = doc.accent {
         p.cur.push(Op::Color { rgb });
@@ -252,52 +292,104 @@ pub(super) fn layout(doc: &Doc) -> Vec<Vec<Op>> {
             *page = stamped;
         }
     }
+    // Page footer, in a post-pass: `Page N of M` needs the final page count,
+    // which only exists after `finish()`.
+    let total = pages.len();
+    for (i, page) in pages.iter_mut().enumerate() {
+        let bytes = winansi(&format!("Page {} of {}", i + 1, total));
+        let width = measure(Face::Regular, 8, &bytes);
+        page.push(Op::Text {
+            face: Face::Regular,
+            size: 8,
+            x: (PAGE_W - width) / 2,
+            y: FOOTER_Y,
+            bytes,
+        });
+    }
     pages
+}
+
+/// Emit the right metadata column starting at `top`, returning the bottom of
+/// the column. Metadata rows are `KeyVal` blocks; anything else is ignored
+/// (the column is layout-owned, not template content).
+fn emit_meta(p: &mut Pager, blocks: &[Block], top: i32) -> i32 {
+    let mut y = top;
+    for block in blocks {
+        let Block::KeyVal { key, spans } = block else {
+            continue;
+        };
+        let key_bytes = winansi(&format!("{key}:"));
+        let lines = wrap_spans(spans, META_SIZE, META_W - META_LABEL_W, false);
+        let height = META_LINE * lines.len() as i32;
+        let base = y + META_SIZE;
+        p.cur.push(Op::Text {
+            face: Face::Bold,
+            size: META_SIZE,
+            x: META_X,
+            y: base,
+            bytes: key_bytes,
+        });
+        let xv = META_X + META_LABEL_W;
+        for (i, line) in lines.into_iter().enumerate() {
+            emit_line_ops(p, &line, META_SIZE, xv, base + META_LINE * i as i32);
+        }
+        y += height;
+    }
+    y
 }
 
 fn emit_table_head(p: &mut Pager, doc: &Doc) {
     p.need(30);
     let y = p.y + 12;
-    let cols = [
-        ("Date", MARGIN, COL_DATE, false),
+    let columns = [
         (
             if doc.column_labels[0].is_empty() {
-                "Description"
+                "Item type"
             } else {
                 &doc.column_labels[0]
             },
-            MARGIN + COL_DATE,
-            COL_DESC,
+            MARGIN,
+            COL_ITEM,
             false,
         ),
         (
             if doc.column_labels[1].is_empty() {
-                "Hours"
+                "Description"
             } else {
                 &doc.column_labels[1]
             },
-            MARGIN + COL_DATE + COL_DESC,
-            COL_HOURS,
-            true,
+            MARGIN + COL_ITEM,
+            COL_DESC,
+            false,
         ),
         (
             if doc.column_labels[2].is_empty() {
-                "Rate"
+                "Quantity"
             } else {
                 &doc.column_labels[2]
             },
-            MARGIN + COL_DATE + COL_DESC + COL_HOURS,
-            COL_RATE,
+            MARGIN + COL_ITEM + COL_DESC,
+            COL_QTY,
+            true,
+        ),
+        (
+            if doc.column_labels[3].is_empty() {
+                "Unit price"
+            } else {
+                &doc.column_labels[3]
+            },
+            MARGIN + COL_ITEM + COL_DESC + COL_QTY,
+            COL_UNIT,
             true,
         ),
         (
             "Amount",
-            MARGIN + COL_DATE + COL_DESC + COL_HOURS + COL_RATE,
+            MARGIN + COL_ITEM + COL_DESC + COL_QTY + COL_UNIT,
             COL_AMOUNT,
             true,
         ),
     ];
-    for (label, x, w, right) in cols {
+    for (label, x, w, right) in columns {
         let bytes = winansi(label);
         p.cur.push(if right {
             Op::TextRight {
@@ -342,15 +434,15 @@ fn emit_table_row(p: &mut Pager, row: &LineRow, doc: &Doc) {
         size: 9,
         x: MARGIN,
         y: base,
-        bytes: winansi(&row.date),
+        bytes: winansi(&row.item_type),
     });
-    for (i, l) in desc_lines.into_iter().enumerate() {
+    for (i, line) in desc_lines.into_iter().enumerate() {
         p.cur.push(Op::Text {
             face: Face::Regular,
             size: 9,
-            x: MARGIN + COL_DATE,
+            x: MARGIN + COL_ITEM,
             y: base + 11 * i as i32,
-            bytes: l,
+            bytes: line,
         });
     }
     let mut num = |s: &str, x_right: i32| {
@@ -365,20 +457,27 @@ fn emit_table_row(p: &mut Pager, row: &LineRow, doc: &Doc) {
             bytes: winansi(s),
         });
     };
-    num(&row.hours, MARGIN + COL_DATE + COL_DESC + COL_HOURS - 4);
+    num(&row.quantity, MARGIN + COL_ITEM + COL_DESC + COL_QTY - 4);
     num(
-        &row.rate,
-        MARGIN + COL_DATE + COL_DESC + COL_HOURS + COL_RATE - 4,
+        &row.unit_price,
+        MARGIN + COL_ITEM + COL_DESC + COL_QTY + COL_UNIT - 4,
     );
     num(
         &row.amount,
-        MARGIN + COL_DATE + COL_DESC + COL_HOURS + COL_RATE + COL_AMOUNT - 4,
+        MARGIN + COL_ITEM + COL_DESC + COL_QTY + COL_UNIT + COL_AMOUNT - 4,
     );
     p.advance(height);
 }
 
 /// Emit one flowing block at `size` points. `indent` nests bullets/lists.
 fn emit_block(p: &mut Pager, block: &Block, size: i32, indent: i32) {
+    emit_block_in(p, block, size, indent, CONTENT_W);
+}
+
+/// Emit one flowing block, wrapping at `max_w` points from the left margin.
+/// The default is the full content width; the header passes the left column
+/// width so its blocks cannot cross into the metadata column.
+fn emit_block_in(p: &mut Pager, block: &Block, size: i32, indent: i32, max_w: i32) {
     match block {
         Block::Heading { level, spans } => {
             let h = match level {
@@ -386,23 +485,62 @@ fn emit_block(p: &mut Pager, block: &Block, size: i32, indent: i32) {
                 2 => 12,
                 _ => 11,
             };
-            emit_spans(p, spans, h, true, indent);
+            emit_spans(p, spans, h, true, indent, max_w);
         }
-        Block::Paragraph(spans) => emit_spans(p, spans, size, false, indent),
-        Block::Bullet(spans) => emit_spans_with_prefix(p, spans, size, indent, b"\x95 "),
-        Block::Numbered { number, spans } => {
-            emit_spans_with_prefix(p, spans, size, indent, &winansi(&format!("{number}. ")))
+        Block::Paragraph(spans) => emit_spans(p, spans, size, false, indent, max_w),
+        Block::Bullet(spans) => emit_spans_with_prefix(p, spans, size, indent, b"\x95 ", max_w),
+        Block::Numbered { number, spans } => emit_spans_with_prefix(
+            p,
+            spans,
+            size,
+            indent,
+            &winansi(&format!("{number}. ")),
+            max_w,
+        ),
+        Block::KeyVal { key, spans } => emit_keyval(p, key, spans, size, indent, max_w),
+        Block::Rule { dashed } => {
+            p.advance(6);
+            p.need(1);
+            if *dashed {
+                push_dashed_rule(p, max_w);
+            } else {
+                p.cur.push(Op::Line {
+                    x1: MARGIN,
+                    y1: p.y,
+                    x2: MARGIN + max_w,
+                    y2: p.y,
+                    width: 1,
+                });
+            }
+            p.advance(6);
         }
-        Block::KeyVal { key, spans } => emit_keyval(p, key, spans, size, indent),
+    }
+}
+
+/// A dashed separator built from 3pt segments every 6pt: `Op::Line` needs no
+/// dash-pattern state, so the op set stays closed and the bytes deterministic.
+fn push_dashed_rule(p: &mut Pager, max_w: i32) {
+    let end = MARGIN + max_w;
+    let mut x = MARGIN;
+    while x < end {
+        let x2 = (x + 3).min(end);
+        p.cur.push(Op::Line {
+            x1: x,
+            y1: p.y,
+            x2,
+            y2: p.y,
+            width: 1,
+        });
+        x += 6;
     }
 }
 
 /// A `Key: value` line: bold key in a fixed label column, value wrapped.
-fn emit_keyval(p: &mut Pager, key: &str, spans: &[Span], size: i32, indent: i32) {
+fn emit_keyval(p: &mut Pager, key: &str, spans: &[Span], size: i32, indent: i32, max_w: i32) {
     const LABEL_W: i32 = 110;
     let key_bytes = winansi(&format!("{key}:"));
     let x0 = MARGIN + indent;
-    let avail = CONTENT_W - indent - LABEL_W;
+    let avail = max_w - indent - LABEL_W;
     let mut lines = wrap_spans(spans, size, avail, false);
     if lines.is_empty() {
         lines.push(vec![]);
@@ -426,8 +564,8 @@ fn emit_keyval(p: &mut Pager, key: &str, spans: &[Span], size: i32, indent: i32)
 
 /// Styled paragraph: wrap across spans (each span keeps its own face), then
 /// emit line by line with running x.
-fn emit_spans(p: &mut Pager, spans: &[Span], size: i32, force_bold: bool, indent: i32) {
-    let lines = wrap_spans(spans, size, CONTENT_W - indent, force_bold);
+fn emit_spans(p: &mut Pager, spans: &[Span], size: i32, force_bold: bool, indent: i32, max_w: i32) {
+    let lines = wrap_spans(spans, size, max_w - indent, force_bold);
     let height = 13 * lines.len() as i32;
     p.need(height);
     let base = p.y + size;
@@ -437,9 +575,16 @@ fn emit_spans(p: &mut Pager, spans: &[Span], size: i32, force_bold: bool, indent
     p.advance(height);
 }
 
-fn emit_spans_with_prefix(p: &mut Pager, spans: &[Span], size: i32, indent: i32, prefix: &[u8]) {
+fn emit_spans_with_prefix(
+    p: &mut Pager,
+    spans: &[Span],
+    size: i32,
+    indent: i32,
+    prefix: &[u8],
+    max_w: i32,
+) {
     let px = measure(Face::Regular, size, prefix);
-    let lines = wrap_spans(spans, size, CONTENT_W - indent - px, false);
+    let lines = wrap_spans(spans, size, max_w - indent - px, false);
     let height = 13 * lines.len() as i32;
     p.need(height);
     let base = p.y + size;
@@ -539,7 +684,8 @@ fn emit_line_ops(p: &mut Pager, line: &[Word], size: i32, x0: i32, y: i32) {
 mod tests {
     use super::*;
     use crate::domain::{
-        Currency, Customer, Invoice, InvoiceLine, InvoiceStatus, InvoiceWatermarkStage, LineKind,
+        Address, Currency, Customer, Invoice, InvoiceLine, InvoiceStatus, InvoiceWatermarkStage,
+        LineKind,
     };
     use crate::pdf::{Org, doc_for, render_invoice_pdf};
     use chrono::{TimeZone, Utc};
@@ -597,17 +743,19 @@ mod tests {
             written_off_at: None,
             tax_hundredths: 0,
             discount_hundredths: 0,
+            subject: String::new(),
+            terms: None,
         }
     }
 
     fn customer() -> Customer {
         Customer {
             id: "22222222-2222-2222-2222-222222222222".parse().unwrap(),
-            name: "Capybara Solutions".into(),
+            name: "Acme Widgets GmbH".into(),
             currency: Currency("EUR".into()),
             default_rate_minor: 9000,
             active: true,
-            email: "billing@capybara.example".into(),
+            email: "billing@acme.example".into(),
             payment_terms: None,
             invoice_notes: String::new(),
             invoice_subject: String::new(),
@@ -616,6 +764,7 @@ mod tests {
             tax_hundredths: 0,
             discount_hundredths: 0,
             payment_details: None,
+            legal_id: String::new(),
         }
     }
 
@@ -623,10 +772,9 @@ mod tests {
         Org::named("Tucano")
     }
 
-    #[test]
-    fn many_lines_flow_onto_more_pages() {
-        let mut inv = sample_invoice();
-        inv.lines = (0..80)
+    /// A burst of `count` fixed lines, to force the document onto several pages.
+    fn many_lines(inv: &mut Invoice, count: usize) {
+        inv.lines = (0..count)
             .map(|i| InvoiceLine {
                 kind: LineKind::Fixed,
                 date: inv.period_from,
@@ -643,22 +791,154 @@ mod tests {
                 item_kind: None,
             })
             .collect();
+    }
+
+    /// The `Page N of M` text op of a page, if any.
+    fn page_footer(page: &[Op]) -> Option<String> {
+        page.iter().rev().find_map(|op| match op {
+            Op::Text { bytes, .. } if bytes.starts_with(b"Page ") => {
+                Some(String::from_utf8_lossy(bytes).into_owned())
+            }
+            _ => None,
+        })
+    }
+
+    /// The baseline of the text op whose glyph run is exactly `word`.
+    fn y_of(page: &[Op], word: &str) -> Option<i32> {
+        page.iter().find_map(|op| match op {
+            Op::Text { bytes, y, .. } if bytes == word.as_bytes() => Some(*y),
+            _ => None,
+        })
+    }
+
+    #[test]
+    fn column_widths_sum_to_the_content_width() {
+        assert_eq!(
+            COL_ITEM + COL_DESC + COL_QTY + COL_UNIT + COL_AMOUNT,
+            CONTENT_W
+        );
+    }
+
+    #[test]
+    fn many_lines_flow_onto_more_pages() {
+        let mut inv = sample_invoice();
+        many_lines(&mut inv, 80);
         let doc = doc_for(&inv, &customer(), &org());
         let pages = layout(&doc);
         assert!(pages.len() > 1, "80 lines must flow across pages");
+        // Every page carries its `Page N of M` footer.
+        for (i, page) in pages.iter().enumerate() {
+            assert_eq!(
+                page_footer(page).as_deref(),
+                Some(format!("Page {} of {}", i + 1, pages.len()).as_str()),
+                "page {i} is numbered"
+            );
+        }
         let bytes = render_invoice_pdf(&doc);
         let parsed = lopdf::Document::load_mem(&bytes).expect("re-parse multi-page");
         assert_eq!(parsed.get_pages().len(), pages.len());
     }
 
     #[test]
+    fn multi_line_addresses_do_not_collapse_into_one_line() {
+        let mut c = customer();
+        c.address = Some(Address {
+            street: "9 Placeholder Road".into(),
+            city: "Testville".into(),
+            postal_code: "AA1 1AA".into(),
+            country: "Freedonia".into(),
+        });
+        let doc = doc_for(&sample_invoice(), &c, &org());
+        let pages = layout(&doc);
+        let page = &pages[0];
+        // Each address line is its own paragraph, so the words of different
+        // lines sit on different baselines.
+        let street = y_of(page, "Placeholder").expect("street line");
+        let city = y_of(page, "Testville,").expect("city line");
+        let postal = y_of(page, "AA1").expect("postal line");
+        let country = y_of(page, "Freedonia").expect("country line");
+        assert!(street < city && city < postal && postal < country);
+        assert_eq!(city - street, 13, "one line each, no collapsing");
+    }
+
+    #[test]
+    fn header_blocks_wrap_inside_the_left_column() {
+        let mut inv = sample_invoice();
+        inv.subject = "October services across several projects".into();
+        let mut c = customer();
+        c.address = Some(Address {
+            street: "One Extremely Long Customer Street Name That Should Wrap".into(),
+            city: "Testville".into(),
+            postal_code: "AA1 1AA".into(),
+            country: "Freedonia".into(),
+        });
+        let mut o = Org::named(
+            "Tucano Impossibly Long Issuer Company Name That Must Wrap Inside The Left Column",
+        );
+        o.legal_id = "VAT BE 0123 4567 8901 2345 6789".into();
+        o.address = Some(Address {
+            street: "One Exceedingly Long Issuer Street Line That Must Wrap As Well".into(),
+            city: "Brussels".into(),
+            postal_code: "1000".into(),
+            country: "Belgium".into(),
+        });
+        let doc = doc_for(&inv, &c, &o);
+        assert!(
+            doc.subject.is_some(),
+            "the metadata column carries a subject"
+        );
+        let pages = layout(&doc);
+        assert_eq!(pages.len(), 1);
+        let page = &pages[0];
+        // The last line of the customer block bounds the header vertically:
+        // the footer below it also names the org, but it is not a column.
+        let header_bottom = y_of(page, "Freedonia").expect("last header line");
+        for op in page {
+            if let Op::Text {
+                face,
+                size,
+                x,
+                y,
+                bytes,
+            } = op
+            {
+                // `Page N of M` is centred on the page, not part of a column.
+                if bytes.starts_with(b"Page ") || *y > header_bottom {
+                    continue;
+                }
+                // Left-column ink starts at the margin and must stay clear of
+                // the metadata column, which begins exactly at `META_X`.
+                if *x >= MARGIN && *x < META_X {
+                    let right = x + measure(*face, *size, bytes);
+                    assert!(
+                        right <= META_X,
+                        "{:?} ends at {right}, crossing the metadata column at {META_X}",
+                        String::from_utf8_lossy(bytes)
+                    );
+                }
+            }
+        }
+        // The deliberately long issuer name and address line both wrapped, so
+        // the test would fail if the header still used the full content width.
+        let name_first = y_of(page, "Impossibly").expect("issuer name start");
+        let name_last = y_of(page, "Column").expect("issuer name end");
+        assert!(name_first < name_last, "the issuer name wraps");
+        let street_first = y_of(page, "Exceedingly").expect("issuer street start");
+        let street_last = y_of(page, "Well,").expect("issuer street end");
+        assert!(street_first < street_last, "the issuer address line wraps");
+    }
+
+    #[test]
     fn spans_carry_bold_and_italic_faces() {
         let doc = Doc {
             title: "T".into(),
+            subject: None,
+            header: vec![],
+            meta: vec![],
             column_labels: Default::default(),
+            total_hours: None,
             accent: None,
             watermark: None,
-            header: vec![],
             blocks: vec![Block::Paragraph(vec![
                 Span::bold("B"),
                 Span::text(" "),
@@ -720,23 +1000,7 @@ mod tests {
     #[test]
     fn watermark_is_a_rotated_grey_run_on_every_page() {
         let mut inv = sample_invoice();
-        inv.lines = (0..80)
-            .map(|i| InvoiceLine {
-                kind: LineKind::Fixed,
-                date: inv.period_from,
-                entry_id: None,
-                expense_id: None,
-                project_code: None,
-                task_code: None,
-                hours: None,
-                rate_minor: None,
-                amount_minor: i as u64 * 100,
-                note: format!("Recurring charge {i}"),
-                quantity_hundredths: None,
-                unit_price_minor: None,
-                item_kind: None,
-            })
-            .collect();
+        many_lines(&mut inv, 80);
         let mut doc = doc_for(&inv, &customer(), &org());
         doc.watermark = Some(InvoiceWatermarkStage::Draft);
         let pages = layout(&doc);
@@ -749,5 +1013,13 @@ mod tests {
                 "the stamp is drawn first"
             );
         }
+    }
+
+    #[test]
+    fn single_page_document_is_numbered_one_of_one() {
+        let doc = doc_for(&sample_invoice(), &customer(), &org());
+        let pages = layout(&doc);
+        assert_eq!(pages.len(), 1);
+        assert_eq!(page_footer(&pages[0]).as_deref(), Some("Page 1 of 1"));
     }
 }

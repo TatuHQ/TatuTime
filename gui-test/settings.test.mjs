@@ -35,6 +35,7 @@ const EMAIL = {
 const ORG = {
     name: 'Acme',
     legal_id: 'BE0123456789',
+    legal_id_label: 'VAT',
     address: { street: 'Harbour 9', city: 'Antwerp', postal_code: '2000', country: 'BE' },
     from_name: 'Acme Billing',
     reply_to: 'billing@acme.test',
@@ -55,6 +56,16 @@ const TEMPLATE = {
             discount: 'Discount',
             tax: 'VAT',
             total: 'Due',
+            from: 'Issued by',
+            invoice_for: 'Billed to',
+            invoice_id: 'Invoice no.',
+            issue_date: 'Issued',
+            due_date: 'Pay by',
+            subject: 'Re',
+            payment_heading: 'How to pay',
+            item_type: 'Kind',
+            payments: 'Settlements',
+            amount_due: 'Balance due',
         },
     },
     variables: [
@@ -367,11 +378,37 @@ test('Company loads its identity and saves via PUT /admin/org', async () => {
     assert.deepEqual(JSON.parse(JSON.stringify(call.body)), {
         name: 'Acme Invoice Co',
         legal_id: 'BE0123456789',
+        legal_id_label: 'VAT',
         from_name: 'Acme Billing',
         reply_to: 'billing@acme.test',
         accent: '#e95420',
         address: { street: 'Harbour 9', city: 'Antwerp', postal_code: '2000', country: 'BE' },
     });
+    dom.window.close();
+});
+
+test('Company pairs the legal id with its printed label and explains the From block (#354)', async () => {
+    const { dom, document, t } = setup();
+    await t.refreshOrgProfile();
+    const legal = document.getElementById('org-legal');
+    const label = document.getElementById('org-legal-label');
+    assert.equal(legal.value, 'BE0123456789');
+    assert.equal(label.value, 'VAT', 'the stored label loads beside the id');
+    assert.equal(label.maxLength, 40, 'the label is bounded like the API field');
+    assert.equal(label.placeholder, 'Tax ID', 'the placeholder names a neutral registration id');
+    assert.equal(label.labels.length, 1);
+    assert.match(label.labels[0].textContent, /legal \/ registration\s+id\s+label/i);
+    const help = document.getElementById('org-legal-group-help');
+    assert.match(help.textContent, /VAT \/ company id/, 'the default wording is explained');
+    assert.match(help.textContent, /leave it empty/i);
+    const note = document.getElementById('org-legal-group').querySelector('p.p-form-help-text');
+    assert.match(note.textContent, /From/, 'the note points at the invoice From block');
+    assert.match(note.textContent, /address lines/i);
+
+    setValue(document, 'org-legal-label', 'Tax ID');
+    await t.saveOrgProfile({ preventDefault() { } });
+    const call = t.calls().put.find((entry) => entry.path === '/admin/org');
+    assert.equal(call.body.legal_id_label, 'Tax ID', 'the label round-trips through PUT /admin/org');
     dom.window.close();
 });
 
@@ -382,17 +419,67 @@ test('Invoice template loads the cheat-sheet and saves labels with the template'
     await t.refreshInvoiceTemplate();
     assert.equal(document.getElementById('template-subject').value, 'Invoice %invoice_number%');
     assert.equal(document.getElementById('lb-total').value, 'Due');
+    // The ten document labels (#354) load from the same `labels` object, each
+    // in its own input whose placeholder is the built-in default.
+    assert.equal(document.getElementById('lb-from').value, 'Issued by');
+    assert.equal(document.getElementById('lb-invoice-for').value, 'Billed to');
+    assert.equal(document.getElementById('lb-invoice-id').value, 'Invoice no.');
+    assert.equal(document.getElementById('lb-issue-date').value, 'Issued');
+    assert.equal(document.getElementById('lb-due-date').value, 'Pay by');
+    assert.equal(document.getElementById('lb-subject').value, 'Re');
+    assert.equal(document.getElementById('lb-payment-heading').value, 'How to pay');
+    assert.equal(document.getElementById('lb-item-type').value, 'Kind');
+    assert.equal(document.getElementById('lb-payments').value, 'Settlements');
+    assert.equal(document.getElementById('lb-amount-due').value, 'Balance due');
     const rows = [...document.querySelectorAll('#template-vars tbody tr')];
     assert.equal(rows.length, 3, 'the %variable% cheat-sheet comes from the server');
     assert.match(rows.map((row) => row.textContent).join(' '), /%invoice_issue_month%/);
     assert.equal(t.calls().preview.length, 0, 'a hidden section never renders a preview');
 
     setValue(document, 'lb-total', 'Amount due');
+    setValue(document, 'lb-amount-due', 'Total payable');
     await t.saveInvoiceTemplate({ preventDefault() { } });
     const call = t.calls().put.find((entry) => entry.path === '/admin/invoice-template');
     assert.equal(call.body.labels.total, 'Amount due');
     assert.equal(call.body.labels.description, 'Work');
+    assert.equal(call.body.labels.amount_due, 'Total payable', 'new labels travel in the same payload');
     assert.equal(call.body.payment_terms.kind, 'net_30');
+    dom.window.close();
+});
+
+test('the Document labels section is grouped, optional and prints its defaults (#354)', () => {
+    const { dom, document } = setup();
+    const group = document.getElementById('document-labels');
+    assert.ok(group, 'the ten document labels live in one group');
+    assert.equal(group.querySelector('legend').textContent, 'Document labels');
+    const expected = {
+        'lb-from': 'From',
+        'lb-invoice-for': 'Invoice for',
+        'lb-invoice-id': 'Invoice ID',
+        'lb-issue-date': 'Issue date',
+        'lb-due-date': 'Due date',
+        'lb-subject': 'Subject',
+        'lb-payment-heading': 'Notes',
+        'lb-item-type': 'Item type',
+        'lb-payments': 'Payments',
+        'lb-amount-due': 'Amount due',
+    };
+    for (const [id, placeholder] of Object.entries(expected)) {
+        const input = document.getElementById(id);
+        assert.ok(input, `${id} exists`);
+        assert.equal(input.maxLength, 40, `${id} is bounded like the API field`);
+        assert.equal(input.placeholder, placeholder, `${id} shows its built-in default`);
+        assert.equal(input.labels.length, 1, `${id} has one label`);
+        assert.equal(input.labels[0].getAttribute('for'), id);
+    }
+    // The original line-column overrides keep working beside the new set.
+    for (const id of ['lb-description', 'lb-quantity', 'lb-unit-price', 'lb-subtotal', 'lb-discount', 'lb-tax', 'lb-total']) {
+        assert.ok(document.getElementById(id), `${id} is still present`);
+    }
+    assert.match(document.getElementById('template-subject-help').textContent, /%period_month_padded%/);
+    assert.match(document.getElementById('template-subject-help').textContent, /%period_year%/);
+    assert.match(document.getElementById('template-subject-help').textContent, /dd\/mm\/yyyy/);
+    assert.match(document.getElementById('template-subject-help').textContent, /EUR €1,234\.56/);
     dom.window.close();
 });
 
@@ -493,6 +580,17 @@ test('typing in the body and labels debounces one preview POST with the form pay
             discount: 'Discount',
             tax: 'VAT',
             total: 'Amount due',
+            // The ten document labels (#354) travel in the same object.
+            from: 'Issued by',
+            invoice_for: 'Billed to',
+            invoice_id: 'Invoice no.',
+            issue_date: 'Issued',
+            due_date: 'Pay by',
+            subject: 'Re',
+            payment_heading: 'How to pay',
+            item_type: 'Kind',
+            payments: 'Settlements',
+            amount_due: 'Balance due',
         },
     }, 'the preview sends exactly what Save would');
     assert.equal(call.ifNoneMatch, '"preview-etag-1"', 'the conditional request carries the last ETag');
@@ -583,6 +681,31 @@ test('a 422 keeps the last good preview, shows the field errors and retries on t
     });
     assert.equal(t.calls().preview[1].body.body, 'pay %customer_name%', 'the retry carries the newest edit');
     assert.equal(document.getElementById('template-error').hidden, true, 'success clears the field error');
+    dom.window.close();
+});
+
+test('document-label edits re-render with the new labels, and an org reload drops the ETag (#354)', async () => {
+    const { dom, document, window, t } = setup();
+    await openPreview(t, window, document);
+    document.getElementById('lb-amount-due').value = 'Total payable';
+    document.getElementById('lb-amount-due').dispatchEvent(new window.Event('change', { bubbles: true }));
+    await waitFor(() => t.calls().preview.length === 1, {
+        message: 'a Document labels edit to request a render',
+    });
+    const first = t.calls().preview[0];
+    assert.equal(first.body.labels.amount_due, 'Total payable', 'the new label rides the preview payload');
+    assert.equal(first.body.labels.from, 'Issued by', 'the other document labels travel unchanged');
+    await waitFor(() => document.getElementById('template-preview-status').textContent === 'Preview updated', {
+        message: 'the label render to finish',
+    });
+
+    // Saving Company reloads the org profile; the sample document embeds that
+    // identity, so the framed bytes' tag must be dropped and the next render
+    // must be unconditional rather than a 304 for the old company block.
+    await t.refreshOrgProfile();
+    await t.renderTemplatePreview();
+    assert.equal(t.calls().preview.length, 2);
+    assert.equal(t.calls().preview[1].ifNoneMatch, null, 'a fresh org profile invalidates the preview tag');
     dom.window.close();
 });
 
@@ -884,7 +1007,12 @@ test('SET-07: Use built-in labels re-renders the preview with empty labels', asy
         message: 'the label reset to request a fresh preview',
     });
     const labels = t.calls().preview[0].body.labels;
-    assert.deepEqual(Object.values(labels), ['', '', '', '', '', '', ''],
+    assert.deepEqual(Object.keys(labels), [
+        'description', 'quantity', 'unit_price', 'subtotal', 'discount', 'tax', 'total',
+        'from', 'invoice_for', 'invoice_id', 'issue_date', 'due_date',
+        'subject', 'payment_heading', 'item_type', 'payments', 'amount_due',
+    ], 'every label key travels, including the ten document labels (#354)');
+    assert.ok(Object.values(labels).every((value) => value === ''),
         'the preview is rendered from the cleared labels, not the stale frame');
     assert.match(window.document.getElementById('live-region').textContent, /Built-in labels restored/);
     dom.window.close();
@@ -988,19 +1116,66 @@ test('the recipient dialog Settings link names the Email section', () => {
 
 // --------------------------------------------------------------- a11y ------
 
-test('every Settings panel uses the heading slot and a headed card', () => {
+// The one header shape every Settings view must use: a heading slot, then
+// p-cards that each open with a p-card__header (owning exactly one title)
+// followed by a p-card__content body. This is the structural half of the
+// card-header contract — the CSS half (the shared 1rem lead rhythm that keeps
+// the body text below the header rule) is pinned in the next test. Checking
+// every card and every panel, rather than the first card only, is what stops a
+// future view from reintroducing a per-view header/description variant.
+test('every Settings panel uses the heading slot and only headed cards', () => {
     const { dom, document } = setup();
+    assert.deepEqual(
+        [...document.querySelectorAll('.settings-panel')].map((panel) => panel.id).sort(),
+        ROUTES.map(([, , panelId]) => panelId).sort(),
+        'every settings panel is listed in ROUTES, so a new panel cannot skip this guard',
+    );
+    const directTitles = (el) => [...el.children].filter((child) => child.tagName === 'H2');
     for (const [, , panelId] of ROUTES) {
         const panel = document.getElementById(panelId);
-        const head = panel.querySelector(':scope > .ts-head');
-        assert.ok(head, `${panelId} leads with .ts-head`);
-        assert.ok(head.querySelector('h2'), `${panelId} has a section title in its heading slot`);
-        const card = panel.querySelector(':scope > .p-card');
-        assert.ok(card, `${panelId} continues with a p-card`);
-        assert.ok(card.querySelector(':scope > .p-card__header h2'), `${panelId}'s card is headed`);
-        assert.ok(card.querySelector(':scope > .p-card__content'), `${panelId}'s card has content`);
+        const head = panel.firstElementChild;
+        assert.ok(head && head.classList.contains('ts-head'), `${panelId} leads with .ts-head`);
+        assert.equal(directTitles(head).length, 1, `${panelId} has exactly one section title in its heading slot`);
+        assert.ok(directTitles(head)[0].textContent.trim(), `${panelId}'s section title is named`);
+        const cards = [...panel.children].slice(1);
+        assert.ok(cards.length > 0, `${panelId} continues with at least one p-card`);
+        for (const card of cards) {
+            assert.ok(card.classList.contains('p-card'),
+                `${panelId} only continues with p-cards, not <${card.tagName.toLowerCase()}>`);
+            const header = card.firstElementChild;
+            assert.ok(header && header.classList.contains('p-card__header'),
+                `${panelId}'s card starts with p-card__header`);
+            assert.equal(directTitles(header).length, 1, `${panelId}'s card header owns exactly one h2`);
+            const content = header.nextElementSibling;
+            assert.ok(content && content.classList.contains('p-card__content'),
+                `${panelId}'s card header is followed by p-card__content`);
+        }
     }
     dom.window.close();
+});
+
+test('the card-body lead rhythm is one shared rule, not a per-view margin', () => {
+    const css = readFileSync(new URL('../web/styles.css', import.meta.url), 'utf8')
+        .replace(/\/\*[\s\S]*?\*\//g, '');
+    // Vanilla ships `[class*=p-card] > p:not([class*=p-heading--]):first-child
+    // { margin-top: -.5rem }`. That substring selector also matches
+    // `.p-card__content`, and at (0,3,1) it out-specifies the app's
+    // `.p-form-help-text { margin: revert }`, so the first paragraph of a card
+    // body used to overlap the p-card__header rule (the Company view) while a
+    // non-<p> first block (the Users filter bar) did not. The single shared
+    // answer must exist, at the same specificity, for every card body.
+    assert.match(
+        css,
+        /\.p-card__content > p:not\(\[class\*="p-heading--"\]\):first-child \{ margin-top: 1rem; \}/,
+        'the shared card-body lead rule must keep the first paragraph below the header rule',
+    );
+    for (const [, , panelId] of ROUTES) {
+        assert.equal(
+            new RegExp(`#${panelId}[^{]*\\{[^}]*margin-top`).test(css),
+            false,
+            `${panelId} must not carry a per-view header/lead top-margin patch`,
+        );
+    }
 });
 
 test('every Email control is labelled and the live regions are declared', () => {

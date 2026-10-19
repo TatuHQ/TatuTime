@@ -18,7 +18,7 @@ function makeDom(prelude = '', url = 'http://localhost/') {
   dom.window.HTMLDialogElement.prototype.close = function () { this.open = false; };
   // jsdom lays nothing out, so it has no scrollIntoView; the invoice detail
   // panel calls it when it opens (#349). Stub it exactly as gui.mjs does.
-  if (!dom.window.Element.prototype.scrollIntoView) dom.window.Element.prototype.scrollIntoView = () => {};
+  if (!dom.window.Element.prototype.scrollIntoView) dom.window.Element.prototype.scrollIntoView = () => { };
   const exports = `${app}
 ${prelude}
 window.bootTest = {
@@ -558,7 +558,7 @@ api.get = async (path) => {
 };
 `);
   dom.window.URL.createObjectURL = () => 'blob:test-1';
-  dom.window.URL.revokeObjectURL = () => {};
+  dom.window.URL.revokeObjectURL = () => { };
   await context.openInvoicePreview({
     id: 'i1', number: 'INV-0001', status: 'issued', currency: 'EUR',
     period_from: '2026-09-01', period_to: '2026-09-30', total_minor: 1000, lines: [],
@@ -605,6 +605,58 @@ api.get = async (path) => {
   assert.equal(document.getElementById('invoice-preview').hidden, true);
   assert.equal(document.getElementById('ip-pdf').children.length, 0, 'the frame is released on close');
   assert.equal(document.querySelectorAll('#ip-timeline li').length, 0);
+  dom.window.close();
+});
+
+test('the frozen subject rides the register row and the detail panel (#354)', async () => {
+  const subject = 'Acme Widgets GmbH invoice for 08 2026';
+  const { dom, context, document } = makeDom(`
+api.get = async (path) => {
+  if (path === '/invoices') return { invoices: [
+    { id: 'i1', number: 'INV-0001', status: 'issued', customer_id: 'c1', currency: 'EUR',
+      period_from: '2026-08-01', period_to: '2026-08-31', total_minor: 1000, payments: [],
+      subject: ${JSON.stringify(subject)} },
+    { id: 'i2', number: 'INV-0002', status: 'draft', customer_id: 'c1', currency: 'EUR',
+      period_from: '2026-09-01', period_to: '2026-09-30', total_minor: 1000, payments: [], subject: '' },
+  ] };
+  if (path === '/invoices/summary') return { draft: 1, issued: 1, overdue: 0, partly_paid: 0, paid: 0, written_off: 0, outstanding: {} };
+  if (path === '/customers') return { customers: [{ id: 'c1', name: 'Acme Widgets GmbH', currency: 'EUR', default_rate_minor: 0, active: true }] };
+  if (path.endsWith('/timeline')) return { events: [] };
+  if (path === '/admin/config') return { config: [] };
+  return {};
+};
+api.getBlob = async () => new Blob([new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d])], { type: 'application/pdf' });
+`);
+  dom.window.URL.createObjectURL = () => 'blob:subject';
+  dom.window.URL.revokeObjectURL = () => { };
+  context.state.isAdmin = true;
+  await context.refreshInvoices();
+  await waitFor(() => document.querySelectorAll('#invoice-table tbody tr').length === 2, {
+    message: 'the register to render both invoices',
+  });
+  const rows = [...document.querySelectorAll('#invoice-table tbody tr')];
+  assert.equal(rows[0].querySelector('.inv-row-subject').textContent, subject,
+    'the issued invoice shows its frozen subject as a subtitle');
+  assert.match(rows[0].getAttribute('aria-label'), /Acme Widgets GmbH invoice for 08 2026/);
+  assert.equal(rows[1].querySelector('.inv-row-subject'), null,
+    'a draft has no frozen subject yet');
+
+  await context.openInvoicePreview({
+    id: 'i1', number: 'INV-0001', status: 'issued', currency: 'EUR',
+    total_minor: 1000, payments: [], subject,
+  }, null);
+  assert.equal(document.getElementById('ip-subject').hidden, false);
+  assert.equal(document.getElementById('ip-subject').textContent, subject);
+  assert.match(document.getElementById('ip-document-note').textContent, /fixed at issue/i);
+
+  await context.openInvoicePreview({
+    id: 'i2', number: 'INV-0002', status: 'draft', currency: 'EUR', total_minor: 1000, payments: [],
+  }, null);
+  assert.equal(document.getElementById('ip-subject').hidden, true, 'a draft shows no frozen subject');
+  assert.match(document.getElementById('ip-document-note').textContent, /frozen when you issue it/i);
+  context.closeInvoicePreview();
+  assert.equal(document.getElementById('ip-subject').hidden, true, 'closing clears the subject line');
+  assert.equal(document.getElementById('ip-document-note').hidden, true);
   dom.window.close();
 });
 

@@ -606,6 +606,7 @@ mod tests {
             discount_hundredths: 0,
 
             payment_details: None,
+            legal_id: String::new(),
         };
         let inv = Invoice {
             id: Uuid::new_v4(),
@@ -642,6 +643,8 @@ mod tests {
             written_off_at: None,
             tax_hundredths: 0,
             discount_hundredths: 0,
+            subject: String::new(),
+            terms: None,
         };
         (inv, customer)
     }

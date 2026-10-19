@@ -68,6 +68,7 @@ fn concurrent_writer_times_out_with_lock_busy() {
         discount_hundredths: 0,
 
         payment_details: None,
+        legal_id: String::new(),
     };
     let err = store.put_customer(&cust).expect_err("should time out");
     assert!(
@@ -342,6 +343,7 @@ mod storage_layout {
             discount_hundredths: 0,
 
             payment_details: None,
+            legal_id: String::new(),
         };
         store.put_customer(&customer).unwrap();
 
@@ -423,6 +425,8 @@ mod storage_layout {
                 written_off_at: None,
                 tax_hundredths: 0,
                 discount_hundredths: 0,
+                subject: String::new(),
+                terms: None,
             })
             .unwrap();
 

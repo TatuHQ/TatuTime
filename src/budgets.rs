@@ -225,6 +225,7 @@ mod tests {
                 discount_hundredths: 0,
 
                 payment_details: None,
+                legal_id: String::new(),
             })
             .unwrap();
         store.put_project(&project).unwrap();
@@ -274,6 +275,7 @@ mod tests {
             discount_hundredths: 0,
 
             payment_details: None,
+            legal_id: String::new(),
         };
         let entries = vec![Entry {
             id: uuid::Uuid::new_v4(),
@@ -318,6 +320,7 @@ mod tests {
             discount_hundredths: 0,
 
             payment_details: None,
+            legal_id: String::new(),
         };
         let entries = vec![Entry {
             id: uuid::Uuid::new_v4(),

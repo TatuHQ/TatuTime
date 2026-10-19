@@ -150,22 +150,28 @@ impl EmailReminderJob {
             )),
             Ok(None) => {
                 // Same content source as the API lazy path (#116): current
-                // template + customer notes merged into the doc.
+                // template + customer notes merged into the doc. The absent
+                // singleton resolves to the seeded defaults, matching
+                // `api::invoicing::load_template`.
                 let template = self
                     .store
                     .read_json_rel::<crate::domain::InvoiceTemplate>("invoice_template.json")
                     .ok()
                     .flatten()
-                    .unwrap_or_default();
-                // Same identity resolution as the API (#138, SET-03): the org
-                // profile wins over the config fallback.
-                let mut doc = crate::pdf::doc_for_labeled(inv, customer, org, &template.labels);
+                    .unwrap_or_else(crate::domain::InvoiceTemplate::seeded);
                 let vars = crate::template::vars_for(
                     inv,
                     customer,
                     Some(inv.issued_at.unwrap_or(inv.created_at).date_naive()),
                 );
-                let content = crate::template::doc_content(&template, customer, &vars);
+                let content = crate::template::doc_content(inv, &template, customer, &vars);
+                // Same identity resolution as the API (#138, SET-03): the org
+                // profile wins over the config fallback. The resolved subject
+                // rides the document too, so a legacy invoice re-rendered here
+                // matches what `/document` and the email report.
+                let mut view = inv.clone();
+                view.subject = content.subject.clone().unwrap_or_default();
+                let mut doc = crate::pdf::doc_for_labeled(&view, customer, org, &template.labels);
                 crate::template::apply_doc_content(&mut doc, &content);
                 // Subtask C: this path also archives a PDF (for an issued,
                 // undelivered invoice), so it carries the same generation-time
@@ -296,6 +302,8 @@ mod tests {
             written_off_at: None,
             tax_hundredths: 0,
             discount_hundredths: 0,
+            subject: String::new(),
+            terms: None,
         }
     }
 
@@ -328,6 +336,7 @@ mod tests {
                 tax_hundredths: 0,
                 discount_hundredths: 0,
                 payment_details: None,
+                legal_id: String::new(),
             })
             .unwrap();
         let mut invoice = issued_due(

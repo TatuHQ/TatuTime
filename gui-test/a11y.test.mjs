@@ -24,6 +24,7 @@ function setup() {
 window.t = {
   dashRenderOverview, state, api,
   contactRow, edLineRow, decorate: decorateUbuntuButton,
+  paymentRailRow, paymentRailRows, renumberPaymentRails, setPaymentRails, addPaymentRail,
 };`);
   return { dom, t: dom.window.t, document: dom.window.document };
 }
@@ -46,6 +47,48 @@ test('invoice chart exposes its numbers through the accessible name (#191)', () 
   // Children of role="img" are presentational — the old sr-only child is gone.
   assert.equal(chart.querySelector('.sr-only'), null,
     'no DOM summary inside a role="img" subtree');
+  dom.window.close();
+});
+
+test('payment-rail rows are labelled fieldsets with keyboard-operable controls (#354)', () => {
+  const { dom, t, document } = setup();
+  t.setPaymentRails([{
+    currency: 'EUR', account_name: 'Acme', iban: 'EX000000000000000000', instructions: 'Quote INV-1',
+  }]);
+  const row = document.querySelector('#pay-rails .payment-rail');
+  assert.ok(row, 'the rail renders as a fieldset');
+  assert.equal(row.tagName, 'FIELDSET');
+  assert.equal(row.querySelector('legend').textContent, 'Payment rail 1', 'the legend names the group');
+  for (const control of row.querySelectorAll('input, textarea')) {
+    assert.ok(control.id, `${control.dataset.railField} has an id`);
+    assert.equal(control.labels.length, 1, `${control.id} has exactly one label`);
+    assert.equal(control.labels[0].getAttribute('for'), control.id, `${control.id} label targets it`);
+    assert.ok(control.labels[0].textContent.trim(), `${control.id} has a visible name`);
+    assert.notEqual(control.tabIndex, -1, `${control.id} stays in the tab order`);
+  }
+  // The currency input is a free 3-letter entry with a datalist of common codes.
+  const currency = document.getElementById('pay-rail-0-currency');
+  assert.equal(currency.getAttribute('list'), 'pay-rail-currencies');
+  assert.equal(currency.maxLength, 3);
+  assert.ok(document.getElementById('pay-rail-currencies').options.length >= 4);
+
+  // Add/remove are real buttons, outside any click-only control: a keyboard
+  // user activates them with Enter/Space like every other button.
+  const add = document.getElementById('pay-rail-add');
+  assert.equal(add.tagName, 'BUTTON');
+  assert.equal(add.getAttribute('type'), 'button');
+  assert.notEqual(add.tabIndex, -1);
+  const remove = row.querySelector('button');
+  assert.equal(remove.tagName, 'BUTTON');
+  assert.equal(remove.getAttribute('type'), 'button');
+  assert.equal(remove.getAttribute('aria-label'), 'Remove payment rail 1');
+  assert.ok(remove.textContent.trim(), 'the remove control also has visible text');
+
+  t.addPaymentRail();
+  assert.equal(t.paymentRailRows().length, 2);
+  t.paymentRailRows()[0].querySelector('button').click();
+  assert.equal(t.paymentRailRows().length, 1, 'clicking the remove button removes its row');
+  assert.equal(document.getElementById('pay-rail-0-currency').value, '', 'the surviving row renumbers');
   dom.window.close();
 });
 
@@ -158,13 +201,15 @@ test('the bespoke dialog skins are retired, keeping only the p-modal adapter (#2
 
 test('dialog chrome meets AA in both framework themes (#232 inc 4)', () => {
   const themes = [];
-  walk(parse(vendorCss), { visit: 'Rule', enter(node) {
-    const values = {};
-    node.block.children.forEach((declaration) => {
-      if (declaration.type === 'Declaration') values[declaration.property] = generate(declaration.value);
-    });
-    if (values['--vf-color-background-default'] && values['--vf-color-text-default']) themes.push(values);
-  } });
+  walk(parse(vendorCss), {
+    visit: 'Rule', enter(node) {
+      const values = {};
+      node.block.children.forEach((declaration) => {
+        if (declaration.type === 'Declaration') values[declaration.property] = generate(declaration.value);
+      });
+      if (values['--vf-color-background-default'] && values['--vf-color-text-default']) themes.push(values);
+    }
+  });
   assert.ok(themes.length >= 2, 'light + dark token sets');
   for (const theme of themes) {
     const ratio = contrast(theme['--vf-color-text-default'], theme['--vf-color-background-default']);
@@ -282,13 +327,15 @@ test('the selected tab is signalled by the text colour, not a faint tint, in bot
   assert.match(vendorCss, /\[aria-selected=true\]::before\{[^}]*background-color:var\(--vf-color-text-default\)/,
     'the selected bar is painted in the tab text colour');
   const themes = [];
-  walk(parse(vendorCss), { visit: 'Rule', enter(node) {
-    const values = {};
-    node.block.children.forEach((declaration) => {
-      if (declaration.type === 'Declaration') values[declaration.property] = generate(declaration.value);
-    });
-    if (values['--vf-color-text-default'] && values['--vf-color-background-default']) themes.push(values);
-  } });
+  walk(parse(vendorCss), {
+    visit: 'Rule', enter(node) {
+      const values = {};
+      node.block.children.forEach((declaration) => {
+        if (declaration.type === 'Declaration') values[declaration.property] = generate(declaration.value);
+      });
+      if (values['--vf-color-text-default'] && values['--vf-color-background-default']) themes.push(values);
+    }
+  });
   assert.ok(themes.length >= 2, 'light + dark token sets');
   for (const theme of themes) {
     const ratio = contrast(theme['--vf-color-text-default'], theme['--vf-color-background-default']);

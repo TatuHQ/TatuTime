@@ -118,12 +118,15 @@ pub(crate) fn invoice_pdf_for_delivery(
 
 // ------------------------------------------------- templates & document --
 
-/// The singleton invoice template (#116) as stored; absent means defaults.
+/// The singleton invoice template (#116) as stored. An install that has never
+/// saved one resolves to the seeded defaults (`net_30` + the period subject);
+/// an explicitly saved template is used exactly as stored, so the code fallback
+/// chain in [`resolve_due_date`] stays intact.
 pub(crate) fn load_template(app: &AppState) -> Result<crate::domain::InvoiceTemplate, ApiError> {
     Ok(app
         .store
         .read_json_rel::<crate::domain::InvoiceTemplate>("invoice_template.json")?
-        .unwrap_or_default())
+        .unwrap_or_else(crate::domain::InvoiceTemplate::seeded))
 }
 
 /// Resolved variables + rendered content for one invoice/customer/template.
@@ -137,7 +140,7 @@ pub(crate) fn content_for(
         .or(Some(invoice.created_at))
         .map(|dt| dt.date_naive());
     let vars = crate::template::vars_for(invoice, customer, issue_day);
-    crate::template::doc_content(template, customer, &vars)
+    crate::template::doc_content(invoice, template, customer, &vars)
 }
 
 /// Render + archive the PDF from the invoice as stored today, using the current
@@ -164,11 +167,34 @@ pub(crate) fn render_pdf_with_stage(
 ) -> Result<Vec<u8>, ApiError> {
     let customer = get_customer(&app.store, invoice.customer_id)?;
     let template = load_template(app)?;
-    let mut doc = crate::pdf::doc_for_labeled(invoice, &customer, &org_for(app)?, &template.labels);
     let content = content_for(invoice, &customer, &template);
+    // The stored snapshot wins for an issued invoice; a draft — and a legacy
+    // issued document that predates the field — resolves the subject live,
+    // exactly as `/document` and the email do. Rendering from the stored value
+    // alone left the preview's PDF without the Subject row its own JSON
+    // reported. The title follows the same resolved value.
+    let mut view = invoice.clone();
+    view.subject = content.subject.clone().unwrap_or_default();
+    let mut doc = crate::pdf::doc_for_labeled(&view, &customer, &org_for(app)?, &template.labels);
     crate::template::apply_doc_content(&mut doc, &content);
     doc.watermark = Some(stage);
     Ok(crate::pdf::render_invoice_pdf(&doc))
+}
+
+/// The payment terms an issue will use: customer first, else the org template.
+/// `None` means the legacy net-14-from-`period_to` fallback applies. This is
+/// the ONE resolver, so the frozen `Invoice::terms` snapshot and the computed
+/// `due_date` can never disagree.
+#[must_use]
+pub(crate) fn resolve_terms(
+    customer: &crate::domain::Customer,
+    template: &crate::domain::InvoiceTemplate,
+) -> Option<crate::domain::PaymentTerms> {
+    customer
+        .payment_terms
+        .as_ref()
+        .or(template.payment_terms.as_ref())
+        .copied()
 }
 
 /// `due_date` at issue (#116): customer terms → org default terms → the
@@ -180,11 +206,8 @@ pub(crate) fn resolve_due_date(
     template: &crate::domain::InvoiceTemplate,
     now: chrono::DateTime<chrono::Utc>,
 ) -> chrono::NaiveDate {
-    let terms = customer
-        .payment_terms
-        .as_ref()
-        .or(template.payment_terms.as_ref());
-    if let Some(days) = terms.and_then(|t| t.fixed_days()) {
+    let terms = resolve_terms(customer, template);
+    if let Some(days) = terms.as_ref().and_then(|t| t.fixed_days()) {
         let from = now.date_naive();
         return from
             .checked_add_days(chrono::Days::new(u64::from(days)))

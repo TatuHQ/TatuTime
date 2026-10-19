@@ -1,4 +1,7 @@
-use super::{build_draft, content_for, load_template, money_for_email, org_for, resolve_due_date};
+use super::{
+    build_draft, content_for, load_template, money_for_email, org_for, resolve_due_date,
+    resolve_terms,
+};
 use crate::api::*;
 use crate::domain::{InvoiceTimelineEvent, InvoiceTimelineEventKind, InvoiceWatermarkStage};
 
@@ -207,6 +210,9 @@ pub async fn issue_invoice(
     // straddle a tick — visible at midnight boundaries and it breaks the
     // "re-render yields identical bytes" determinism claim).
     let now = app.clock.now();
+    // ONE terms resolution feeds both the due date and the frozen snapshot, so
+    // the printed `(Net N)` can never disagree with `due_date`.
+    let terms = resolve_terms(&customer, &template);
     let due = resolve_due_date(&invoice, &customer, &template, now);
     // Render against the to-be-issued snapshot: the PDF is the issue-time
     // document, and bytes are pure in this state (legacy re-renders match).
@@ -214,16 +220,25 @@ pub async fn issue_invoice(
     snapshot.status = crate::domain::InvoiceStatus::Issued;
     snapshot.issued_at = Some(now);
     snapshot.due_date = Some(due);
+    snapshot.terms = terms;
+    let content = content_for(&snapshot, &customer, &template);
+    // Freeze the resolved subject in the same transition. From here on the
+    // document reads its own snapshot, not the live template/customer — and
+    // the subject must be set BEFORE the document is built, or the archived
+    // bytes would lack the Subject row a later lazy re-render prints.
+    let subject = content.subject.clone().unwrap_or_default();
+    snapshot.subject = subject.clone();
     let mut doc =
         crate::pdf::doc_for_labeled(&snapshot, &customer, &org_for(&app)?, &template.labels);
-    let content = content_for(&snapshot, &customer, &template);
     crate::template::apply_doc_content(&mut doc, &content);
     // Subtask C: the archived PDF is generated at issue time, when the invoice
     // has not yet been delivered, so its frozen watermark stage is `Draft`.
     // The archive is write-once, so this stamp is never recomputed later.
     doc.watermark = Some(InvoiceWatermarkStage::Draft);
     let pdf = crate::pdf::render_invoice_pdf(&doc);
-    let issued = app.store.issue_invoice(id, now, due, &pdf)?;
+    let issued = app
+        .store
+        .issue_invoice(id, now, due, subject, terms, &pdf)?;
     record_timeline(
         &app,
         issued.id,

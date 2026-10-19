@@ -62,7 +62,9 @@ async fn invoice_email_sends_to_customer() {
         "{}",
         msgs[0].text
     );
-    assert!(msgs[0].subject.contains(inv["number"].as_str().unwrap()));
+    // The default template now names the billing period (not the invoice
+    // number) and the issued snapshot is what the email carries.
+    assert_eq!(msgs[0].subject, "ACME invoice for 10 2026");
 }
 
 #[tokio::test]

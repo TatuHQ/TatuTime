@@ -4,7 +4,7 @@ use uuid::Uuid;
 use super::invoices::pdf_hint;
 use super::io::{read_json, write_bytes_atomic, write_json};
 use super::*;
-use crate::domain::{Entry, InvoiceStatus};
+use crate::domain::{Entry, InvoiceStatus, PaymentTerms};
 
 // -------------------------------------------- multi-document transactions --
 //
@@ -26,11 +26,14 @@ impl Store {
     /// refused with [`StoreError::DraftOutOfDate`] **inside this transaction**
     /// — an entry edit cannot slip between the check and the persist, and the
     /// refusal writes nothing (no status change, no PDF, no lock).
+    #[allow(clippy::too_many_arguments)]
     pub fn issue_invoice(
         &self,
         id: Uuid,
         now: DateTime<Utc>,
         due: NaiveDate,
+        subject: String,
+        terms: Option<PaymentTerms>,
         pdf: &[u8],
     ) -> Result<Invoice, StoreError> {
         let _guard = self.write_lock()?;
@@ -62,6 +65,10 @@ impl Store {
         invoice.status = InvoiceStatus::Issued;
         invoice.issued_at = Some(now);
         invoice.due_date = Some(due);
+        // Freeze the subject + terms in the SAME transactional write as the
+        // status/due date and the archive, so the document can never drift.
+        invoice.subject = subject;
+        invoice.terms = terms;
         invoice.pdf = Some(hint);
         write_json(&self.doc_path::<Invoice>(&id.to_string()), &invoice)?;
         Ok(invoice)
@@ -495,6 +502,8 @@ mod txn_tests {
             written_off_at: None,
             tax_hundredths: 0,
             discount_hundredths: 0,
+            subject: String::new(),
+            terms: None,
         }
     }
 
@@ -538,6 +547,8 @@ mod txn_tests {
                 inv.id,
                 Utc::now(),
                 NaiveDate::from_ymd_opt(2026, 10, 21).unwrap(),
+                "INV subject".into(),
+                None,
                 b"%PDF-1.4 test",
             )
             .unwrap();
@@ -552,6 +563,8 @@ mod txn_tests {
                 inv.id,
                 Utc::now(),
                 NaiveDate::from_ymd_opt(2026, 10, 21).unwrap(),
+                String::new(),
+                None,
                 b"%PDF-1.4 test"
             ),
             Err(StoreError::Conflict(_))
@@ -570,6 +583,8 @@ mod txn_tests {
                 inv.id,
                 Utc::now(),
                 NaiveDate::from_ymd_opt(2026, 10, 21).unwrap(),
+                String::new(),
+                None,
                 b"%PDF-1.4 first",
             )
             .unwrap();
@@ -605,6 +620,8 @@ mod txn_tests {
                 inv.id,
                 Utc::now(),
                 NaiveDate::from_ymd_opt(2026, 10, 21).unwrap(),
+                String::new(),
+                None,
                 b"%PDF-1.4 doc",
             )
             .unwrap();
@@ -626,6 +643,8 @@ mod txn_tests {
                 inv.id,
                 Utc::now(),
                 NaiveDate::from_ymd_opt(2026, 10, 21).unwrap(),
+                String::new(),
+                None,
                 b"%PDF x",
             )
             .unwrap();
@@ -682,6 +701,8 @@ mod txn_tests {
                 inv.id,
                 Utc::now(),
                 NaiveDate::from_ymd_opt(2026, 10, 21).unwrap(),
+                String::new(),
+                None,
                 b"%PDF x",
             )
             .unwrap();
