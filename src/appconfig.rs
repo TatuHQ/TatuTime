@@ -69,7 +69,7 @@ pub const KEYS: &[KeyDef] = &[
             max: 365,
             default: 7,
         },
-        description: "Days between overdue-invoice email reminders (#35)",
+        description: "Days between overdue-invoice email reminders",
     },
     KeyDef {
         name: "org_name",
@@ -78,21 +78,21 @@ pub const KEYS: &[KeyDef] = &[
         kind: Kind::Str {
             default: "TucanoTime",
         },
-        description: "Fallback organisation name, used only when the Company name is blank (#138, #113)",
+        description: "Fallback organisation name, used only when the Company name is blank",
     },
     KeyDef {
         name: "sso_admin_group",
         writable: true,
         env: "TUCANO_SSO_ADMIN_GROUP",
         kind: Kind::Str { default: "" },
-        description: "IdP group that maps to the admin role on SSO login (#32)",
+        description: "IdP group that maps to the admin role on SSO login",
     },
     KeyDef {
         name: "sso_allowed_domains",
         writable: true,
         env: "TUCANO_SSO_ALLOWED_DOMAINS",
         kind: Kind::Csv,
-        description: "Comma-separated email domains allowed for SSO (#32)",
+        description: "Comma-separated email domains allowed for SSO",
     },
     KeyDef {
         name: "calendar_oauth_redirect",
@@ -101,35 +101,35 @@ pub const KEYS: &[KeyDef] = &[
         kind: Kind::Str {
             default: "/api/calendar/oauth/callback",
         },
-        description: "Redirect URI registered with the OAuth calendar app (#36)",
+        description: "Redirect URI registered with the OAuth calendar app",
     },
     KeyDef {
         name: "google_calendar_client_id",
         writable: true,
         env: "TUCANO_GOOGLE_CLIENT_ID",
         kind: Kind::OptionalStr,
-        description: "Google OAuth client id (public half of the pair; the secret stays env/vault) (#36)",
+        description: "Google OAuth client id (public half of the pair; the secret stays env/vault)",
     },
     KeyDef {
         name: "ms_calendar_client_id",
         writable: true,
         env: "TUCANO_MS_CLIENT_ID",
         kind: Kind::OptionalStr,
-        description: "Microsoft OAuth client id (secret stays env/vault) (#36)",
+        description: "Microsoft OAuth client id (secret stays env/vault)",
     },
     KeyDef {
         name: "qbo_base_url",
         writable: true,
         env: "TUCANO_QBO_BASE_URL",
         kind: Kind::OptionalStr,
-        description: "Override the QuickBooks API base URL (#33)",
+        description: "Override the QuickBooks API base URL",
     },
     KeyDef {
         name: "xero_base_url",
         writable: true,
         env: "TUCANO_XERO_BASE_URL",
         kind: Kind::OptionalStr,
-        description: "Override the Xero API base URL (#33)",
+        description: "Override the Xero API base URL",
     },
     KeyDef {
         name: "max_docs",
@@ -575,10 +575,13 @@ mod tests {
 
     #[test]
     fn csv_parsing() {
-        let env = env_from(&[("TUCANO_SSO_ALLOWED_DOMAINS", "acme.test, other.test ,")]);
+        let env = env_from(&[(
+            "TUCANO_SSO_ALLOWED_DOMAINS",
+            "tucanotime.test, other.test ,",
+        )]);
         assert_eq!(
             AppConfig::empty().get_csv("sso_allowed_domains", &env),
-            vec!["acme.test".to_string(), "other.test".to_string()]
+            vec!["tucanotime.test".to_string(), "other.test".to_string()]
         );
     }
 

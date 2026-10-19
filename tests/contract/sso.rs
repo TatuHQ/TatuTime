@@ -14,8 +14,11 @@ use tucano_time::store::Store;
 async fn sso_jit_provisions_and_logs_in() {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(dir.path().join("data")).unwrap();
-    let idp =
-        tucano_time::sso::SignedTokenIdp::new("okta-test", "stub-secret", vec!["acme.test".into()]);
+    let idp = tucano_time::sso::SignedTokenIdp::new(
+        "okta-test",
+        "stub-secret",
+        vec!["tucanotime.test".into()],
+    );
     let registry = Arc::new(tucano_time::sso::SsoRegistry::new(vec![Arc::new(idp)]));
     let state = AppState::with_session(
         store,
@@ -47,13 +50,16 @@ async fn sso_jit_provisions_and_logs_in() {
         &vec![json!("okta-test")]
     );
 
-    let idp =
-        tucano_time::sso::SignedTokenIdp::new("okta-test", "stub-secret", vec!["acme.test".into()]);
+    let idp = tucano_time::sso::SignedTokenIdp::new(
+        "okta-test",
+        "stub-secret",
+        vec!["tucanotime.test".into()],
+    );
 
     // A valid signed assertion JIT-creates the user (member) and logs in.
     let claims = tucano_time::sso::TokenClaims {
         sub: "u1".into(),
-        email: "Newbie@acme.test".into(),
+        email: "Newbie@tucanotime.test".into(),
         name: "New Bie".into(),
         groups: vec![],
         exp: chrono::Utc::now().timestamp() + 300,
@@ -68,7 +74,7 @@ async fn sso_jit_provisions_and_logs_in() {
     )
     .await;
     assert_eq!(s1, StatusCode::OK, "{user}");
-    assert_eq!(user["email"], "newbie@acme.test");
+    assert_eq!(user["email"], "newbie@tucanotime.test");
     assert_eq!(user["role"], "member");
 
     // The session cookie works like a local one.
@@ -145,7 +151,7 @@ async fn sso_empty_allowed_domains_denies_and_provisions_nothing() {
     let idp = tucano_time::sso::SignedTokenIdp::new("okta-test", "stub-secret", vec![]);
     let claims = tucano_time::sso::TokenClaims {
         sub: "u1".into(),
-        email: "Intruder@acme.test".into(),
+        email: "Intruder@tucanotime.test".into(),
         name: "Intruder".into(),
         groups: vec![],
         exp: chrono::Utc::now().timestamp() + 300,

@@ -7,7 +7,7 @@ import { calState, refreshTimeCal, shiftMonth } from './calendar.js';
 import { $, addDays, announce, clearFormError, decorateUbuntuButton, isoDate, mondayOf } from './dom.js';
 import { ADD_CATEGORY_VALUE, addCategory, addExpenseCategory, fillCategorySelect, refreshCategories, refreshExpenses, refreshSubmissions, resetCategoryForm, resetExpenseForm, saveExpense, submitWeek } from './expenses.js';
 import { refreshExpenseConversion, resetExpenseConversion, showConverted } from './fx.js';
-import { cancelCustomerEdit, cancelProjectEdit, cancelTaskEdit, contactRow, fillParentCustomers, fillTaskParents, prefillProjectParent, refreshCustomerPickers, refreshCustomerTable, refreshCustomersView, refreshProjectTable, refreshProjectsView, refreshTaskTable, refreshTasksView, runReport, saveCustomer, saveProject, saveTask } from './hierarchy.js';
+import { addPaymentRail, cancelCustomerEdit, cancelProjectEdit, cancelTaskEdit, contactRow, fillParentCustomers, fillTaskParents, prefillProjectParent, refreshCustomerPickers, refreshCustomerTable, refreshCustomersView, refreshProjectTable, refreshProjectsView, refreshTaskTable, refreshTasksView, runReport, saveCustomer, saveProject, saveTask } from './hierarchy.js';
 import { closeDeliveryRecord, closeInvoicePreview, closeSendEmailDialog, confirmSendEmail, dash, dashApplyColumns, downloadInvoicePdf, ed, edCancel, edLineRow, edOpen, edRecalc, edSave, invoicePreview, markInvoiceSent, openEmailSettings, refreshInvoiceSummary, refreshInvoices, sendInvoiceEmail } from './invoices.js';
 import { markNotificationsRead, refreshNotifications } from './notifications.js';
 import { initReceiptPreview } from './receipt.js';
@@ -86,15 +86,15 @@ export function wireDayAndCalendar() {
   // #140: calendar navigation.
   $('cal-prev').addEventListener('click', () => {
     calState.month = shiftMonth(calState.month || $('day-date').value.slice(0, 7), -1);
-    refreshTimeCal().catch?.(() => {});
+    refreshTimeCal().catch?.(() => { });
   });
   $('cal-next').addEventListener('click', () => {
     calState.month = shiftMonth(calState.month || $('day-date').value.slice(0, 7), 1);
-    refreshTimeCal().catch?.(() => {});
+    refreshTimeCal().catch?.(() => { });
   });
   $('cal-month').addEventListener('click', () => {
     calState.month = isoDate(new Date()).slice(0, 7);
-    refreshTimeCal().catch?.(() => {});
+    refreshTimeCal().catch?.(() => { });
   });
 }
 
@@ -105,35 +105,35 @@ export function wireInvoiceDashboard() {
     dash.openOnly = true;
     $('inv-tab-open').setAttribute('aria-pressed', 'true');
     $('inv-tab-all').setAttribute('aria-pressed', 'false');
-    refreshInvoices().catch?.(() => {});
+    refreshInvoices().catch?.(() => { });
   });
   $('inv-tab-all').addEventListener('click', () => {
     dash.openOnly = false;
     $('inv-tab-all').setAttribute('aria-pressed', 'true');
     $('inv-tab-open').setAttribute('aria-pressed', 'false');
-    refreshInvoices().catch?.(() => {});
+    refreshInvoices().catch?.(() => { });
   });
   $('invoice-search').addEventListener('input', () => {
     dash.q = $('invoice-search').value;
-    refreshInvoices().catch?.(() => {});
+    refreshInvoices().catch?.(() => { });
   });
   $('inv-f-customer').addEventListener('change', () => {
     dash.customer = $('inv-f-customer').value;
     // #189: refreshInvoices chains refreshInvoiceSummary with the shared
     // payload — the old double call fired two renders and three GETs.
-    refreshInvoices().catch?.(() => {});
+    refreshInvoices().catch?.(() => { });
   });
   $('inv-f-project').addEventListener('change', () => {
     dash.project = $('inv-f-project').value;
-    refreshInvoices().catch?.(() => {});
+    refreshInvoices().catch?.(() => { });
   });
   $('inv-f-from').addEventListener('change', () => {
     dash.from = $('inv-f-from').value;
-    refreshInvoices().catch?.(() => {});
+    refreshInvoices().catch?.(() => { });
   });
   $('inv-f-to').addEventListener('change', () => {
     dash.to = $('inv-f-to').value;
-    refreshInvoices().catch?.(() => {});
+    refreshInvoices().catch?.(() => { });
   });
   for (const cb of document.querySelectorAll('.inv-col')) {
     cb.addEventListener('change', dashApplyColumns);
@@ -151,16 +151,16 @@ export function wireInvoiceDashboard() {
         b2.closest('th').setAttribute('aria-sort', 'none');
       }
       btn.closest('th').setAttribute('aria-sort', dash.sortDir === 1 ? 'ascending' : 'descending');
-      refreshInvoices().catch?.(() => {});
+      refreshInvoices().catch?.(() => { });
     });
   }
   $('inv-year-prev').addEventListener('click', () => {
     dash.year -= 1;
-    refreshInvoiceSummary().catch?.(() => {});
+    refreshInvoiceSummary().catch?.(() => { });
   });
   $('inv-year-next').addEventListener('click', () => {
     dash.year += 1;
-    refreshInvoiceSummary().catch?.(() => {});
+    refreshInvoiceSummary().catch?.(() => { });
   });
 }
 
@@ -408,6 +408,10 @@ export function wireWeekGrid() {
 // `today` is passed in: the submission-week seed belongs to the boot date
 // seeding, not the wiring block (see #189 extraction).
 export function wireSetupPanels(today) {
+  // #354: the customer dialog's payment-rail list. The add control is wired
+  // with the other setup-panel controls; each row's Remove button is wired by
+  // the row builder itself (one <button> per row, no delegated handlers).
+  $('pay-rail-add').addEventListener('click', addPaymentRail);
   // #116: the day input only makes sense for `custom` terms.
   $('customer-terms').addEventListener('change', () => {
     $('customer-terms-days-field').hidden = $('customer-terms').value !== 'custom';
@@ -635,10 +639,10 @@ export async function startApp() {
   wireSetupPanels(today);
   await loadCustomers();
   await refreshCustomerPickers(); // fills all four pickers, no fetches
-  refreshSchedules().catch?.(() => {});
+  refreshSchedules().catch?.(() => { });
   // SET-02: the catalog is an admin-tier read; a member boot must not fetch it.
-  if (state.isAdmin) refreshCatalog().catch?.(() => {});
-  refreshRetainers().catch?.(() => {});
+  if (state.isAdmin) refreshCatalog().catch?.(() => { });
+  refreshRetainers().catch?.(() => { });
   // First-run trigger (#111): zero customers after a successful login opens
   // the wizard as a modal. Once a customer exists it never auto-opens — the
   // sidebar entry reopens it manually.
@@ -648,28 +652,28 @@ export async function startApp() {
   const firstPaint = refreshDay();
   $('expense-date').value = today;
   await Promise.all([
-  firstPaint,
-  refreshWeek(),
-  // #140: a deep link (or a plain reload) straight to the Calendar is selected
-  // by applyRoute() with the panel refresh suppressed — the router trusts this
-  // boot sequence to paint — and it only painted Day and Week, so the month
-  // grid stayed empty until the segment was clicked. Paint the linked segment.
-  segActiveId === 'ts-cal' ? refreshTimeCal() : null,
-  refreshCustomerTable(),
-  // #182: Projects and Tasks were only ever painted by refreshPanel(), which
-  // applyRoute() suppresses while it selects a tab (the router trusts the boot
-  // sequence to paint). A deep link - or a plain reload - of /projects or /tasks
-  // therefore rendered an empty register until the tab was clicked again.
-  refreshProjectTable(),
-  refreshTaskTable(),
-  refreshInvoices(),
-  refreshTimer(),
-  refreshNotifications(),
-  refreshCategories(),
-  fillCategorySelect(),
-  refreshExpenses(),
-  refreshSubmissions(),
-  refreshSettings(),
+    firstPaint,
+    refreshWeek(),
+    // #140: a deep link (or a plain reload) straight to the Calendar is selected
+    // by applyRoute() with the panel refresh suppressed — the router trusts this
+    // boot sequence to paint — and it only painted Day and Week, so the month
+    // grid stayed empty until the segment was clicked. Paint the linked segment.
+    segActiveId === 'ts-cal' ? refreshTimeCal() : null,
+    refreshCustomerTable(),
+    // #182: Projects and Tasks were only ever painted by refreshPanel(), which
+    // applyRoute() suppresses while it selects a tab (the router trusts the boot
+    // sequence to paint). A deep link - or a plain reload - of /projects or /tasks
+    // therefore rendered an empty register until the tab was clicked again.
+    refreshProjectTable(),
+    refreshTaskTable(),
+    refreshInvoices(),
+    refreshTimer(),
+    refreshNotifications(),
+    refreshCategories(),
+    fillCategorySelect(),
+    refreshExpenses(),
+    refreshSubmissions(),
+    refreshSettings(),
   ]);
   $('version').textContent = 'TucanoTime';
 }

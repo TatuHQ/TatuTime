@@ -10,7 +10,7 @@ async fn unknown_field_rejected_before_persist() {
         &app,
         "POST",
         "/api/customers",
-        Some(json!({"name":"ACME","currency":"EUR","default_rate_minor":1,"evil":true})),
+        Some(json!({"name":"Tucano Time","currency":"EUR","default_rate_minor":1,"evil":true})),
     )
     .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
@@ -51,7 +51,7 @@ async fn wrong_type_is_validation_failure() {
 #[tokio::test]
 async fn currency_normalised_and_rejected() {
     let (app, _d) = app().await;
-    let created = new_customer(&app, "ACME", "eur", 6000).await;
+    let created = new_customer(&app, "Tucano Time", "eur", 6000).await;
     assert_eq!(
         created["currency"], "EUR",
         "currency is normalised to upper case"
@@ -70,7 +70,7 @@ async fn currency_normalised_and_rejected() {
 #[tokio::test]
 async fn full_customer_project_entry_flow() {
     let (app, _d) = app().await;
-    let cust = new_customer(&app, "ACME", "EUR", 6000).await;
+    let cust = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = cust["id"].as_str().unwrap();
 
     let proj = new_project(&app, cid, "p-1", json!({"name":"Portal"})).await;
@@ -150,7 +150,7 @@ async fn project_must_belong_to_customer() {
 #[tokio::test]
 async fn hours_boundaries() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({})).await;
 
@@ -188,7 +188,7 @@ async fn hours_boundaries() {
 #[tokio::test]
 async fn invalid_date_rejected_with_field_detail() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({})).await;
     let (status, body) = json_req(
@@ -205,7 +205,7 @@ async fn invalid_date_rejected_with_field_detail() {
 #[tokio::test]
 async fn duplicate_project_conflicts() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({})).await;
     let (status, _) = json_req(
@@ -221,7 +221,7 @@ async fn duplicate_project_conflicts() {
 #[tokio::test]
 async fn customer_delete_blocked_while_referenced() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({})).await;
     // Has projects -> cannot delete.
@@ -260,7 +260,7 @@ async fn range_and_date_queries_are_exclusive_forms() {
 #[tokio::test]
 async fn project_requires_currency_and_rate() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     // Missing rate_minor.
     let (s1, b1) = json_req(
@@ -285,7 +285,7 @@ async fn project_requires_currency_and_rate() {
 #[tokio::test]
 async fn legacy_project_document_resolves_from_customer() {
     let (app, d) = app().await;
-    let c = new_customer(&app, "ACME", "USD", 4500).await;
+    let c = new_customer(&app, "Tucano Time", "USD", 4500).await;
     let cid = c["id"].as_str().unwrap();
     // Write a pre-#11 project document that omits currency and rate_minor.
     let dir = d
@@ -435,15 +435,15 @@ async fn payment_details_round_trip_validate_and_email() {
         Some(
             json!({"name":"PAYME","currency":"EUR","default_rate_minor":6000,
             "email":"pay@payme.test",
-            "payment_details":{"bank_name":"Tucano Bank","iban":"DE89371314000000000000",
-                "bic":"GENODED1XXX","reference":"Invoice number",
+            "payment_details":{"bank_name":"Example Bank","iban":"EX000000000000000000",
+                "bic":"EXAMPLEB","reference":"Invoice number",
                 "instructions":"Please pay by bank transfer in EUR."}}),
         ),
     )
     .await;
     assert_eq!(s, StatusCode::CREATED, "{c}");
-    assert_eq!(c["payment_details"]["iban"], "DE89371314000000000000");
-    assert_eq!(c["payment_details"]["bank_name"], "Tucano Bank");
+    assert_eq!(c["payment_details"]["iban"], "EX000000000000000000");
+    assert_eq!(c["payment_details"]["bank_name"], "Example Bank");
     let cid = c["id"].as_str().unwrap().to_string();
 
     // An all-blank block normalises to absent on update (never persisted).
@@ -465,8 +465,8 @@ async fn payment_details_round_trip_validate_and_email() {
     );
 
     // Restore, then the rejection matrix: every bad shape is a 422.
-    let pay = json!({"bank_name":"Tucano Bank","iban":"DE89371314000000000000",
-        "bic":"GENODED1XXX","reference":"Invoice number",
+    let pay = json!({"bank_name":"Example Bank","iban":"EX000000000000000000",
+        "bic":"EXAMPLEB","reference":"Invoice number",
         "instructions":"Please pay by bank transfer in EUR."});
     json_req(
         &app,
@@ -479,7 +479,7 @@ async fn payment_details_round_trip_validate_and_email() {
     )
     .await;
     for bad in [
-        json!({"iban":"DE89 3713 1400 0000 0000 00!"}), // not letters/digits
+        json!({"iban":"EX00 0000 0000 0000 0000 00!"}), // not letters/digits
         json!({"bic":"SHORT"}),                         // 5 chars — wrong length
         json!({"iban":"AB"}),                           // below the 5-char floor
         json!({"routing":"99"}),                        // unknown field
@@ -499,7 +499,7 @@ async fn payment_details_round_trip_validate_and_email() {
     }
     let (_sg, got) = json_req(&app, "GET", &format!("/api/customers/{cid}"), None).await;
     assert_eq!(
-        got["payment_details"]["bank_name"], "Tucano Bank",
+        got["payment_details"]["bank_name"], "Example Bank",
         "rejections must not touch the stored block"
     );
 
@@ -532,9 +532,9 @@ async fn payment_details_round_trip_validate_and_email() {
     let mail = &app.email.messages()[0].text;
     for fragment in [
         "How to pay:",
-        "Bank: Tucano Bank",
-        "IBAN: DE89371314000000000000",
-        "BIC/SWIFT: GENODED1XXX",
+        "Bank: Example Bank",
+        "IBAN: EX000000000000000000",
+        "BIC/SWIFT: EXAMPLEB",
         "Reference: Invoice number",
         "Please pay by bank transfer in EUR.",
     ] {
@@ -553,7 +553,7 @@ async fn payment_details_round_trip_validate_and_email() {
     assert_eq!(sd, StatusCode::OK, "{doc}");
     let html = doc["html"].as_str().unwrap();
     assert!(html.contains("Pay us:"), "{html}");
-    assert!(html.contains("DE89371314000000000000"), "{html}");
+    assert!(html.contains("EX000000000000000000"), "{html}");
 }
 
 #[tokio::test]
@@ -587,7 +587,7 @@ async fn oversized_project_budgets_rejected_without_persisting() {
     // #187: budget fields were the only money/hours inputs persisted with no
     // bound (u64::MAX survived, breaking the burn-rate math downstream).
     let (app, _d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     let p = new_project(&app, cid, "P1", json!({"budget_hours": 5000})).await;
     assert_eq!(p["budget_hours"], 5000);
@@ -647,12 +647,15 @@ async fn control_characters_are_refused_on_write_without_persisting() {
     // nothing -- never left to the sink alone.
     let (app, _d) = app().await;
     for (field, value) in [
-        ("email", "billing@acme.test\r\nBcc: attacker@evil.example"),
+        (
+            "email",
+            "billing@tucanotime.test\r\nBcc: attacker@evil.example",
+        ),
         (
             "invoice_subject",
             "Inv %invoice_number%\nBcc: attacker@evil.example",
         ),
-        ("email", "billing@acme.test\0"),
+        ("email", "billing@tucanotime.test\0"),
     ] {
         let mut body = json!({"name":"EVIL","currency":"EUR","default_rate_minor":6000});
         body[field] = json!(value);
@@ -673,7 +676,7 @@ async fn control_characters_are_refused_on_write_without_persisting() {
         Some(
             json!({"name":"EVIL2","currency":"EUR","default_rate_minor":6000,
                     "contacts":[{"name":"Billing","billing":true,
-                                 "email":"billing@acme.test\r\nBcc: attacker@evil.example"}]}),
+                                 "email":"billing@tucanotime.test\r\nBcc: attacker@evil.example"}]}),
         ),
     )
     .await;

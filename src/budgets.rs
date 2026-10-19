@@ -211,7 +211,7 @@ mod tests {
         store
             .put_customer(&Customer {
                 id: cid,
-                name: "ACME".into(),
+                name: "Tucano Time".into(),
                 currency: Currency("EUR".into()),
                 default_rate_minor: 6000,
                 active: true,
@@ -225,6 +225,7 @@ mod tests {
                 discount_hundredths: 0,
 
                 payment_details: None,
+                legal_id: String::new(),
             })
             .unwrap();
         store.put_project(&project).unwrap();
@@ -260,7 +261,7 @@ mod tests {
         let (cid, p) = proj(Some(1000)); // budget 10h
         let customer = Customer {
             id: cid,
-            name: "ACME".into(),
+            name: "Tucano Time".into(),
             currency: Currency("EUR".into()),
             default_rate_minor: 6000,
             active: true,
@@ -274,6 +275,7 @@ mod tests {
             discount_hundredths: 0,
 
             payment_details: None,
+            legal_id: String::new(),
         };
         let entries = vec![Entry {
             id: uuid::Uuid::new_v4(),
@@ -304,7 +306,7 @@ mod tests {
         p.budget_amount_minor = Some(10_000); // 100.00 in minor units
         let customer = Customer {
             id: cid,
-            name: "ACME".into(),
+            name: "Tucano Time".into(),
             currency: Currency("EUR".into()),
             default_rate_minor: 6000, // 60.00/h
             active: true,
@@ -318,6 +320,7 @@ mod tests {
             discount_hundredths: 0,
 
             payment_details: None,
+            legal_id: String::new(),
         };
         let entries = vec![Entry {
             id: uuid::Uuid::new_v4(),

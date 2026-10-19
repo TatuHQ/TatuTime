@@ -597,7 +597,7 @@ impl SecretVault {
         }
     }
 
-    /// Store/overwrite a secret. `key` is a provider path e.g. `acme.api_token`.
+    /// Store/overwrite a secret. `key` is a provider path e.g. `tucano.api_token`.
     pub fn put(&self, key: &str, value: &str) -> Result<(), VaultError> {
         let mut map = lock(&self.data);
         map.insert(key.to_string(), value.to_string());
@@ -696,14 +696,14 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let vault = SecretVault::open(dir.path(), Some(KEY)).unwrap().unwrap();
         vault
-            .put("acme.api_token", "unit-test-secret-value-abcdef")
+            .put("tucano.api_token", "unit-test-secret-value-abcdef")
             .unwrap();
         assert_eq!(
-            vault.get("acme.api_token").as_deref(),
+            vault.get("tucano.api_token").as_deref(),
             Some("unit-test-secret-value-abcdef")
         );
-        assert_eq!(vault.hint("acme.api_token"), "••••ef");
-        assert_eq!(vault.keys(), vec!["acme.api_token".to_string()]);
+        assert_eq!(vault.hint("tucano.api_token"), "••••ef");
+        assert_eq!(vault.keys(), vec!["tucano.api_token".to_string()]);
 
         // On-disk blob must not contain the plaintext.
         let blob = fs::read(dir.path().join("secrets.bin")).unwrap();
@@ -715,7 +715,7 @@ mod tests {
         // Reopen: value survives (decrypted with the same key).
         let v2 = SecretVault::open(dir.path(), Some(KEY)).unwrap().unwrap();
         assert_eq!(
-            v2.get("acme.api_token").as_deref(),
+            v2.get("tucano.api_token").as_deref(),
             Some("unit-test-secret-value-abcdef")
         );
     }

@@ -89,13 +89,22 @@ pub async fn send_invoice_email(
         true,
         payment.as_deref(),
     );
-    // #116: the template subject wins when configured (customer override →
-    // org template → legacy); the HTML letter is set only when there is
+    // The document's own snapshot is the first word on the subject (phase 2):
+    // whatever `invoice.subject` reads on the PDF is what the email carries.
+    // Otherwise the live precedence still applies (customer override → org
+    // template → legacy), and the HTML letter is set only when there is
     // template content, keeping unset templates byte-identical.
-    let subject = content
-        .subject
-        .clone()
-        .unwrap_or_else(|| crate::email::invoice_subject(&invoice.number, &org.name));
+    let subject = {
+        let snapshot = invoice.subject.trim();
+        if snapshot.is_empty() {
+            content
+                .subject
+                .clone()
+                .unwrap_or_else(|| crate::email::invoice_subject(&invoice.number, &org.name))
+        } else {
+            snapshot.to_string()
+        }
+    };
     let html = crate::template::email_html(&content);
     let profile = load_org(&app)?;
     let msg = crate::email::EmailMessage {

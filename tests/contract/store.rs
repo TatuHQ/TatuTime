@@ -10,7 +10,7 @@ async fn delete_customer_refused_when_project_docs_are_unreadable() {
     // project docs. An unlistable collection must refuse the deletion and
     // leave every file intact.
     let (app, d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap().to_string();
     new_project(&app, &cid, "P1", json!({})).await;
     let project_path = d
@@ -68,6 +68,7 @@ fn concurrent_writer_times_out_with_lock_busy() {
         discount_hundredths: 0,
 
         payment_details: None,
+        legal_id: String::new(),
     };
     let err = store.put_customer(&cust).expect_err("should time out");
     assert!(
@@ -91,7 +92,7 @@ async fn store_fault_during_entry_validation_is_500_not_422() {
     // `corrupt_document` rather than the opaque `internal` (no internals
     // leaked either way).
     let (app, d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap().to_string();
     new_project(&app, &cid, "P1", json!({})).await;
     std::fs::write(
@@ -342,10 +343,11 @@ mod storage_layout {
             discount_hundredths: 0,
 
             payment_details: None,
+            legal_id: String::new(),
         };
         store.put_customer(&customer).unwrap();
 
-        let code = "ACME-1";
+        let code = "TUCANO-1";
         store
             .put_project(&Project {
                 customer_id: customer.id,
@@ -423,6 +425,8 @@ mod storage_layout {
                 written_off_at: None,
                 tax_hundredths: 0,
                 discount_hundredths: 0,
+                subject: String::new(),
+                terms: None,
             })
             .unwrap();
 
@@ -614,7 +618,7 @@ mod entries_archive {
     /// The shared fixture: a customer with project `P1`, returned as the customer
     /// token the entry and invoice payloads need.
     async fn fixture(client: &Client) -> String {
-        let customer = new_customer(client, "ACME", "EUR", 6000).await;
+        let customer = new_customer(client, "Tucano Time", "EUR", 6000).await;
         let token = customer["id"].as_str().expect("customer id").to_string();
         new_project(client, &token, "P1", json!({})).await;
         token
@@ -1141,7 +1145,7 @@ mod cold_tree_reads {
 
     /// A customer with project `P1`, as the customer token payloads need.
     async fn fixture(client: &Client) -> String {
-        let customer = new_customer(client, "ACME", "EUR", 6000).await;
+        let customer = new_customer(client, "Tucano Time", "EUR", 6000).await;
         let token = customer["id"].as_str().expect("customer id").to_string();
         new_project(client, &token, "P1", json!({})).await;
         token
@@ -1404,7 +1408,7 @@ mod cold_tree_reads {
     #[tokio::test]
     async fn budget_totals_and_the_deletion_guards_still_see_archived_history() {
         let (client, d) = app().await;
-        let customer = new_customer(&client, "ACME", "EUR", 6000).await;
+        let customer = new_customer(&client, "Tucano Time", "EUR", 6000).await;
         let cid = customer["id"].as_str().expect("customer id").to_string();
         new_project(&client, &cid, "P1", json!({"budget_hours": 10})).await;
         let (s_task, task) = json_req(
@@ -1443,7 +1447,7 @@ mod cold_tree_reads {
             .as_array()
             .expect("budget rows")
             .iter()
-            .find(|r| r["customer"] == "ACME")
+            .find(|r| r["customer"] == "Tucano Time")
             .expect("the budgeted project");
         assert_eq!(
             row["burn_hours"].as_f64(),

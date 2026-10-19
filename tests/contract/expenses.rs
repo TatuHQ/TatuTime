@@ -23,7 +23,7 @@ async fn category_and_expense_crud_with_references() {
             "missing default category {name}"
         );
     }
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({})).await;
 
@@ -81,7 +81,7 @@ async fn category_and_expense_crud_with_references() {
 #[tokio::test]
 async fn expense_rejects_unknown_project_and_category() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     let (s, body) = json_req(
         &app,
@@ -107,7 +107,7 @@ async fn expense_rejects_unknown_project_and_category() {
 #[tokio::test]
 async fn expense_receipt_roundtrips() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     let (_, e) = json_req(
         &app,
@@ -135,7 +135,7 @@ async fn expense_receipt_roundtrips() {
 #[tokio::test]
 async fn a_megabyte_receipt_is_stored_and_an_over_long_one_is_the_apps_own_422() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     // ~1 MB of base64: the order of magnitude of a scanned receipt.
     let stored = "A".repeat(1_000_000);
@@ -182,7 +182,7 @@ async fn a_megabyte_receipt_is_stored_and_an_over_long_one_is_the_apps_own_422()
 #[tokio::test]
 async fn expense_records_the_conversion_it_was_entered_with() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     // USD 100.00 spent, billed as EUR 92.06 at the published 2026-10-01 rate.
     // The rate is padded and carries trailing zeros on purpose: what is stored
@@ -247,7 +247,7 @@ async fn expense_records_the_conversion_it_was_entered_with() {
 #[tokio::test]
 async fn expense_conversion_is_all_or_nothing_and_never_a_float() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     // The billed pair is EUR; the amount was entered in USD.
     let full = || {
@@ -356,7 +356,7 @@ async fn expense_conversion_is_all_or_nothing_and_never_a_float() {
 #[tokio::test]
 async fn expense_update_replaces_the_record_and_keeps_its_identity() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap().to_string();
     new_project(&app, &cid, "P1", json!({})).await;
     new_project(&app, &cid, "P2", json!({})).await;
@@ -469,7 +469,7 @@ async fn expense_update_replaces_the_record_and_keeps_its_identity() {
 #[tokio::test]
 async fn expense_update_refuses_unowned_bad_and_locked_expenses() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap().to_string();
     new_project(&app, &cid, "P1", json!({})).await;
     let (_, x) = json_req(
@@ -559,7 +559,7 @@ async fn expense_update_refuses_unowned_bad_and_locked_expenses() {
 #[tokio::test]
 async fn reimbursement_claim_lifecycle_locks_expenses() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     let (_, e1) = json_req(
         &app,
@@ -642,7 +642,7 @@ async fn claim_rejects_duplicate_expense_ids() {
     // #187: [id, id] summed the expense amount twice into the persisted
     // claim total while referencing one expense.
     let (app, _d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap().to_string();
     let (_s, x) = json_req(
         &app,
@@ -818,7 +818,7 @@ async fn category_names_are_unique_case_insensitively_with_self_exclusion() {
 #[tokio::test]
 async fn claim_error_shapes_are_honest() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     let (sc, cat) = json_req(
         &app,
@@ -903,7 +903,7 @@ async fn claim_error_shapes_are_honest() {
 #[tokio::test]
 async fn expense_pages_report_more_and_the_cursor_walks_every_row_once() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({})).await;
     let (sc, cat) = json_req(

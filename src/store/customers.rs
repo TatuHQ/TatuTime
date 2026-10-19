@@ -228,6 +228,7 @@ mod tests {
             tax_hundredths: 0,
             discount_hundredths: 0,
             payment_details: None,
+            legal_id: String::new(),
         }
     }
 

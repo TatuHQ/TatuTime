@@ -1102,7 +1102,7 @@ class Gate:
         csrf = {"x-csrf-protection": "1"}
         status, _, raw = self.http(
             "POST", "/api/customers",
-            {"name": "ACME", "currency": "EUR", "default_rate_minor": 6000},
+            {"name": "Tucano Time", "currency": "EUR", "default_rate_minor": 6000},
             cookie=cookie, extra_headers=csrf,
         )
         if status != 201:
@@ -1320,15 +1320,18 @@ class Gate:
             "the bespoke .field/.hint/.form-error markup is gone and the official "
             "form vocabulary is in place (#232 phase 2b)",
             counts["field"] == 0 and counts["hint"] == 0 and counts["formError"] == 0
-            # 144/139/139: the Settings split added the Email section's six
-            # stacked field rows (SMTP host/port/username/password/from and the
-            # test-email recipient).
-            and counts["groups"] == 144 and counts["labels"] == 139
-            # 47: the security vault card's detail line and (normally hidden)
-            # warning note join the previous 45; the moved #vault-status keeps
-            # its count. Mirrors the shell census in gui-test/forms.test.mjs:69,
-            # so the two suites cannot drift.
-            and counts["controls"] == 139 and counts["help"] == 47
+            # 151/151: the Settings split's 139 plus the ten Document label
+            # rows (#354), the Company legal id and its label row.
+            # 159 groups: those rows plus the composed fieldsets and the
+            # Contacts row. Mirrors the shell census in
+            # gui-test/forms.test.mjs:69, so the two suites cannot drift.
+            and counts["groups"] == 159 and counts["labels"] == 151
+            and counts["controls"] == 151
+            # 55: the previous 47 plus the Company legal/default notes, the
+            # customer legal id hint, the rail list's notes and status line,
+            # the Document labels hint, the subject formatting hint and the
+            # invoice detail's frozen-terms note.
+            and counts["help"] == 55
             # 28: the previous 27 plus the vault card's #vault-error.
             and counts["messages"] == counts["errorGroups"] == 28,
             f"counts={counts}",
@@ -1343,7 +1346,7 @@ class Gate:
             "  for (var j = 0; j < g.children.length; j++) {"
             "    if (g.children[j].tagName === 'LABEL') { label = g.children[j]; break; }"
             "  }"
-            "  if (!label) continue;"  # the 3 grouped fieldsets + the Contacts row
+            "  if (!label) continue;"  # the 7 grouped fieldsets + the Contacts row
             "  var id = label.getAttribute('for');"
             "  var ctl = id ? document.getElementById(id) : null;"
             "  if (!ctl) { bad.push(String(id) + ': no control'); continue; }"

@@ -61,10 +61,10 @@ const busy = (button) => button.disabled === true && button.getAttribute('aria-b
 
 function seedCustomer(t, document, selectId) {
     t.state.customers = [{
-        id: 'c1', name: 'ACME', currency: 'EUR', default_rate_minor: 6000, active: true,
+        id: 'c1', name: 'Tucano Time', currency: 'EUR', default_rate_minor: 6000, active: true,
     }];
     if (selectId) {
-        t.fillSelect(document.getElementById(selectId), [{ value: 'c1', text: 'ACME' }]);
+        t.fillSelect(document.getElementById(selectId), [{ value: 'c1', text: 'Tucano Time' }]);
         document.getElementById(selectId).value = 'c1';
     }
 }
@@ -105,7 +105,10 @@ test('QA-01: two rapid submit events post the entry exactly once', async () => {
     assert.equal(t.posts()[0].path, '/entries');
     const save = document.getElementById('entry-save');
     assert.ok(busy(save), 'Save entry is disabled and aria-busy while the request is in flight');
-    assert.equal(save.textContent, 'Save entry', 'the busy control still reads sensibly');
+    // The shell wraps long labels across source lines; rendered/accessible
+    // text collapses whitespace, so compare that form.
+    assert.equal(save.textContent.replace(/\s+/g, ' ').trim(), 'Save entry',
+        'the busy control still reads sensibly');
     assert.equal(t.entrySavingNow(), true, 'the dialog close/Escape guard sees the in-flight save');
 
     t.release();
@@ -175,7 +178,7 @@ const CASES = [
         name: 'customer',
         button: 'customer-save',
         prepare(t, doc) {
-            doc.getElementById('customer-name').value = 'ACME';
+            doc.getElementById('customer-name').value = 'Tucano Time';
             doc.getElementById('customer-currency').value = 'EUR';
             doc.getElementById('customer-rate').value = '60.00';
         },
@@ -251,7 +254,7 @@ const CASES = [
         name: 'wizard customer',
         button: 'wz-next',
         prepare(t, doc) {
-            doc.getElementById('wz-cust-name').value = 'ACME';
+            doc.getElementById('wz-cust-name').value = 'Tucano Time';
             doc.getElementById('wz-cust-currency').value = 'EUR';
             doc.getElementById('wz-cust-rate').value = '60.00';
         },

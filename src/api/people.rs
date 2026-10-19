@@ -279,6 +279,7 @@ pub async fn create_customer(
         tax_hundredths: draft.tax_hundredths,
         discount_hundredths: draft.discount_hundredths,
         payment_details: draft.payment_details,
+        legal_id: draft.legal_id,
     };
     app.store.put_customer(&customer)?;
     Ok((StatusCode::CREATED, Json(&customer)).into_response())
@@ -310,6 +311,7 @@ pub async fn update_customer(
         tax_hundredths: draft.tax_hundredths,
         discount_hundredths: draft.discount_hundredths,
         payment_details: draft.payment_details,
+        legal_id: draft.legal_id,
     };
     app.store.put_customer(&updated)?;
     Ok(Json(&updated).into_response())

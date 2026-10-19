@@ -11,7 +11,7 @@ async fn unverifiable_lock_state_refuses_writes_but_never_reads() {
     // unreadable invoice document the locks must fail CLOSED: entry edit and
     // delete get 503 (Retry-After), submission is refused, reads still work.
     let (app, d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap().to_string();
     new_project(&app, &cid, "P1", json!({})).await;
     let (_, e) = json_req(
@@ -64,7 +64,7 @@ async fn unverifiable_claim_state_refuses_expense_delete_but_never_reads() {
     // verify its state fails the delete CLOSED with 503 — before the fold this
     // path surfaced a raw store error as a 500. Reads stay untouched.
     let (app, d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap().to_string();
     let (_, x) = json_req(
         &app,
@@ -96,7 +96,7 @@ async fn expense_on_partly_paid_invoice_stays_locked() {
     // (and the dashboard treats as open) issued | partly_paid — a partial
     // payment silently unlocked the expense rows sitting on that invoice.
     let (app, _d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap().to_string();
     new_project(&app, &cid, "P1", json!({"rate_minor": 6000})).await;
     let (_s, x) = json_req(
@@ -165,7 +165,7 @@ async fn invoiced_time_is_permanently_locked() {
     // never be edited or deleted again — not while open, not after the
     // invoice is settled. Only drafts leave lines free.
     let (app, _d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap().to_string();
     new_project(&app, &cid, "P1", json!({"rate_minor": 6000})).await;
     let (_s0, e) = json_req(

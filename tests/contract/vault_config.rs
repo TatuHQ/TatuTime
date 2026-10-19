@@ -80,7 +80,7 @@ async fn secret_vault_endpoints_mask_and_authorize() {
     let (s, _, _) = raw(
         &router,
         "PUT",
-        "/api/admin/secrets/acme.api_token",
+        "/api/admin/secrets/tucano.api_token",
         Some(json!({"value":"dummy-secret-value-1234"})),
         Some(&admin),
     )
@@ -90,7 +90,7 @@ async fn secret_vault_endpoints_mask_and_authorize() {
     let (s2, list, _) = raw(&router, "GET", "/api/admin/secrets", None, Some(&admin)).await;
     assert_eq!(s2, StatusCode::OK);
     let text = serde_json::to_string(&list).unwrap();
-    assert!(text.contains("acme.api_token"), "{text}");
+    assert!(text.contains("tucano.api_token"), "{text}");
     assert!(
         !text.contains("dummy-secret-value-1234"),
         "value leaked in list: {text}"
@@ -114,7 +114,7 @@ async fn secret_vault_endpoints_mask_and_authorize() {
     let (s4, _, _) = raw(
         &router,
         "DELETE",
-        "/api/admin/secrets/acme.api_token",
+        "/api/admin/secrets/tucano.api_token",
         None,
         Some(&admin),
     )
@@ -242,15 +242,15 @@ async fn config_values_are_trimmed_and_blank_org_name_is_refused() {
         "PUT",
         "/api/admin/config",
         Some(json!({
-            "org_name": "  Acme Ltd  ",
-            "sso_allowed_domains": " acme.test , other.test "
+            "org_name": "  Tucano Ltd  ",
+            "sso_allowed_domains": " tucanotime.test , other.test "
         })),
     )
     .await;
     assert_eq!(s_trim, StatusCode::OK, "{body_trim}");
     let persisted = std::fs::read_to_string(&cfg_path).unwrap();
-    assert!(persisted.contains("\"Acme Ltd\""), "{persisted}");
-    assert!(!persisted.contains("  Acme"), "{persisted}");
+    assert!(persisted.contains("\"Tucano Ltd\""), "{persisted}");
+    assert!(!persisted.contains("  Tucano"), "{persisted}");
     let (_s_eff, eff) = json_req(&app, "GET", "/api/admin/config", None).await;
     let org = eff["config"]
         .as_array()
@@ -258,14 +258,14 @@ async fn config_values_are_trimmed_and_blank_org_name_is_refused() {
         .iter()
         .find(|c| c["key"] == "org_name")
         .unwrap();
-    assert_eq!(org["value"], "Acme Ltd");
+    assert_eq!(org["value"], "Tucano Ltd");
     let domains = eff["config"]
         .as_array()
         .unwrap()
         .iter()
         .find(|c| c["key"] == "sso_allowed_domains")
         .unwrap();
-    assert_eq!(domains["value"], "acme.test , other.test");
+    assert_eq!(domains["value"], "tucanotime.test , other.test");
 
     // `null` still clears an optional currency key.
     let (s_set, _) = json_req(

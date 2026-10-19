@@ -592,7 +592,7 @@ mod tests {
     fn sample_invoice() -> (Invoice, Customer) {
         let customer = Customer {
             id: Uuid::new_v4(),
-            name: "ACME".into(),
+            name: "Tucano Time".into(),
             currency: Currency("EUR".into()),
             default_rate_minor: 6000,
             active: true,
@@ -606,6 +606,7 @@ mod tests {
             discount_hundredths: 0,
 
             payment_details: None,
+            legal_id: String::new(),
         };
         let inv = Invoice {
             id: Uuid::new_v4(),
@@ -642,6 +643,8 @@ mod tests {
             written_off_at: None,
             tax_hundredths: 0,
             discount_hundredths: 0,
+            subject: String::new(),
+            terms: None,
         };
         (inv, customer)
     }

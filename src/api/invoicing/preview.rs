@@ -11,8 +11,10 @@
 //!   **candidate** template, persisting nothing.
 //!
 //! The sample is deliberately representative (two time lines, one expense
-//! line, a period, VAT, a due date and payment details) so every documented
-//! `%variable%` has a real value to show. Nothing here writes to the store.
+//! line, a period, VAT, a due date, a subject, net-30 terms, a customer company
+//! number and one EUR plus one USD payment rail) so every documented section
+//! and `%variable%` has a value to show. Every value is synthetic. Nothing here
+//! writes to the store.
 
 use chrono::{NaiveDate, TimeZone, Utc};
 use uuid::Uuid;
@@ -20,7 +22,7 @@ use uuid::Uuid;
 use crate::api::*;
 use crate::domain::{
     Address, Contact, Currency, Invoice, InvoiceLine, InvoiceStatus, InvoiceTemplate, LineKind,
-    PaymentDetails, PaymentTerms, TermsKind,
+    PaymentDetails, PaymentRail, PaymentTerms, TermsKind,
 };
 
 /// A date that exists in every calendar (no leap-day edge) and keeps the
@@ -31,9 +33,10 @@ fn day(year: i32, month: u32, day: u32) -> NaiveDate {
 
 /// The synthetic invoice every preview and save-gauntlet renders against.
 ///
-/// Two time lines and one expense line, a period, a due date and totals with
-/// VAT: enough for `%line_count%`, `%total%`, `%period_from%`,
-/// `%period_to%`, `%invoice_due_date%` and the label overrides to be visible.
+/// Two time lines and one expense line, a period, a subject, net-30 terms, a
+/// due date and totals with VAT: enough for `%line_count%`, `%total%`,
+/// `%period_from%`, `%period_to%`, `%invoice_due_date%`, the subject/terms
+/// rows and the label overrides to be visible.
 #[must_use]
 pub(crate) fn sample_invoice() -> Invoice {
     Invoice {
@@ -107,12 +110,20 @@ pub(crate) fn sample_invoice() -> Invoice {
         written_off_at: None,
         tax_hundredths: 2300,
         discount_hundredths: 0,
+        // Frozen at issue in production; the sample shows both new document
+        // sections (the subject row and the `(Net 30)` due-date suffix).
+        subject: "Sample Customer invoice for 10 2026".into(),
+        terms: Some(PaymentTerms {
+            kind: TermsKind::Net30,
+            days: None,
+        }),
     }
 }
 
-/// The customer the sample invoice bills: a billing contact and full payment
-/// details, so `%payment_details%` and the document's "How to pay" section
-/// are exercised.
+/// The customer the sample invoice bills: a billing contact, a company
+/// number and one EUR + one USD payment rail, so `%payment_details%`, the
+/// `Company number` row and the document's multi-rail "Notes" section are
+/// exercised.
 #[must_use]
 pub(crate) fn sample_customer() -> crate::domain::Customer {
     crate::domain::Customer {
@@ -143,14 +154,34 @@ pub(crate) fn sample_customer() -> crate::domain::Customer {
         tax_hundredths: 0,
         discount_hundredths: 0,
         payment_details: Some(PaymentDetails {
-            bank_name: "Sample Bank".into(),
+            bank_name: "Example Bank, 1 Sample Plaza, Testville".into(),
             account_name: "Sample Customer".into(),
             account_number: String::new(),
-            iban: "DE89 3704 0044 0532 0130 00".into(),
-            bic: "COBADEFFXXX".into(),
+            iban: "EX000000000000000000".into(),
+            bic: "EXAMPLEB".into(),
             reference: "Invoice number".into(),
             instructions: "Please quote the invoice number with your transfer.".into(),
+            rails: vec![
+                PaymentRail {
+                    currency: "EUR".into(),
+                    account_name: "Sample Customer".into(),
+                    iban: Some("EX000000000000000000".into()),
+                    bic: Some("EXAMPLEB".into()),
+                    instructions: Some("For all Euro Payments; quote the invoice number.".into()),
+                    ..Default::default()
+                },
+                PaymentRail {
+                    currency: "USD".into(),
+                    account_name: "Sample Customer".into(),
+                    account_number: Some("000000000000".into()),
+                    routing_number: Some("000000000".into()),
+                    swift: Some("EXAMPLEB".into()),
+                    instructions: Some("For all USD Payments; quote the invoice number.".into()),
+                    ..Default::default()
+                },
+            ],
         }),
+        legal_id: "0123456789".into(),
     }
 }
 
@@ -220,7 +251,7 @@ pub(crate) fn render_sample_pdf(template: &InvoiceTemplate, org: &crate::pdf::Or
 /// Bumped whenever the sample fixture or the renderer changes in a way that can
 /// alter the bytes. Part of the input-keyed `ETag`, so a renderer upgrade can
 /// never leave a stale tag looking current (SET-06).
-const PREVIEW_ETAG_VERSION: u32 = 1;
+const PREVIEW_ETAG_VERSION: u32 = 2;
 
 /// The preview `ETag`, keyed on the **inputs** — canonical candidate-template
 /// JSON, the resolved org profile and the renderer/sample version — so it can be
@@ -234,6 +265,7 @@ fn preview_etag(template: &InvoiceTemplate, org: &crate::pdf::Org) -> String {
         "org": {
             "name": org.name,
             "legal_id": org.legal_id,
+            "legal_id_label": org.legal_id_label,
             "address": org.address,
             "accent": org.accent,
         },
@@ -335,7 +367,20 @@ mod tests {
         );
         let totals = crate::domain::invoice_totals(161_000, invoice.tax_hundredths, 0);
         assert_eq!(totals.total_minor, invoice.total_minor);
-        assert!(customer.payment_details.is_some(), "payment details");
+        // The new document sections have representative data (phase 2).
+        assert_eq!(invoice.subject, "Sample Customer invoice for 10 2026");
+        assert_eq!(
+            invoice.terms,
+            Some(PaymentTerms {
+                kind: TermsKind::Net30,
+                days: None
+            })
+        );
+        assert!(!customer.legal_id.is_empty(), "company number");
+        let details = customer.payment_details.as_ref().expect("payment details");
+        assert_eq!(details.rails.len(), 2, "one EUR and one USD rail");
+        assert!(details.rails.iter().any(|r| r.currency == "EUR"));
+        assert!(details.rails.iter().any(|r| r.currency == "USD"));
         assert!(
             customer
                 .contacts
@@ -343,6 +388,57 @@ mod tests {
                 .any(|c| c.billing && !c.email.is_empty()),
             "billing contact"
         );
+    }
+
+    /// The settings preview must show the new document sections too, not just
+    /// the template content: subject row, company number, rail notes and the
+    /// hours summary. The layout draws one literal per word, so match words.
+    #[test]
+    fn sample_document_shows_the_new_document_sections() {
+        let doc = sample_document(
+            &InvoiceTemplate::default(),
+            &crate::pdf::Org::named("Sample Org"),
+        );
+        assert_eq!(
+            doc.subject.as_deref(),
+            Some("Sample Customer invoice for 10 2026")
+        );
+        // 12.00 h + 4.50 h = 16.50 h = 16h 30min.
+        assert_eq!(doc.total_hours.as_deref(), Some("16h 30min"));
+        assert_eq!(doc.column_labels[0], "Item type");
+        let meta_keys: Vec<&str> = doc
+            .meta
+            .iter()
+            .filter_map(|b| match b {
+                crate::pdf::Block::KeyVal { key, .. } => Some(key.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            meta_keys,
+            vec!["Subject", "Invoice ID", "Issue date", "Due date", "Period"]
+        );
+        assert_eq!(
+            doc.header
+                .iter()
+                .filter(|b| matches!(b, crate::pdf::Block::KeyVal { key, .. } if key == "Company number"))
+                .count(),
+            1
+        );
+        let texts: Vec<&str> = doc
+            .footer
+            .iter()
+            .filter_map(|b| match b {
+                crate::pdf::Block::Paragraph(spans) => Some(spans[0].text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert!(texts.contains(&"For all EUR Payments;"), "{texts:?}");
+        assert!(texts.contains(&"For all USD Payments;"), "{texts:?}");
+        assert!(doc.footer.iter().any(|b| matches!(
+            b,
+            crate::pdf::Block::Heading { spans, .. } if spans[0].text == "Notes"
+        )));
     }
 
     #[test]

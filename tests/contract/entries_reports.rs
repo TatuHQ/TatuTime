@@ -8,7 +8,7 @@ use std::sync::Arc;
 #[tokio::test]
 async fn report_groups_by_project_with_effective_rate() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await; // 60.00/h default
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await; // 60.00/h default
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "STD", json!({})).await;
     new_project(&app, cid, "PREM", json!({"rate_minor": 12000})).await; // 120.00/h override
@@ -52,7 +52,7 @@ async fn report_groups_by_project_with_effective_rate() {
 #[tokio::test]
 async fn csv_export_quotes_and_escapes_note() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "ACME, Inc.", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time, Inc.", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({})).await;
     let body = json!({
@@ -73,7 +73,7 @@ async fn csv_export_quotes_and_escapes_note() {
     // Formula injection is defused with a leading apostrophe and the comma in
     // the customer name is quoted.
     assert!(
-        text.contains("\"ACME, Inc.\""),
+        text.contains("\"Tucano Time, Inc.\""),
         "comma field quoted; got: {text}"
     );
     assert!(text.contains("'=SUM(A1)"), "formula escaped; got: {text}");
@@ -100,7 +100,7 @@ async fn error_shape_never_leaks_internals() {
 #[tokio::test]
 async fn update_entry_can_move_day() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({})).await;
     let (_, entry) = json_req(
@@ -131,7 +131,7 @@ async fn update_entry_can_move_day() {
 #[tokio::test]
 async fn oversized_note_rejected() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({})).await;
     let body = json!({
@@ -145,7 +145,7 @@ async fn oversized_note_rejected() {
 #[tokio::test]
 async fn entry_billable_defaults_true_and_persists_false() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({})).await;
 
@@ -174,7 +174,7 @@ async fn entry_billable_defaults_true_and_persists_false() {
 #[tokio::test]
 async fn legacy_entry_document_without_billable_reads_true() {
     let (app, d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({})).await;
     // Craft a pre-#20 entry document (no `billable` field) directly on disk.
@@ -196,7 +196,7 @@ async fn legacy_entry_document_without_billable_reads_true() {
 #[tokio::test]
 async fn entry_source_defaults_manual() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({})).await;
     let (_, e) = json_req(
@@ -212,7 +212,7 @@ async fn entry_source_defaults_manual() {
 #[tokio::test]
 async fn legacy_entry_document_without_source_reads_manual() {
     let (app, d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({})).await;
     let id = uuid::Uuid::new_v4();
@@ -233,7 +233,7 @@ async fn legacy_entry_document_without_source_reads_manual() {
 #[tokio::test]
 async fn locked_entry_rejects_edit_and_delete_but_not_read() {
     let (app, d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({})).await;
     let (_, e) = json_req(
@@ -261,7 +261,7 @@ async fn locked_entry_rejects_edit_and_delete_but_not_read() {
 async fn report_applies_person_rate_tier_and_attributes_entry() {
     let (app, _d) = app().await;
     // Customer default 60/h; project rate 30/h.
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({"rate_minor": 3000})).await;
 
@@ -304,7 +304,7 @@ async fn report_applies_person_rate_tier_and_attributes_entry() {
 #[tokio::test]
 async fn report_splits_billable_and_groups_by_person() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
     // 3h billable + 2h non-billable, both by the admin.
@@ -353,7 +353,7 @@ async fn report_splits_billable_and_groups_by_person() {
 #[tokio::test]
 async fn profitability_revenue_vs_cost() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
     // Bob: cost rate 20/h.
@@ -404,8 +404,8 @@ async fn profitability_revenue_vs_cost() {
         .as_array()
         .unwrap()
         .iter()
-        .find(|r| r["label"] == "ACME")
-        .expect("ACME row");
+        .find(|r| r["label"] == "Tucano Time")
+        .expect("Tucano Time row");
     assert_eq!(row["revenue_minor"], 17000);
     assert_eq!(row["cost_minor"], 9000); // 5000 expense + 4000 labour
     assert_eq!(row["margin_minor"], 8000);
@@ -414,7 +414,7 @@ async fn profitability_revenue_vs_cost() {
 #[tokio::test]
 async fn invoice_report_and_export() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
     json_req(
@@ -450,14 +450,14 @@ async fn invoice_report_and_export() {
     assert_eq!(rep["issued"], 1);
     assert_eq!(rep["revenue_by_currency"]["EUR"], 18000); // 3h * 60
     let row = &rep["rows"][0];
-    assert_eq!(row["label"], "ACME");
+    assert_eq!(row["label"], "Tucano Time");
     assert_eq!(row["revenue_minor"], 18000);
 
     let (s2, csv) = json_req(&app, "GET", "/api/invoices/export.csv", None).await;
     assert_eq!(s2, StatusCode::OK);
     let text = csv.as_str().unwrap();
     assert!(text.starts_with("number,customer,"), "csv header: {text}");
-    assert!(text.contains("INV-0001") && text.contains("ACME"));
+    assert!(text.contains("INV-0001") && text.contains("Tucano Time"));
 }
 
 #[tokio::test]
@@ -466,7 +466,7 @@ async fn reports_partition_by_currency_and_never_sum_cents_across_it() {
     // every grouping level must produce per-currency rows — previously the
     // EUR and USD cents were added into a single number.
     let (app, _d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap().to_string();
     new_project(&app, &cid, "P-EUR", json!({"rate_minor": 6000})).await;
     new_project(
@@ -561,10 +561,17 @@ async fn reports_partition_by_currency_and_never_sum_cents_across_it() {
     )
     .await;
     let rows = prof["rows"].as_array().unwrap();
-    let acme: Vec<&Value> = rows.iter().filter(|r| r["label"] == "ACME").collect();
-    assert_eq!(acme.len(), 2, "profitability splits by currency: {rows:?}");
-    let eur = acme.iter().find(|r| r["currency"] == "EUR").unwrap();
-    let usd = acme.iter().find(|r| r["currency"] == "USD").unwrap();
+    let tucano: Vec<&Value> = rows
+        .iter()
+        .filter(|r| r["label"] == "Tucano Time")
+        .collect();
+    assert_eq!(
+        tucano.len(),
+        2,
+        "profitability splits by currency: {rows:?}"
+    );
+    let eur = tucano.iter().find(|r| r["currency"] == "EUR").unwrap();
+    let usd = tucano.iter().find(|r| r["currency"] == "USD").unwrap();
     assert_eq!(eur["revenue_minor"], 12000);
     assert_eq!(usd["revenue_minor"], 15000);
 }
@@ -572,7 +579,7 @@ async fn reports_partition_by_currency_and_never_sum_cents_across_it() {
 #[tokio::test]
 async fn budget_report_shows_burn() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(
         &app,
@@ -654,7 +661,7 @@ async fn invoice_report_gains_paid_and_balance_columns() {
         .unwrap()
         .iter()
         .find(|r| r["revenue_minor"] == 18000)
-        .expect("ACME row");
+        .expect("Tucano Time row");
     assert_eq!(row["paid_minor"], 8000);
     assert_eq!(row["balance_minor"], 10000);
     let (s2, csv) = json_req(&app, "GET", "/api/invoices/export.csv", None).await;
@@ -722,7 +729,7 @@ async fn range_query_cap_is_400_inclusive_days() {
 #[tokio::test]
 async fn entry_pages_report_more_and_the_cursor_walks_every_row_once() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({})).await;
     // Five entries over three days, two days carrying two of them: the id
@@ -814,7 +821,7 @@ async fn entry_pages_report_more_and_the_cursor_walks_every_row_once() {
 #[tokio::test]
 async fn an_out_of_range_limit_and_a_malformed_cursor_are_field_named_422s() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({})).await;
     json_req(
@@ -900,7 +907,7 @@ async fn archived_days_read_through_the_entries_api() {
     let cutoff = chrono::NaiveDate::from_ymd_opt(2026, 9, 1).unwrap();
 
     let (app, d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap().to_string();
     new_project(&app, &cid, "P1", json!({})).await;
 

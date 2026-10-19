@@ -23,7 +23,7 @@ const byId = (document, id) => document.getElementById(id);
 function prelude(extra = '') {
     return `
 window.__calls = { get: [], post: [], put: [] };
-window.__org = { name: 'Acme Ltd' };
+window.__org = { name: 'Tucano Ltd' };
 api.get = async (path) => {
   window.__calls.get.push(path);
   if (path === '/auth/status') return { initialised: false };
@@ -177,7 +177,7 @@ test('step 3 sends only the accepted OrgProfile field names', async () => {
     const dom = await firstRun();
     const { document } = dom.window;
     await createAdmin(document);
-    setValue(document, 'aw-org-name', 'Acme Ltd');
+    setValue(document, 'aw-org-name', 'Tucano Ltd');
     setValue(document, 'aw-org-legal', 'VAT-123');
     setValue(document, 'aw-org-street', '1 Main Street');
     setValue(document, 'aw-org-city', 'Springfield');
@@ -189,7 +189,7 @@ test('step 3 sends only the accepted OrgProfile field names', async () => {
     assert.deepEqual(JSON.parse(JSON.stringify(dom.window.__calls.put)), [{
         path: '/admin/org',
         body: {
-            name: 'Acme Ltd',
+            name: 'Tucano Ltd',
             legal_id: 'VAT-123',
             address: { street: '1 Main Street', city: 'Springfield', postal_code: '12345', country: 'PT' },
             accent: '#ff8800',
@@ -243,7 +243,7 @@ test('step 5 re-reads /auth/me and /admin/org and shows what persisted', async (
     assert.ok(dom.window.__calls.get.includes('/auth/me'), 'the review re-reads /auth/me');
     assert.ok(dom.window.__calls.get.includes('/admin/org'), 'the review re-reads /admin/org');
     assert.equal(byId(document, 'aw-review-email').textContent, 'ada@example.test');
-    assert.equal(byId(document, 'aw-review-org').textContent, 'Acme Ltd');
+    assert.equal(byId(document, 'aw-review-org').textContent, 'Tucano Ltd');
     dom.window.close();
 });
 

@@ -44,6 +44,10 @@ pub struct Customer {
     /// panel, invoice emails, `%payment_details%`). `None` on legacy docs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub payment_details: Option<PaymentDetails>,
+    /// The customer's company/registration number as printed on documents
+    /// (e.g. `99999999`). Empty on legacy documents.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub legal_id: String,
 }
 
 /// A postal address; every part is free text with validated bounds (#139).
@@ -80,7 +84,7 @@ pub struct Contact {
 /// integration; every part is validated free text and an all-empty block never persists.
 ///
 /// ```rust
-/// details.iban = "DE89 3704 0044 0532 0130 00".into();
+/// details.iban = "EX00 0000 0000 0000 0000 00".into();
 /// // -> the "How to pay" section of the invoice, its email and its PDF
 /// ```
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -109,6 +113,91 @@ pub struct PaymentDetails {
     /// Free-form instructions shown verbatim last.
     #[serde(default)]
     pub instructions: String,
+    /// Structured rails for multi-currency billing (one account per
+    /// currency). The flat fields above stay authoritative for the
+    /// single-rail case; nothing is migrated and no provider integration is
+    /// involved — this is display data only.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rails: Vec<PaymentRail>,
+}
+
+/// At most this many structured payment rails may be configured.
+pub const MAX_PAYMENT_RAILS: usize = 4;
+
+/// One currency-specific payment rail (e.g. a EUR IBAN and a USD account in
+/// the same [`PaymentDetails`] block). Display data only.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PaymentRail {
+    /// ISO-4217 code, exactly 3 upper-case letters (`EUR`, `USD`).
+    pub currency: String,
+    /// Account holder name as the bank knows it (required on a rail).
+    pub account_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_number: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub iban: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bic: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bank_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bank_address: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub routing_number: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub swift: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instructions: Option<String>,
+}
+
+impl PaymentRail {
+    /// Trimmed copy for persistence (optionals stay absent when blank).
+    #[must_use]
+    pub fn trimmed(&self) -> Self {
+        let trim = |v: &Option<String>| {
+            v.as_ref()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+        };
+        Self {
+            currency: self.currency.trim().to_uppercase(),
+            account_name: self.account_name.trim().to_string(),
+            account_number: trim(&self.account_number),
+            account_type: trim(&self.account_type),
+            iban: trim(&self.iban),
+            bic: trim(&self.bic),
+            bank_name: trim(&self.bank_name),
+            bank_address: trim(&self.bank_address),
+            routing_number: trim(&self.routing_number),
+            swift: trim(&self.swift),
+            instructions: trim(&self.instructions),
+        }
+    }
+
+    /// Structured `(label, value)` rows for the rail, only non-empty fields.
+    #[must_use]
+    pub fn rows(&self) -> Vec<(&'static str, String)> {
+        let mut out = vec![("Currency", self.currency.trim().to_string())];
+        for (label, value) in [
+            ("Bank", self.bank_name.as_deref()),
+            ("Account name", Some(self.account_name.as_str())),
+            ("Account number", self.account_number.as_deref()),
+            ("Account type", self.account_type.as_deref()),
+            ("IBAN", self.iban.as_deref()),
+            ("BIC/SWIFT", self.bic.as_deref()),
+            ("Bank address", self.bank_address.as_deref()),
+            ("Routing number", self.routing_number.as_deref()),
+            ("SWIFT", self.swift.as_deref()),
+        ] {
+            if let Some(v) = value.map(str::trim).filter(|v| !v.is_empty()) {
+                out.push((label, v.to_string()));
+            }
+        }
+        out
+    }
 }
 
 impl PaymentDetails {
@@ -127,6 +216,7 @@ impl PaymentDetails {
         ]
         .iter()
         .any(|v| !v.trim().is_empty())
+            || self.rails.iter().any(|r| !r.currency.trim().is_empty())
     }
 
     /// Trimmed copy for persistence.
@@ -140,6 +230,7 @@ impl PaymentDetails {
             bic: self.bic.trim().to_string(),
             reference: self.reference.trim().to_string(),
             instructions: self.instructions.trim().to_string(),
+            rails: self.rails.iter().map(PaymentRail::trimmed).collect(),
         }
     }
 
@@ -175,6 +266,24 @@ impl PaymentDetails {
         }
         if !self.instructions.trim().is_empty() {
             lines.push(self.instructions.trim().to_string());
+        }
+        // Structured rails are printed after the flat single-rail block, each
+        // one clearly separated by currency. Display only.
+        for rail in &self.rails {
+            if rail.currency.trim().is_empty() {
+                continue;
+            }
+            for (label, value) in rail.rows() {
+                lines.push(format!("{label}: {value}"));
+            }
+            if let Some(instructions) = rail
+                .instructions
+                .as_ref()
+                .map(|v| v.trim())
+                .filter(|v| !v.is_empty())
+            {
+                lines.push(instructions.to_string());
+            }
         }
         if lines.is_empty() {
             None
@@ -308,6 +417,97 @@ pub fn validate_customer_billing_fields(
                 "must be 8 or 11 letters/digits",
             ));
         }
+        // Structured multi-currency rails: bounded count, a real ISO code and
+        // the same shape rules the flat single-rail block follows.
+        if p.rails.len() > MAX_PAYMENT_RAILS {
+            errors.push(FieldError::new(
+                "payment_details.rails",
+                format!("at most {MAX_PAYMENT_RAILS} payment rails"),
+            ));
+        }
+        for (i, rail) in p.rails.iter().enumerate() {
+            let field = |suffix: &str| format!("payment_details.rails[{i}].{suffix}");
+            let currency = rail.currency.trim();
+            if currency.len() != 3 || !currency.chars().all(|c| c.is_ascii_uppercase()) {
+                errors.push(FieldError::new(
+                    field("currency"),
+                    "required, a 3-letter uppercase ISO code",
+                ));
+            }
+            // `account_name` is a required rail field (its absence is not a
+            // blank optional the way account_number/iban are): a rail that
+            // names no account holder cannot be paid into. Refused on write,
+            // with the same wording as every other required field.
+            if rail.account_name.trim().is_empty() {
+                errors.push(FieldError::new(
+                    field("account_name"),
+                    "required, at most 120 characters",
+                ));
+            }
+            for (name, val, max) in [
+                ("account_name", rail.account_name.as_str(), 120usize),
+                (
+                    "account_number",
+                    rail.account_number.as_deref().unwrap_or(""),
+                    64,
+                ),
+                (
+                    "account_type",
+                    rail.account_type.as_deref().unwrap_or(""),
+                    40,
+                ),
+                ("iban", rail.iban.as_deref().unwrap_or(""), 34),
+                ("bic", rail.bic.as_deref().unwrap_or(""), 11),
+                ("bank_name", rail.bank_name.as_deref().unwrap_or(""), 120),
+                (
+                    "bank_address",
+                    rail.bank_address.as_deref().unwrap_or(""),
+                    200,
+                ),
+                (
+                    "routing_number",
+                    rail.routing_number.as_deref().unwrap_or(""),
+                    40,
+                ),
+                ("swift", rail.swift.as_deref().unwrap_or(""), 11),
+                (
+                    "instructions",
+                    rail.instructions.as_deref().unwrap_or(""),
+                    500,
+                ),
+            ] {
+                if val.chars().count() > max {
+                    errors.push(FieldError::new(
+                        field(name),
+                        format!("too long (max {max})"),
+                    ));
+                }
+            }
+            let rail_iban = rail.iban.as_deref().unwrap_or("").trim();
+            if !rail_iban.is_empty()
+                && (rail_iban.len() < 5 || !rail_iban.chars().all(|c| c.is_ascii_alphanumeric()))
+            {
+                errors.push(FieldError::new(
+                    field("iban"),
+                    "must be 5-34 letters/digits",
+                ));
+            }
+            for name in ["bic", "swift"] {
+                let code = match name {
+                    "bic" => rail.bic.as_deref().unwrap_or("").trim(),
+                    _ => rail.swift.as_deref().unwrap_or("").trim(),
+                };
+                if !code.is_empty()
+                    && ((code.len() != 8 && code.len() != 11)
+                        || !code.chars().all(|c| c.is_ascii_alphanumeric()))
+                {
+                    errors.push(FieldError::new(
+                        field(name),
+                        "must be 8 or 11 letters/digits",
+                    ));
+                }
+            }
+        }
     }
 }
 
@@ -383,6 +583,10 @@ pub struct OrgProfile {
     /// ink-only rendering. Applied to the totals rule + amount text.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub accent: String,
+    /// Display prefix for [`OrgProfile::legal_id`] (`Tax ID`, `VAT`,
+    /// `Company number`). Empty keeps today's `VAT / company id` wording.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub legal_id_label: String,
 }
 
 /// Display-label overrides for invoice documents (#147). Empty = built-in
@@ -404,6 +608,38 @@ pub struct LabelOverrides {
     pub tax: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub total: String,
+    /// Wording of the issuer block heading (`From`).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub from: String,
+    /// Wording of the customer block heading (`Invoice for`).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub invoice_for: String,
+    /// Wording of the invoice-number row (`Invoice ID`).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub invoice_id: String,
+    /// Wording of the issue-date row (`Issue date`).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub issue_date: String,
+    /// Wording of the due-date row (`Due date`).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub due_date: String,
+    /// Wording of the subject row (`Subject`).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub subject: String,
+    /// Wording of the payment section: labels both the structured rails
+    /// (built-in `Notes`) and the legacy flat block (built-in
+    /// `Payment details`) when set.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub payment_heading: String,
+    /// Wording of the line-table item-type column (`Item type`).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub item_type: String,
+    /// Wording of the payments/settlements section (`Payments`).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub payments: String,
+    /// Wording of the amount-due row (`Amount due`).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub amount_due: String,
 }
 
 impl LabelOverrides {
@@ -423,6 +659,16 @@ impl LabelOverrides {
             ("labels.discount", &self.discount),
             ("labels.tax", &self.tax),
             ("labels.total", &self.total),
+            ("labels.from", &self.from),
+            ("labels.invoice_for", &self.invoice_for),
+            ("labels.invoice_id", &self.invoice_id),
+            ("labels.issue_date", &self.issue_date),
+            ("labels.due_date", &self.due_date),
+            ("labels.subject", &self.subject),
+            ("labels.payment_heading", &self.payment_heading),
+            ("labels.item_type", &self.item_type),
+            ("labels.payments", &self.payments),
+            ("labels.amount_due", &self.amount_due),
         ] {
             if v.chars().count() > 40 {
                 errors.push(FieldError::new(field, "label too long (max 40 characters)"));
@@ -459,6 +705,9 @@ pub struct CustomerInput {
     pub discount_hundredths: u16,
     #[serde(default)]
     pub payment_details: Option<PaymentDetails>,
+    /// Company/registration number printed on documents (<= 60 chars).
+    #[serde(default)]
+    pub legal_id: String,
 }
 
 pub fn validate_customer_input(input: &CustomerInput) -> Result<CustomerDraft, Vec<FieldError>> {
@@ -494,6 +743,17 @@ pub fn validate_customer_input(input: &CustomerInput) -> Result<CustomerDraft, V
         errors.push(FieldError::new(
             "invoice_subject",
             "must be a single line without control characters",
+        ));
+    }
+    // Customer company/registration number: bounded and printable (a control
+    // character in a printed identity is never a valid shape).
+    if input.legal_id.chars().count() > 60 {
+        errors.push(FieldError::new("legal_id", "at most 60 characters"));
+    }
+    if crate::email::has_control_characters(&input.legal_id) {
+        errors.push(FieldError::new(
+            "legal_id",
+            "must not contain control characters",
         ));
     }
     validate_customer_billing_fields(
@@ -539,6 +799,7 @@ pub fn validate_customer_input(input: &CustomerInput) -> Result<CustomerDraft, V
                 .as_ref()
                 .filter(|p| p.has_content())
                 .map(PaymentDetails::trimmed),
+            legal_id: input.legal_id.trim().to_string(),
         })
     } else {
         Err(errors)
@@ -583,6 +844,7 @@ pub struct CustomerDraft {
     pub tax_hundredths: u16,
     pub discount_hundredths: u16,
     pub payment_details: Option<PaymentDetails>,
+    pub legal_id: String,
 }
 
 #[cfg(test)]
@@ -604,12 +866,13 @@ mod tests {
             tax_hundredths: 0,
             discount_hundredths: 0,
             payment_details: None,
+            legal_id: String::new(),
         }
     }
 
     #[test]
     fn customer_validation_boundaries() {
-        assert!(validate_customer_input(&customer_input("ACME", "EUR", 6000)).is_ok());
+        assert!(validate_customer_input(&customer_input("Tucano Time", "EUR", 6000)).is_ok());
         let errs = validate_customer_input(&customer_input("  ", "EUR", 6000)).unwrap_err();
         assert_eq!(errs[0].field, "name");
         let errs = validate_customer_input(&customer_input("x", "EUR", 100_000_001)).unwrap_err();
@@ -712,5 +975,181 @@ mod tests {
             .fixed_days(),
             Some(9)
         );
+    }
+
+    /// A legacy `customers/<id>.json` (no `legal_id`) loads, defaults empty and
+    /// round-trips byte-identically.
+    #[test]
+    fn legacy_customer_document_round_trips_byte_identically() {
+        let legacy = r#"{"id":"11111111-1111-1111-1111-111111111111","name":"Old Co","currency":"EUR","default_rate_minor":5000,"active":true,"email":"","invoice_notes":"","invoice_subject":""}"#;
+        let c: Customer = serde_json::from_str(legacy).unwrap();
+        assert_eq!(c.legal_id, "");
+        assert_eq!(serde_json::to_string(&c).unwrap(), legacy);
+    }
+
+    #[test]
+    fn legal_id_is_bounded_and_printable() {
+        let mut input = customer_input("Tucano Time", "EUR", 6000);
+        input.legal_id = "1".repeat(61);
+        let errs = validate_customer_input(&input).unwrap_err();
+        assert_eq!(errs[0].field, "legal_id");
+        input.legal_id = "122\r\nX".into();
+        let errs = validate_customer_input(&input).unwrap_err();
+        assert_eq!(errs[0].field, "legal_id");
+        input.legal_id = " 99999999 ".into();
+        let draft = validate_customer_input(&input).unwrap();
+        assert_eq!(draft.legal_id, "99999999");
+    }
+
+    #[test]
+    fn payment_rails_are_bounded_and_validated() {
+        let rail = |currency: &str, iban: Option<&str>, bic: Option<&str>| PaymentRail {
+            currency: currency.into(),
+            account_name: "Holder".into(),
+            iban: iban.map(str::to_string),
+            bic: bic.map(str::to_string),
+            ..Default::default()
+        };
+        let mut errors = Vec::new();
+        validate_customer_billing_fields(
+            &None,
+            &[],
+            0,
+            0,
+            &Some(PaymentDetails {
+                rails: vec![rail("", None, None)],
+                ..Default::default()
+            }),
+            &mut errors,
+        );
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].field, "payment_details.rails[0].currency");
+        // A blank account name is refused: the rail names no account holder.
+        let mut errors = Vec::new();
+        validate_customer_billing_fields(
+            &None,
+            &[],
+            0,
+            0,
+            &Some(PaymentDetails {
+                rails: vec![PaymentRail {
+                    currency: "EUR".into(),
+                    account_name: "   ".into(),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }),
+            &mut errors,
+        );
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].field, "payment_details.rails[0].account_name");
+        let mut errors = Vec::new();
+        validate_customer_billing_fields(
+            &None,
+            &[],
+            0,
+            0,
+            &Some(PaymentDetails {
+                rails: vec![rail("EUR", Some("AB"), Some("SAMPLE"))],
+                ..Default::default()
+            }),
+            &mut errors,
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.field == "payment_details.rails[0].iban")
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.field == "payment_details.rails[0].bic")
+        );
+        let mut errors = Vec::new();
+        validate_customer_billing_fields(
+            &None,
+            &[],
+            0,
+            0,
+            &Some(PaymentDetails {
+                rails: (0..=MAX_PAYMENT_RAILS)
+                    .map(|_| rail("EUR", None, None))
+                    .collect(),
+                ..Default::default()
+            }),
+            &mut errors,
+        );
+        assert!(errors.iter().any(|e| e.field == "payment_details.rails"));
+        // A well-formed rail is accepted and normalises to upper-case.
+        let mut errors = Vec::new();
+        validate_customer_billing_fields(
+            &None,
+            &[],
+            0,
+            0,
+            &Some(PaymentDetails {
+                rails: vec![rail("EUR", Some("EX000000000000000000"), None)],
+                ..Default::default()
+            }),
+            &mut errors,
+        );
+        assert!(errors.is_empty(), "{errors:?}");
+        // Lower-case is a bad shape (the contract says upper-case ISO), but a
+        // *stored* rail is normalised on the way in.
+        assert_eq!(
+            PaymentDetails {
+                rails: vec![rail("eur", None, None)],
+                ..Default::default()
+            }
+            .trimmed()
+            .rails[0]
+                .currency,
+            "EUR"
+        );
+        assert_eq!(
+            PaymentDetails {
+                rails: vec![rail("eur", None, None)],
+                ..Default::default()
+            }
+            .trimmed()
+            .rails[0]
+                .currency,
+            "EUR"
+        );
+    }
+
+    #[test]
+    fn legacy_org_profile_round_trips_and_label_overrides_round_trip() {
+        let legacy = r#"{"name":"Org","legal_id":"BE0123456789","address":null}"#;
+        let profile: OrgProfile = serde_json::from_str(legacy).unwrap();
+        assert_eq!(profile.legal_id_label, "");
+        assert_eq!(serde_json::to_string(&profile).unwrap(), legacy);
+
+        let labels = LabelOverrides {
+            from: "From".into(),
+            invoice_for: "Invoice for".into(),
+            invoice_id: "Invoice ID".into(),
+            issue_date: "Issue date".into(),
+            due_date: "Due date".into(),
+            subject: "Subject".into(),
+            payment_heading: "Payment details".into(),
+            item_type: "Item type".into(),
+            payments: "Payments".into(),
+            amount_due: "Amount due".into(),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&labels).unwrap();
+        assert_eq!(
+            serde_json::from_str::<LabelOverrides>(&json).unwrap(),
+            labels
+        );
+        let mut errors = Vec::new();
+        LabelOverrides {
+            item_type: "x".repeat(41),
+            ..labels
+        }
+        .validate(&mut errors);
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].field, "labels.item_type");
     }
 }

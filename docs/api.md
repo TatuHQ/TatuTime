@@ -82,6 +82,38 @@ answers `403` with `{"error":{"code":"csrf","message":"missing X-CSRF-Protection
 - A delete of a non-draft invoice, or any other state transition the current
   status forbids, answers **409**.
 
+## Invoice document fields
+
+The invoice document model gained these fields; the schemas live in
+[`openapi.json`](../openapi.json):
+
+- `Invoice.subject` — the resolved subject, frozen at issue. Empty on drafts and
+  legacy issued documents. The subject precedence is the frozen snapshot, then
+  `Customer.invoice_subject`, then the template subject, then the legacy
+  `Invoice {n} from {org}` wording.
+- `Invoice.terms` — the `PaymentTerms` actually used to resolve `due_date` at
+  issue (a snapshot, never a live lookup). Absent when the legacy
+  net-14-from-period-to fallback applied.
+- `Customer` / `CustomerInput.legal_id` — the customer's company/registration
+  number (≤ 60 characters, no control characters), printed on documents.
+- `OrgProfile.legal_id_label` — the display prefix for the org's `legal_id`
+  (`Tax ID`, `VAT`, `Company number`; ≤ 40 characters).
+- `LabelOverrides` gains display-only, ≤ 40-character keys for the reference
+  document's wording: `from`, `invoice_for`, `invoice_id`, `issue_date`,
+  `due_date`, `subject`, `payment_heading`, `item_type`, `payments`,
+  `amount_due`.
+- `PaymentDetails.rails` — up to four `PaymentRail` entries for multi-currency
+  customers. `currency` (3 uppercase letters) and `account_name` are required;
+  the remaining account fields are optional and shape-checked (`iban` 5-34
+  alphanumerics, `bic`/`swift` 8 or 11). The flat fields remain authoritative
+  for the single-rail case; nothing is migrated.
+
+An install that has never saved `invoice_template.json` resolves to the seeded
+defaults: `payment_terms = {"kind": "net_30"}` and the subject
+`%customer_name% invoice for %period_month_padded% %period_year%`. The template
+variable set now also includes `%period_month%`, `%period_month_number%`,
+`%period_month_padded%` and `%period_year%`, derived from the invoice period.
+
 ## Errors
 
 Every failure uses one JSON shape:
@@ -139,4 +171,4 @@ exports use the same cap.
 
 ---
 
-Last verified against TucanoTime 0.1.41.
+Last verified against TucanoTime 0.1.42.

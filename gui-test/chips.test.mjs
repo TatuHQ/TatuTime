@@ -43,7 +43,7 @@ test('status pills use the official chip vocabulary for both variants (#232 inc 
 test('register rows carry the chip variant matching the record state (#232 inc 3)', async () => {
   const { dom, t, document } = setup();
   t.state.customers = [
-    { id: 'c1', name: 'ACME', currency: 'EUR', default_rate_minor: 6000, active: true },
+    { id: 'c1', name: 'Tucano Time', currency: 'EUR', default_rate_minor: 6000, active: true },
     { id: 'c2', name: 'Globex', currency: 'EUR', default_rate_minor: 4500, active: false },
   ];
   await t.refreshCustomerTable();

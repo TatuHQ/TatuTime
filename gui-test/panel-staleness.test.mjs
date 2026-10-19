@@ -49,7 +49,7 @@ test('QA-10: a failed expense refresh keeps the rows and shows a Retry banner', 
         if (path === '/customers') return { customers: [] };
         return {};
     };
-    t.state.customers = [{ id: 'c1', name: 'ACME', active: true, currency: 'EUR', default_rate_minor: 0 }];
+    t.state.customers = [{ id: 'c1', name: 'Tucano Time', active: true, currency: 'EUR', default_rate_minor: 0 }];
 
     await t.refreshExpenses();
     const rows = () => document.querySelectorAll('#expense-table tbody tr').length;
@@ -96,7 +96,7 @@ test('QA-10: the Customers view shows the same banner and retry behaviour', asyn
             if (window.fail) throw new Error('server lost');
             return {
                 customers: [
-                    { id: 'c1', name: 'ACME', currency: 'EUR', default_rate_minor: 6000, active: true, email: '' },
+                    { id: 'c1', name: 'Tucano Time', currency: 'EUR', default_rate_minor: 6000, active: true, email: '' },
                 ],
             };
         }

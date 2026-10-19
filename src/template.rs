@@ -27,6 +27,10 @@ pub const VARS: &[&str] = &[
     "invoice_due_date",
     "period_from",
     "period_to",
+    "period_month",
+    "period_month_number",
+    "period_month_padded",
+    "period_year",
     "customer_name",
     "currency",
     "total",
@@ -45,11 +49,15 @@ pub const VAR_HELP: &[(&str, &str)] = &[
     ("%invoice_due_date%", "2026-11-04"),
     ("%period_from%", "2026-10-01"),
     ("%period_to%", "2026-10-31"),
-    ("%customer_name%", "Capybara Solutions"),
+    ("%period_month%", "October"),
+    ("%period_month_number%", "10"),
+    ("%period_month_padded%", "10"),
+    ("%period_year%", "2026"),
+    ("%customer_name%", "Tucano Time"),
     ("%currency%", "EUR"),
     ("%total%", "1,200.00"),
     ("%line_count%", "14"),
-    ("%payment_details%", "IBAN: DE89 3713 1400 ..."),
+    ("%payment_details%", "IBAN: EX00 0000 ..."),
 ];
 
 /// Caps (validated at save; #50 bounds on free text).
@@ -169,6 +177,17 @@ pub fn vars_for(
     );
     v.insert("period_from".into(), invoice.period_from.to_string());
     v.insert("period_to".into(), invoice.period_to.to_string());
+    // Billing-period family (#subject): the document says "the work of
+    // month/year", not "the day it was issued". Pure integer month arithmetic
+    // from `period_from`; no locale, no floats.
+    let period_month = invoice.period_from.month();
+    v.insert(
+        "period_month".into(),
+        MONTHS[invoice.period_from.month0() as usize].to_string(),
+    );
+    v.insert("period_month_number".into(), period_month.to_string());
+    v.insert("period_month_padded".into(), format!("{period_month:02}"));
+    v.insert("period_year".into(), invoice.period_from.year().to_string());
     v.insert("customer_name".into(), customer.name.clone());
     v.insert("currency".into(), invoice.currency.0.clone());
     v.insert(
@@ -384,6 +403,12 @@ pub fn to_html(blocks: &[Block]) -> String {
                 ));
                 i += 1;
             }
+            // A separator block (payment-rail divider); the HTML letter keeps
+            // it as a plain rule, never as markup a customer could inject.
+            Block::Rule { .. } => {
+                out.push_str("<hr>");
+                i += 1;
+            }
             Block::Bullet(_) => {
                 out.push_str("<ul>");
                 while let Some(Block::Bullet(s)) = blocks.get(i) {
@@ -413,6 +438,7 @@ pub fn to_html(blocks: &[Block]) -> String {
 /// empty vecs, keeping the caller's legacy behaviour untouched.
 #[must_use]
 pub fn doc_content(
+    invoice: &Invoice,
     template: &crate::domain::InvoiceTemplate,
     customer: &crate::domain::Customer,
     vars: &Vars,
@@ -422,17 +448,29 @@ pub fn doc_content(
         body: md(&template.body),
         footer: md(&template.footer),
         notes: md(&customer.invoice_notes),
-        subject: resolve_subject(template, customer, vars),
+        subject: resolve_subject(invoice, template, customer, vars),
     }
 }
 
-/// Resolve the subject: customer override → org template → `None` (the
-/// caller keeps its legacy subject).
+/// Resolve the subject with a documented, stable precedence:
+///
+/// 1. **`invoice.subject`** — the snapshot frozen at issue. It is already
+///    interpolated, so it wins verbatim and a later template/customer edit can
+///    never rewrite an issued invoice.
+/// 2. **`customer.invoice_subject`** — the live per-customer override (drafts
+///    keep following edits).
+/// 3. **`template.subject`** — the live org template.
+/// 4. **`None`** — the caller keeps its legacy `Invoice {n} from {org}`.
 fn resolve_subject(
+    invoice: &Invoice,
     template: &crate::domain::InvoiceTemplate,
     customer: &crate::domain::Customer,
     vars: &Vars,
 ) -> Option<String> {
+    let snapshot = invoice.subject.trim();
+    if !snapshot.is_empty() {
+        return Some(snapshot.to_string());
+    }
     let customer_subj = customer.invoice_subject.trim();
     if !customer_subj.is_empty() {
         return Some(interpolate(customer_subj, vars));
@@ -524,13 +562,15 @@ mod tests {
             written_off_at: None,
             tax_hundredths: 0,
             discount_hundredths: 0,
+            subject: String::new(),
+            terms: None,
         }
     }
 
     fn vars() -> Vars {
         vars_for(
             &sample_invoice(),
-            &customer_named("Capybara Solutions"),
+            &customer_named("Tucano Time"),
             Some(NaiveDate::from_ymd_opt(2026, 10, 5).unwrap()),
         )
     }
@@ -553,6 +593,7 @@ mod tests {
             tax_hundredths: 0,
             discount_hundredths: 0,
             payment_details: None,
+            legal_id: String::new(),
         }
     }
 
@@ -560,7 +601,7 @@ mod tests {
     fn variable_table_resolves_documented_examples() {
         let issue = Some(NaiveDate::from_ymd_opt(2026, 10, 5).unwrap());
         let inv = sample_invoice();
-        let built = vars_for(&inv, &customer_named("Capybara Solutions"), issue);
+        let built = vars_for(&inv, &customer_named("Tucano Time"), issue);
         assert_eq!(built["invoice_number"], "INV-0007");
         assert_eq!(built["invoice_issue_day"], "5");
         assert_eq!(built["invoice_issue_month"], "October");
@@ -569,7 +610,12 @@ mod tests {
         assert_eq!(built["invoice_due_date"], "2026-11-04");
         assert_eq!(built["period_from"], "2026-10-01");
         assert_eq!(built["period_to"], "2026-10-31");
-        assert_eq!(built["customer_name"], "Capybara Solutions");
+        // Billing-period family: derived from period_from, not the issue day.
+        assert_eq!(built["period_month"], "October");
+        assert_eq!(built["period_month_number"], "10");
+        assert_eq!(built["period_month_padded"], "10");
+        assert_eq!(built["period_year"], "2026");
+        assert_eq!(built["customer_name"], "Tucano Time");
         assert_eq!(built["currency"], "EUR");
         assert_eq!(built["total"], "1,200.00 EUR");
         assert_eq!(built["line_count"], "0");
@@ -584,7 +630,7 @@ mod tests {
         );
         assert_eq!(
             s,
-            "Invoice INV-0007 for Capybara Solutions: 1,200.00 EUR due 2026-11-04"
+            "Invoice INV-0007 for Tucano Time: 1,200.00 EUR due 2026-11-04"
         );
     }
 
@@ -677,26 +723,55 @@ mod tests {
             discount_hundredths: 0,
 
             payment_details: None,
+            legal_id: String::new(),
         };
         let template = InvoiceTemplate {
             subject: "Invoice %invoice_number%".into(),
             ..Default::default()
         };
         let v = vars();
+        let draft = sample_invoice();
         assert_eq!(
-            resolve_subject(&template, &customer, &v).as_deref(),
-            Some("INV-0007 for Capybara Solutions")
+            resolve_subject(&draft, &template, &customer, &v).as_deref(),
+            Some("INV-0007 for Tucano Time")
         );
         let bare = Customer {
             invoice_subject: String::new(),
-            ..customer
+            ..customer.clone()
         };
         assert_eq!(
-            resolve_subject(&template, &bare, &v).as_deref(),
+            resolve_subject(&draft, &template, &bare, &v).as_deref(),
             Some("Invoice INV-0007")
         );
         let empty = crate::domain::InvoiceTemplate::default();
-        assert_eq!(resolve_subject(&empty, &bare, &v), None);
+        assert_eq!(resolve_subject(&draft, &empty, &bare, &v), None);
+        // The issue-time snapshot wins verbatim over both live sources.
+        let issued = Invoice {
+            subject: "Tucano Time invoice for 08 2026".into(),
+            ..sample_invoice()
+        };
+        assert_eq!(
+            resolve_subject(&issued, &template, &customer, &v).as_deref(),
+            Some("Tucano Time invoice for 08 2026")
+        );
+    }
+
+    #[test]
+    fn period_variables_use_integer_month_arithmetic() {
+        let inv = Invoice {
+            period_from: NaiveDate::from_ymd_opt(2026, 1, 15).unwrap(),
+            period_to: NaiveDate::from_ymd_opt(2026, 1, 31).unwrap(),
+            ..sample_invoice()
+        };
+        let v = vars_for(&inv, &customer_named("C"), None);
+        assert_eq!(v["period_month"], "January");
+        assert_eq!(v["period_month_number"], "1");
+        assert_eq!(v["period_month_padded"], "01");
+        assert_eq!(v["period_year"], "2026");
+        // The default seeded subject expands to the documented wording.
+        let template = crate::domain::InvoiceTemplate::seeded();
+        let rendered = interpolate(&template.subject, &v);
+        assert_eq!(rendered, "C invoice for 01 2026");
     }
 
     #[test]
@@ -718,12 +793,13 @@ mod tests {
             discount_hundredths: 0,
 
             payment_details: None,
+            legal_id: String::new(),
         };
         let template = InvoiceTemplate::default();
         let inv = sample_invoice();
         let mut doc = crate::pdf::doc_for(&inv, &customer, &crate::pdf::Org::named("Tucano"));
         let before = doc.clone();
-        let content = doc_content(&template, &customer, &vars_for(&inv, &customer, None));
+        let content = doc_content(&inv, &template, &customer, &vars_for(&inv, &customer, None));
         apply_doc_content(&mut doc, &content);
         assert_eq!(doc.blocks, before.blocks);
         assert_eq!(doc.footer, before.footer);
@@ -735,7 +811,7 @@ mod tests {
         use crate::domain::{Currency, Customer, InvoiceTemplate};
         let customer = Customer {
             id: uuid::Uuid::new_v4(),
-            name: "Capybara Solutions".into(),
+            name: "Tucano Time".into(),
             currency: Currency("EUR".into()),
             default_rate_minor: 1,
             active: true,
@@ -749,6 +825,7 @@ mod tests {
             discount_hundredths: 0,
 
             payment_details: None,
+            legal_id: String::new(),
         };
         let template = InvoiceTemplate {
             body: "## Work for %invoice_issue_month%\n- consultancy".into(),
@@ -758,6 +835,7 @@ mod tests {
         let inv = sample_invoice();
         let mut doc = crate::pdf::doc_for(&inv, &customer, &crate::pdf::Org::named("Tucano"));
         let content = doc_content(
+            &inv,
             &template,
             &customer,
             &vars_for(

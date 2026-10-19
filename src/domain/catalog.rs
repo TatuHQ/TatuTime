@@ -1,4 +1,4 @@
-use super::customer::{LabelOverrides, PaymentTerms};
+use super::customer::{LabelOverrides, PaymentTerms, TermsKind};
 use super::invoice::LineItemKind;
 use super::primitives::{Currency, default_active};
 use chrono::{DateTime, Utc};
@@ -63,4 +63,30 @@ pub struct InvoiceTemplate {
     /// Document display labels (#147); empty = built-in.
     #[serde(default)]
     pub labels: LabelOverrides,
+}
+
+/// The subject a fresh install's template carries: the billing period, not
+/// the issue date, e.g. `Tucano Time invoice for 08 2026`.
+pub const DEFAULT_TEMPLATE_SUBJECT: &str =
+    "%customer_name% invoice for %period_month_padded% %period_year%";
+
+impl InvoiceTemplate {
+    /// The org-wide defaults for an install that has never saved a template:
+    /// `net_30` (the confirmed org default) and the period-based subject.
+    ///
+    /// Only the *absent singleton* resolves to this; an explicitly saved
+    /// template is used exactly as stored, and the code fallback chain in
+    /// `resolve_due_date` (customer terms → template terms → period_to + 14)
+    /// is untouched.
+    #[must_use]
+    pub fn seeded() -> Self {
+        Self {
+            subject: DEFAULT_TEMPLATE_SUBJECT.to_string(),
+            payment_terms: Some(PaymentTerms {
+                kind: TermsKind::Net30,
+                days: None,
+            }),
+            ..Self::default()
+        }
+    }
 }

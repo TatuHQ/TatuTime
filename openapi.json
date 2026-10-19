@@ -7,7 +7,7 @@
       "name": "AGPL-3.0-or-later",
       "identifier": "AGPL-3.0-or-later"
     },
-    "description": "Timesheet system: daily/weekly time entries, customers and project codes with per-entity currencies and hourly rates. File-backed (no database); the API is the only writer below TUCANO_DATA_DIR. Access is private-per-user (#51): a member sees and edits only their own entries/expenses/submissions; an administrator sees all data and owns invoicing, approvals and user management (the /api/users and /api/invoices routes return 403 for members). Mutating endpoints may return 503 (Retry-After) under write contention (#62). Mutating requests (POST/PUT/DELETE) must also carry the X-CSRF-Protection: 1 header (#46); without it the request is rejected 403 with code csrf. Exempt: POST /api/auth/login, /api/auth/bootstrap, /api/auth/sso/assertion."
+    "description": "Timesheet system: daily/weekly time entries, customers and project codes with per-entity currencies and hourly rates. File-backed (no database); the API is the only writer below TUCANO_DATA_DIR. Access is private-per-user: a member sees and edits only their own entries/expenses/submissions; an administrator sees all data and owns invoicing, approvals and user management (the /api/users and /api/invoices routes return 403 for members). Mutating endpoints may return 503 (Retry-After) under write contention. Mutating requests (POST/PUT/DELETE) must also carry the X-CSRF-Protection: 1 header; without it the request is rejected 403 with code csrf. Exempt: POST /api/auth/login, /api/auth/bootstrap, /api/auth/sso/assertion."
   },
   "servers": [
     {
@@ -255,7 +255,7 @@
         "pattern": "^[A-Z0-9][A-Z0-9_-]{0,23}$",
         "description": "Normalised upper case; letters and digits, dashes and underscores after the first character; at most 24 characters.",
         "examples": [
-          "ACME-42"
+          "TUCANO-42"
         ]
       },
       "Hours": {
@@ -308,10 +308,10 @@
           "email": {
             "type": "string",
             "maxLength": 200,
-            "description": "Optional billing email for invoice delivery (#35)"
+            "description": "Optional billing email for invoice delivery"
           },
           "payment_terms": {
-            "description": "Payment terms for the issue-time due date (#116).",
+            "description": "Payment terms for the issue-time due date.",
             "oneOf": [
               {
                 "$ref": "#/components/schemas/PaymentTerms"
@@ -324,15 +324,15 @@
           "invoice_notes": {
             "type": "string",
             "maxLength": 4000,
-            "description": "Markdown-subset notes appended to this customer's invoice documents (#116)."
+            "description": "Markdown-subset notes appended to this customer's invoice documents."
           },
           "invoice_subject": {
             "type": "string",
             "maxLength": 120,
-            "description": "Per-customer subject override with %variables% (#116)."
+            "description": "Per-customer subject override with %variables%."
           },
           "address": {
-            "description": "Postal address (#139).",
+            "description": "Postal address.",
             "oneOf": [
               {
                 "$ref": "#/components/schemas/Address"
@@ -348,7 +348,7 @@
             "items": {
               "$ref": "#/components/schemas/Contact"
             },
-            "description": "Billing contacts (#139). When a contact is flagged billing, invoice emails go there."
+            "description": "Billing contacts. When a contact is flagged billing, invoice emails go there."
           },
           "tax_hundredths": {
             "type": "integer",
@@ -372,6 +372,11 @@
                 "type": "null"
               }
             ]
+          },
+          "legal_id": {
+            "type": "string",
+            "maxLength": 60,
+            "description": "The customer's company/registration number printed on invoice documents (e.g. 99999999). Empty on legacy documents."
           }
         },
         "additionalProperties": false
@@ -405,7 +410,7 @@
             "default": ""
           },
           "payment_terms": {
-            "description": "Payment terms for the issue-time due date (#116).",
+            "description": "Payment terms for the issue-time due date.",
             "oneOf": [
               {
                 "$ref": "#/components/schemas/PaymentTerms"
@@ -418,15 +423,15 @@
           "invoice_notes": {
             "type": "string",
             "maxLength": 4000,
-            "description": "Markdown-subset notes appended to this customer's invoice documents (#116)."
+            "description": "Markdown-subset notes appended to this customer's invoice documents."
           },
           "invoice_subject": {
             "type": "string",
             "maxLength": 120,
-            "description": "Per-customer subject override with %variables% (#116)."
+            "description": "Per-customer subject override with %variables%."
           },
           "address": {
-            "description": "Postal address (#139).",
+            "description": "Postal address.",
             "oneOf": [
               {
                 "$ref": "#/components/schemas/Address"
@@ -442,7 +447,7 @@
             "items": {
               "$ref": "#/components/schemas/Contact"
             },
-            "description": "Billing contacts (#139). When a contact is flagged billing, invoice emails go there."
+            "description": "Billing contacts. When a contact is flagged billing, invoice emails go there."
           },
           "tax_hundredths": {
             "type": "integer",
@@ -466,6 +471,11 @@
                 "type": "null"
               }
             ]
+          },
+          "legal_id": {
+            "type": "string",
+            "maxLength": 60,
+            "description": "The customer's company/registration number printed on invoice documents (e.g. 99999999). Defaults empty."
           }
         },
         "additionalProperties": false
@@ -509,7 +519,7 @@
             ],
             "minimum": 1,
             "maximum": 100000000,
-            "description": "Total budget in hundredths of an hour (#30); bounded per #187"
+            "description": "Total budget in hundredths of an hour; bounded by the field maximum"
           },
           "budget_amount_minor": {
             "type": [
@@ -658,7 +668,7 @@
                 "type": "null"
               }
             ],
-            "description": "The user who logged the entry (attribution, #21)."
+            "description": "The user who logged the entry (attribution)."
           },
           "project_code": {
             "$ref": "#/components/schemas/ProjectCode"
@@ -672,7 +682,7 @@
                 "type": "null"
               }
             ],
-            "description": "Optional task within the project (#38)."
+            "description": "Optional task within the project."
           },
           "hours": {
             "$ref": "#/components/schemas/Hours"
@@ -995,7 +1005,7 @@
           "paid",
           "written_off"
         ],
-        "description": "Invoice lifecycle (#27); partly_paid and written_off added by #114."
+        "description": "Invoice lifecycle; partly_paid and written_off are included."
       },
       "InvoiceLine": {
         "type": "object",
@@ -1082,7 +1092,7 @@
             ],
             "minimum": 1,
             "maximum": 1000000,
-            "description": "Manual lines: hundredths of a unit (#143)."
+            "description": "Manual lines: hundredths of a unit."
           },
           "unit_price_minor": {
             "type": [
@@ -1090,7 +1100,7 @@
               "null"
             ],
             "minimum": 0,
-            "description": "Manual lines: snapshot unit price (#143)."
+            "description": "Manual lines: snapshot unit price."
           },
           "item_kind": {
             "oneOf": [
@@ -1198,11 +1208,11 @@
             "items": {
               "$ref": "#/components/schemas/InvoicePayment"
             },
-            "description": "Payment ledger (#114). A legacy paid document without entries counts as fully paid."
+            "description": "Payment ledger. A legacy paid document without entries counts as fully paid."
           },
           "write_off_reason": {
             "type": "string",
-            "description": "Non-empty once written off (#114)."
+            "description": "Non-empty once written off."
           },
           "written_off_at": {
             "type": [
@@ -1215,12 +1225,27 @@
             "type": "integer",
             "minimum": 0,
             "maximum": 10000,
-            "description": "VAT percent in hundredths (2100 = 21%) (#143)."
+            "description": "VAT percent in hundredths (2100 = 21%)."
           },
           "discount_hundredths": {
             "type": "integer",
             "minimum": 0,
             "maximum": 10000
+          },
+          "subject": {
+            "type": "string",
+            "description": "The resolved invoice subject, frozen at issue (interpolated from the customer/template). Empty on drafts and legacy issued documents."
+          },
+          "terms": {
+            "description": "The payment terms used to resolve due_date at issue, frozen so a document prints (Net N) from its own snapshot. Absent when the legacy net-14 fallback applied or on legacy documents.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PaymentTerms"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false
@@ -1257,15 +1282,15 @@
               "type": "integer",
               "minimum": 0
             },
-            "description": "Outstanding BALANCES keyed by currency (#114: total - paid over issued/partly_paid)."
+            "description": "Outstanding BALANCES keyed by currency (total - paid over issued/partly_paid)."
           },
           "partly_paid": {
             "type": "integer",
-            "description": "Open invoices with a partially settled balance (#114)."
+            "description": "Open invoices with a partially settled balance."
           },
           "written_off": {
             "type": "integer",
-            "description": "Forgiven invoices, excluded from outstanding (#114)."
+            "description": "Forgiven invoices, excluded from outstanding."
           }
         },
         "additionalProperties": false
@@ -1301,11 +1326,11 @@
             "items": {
               "$ref": "#/components/schemas/ProjectCode"
             },
-            "description": "Restrict billing to these projects of the customer (#134); empty = all eligible projects."
+            "description": "Restrict billing to these projects of the customer; empty = all eligible projects."
           }
         },
         "additionalProperties": false,
-        "description": "Generate a draft from a period's billable work (#8/#134)."
+        "description": "Generate a draft from a period's billable work."
       },
       "Category": {
         "type": "object",
@@ -1889,7 +1914,7 @@
       },
       "PdfHint": {
         "type": "object",
-        "description": "Metadata for the PDF archived beside the invoice (#113).",
+        "description": "Metadata for the PDF archived beside the invoice.",
         "required": [
           "filename",
           "bytes",
@@ -1924,11 +1949,11 @@
           "net_45",
           "custom"
         ],
-        "description": "Payment terms kind (#116)."
+        "description": "Payment terms kind."
       },
       "PaymentTerms": {
         "type": "object",
-        "description": "Payment terms deciding the due date at issue (#116).",
+        "description": "Payment terms deciding the due date at issue.",
         "required": [
           "kind"
         ],
@@ -1950,7 +1975,7 @@
       },
       "InvoiceTemplate": {
         "type": "object",
-        "description": "Org-wide invoice template (`invoice_template.json`, #116). Empty/unset fields keep legacy behaviour.",
+        "description": "Org-wide invoice template (`invoice_template.json`). An install that never saved one resolves to the seeded defaults (subject `%customer_name% invoice for %period_month_padded% %period_year%` and `net_30`); an explicitly saved template is used as stored.",
         "properties": {
           "subject": {
             "type": "string",
@@ -1986,7 +2011,7 @@
       },
       "InvoicePayment": {
         "type": "object",
-        "description": "One recorded payment on the invoice ledger (#114).",
+        "description": "One recorded payment on the invoice ledger.",
         "required": [
           "id",
           "amount_minor",
@@ -2071,7 +2096,7 @@
           "monthly",
           "quarterly"
         ],
-        "description": "Recurring billing cadence (#26)."
+        "description": "Recurring billing cadence."
       },
       "RecurMode": {
         "type": "string",
@@ -2079,7 +2104,7 @@
           "time",
           "retainer"
         ],
-        "description": "Bill tracked work or a fixed retainer (#26)."
+        "description": "Bill tracked work or a fixed retainer."
       },
       "SchedulePatch": {
         "type": "object",
@@ -2089,7 +2114,7 @@
         "properties": {
           "active": {
             "type": "boolean",
-            "description": "false pauses generation; the billing cursor (last_period_end) is kept (#136)."
+            "description": "false pauses generation; the billing cursor (last_period_end) is kept."
           }
         },
         "additionalProperties": false
@@ -2129,13 +2154,82 @@
             "type": "string",
             "maxLength": 500,
             "description": "Free-form text shown last, verbatim."
+          },
+          "rails": {
+            "type": "array",
+            "maxItems": 4,
+            "items": {
+              "$ref": "#/components/schemas/PaymentRail"
+            },
+            "description": "Structured currency-specific rails for multi-currency billing. The flat fields above stay authoritative for the single-rail case; nothing is migrated. Display data only — no payment provider is involved."
+          }
+        },
+        "additionalProperties": false
+      },
+      "PaymentRail": {
+        "type": "object",
+        "description": "One currency-specific payment rail (e.g. a EUR IBAN and a USD account). Display data only.",
+        "required": [
+          "currency",
+          "account_name"
+        ],
+        "properties": {
+          "currency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$",
+            "description": "ISO-4217 code, exactly three upper-case letters."
+          },
+          "account_name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120,
+            "description": "Account holder name as the bank knows it. Required: a blank value is a 422."
+          },
+          "account_number": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "account_type": {
+            "type": "string",
+            "maxLength": 40
+          },
+          "iban": {
+            "type": "string",
+            "maxLength": 34,
+            "description": "When set: 5-34 letters/digits."
+          },
+          "bic": {
+            "type": "string",
+            "maxLength": 11,
+            "description": "When set: exactly 8 or 11 letters/digits."
+          },
+          "bank_name": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "bank_address": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "routing_number": {
+            "type": "string",
+            "maxLength": 40
+          },
+          "swift": {
+            "type": "string",
+            "maxLength": 11,
+            "description": "When set: exactly 8 or 11 letters/digits."
+          },
+          "instructions": {
+            "type": "string",
+            "maxLength": 500
           }
         },
         "additionalProperties": false
       },
       "Address": {
         "type": "object",
-        "description": "Postal address parts (#139), free text with length bounds.",
+        "description": "Postal address parts, free text with length bounds.",
         "properties": {
           "street": {
             "type": "string",
@@ -2162,7 +2256,7 @@
         "required": [
           "name"
         ],
-        "description": "Named person at a customer (#139); at most one may be the billing contact.",
+        "description": "Named person at a customer; at most one may be the billing contact.",
         "properties": {
           "name": {
             "type": "string",
@@ -2185,7 +2279,7 @@
       },
       "OrgProfile": {
         "type": "object",
-        "description": "Company legal identity, stored as org_profile.json (#138). Empty name falls back to the org_name config key.",
+        "description": "Company legal identity, stored as org_profile.json. Empty name falls back to the org_name config key.",
         "properties": {
           "name": {
             "type": "string",
@@ -2210,17 +2304,22 @@
           "from_name": {
             "type": "string",
             "maxLength": 120,
-            "description": "Email sender display name (#146); empty = built-in."
+            "description": "Email sender display name; empty = built-in."
           },
           "reply_to": {
             "type": "string",
             "maxLength": 200,
-            "description": "Reply-To address (#146); empty omits the header. Validated."
+            "description": "Reply-To address; empty omits the header. Validated."
           },
           "accent": {
             "type": "string",
             "pattern": "^#[0-9a-fA-F]{6}$",
-            "description": "Invoice document accent for the totals section (#146); empty = ink-only."
+            "description": "Invoice document accent for the totals section; empty = ink-only."
+          },
+          "legal_id_label": {
+            "type": "string",
+            "maxLength": 40,
+            "description": "Display prefix for legal_id on documents (Tax ID, VAT, Company number). Empty keeps the built-in 'VAT / company id' wording."
           }
         },
         "additionalProperties": false
@@ -2231,7 +2330,7 @@
           "product",
           "service"
         ],
-        "description": "Manual line item type (#143/#147)."
+        "description": "Manual line item type."
       },
       "ManualLineInput": {
         "type": "object",
@@ -2241,7 +2340,7 @@
           "quantity_hundredths",
           "unit_price_minor"
         ],
-        "description": "A manual Product/Service line as submitted (#143). Quantities are INTEGER hundredths (150 = 1.50) \u2014 the API never sees floats.",
+        "description": "A manual Product/Service line as submitted. Quantities are INTEGER hundredths (150 = 1.50) \u2014 the API never sees floats.",
         "properties": {
           "description": {
             "type": "string",
@@ -2323,7 +2422,7 @@
           "kind",
           "date"
         ],
-        "description": "A draft line as submitted to PUT /api/invoices/{id} (#143/#187). Mirrors the stored InvoiceLine but is an INPUT shape: only kind and date are mandatory, the rest default. Manual lines (kind=fixed with an item kind) are re-priced server-side, so their amount_minor is always recomputed. Tracked lines (entry_id/expense_id) must be echoed back exactly as stored: any changed field is refused 422, which is how the #8 rate snapshot stays immutable.",
+        "description": "A draft line as submitted to PUT /api/invoices/{id}. Mirrors the stored InvoiceLine but is an INPUT shape: only kind and date are mandatory, the rest default. Manual lines (kind=fixed with an item kind) are re-priced server-side, so their amount_minor is always recomputed. Tracked lines (entry_id/expense_id) must be echoed back exactly as stored: any changed field is refused 422, which is how the rate snapshot stays immutable.",
         "properties": {
           "kind": {
             "type": "string",
@@ -2405,7 +2504,7 @@
             ],
             "minimum": 1,
             "maximum": 1000000,
-            "description": "Manual lines: hundredths of a unit (#143)."
+            "description": "Manual lines: hundredths of a unit."
           },
           "unit_price_minor": {
             "type": [
@@ -2414,7 +2513,7 @@
             ],
             "minimum": 0,
             "maximum": 100000000,
-            "description": "Manual lines: snapshot unit price (#143)."
+            "description": "Manual lines: snapshot unit price."
           },
           "item_kind": {
             "oneOf": [
@@ -2434,7 +2533,7 @@
         "required": [
           "lines"
         ],
-        "description": "Draft-only full replacement (#143). Tracked lines must come back verbatim; manual amounts are recomputed server-side.",
+        "description": "Draft-only full replacement. Tracked lines must come back verbatim; manual amounts are recomputed server-side.",
         "properties": {
           "lines": {
             "type": "array",
@@ -2459,7 +2558,7 @@
       },
       "LabelOverrides": {
         "type": "object",
-        "description": "Display-label overrides for invoice documents (#147). Empty = built-in label; API field names never change.",
+        "description": "Display-label overrides for invoice documents. Empty = built-in label; API field names never change.",
         "properties": {
           "description": {
             "type": "string",
@@ -2488,6 +2587,56 @@
           "total": {
             "type": "string",
             "maxLength": 40
+          },
+          "from": {
+            "type": "string",
+            "maxLength": 40,
+            "description": "Issuer block heading (`From`)."
+          },
+          "invoice_for": {
+            "type": "string",
+            "maxLength": 40,
+            "description": "Customer block heading (`Invoice for`)."
+          },
+          "invoice_id": {
+            "type": "string",
+            "maxLength": 40,
+            "description": "Invoice-number row (`Invoice ID`)."
+          },
+          "issue_date": {
+            "type": "string",
+            "maxLength": 40,
+            "description": "Issue-date row (`Issue date`)."
+          },
+          "due_date": {
+            "type": "string",
+            "maxLength": 40,
+            "description": "Due-date row (`Due date`)."
+          },
+          "subject": {
+            "type": "string",
+            "maxLength": 40,
+            "description": "Subject row (`Subject`)."
+          },
+          "payment_heading": {
+            "type": "string",
+            "maxLength": 40,
+            "description": "Payment-details heading. Labels the structured rails (default `Notes`) and the legacy flat block (default `Payment details`); a configured value replaces both."
+          },
+          "item_type": {
+            "type": "string",
+            "maxLength": 40,
+            "description": "Line-table item-type column (`Item type`)."
+          },
+          "payments": {
+            "type": "string",
+            "maxLength": 40,
+            "description": "Payments/settlements section (`Payments`)."
+          },
+          "amount_due": {
+            "type": "string",
+            "maxLength": 40,
+            "description": "Amount-due row (`Amount due`)."
           }
         },
         "additionalProperties": false
@@ -2503,7 +2652,7 @@
           "active",
           "created_at"
         ],
-        "description": "Reusable Product/Service line type (#147).",
+        "description": "Reusable Product/Service line type.",
         "properties": {
           "id": {
             "type": "string",
@@ -2594,7 +2743,7 @@
           "project_code",
           "started_at"
         ],
-        "description": "A running timer for one user (#14): server-side state, at most one active timer per user.",
+        "description": "A running timer for one user: server-side state, at most one active timer per user.",
         "properties": {
           "user_id": {
             "type": "string",
@@ -2689,7 +2838,7 @@
           "transactions",
           "created_at"
         ],
-        "description": "Retainer aggregate; balance is ALWAYS the reconciled ledger (#144).",
+        "description": "Retainer aggregate; balance is ALWAYS the reconciled ledger.",
         "properties": {
           "id": {
             "type": "string",
@@ -2791,7 +2940,7 @@
               "string",
               "null"
             ],
-            "description": "Repeats are rejected 409, never double-posted (#144)."
+            "description": "Repeats are rejected 409, never double-posted."
           }
         },
         "additionalProperties": false
@@ -2799,7 +2948,7 @@
     },
     "responses": {
       "CsrfForbidden": {
-        "description": "CSRF header missing or wrong on a mutating request (#46): send X-CSRF-Protection: 1.",
+        "description": "CSRF header missing or wrong on a mutating request: send X-CSRF-Protection: 1.",
         "content": {
           "application/json": {
             "schema": {
@@ -2869,7 +3018,7 @@
         }
       },
       "Locked": {
-        "description": "Transient lock condition; retry shortly. Sent with Retry-After. A concurrent writer holds the store lock (#62, code write_lock_busy) or an entry's lock state could not be verified and the write was refused fail-closed (#185, code lock_unavailable).",
+        "description": "Transient lock condition; retry shortly. Sent with Retry-After. A concurrent writer holds the store lock (code write_lock_busy) or an entry's lock state could not be verified and the write was refused fail-closed (code lock_unavailable).",
         "headers": {
           "Retry-After": {
             "schema": {
@@ -2886,7 +3035,7 @@
         }
       },
       "Unauthorized": {
-        "description": "No valid session cookie, or an invalid/expired one (#19). Guarded operations require authentication; the body is the shared Error shape with code unauthenticated.",
+        "description": "No valid session cookie, or an invalid/expired one. Guarded operations require authentication; the body is the shared Error shape with code unauthenticated.",
         "content": {
           "application/json": {
             "schema": {
@@ -2896,7 +3045,7 @@
         }
       },
       "Forbidden": {
-        "description": "Authenticated but the request is refused: an administrator role is required (#51, code forbidden), the X-CSRF-Protection: 1 header is missing on a mutating request (#46, code csrf), the first-run setup has already been completed (code initialised), or the account is deactivated (code inactive).",
+        "description": "Authenticated but the request is refused: an administrator role is required (code forbidden), the X-CSRF-Protection: 1 header is missing on a mutating request (code csrf), the first-run setup has already been completed (code initialised), or the account is deactivated (code inactive).",
         "content": {
           "application/json": {
             "schema": {
@@ -2906,7 +3055,7 @@
         }
       },
       "RateLimited": {
-        "description": "Too many failed attempts within the window (#47, code rate_limited); retry once the window elapses or a successful attempt resets the key.",
+        "description": "Too many failed attempts within the window (code rate_limited); retry once the window elapses or a successful attempt resets the key.",
         "content": {
           "application/json": {
             "schema": {
@@ -2926,7 +3075,7 @@
         }
       },
       "VaultUnavailable": {
-        "description": "The secret vault is not enabled or not configured (#77, codes vault_disabled, no_vault); integration credentials and features are unavailable.",
+        "description": "The secret vault is not enabled or not configured (codes vault_disabled, no_vault); integration credentials and features are unavailable.",
         "content": {
           "application/json": {
             "schema": {
@@ -2961,7 +3110,7 @@
         "name": "X-CSRF-Protection",
         "in": "header",
         "required": true,
-        "description": "CSRF guard (#46): mutating requests (POST/PUT/DELETE) must send this header with the literal value 1, otherwise the request is rejected 403 csrf. Exempt endpoints (no header required): POST /api/auth/login, /api/auth/bootstrap, /api/auth/sso/assertion.",
+        "description": "CSRF guard: mutating requests (POST/PUT/DELETE) must send this header with the literal value 1, otherwise the request is rejected 403 csrf. Exempt endpoints (no header required): POST /api/auth/login, /api/auth/bootstrap, /api/auth/sso/assertion.",
         "schema": {
           "type": "string",
           "enum": [
@@ -3034,7 +3183,7 @@
           "maximum": 1000,
           "default": 200
         },
-        "description": "Page size (#334). Between 1 and 1000; anything else — including a larger value — is refused with 422 naming `limit`, never clamped, so a truncated page can never be mistaken for the whole set. The default is 200."
+        "description": "Page size. Between 1 and 1000; anything else — including a larger value — is refused with 422 naming `limit`, never clamped, so a truncated page can never be mistaken for the whole set. The default is 200."
       },
       "CursorParam": {
         "name": "cursor",
@@ -3043,7 +3192,7 @@
         "schema": {
           "type": "string"
         },
-        "description": "Opaque keyset cursor (#334). Send back the previous page's `next_cursor` verbatim to continue the walk; never parse or construct one — its contents are an implementation detail. A value this service did not issue is refused with 422 naming `cursor`, never treated as a fresh first page."
+        "description": "Opaque keyset cursor. Send back the previous page's `next_cursor` verbatim to continue the walk; never parse or construct one — its contents are an implementation detail. A value this service did not issue is refused with 422 naming `cursor`, never treated as a fresh first page."
       }
     }
   },
@@ -3054,7 +3203,7 @@
         "tags": [
           "auth"
         ],
-        "summary": "Configured SSO identity providers (#32), advertised pre-session",
+        "summary": "Configured SSO identity providers, advertised pre-session",
         "security": [],
         "responses": {
           "200": {
@@ -3088,7 +3237,7 @@
         "tags": [
           "auth"
         ],
-        "summary": "Assertion consumer: verifies the provider signature, JIT-provisions the user (#19 roles) and issues a session cookie alongside local login (#32)",
+        "summary": "Assertion consumer: verifies the provider signature, JIT-provisions the user with a role and issues a session cookie alongside local login",
         "requestBody": {
           "required": true,
           "content": {
@@ -4324,7 +4473,7 @@
           "entries"
         ],
         "summary": "List entries for a day or an inclusive date range",
-        "description": "Exactly one form: ?date=YYYY-MM-DD or ?from=...&to=... (span at most 400 inclusive days). Paged (#334): the rows walk the total order `(date, id)` ascending, a response holds at most `limit` of them, and `next_cursor` is the opaque key of the page that follows — `null` when the page ended the set. Follow the cursor to see every row exactly once.",
+        "description": "Exactly one form: ?date=YYYY-MM-DD or ?from=...&to=... (span at most 400 inclusive days). Paged: the rows walk the total order `(date, id)` ascending, a response holds at most `limit` of them, and `next_cursor` is the opaque key of the page that follows — `null` when the page ended the set. Follow the cursor to see every row exactly once.",
         "parameters": [
           {
             "$ref": "#/components/parameters/DateParam"
@@ -4364,7 +4513,7 @@
                       }
                     },
                     "next_cursor": {
-                      "description": "Opaque cursor for the next page (#334), or null when this page ended the matching set.",
+                      "description": "Opaque cursor for the next page, or null when this page ended the matching set.",
                       "oneOf": [
                         {
                           "type": "string"
@@ -4672,7 +4821,7 @@
         "tags": [
           "reports"
         ],
-        "summary": "Budget burn vs budget for budgeted projects (#30)",
+        "summary": "Budget burn vs budget for budgeted projects",
         "responses": {
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -4777,7 +4926,7 @@
         "tags": [
           "reports"
         ],
-        "summary": "Revenue vs cost (expenses + labour at cost rates) per customer and currency (#29, #186)",
+        "summary": "Revenue vs cost (expenses + labour at cost rates) per customer and currency",
         "responses": {
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -4849,7 +4998,7 @@
         "tags": [
           "entries"
         ],
-        "summary": "Current running timer for the caller (with elapsed), or null (#14)",
+        "summary": "Current running timer for the caller (with elapsed), or null",
         "responses": {
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -5036,7 +5185,7 @@
         "tags": [
           "calendar"
         ],
-        "summary": "Begin the Google/Microsoft calendar consent flow (#36); returns the provider authorize URL",
+        "summary": "Begin the Google/Microsoft calendar consent flow; returns the provider authorize URL",
         "parameters": [
           {
             "name": "provider",
@@ -5094,7 +5243,7 @@
         "tags": [
           "calendar"
         ],
-        "summary": "OAuth callback: validates state, exchanges the code, stores tokens in the vault (#36); tokens are never echoed",
+        "summary": "OAuth callback: validates state, exchanges the code, stores tokens in the vault; tokens are never echoed",
         "parameters": [
           {
             "name": "code",
@@ -5167,7 +5316,7 @@
         "tags": [
           "entries"
         ],
-        "summary": "Calendar events overlapping the range, from the configured ICS feed (#15)",
+        "summary": "Calendar events overlapping the range, from the configured ICS feed",
         "responses": {
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -5239,7 +5388,7 @@
         "tags": [
           "entries"
         ],
-        "summary": "The caller's notifications, newest first, with unread count (#22)",
+        "summary": "The caller's notifications, newest first, with unread count",
         "responses": {
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -5374,7 +5523,7 @@
         "tags": [
           "invoices"
         ],
-        "summary": "Create a recurring schedule (time or retainer) (#26)",
+        "summary": "Create a recurring schedule (time or retainer)",
         "requestBody": {
           "required": true,
           "content": {
@@ -5467,7 +5616,7 @@
         "tags": [
           "schedules"
         ],
-        "summary": "Pause or resume a recurring schedule (#136)",
+        "summary": "Pause or resume a recurring schedule",
         "description": "Admin only. Identity, cadence and last_period_end are preserved: resuming continues where billing stopped and never re-bills a period.",
         "requestBody": {
           "required": true,
@@ -5785,7 +5934,7 @@
             "$ref": "#/components/parameters/CsrfProtection"
           }
         ],
-        "summary": "Edit a draft invoice: replace lines and percentages (#143)",
+        "summary": "Edit a draft invoice: replace lines and percentages",
         "description": "Draft-only (409 otherwise); tracked lines are immutable rate snapshots; validation failures persist nothing.",
         "requestBody": {
           "required": true,
@@ -5847,7 +5996,7 @@
         "tags": [
           "invoices"
         ],
-        "summary": "Issue a draft invoice (locks entries; archives the PDF, #113)",
+        "summary": "Issue a draft invoice (locks entries; archives the PDF)",
         "parameters": [
           {
             "$ref": "#/components/parameters/CsrfProtection"
@@ -5904,7 +6053,7 @@
         "tags": [
           "invoices"
         ],
-        "summary": "Download the archived invoice PDF (#113); admin only",
+        "summary": "Download the archived invoice PDF; admin only",
         "description": "Returns the PDF archived at issue time, unmodified. A legacy issued invoice without an archive renders it from the snapshot-locked document on first read. Drafts are refused (409). Responses carry Content-Disposition and an ETag from the archive sha256.",
         "responses": {
           "401": {
@@ -6017,7 +6166,7 @@
         "tags": [
           "invoices"
         ],
-        "summary": "Email an issued invoice to the customer's billing address, or to an explicit recipient list (#35)",
+        "summary": "Email an issued invoice to the customer's billing address, or to an explicit recipient list",
         "description": "Admin only. The body is optional: without it (or with an empty `recipients` list) the invoice goes to the customer's single billing address. An explicit list is used in the given order, de-duplicated case-insensitively, validated before anything is sent (one '@', no control characters, at most 320 characters each, at most 10 recipients), and recorded on the invoice timeline. Drafts are refused with 409; a missing billing email with 422.",
         "requestBody": {
           "required": false,
@@ -6080,7 +6229,7 @@
                         "smtp",
                         "disabled"
                       ],
-                      "description": "Delivery path (#130). \"disabled\" = logged, NOT sent (no smtp.host configured)."
+                      "description": "Delivery path. \"disabled\" = logged, NOT sent (no smtp.host configured)."
                     }
                   },
                   "additionalProperties": false
@@ -6124,7 +6273,7 @@
         "tags": [
           "invoices"
         ],
-        "summary": "Email a PDF copy of an issued invoice to a third party, e.g. the accountant (#112)",
+        "summary": "Email a PDF copy of an issued invoice to a third party, e.g. the accountant",
         "description": "Admin only. Drafts are not shared (409). The recipient is validated before anything is sent or persisted; the send is recorded in the audit log with the recipient address and the invoice id, never the document bytes. The cover note names the requesting user.",
         "requestBody": {
           "required": true,
@@ -6180,7 +6329,7 @@
                         "smtp",
                         "disabled"
                       ],
-                      "description": "Delivery path (#130). \"disabled\" = logged, NOT sent (no smtp.host configured)."
+                      "description": "Delivery path. \"disabled\" = logged, NOT sent (no smtp.host configured)."
                     }
                   },
                   "additionalProperties": false
@@ -6227,7 +6376,7 @@
         "tags": [
           "invoices"
         ],
-        "summary": "Record a payment on an issued invoice (full balance or partial, #27/#114)",
+        "summary": "Record a payment on an issued invoice (full balance or partial)",
         "requestBody": {
           "required": true,
           "content": {
@@ -6246,7 +6395,7 @@
                       "null"
                     ],
                     "minimum": 1,
-                    "description": "Minor units collected now; absent = remaining balance (#114)."
+                    "description": "Minor units collected now; absent = remaining balance."
                   }
                 },
                 "additionalProperties": false
@@ -6310,7 +6459,7 @@
         "tags": [
           "invoices"
         ],
-        "summary": "Copy an issued invoice (and later its payment) to an accounting provider (#33). Idempotent; failures are recorded, not fatal.",
+        "summary": "Copy an issued invoice (and later its payment) to an accounting provider. Idempotent; failures are recorded, not fatal.",
         "requestBody": {
           "required": true,
           "content": {
@@ -6381,7 +6530,7 @@
         "tags": [
           "invoices"
         ],
-        "summary": "Visible accounting sync status: provider records + enabled providers (#33)",
+        "summary": "Visible accounting sync status: provider records + enabled providers",
         "responses": {
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -6438,7 +6587,7 @@
                           },
                           "error": {
                             "type": "string",
-                            "description": "Stable short marker on failure (\"sync failed (see server log)\"); raw provider/transport detail is logged server-side, never serialised (#190). Empty when synced."
+                            "description": "Stable short marker on failure (\"sync failed (see server log)\"); raw provider/transport detail is logged server-side, never serialised. Empty when synced."
                           },
                           "attempts": {
                             "type": "integer"
@@ -6512,7 +6661,7 @@
         "tags": [
           "invoices"
         ],
-        "summary": "Revenue by customer and currency + status counts (#31, #186)",
+        "summary": "Revenue by customer and currency + status counts",
         "responses": {
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -6521,7 +6670,7 @@
             "$ref": "#/components/responses/Forbidden"
           },
           "200": {
-            "description": "Report. Breaking change (#186): total_revenue_minor has been removed because summing minor units across currencies is invalid; use revenue_by_currency instead.",
+            "description": "Report. Breaking change: total_revenue_minor has been removed because summing minor units across currencies is invalid; use revenue_by_currency instead.",
             "content": {
               "application/json": {
                 "schema": {
@@ -6565,11 +6714,11 @@
                           },
                           "paid_minor": {
                             "type": "integer",
-                            "description": "Collected ledger total (#114)."
+                            "description": "Collected ledger total."
                           },
                           "balance_minor": {
                             "type": "integer",
-                            "description": "Still-collectable balance; forgiven excluded (#114)."
+                            "description": "Still-collectable balance; forgiven excluded."
                           }
                         },
                         "additionalProperties": false
@@ -6592,7 +6741,7 @@
                       "additionalProperties": {
                         "type": "integer"
                       },
-                      "description": "Non-draft revenue keyed by ISO-4217 code (#186: a flat total across currencies would sum unrelated minor units)."
+                      "description": "Non-draft revenue keyed by ISO-4217 code (a flat total across currencies would sum unrelated minor units)."
                     },
                     "partly_paid": {
                       "type": "integer"
@@ -6619,7 +6768,7 @@
         "tags": [
           "invoices"
         ],
-        "summary": "CSV export of all invoices (#31)",
+        "summary": "CSV export of all invoices",
         "responses": {
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -6826,7 +6975,7 @@
           "expenses"
         ],
         "summary": "List expenses (optional customer_id / from / to filters)",
-        "description": "Paged (#334): the rows walk the total order `(date, id)` descending — newest first, the order the register displays — a response holds at most `limit` of them, and `next_cursor` is the opaque key of the page that follows, `null` when the page ended the set. Follow the cursor to see every row exactly once.",
+        "description": "Paged: the rows walk the total order `(date, id)` descending — newest first, the order the register displays — a response holds at most `limit` of them, and `next_cursor` is the opaque key of the page that follows, `null` when the page ended the set. Follow the cursor to see every row exactly once.",
         "parameters": [
           {
             "name": "customer_id",
@@ -6872,7 +7021,7 @@
                       }
                     },
                     "next_cursor": {
-                      "description": "Opaque cursor for the next page (#334), or null when this page ended the matching set.",
+                      "description": "Opaque cursor for the next page, or null when this page ended the matching set.",
                       "oneOf": [
                         {
                           "type": "string"
@@ -7079,7 +7228,7 @@
         "tags": [
           "users"
         ],
-        "summary": "Recent security audit events (admin only, #52)",
+        "summary": "Recent security audit events (admin only)",
         "responses": {
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -7119,7 +7268,7 @@
         "tags": [
           "admin"
         ],
-        "summary": "Effective externalised configuration: whitelist of non-secret knobs with value, source (env/file/default), default and writability (#94)",
+        "summary": "Effective externalised configuration: whitelist of non-secret knobs with value, source (env/file/default), default and writability",
         "description": "`vault_enabled` (boolean) is listed read-only (`writable: false`): it controls whether the credential vault starts on the next boot, but it is written only through `POST /api/admin/vault/enable|disable`, never through `PUT /api/admin/config` (a stored `false` next to a `secrets.bin` would make the next boot fail closed).",
         "responses": {
           "401": {
@@ -7183,7 +7332,7 @@
                         "smtp",
                         "disabled"
                       ],
-                      "description": "Whether invoice emails actually deliver (#130)."
+                      "description": "Whether invoice emails actually deliver."
                     }
                   },
                   "additionalProperties": false
@@ -7202,7 +7351,7 @@
         "tags": [
           "admin"
         ],
-        "summary": "Patch whitelisted keys into <data>/config.json; unknown, secret-shaped and read-only keys are refused (#94)",
+        "summary": "Patch whitelisted keys into <data>/config.json; unknown, secret-shaped and read-only keys are refused",
         "description": "Unknown or secret-shaped keys are 422 `validation_failed`. So is `vault_enabled`: the dedicated lifecycle endpoints (`POST /api/admin/vault/enable|disable`) are its only writer (M3).",
         "requestBody": {
           "required": true,
@@ -7809,7 +7958,7 @@
         "tags": [
           "users"
         ],
-        "summary": "List configured integration secrets with masked hints (admin only, #77)",
+        "summary": "List configured integration secrets with masked hints (admin only)",
         "responses": {
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -8155,7 +8304,7 @@
         "tags": [
           "expenses"
         ],
-        "summary": "Create a draft claim over a set of the caller's expenses (#24)",
+        "summary": "Create a draft claim over a set of the caller's expenses",
         "requestBody": {
           "required": true,
           "content": {
@@ -8322,7 +8471,7 @@
         "tags": [
           "invoices"
         ],
-        "summary": "Read the org invoice template plus the %variable% cheatsheet (#116)",
+        "summary": "Read the org invoice template plus the %variable% cheatsheet",
         "responses": {
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -8377,7 +8526,7 @@
         "tags": [
           "invoices"
         ],
-        "summary": "Save the org invoice template (#116)",
+        "summary": "Save the org invoice template",
         "description": "Fail-loud validation: unknown %variables%, oversized fields and malformed payment terms return the standard 422 shape and persist nothing.",
         "requestBody": {
           "required": true,
@@ -8427,7 +8576,7 @@
         "tags": [
           "invoices"
         ],
-        "summary": "Preview an unsaved invoice template as a PDF (#116); admin only",
+        "summary": "Preview an unsaved invoice template as a PDF; admin only",
         "description": "Renders the CANDIDATE template from the request body against the shared sample invoice, the saved org profile (branding/accent/sender) and the sample customer's payment details, returning the PDF inline. Validates exactly like PUT (unknown %variables%, oversized fields, control characters in the subject, malformed payment terms) with the same 422 shape and persists nothing: no template, invoice, PDF archive or timeline entry. A command on existing configuration, so 200. The ETag is keyed on the inputs (canonical candidate template + resolved org + renderer/sample version), so a matching If-None-Match (including `*` and comma-separated lists) is answered 304 with no body before any render; the same ETag is returned on both responses.",
         "requestBody": {
           "required": true,
@@ -8505,8 +8654,8 @@
         "tags": [
           "invoices"
         ],
-        "summary": "Live {subject, html} preview of an invoice document (#116)",
-        "description": "Resolved from the CURRENT template + customer (not a snapshot); the same content the PDF (#113) renders from. HTML is escaped markdown-subset output.",
+        "summary": "Live {subject, html} preview of an invoice document",
+        "description": "Resolved from the CURRENT template + customer (not a snapshot); the same content the PDF renders from. HTML is escaped markdown-subset output.",
         "responses": {
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -8562,7 +8711,7 @@
           "invoices"
         ],
         "summary": "Per-invoice activity timeline (Subtask A); admin only",
-        "description": "Returns { events: [...] } newest first. Events are recorded when an invoice is created (tracked or manual), issued, edited as a draft, emailed to the customer, manually marked as sent, paid or partly paid (#114), and written off. Unknown invoice ids are 404. The timeline is a display aid stored in a dot-file sidecar: a missing one is an empty list, and no event ever changes invoice status or billing state. It is the single source of truth for whether an invoice counts as sent (the `sent`/`email_sent` kinds); `paid`/`write_off` merely retain the settlement history next to the audit log.",
+        "description": "Returns { events: [...] } newest first. Events are recorded when an invoice is created (tracked or manual), issued, edited as a draft, emailed to the customer, manually marked as sent, paid or partly paid, and written off. Unknown invoice ids are 404. The timeline is a display aid stored in a dot-file sidecar: a missing one is an empty list, and no event ever changes invoice status or billing state. It is the single source of truth for whether an invoice counts as sent (the `sent`/`email_sent` kinds); `paid`/`write_off` merely retain the settlement history next to the audit log.",
         "responses": {
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -8678,7 +8827,7 @@
         "tags": [
           "invoices"
         ],
-        "summary": "Forgive the remaining balance of an open invoice (#114)",
+        "summary": "Forgive the remaining balance of an open invoice",
         "description": "Admin only. Issued or partly-paid invoices become written_off (final); the ledger and paid amounts stay. Draft/paid/written-off states are 409; a missing/blank reason is 422 without persistence. Audit records invoice_write_off.",
         "requestBody": {
           "required": true,
@@ -8745,7 +8894,7 @@
         "tags": [
           "invoices"
         ],
-        "summary": "Company identity (#138)",
+        "summary": "Company identity",
         "responses": {
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -8771,7 +8920,7 @@
         "tags": [
           "invoices"
         ],
-        "summary": "Save company identity (#138)",
+        "summary": "Save company identity",
         "description": "Validated before persistence (lengths; address country required when any part is set). Printed on invoice PDFs (From block + VAT id) and used by emails/reminders.",
         "requestBody": {
           "required": true,
@@ -8821,7 +8970,7 @@
         "tags": [
           "invoices"
         ],
-        "summary": "Create a draft invoice from manual Product/Service lines (#143)",
+        "summary": "Create a draft invoice from manual Product/Service lines",
         "description": "Admin only. Totals (integer math): subtotal of quantity x unit price lines, discount off subtotal, VAT on the net. Drafts lock nothing and send nothing.",
         "requestBody": {
           "required": true,
@@ -8877,7 +9026,7 @@
         "tags": [
           "invoices"
         ],
-        "summary": "Stateless generation preview for the staged wizard (#134)",
+        "summary": "Stateless generation preview for the staged wizard",
         "description": "Runs the exact POST /api/invoices pipeline but does NOT persist: the wizard reviews the resulting lines, then saves via POST /api/invoices. Errors (mixed currency, nothing to invoice) are identical to the real call.",
         "requestBody": {
           "required": true,
@@ -8936,7 +9085,7 @@
         "tags": [
           "invoices"
         ],
-        "summary": "Product/Service catalog incl. archived (#147)",
+        "summary": "Product/Service catalog incl. archived",
         "responses": {
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -8974,7 +9123,7 @@
         "tags": [
           "invoices"
         ],
-        "summary": "Add a catalog item type (#147)",
+        "summary": "Add a catalog item type",
         "requestBody": {
           "required": true,
           "content": {
@@ -9034,7 +9183,7 @@
         "tags": [
           "invoices"
         ],
-        "summary": "Edit or archive/restore a catalog item type (#147)",
+        "summary": "Edit or archive/restore a catalog item type",
         "requestBody": {
           "required": true,
           "content": {
@@ -9084,7 +9233,7 @@
         "tags": [
           "invoices"
         ],
-        "summary": "Delete a catalog item type (#147)",
+        "summary": "Delete a catalog item type",
         "parameters": [
           {
             "$ref": "#/components/parameters/CsrfProtection"
@@ -9113,7 +9262,7 @@
         "tags": [
           "retainers"
         ],
-        "summary": "Retainer list with balances (#144)",
+        "summary": "Retainer list with balances",
         "responses": {
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -9187,7 +9336,7 @@
         "tags": [
           "retainers"
         ],
-        "summary": "Create a retainer (#144)",
+        "summary": "Create a retainer",
         "requestBody": {
           "required": true,
           "content": {
@@ -9266,7 +9415,7 @@
         "tags": [
           "retainers"
         ],
-        "summary": "Retainer detail + full ledger (#144)",
+        "summary": "Retainer detail + full ledger",
         "responses": {
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -9308,7 +9457,7 @@
         "tags": [
           "retainers"
         ],
-        "summary": "Close a retainer (final) (#144)",
+        "summary": "Close a retainer (final)",
         "parameters": [
           {
             "$ref": "#/components/parameters/CsrfProtection"
@@ -9371,8 +9520,8 @@
         "tags": [
           "retainers"
         ],
-        "summary": "Retainer add funds (#144)",
-        "description": "A draw is NOT an invoice payment (#114 owns payments): it records a ledger application against the retainer.",
+        "summary": "Retainer add funds",
+        "description": "A draw is NOT an invoice payment (payments are recorded on the invoice ledger): it records a ledger application against the retainer.",
         "requestBody": {
           "required": true,
           "content": {
@@ -9451,8 +9600,8 @@
         "tags": [
           "retainers"
         ],
-        "summary": "Retainer apply funds (reason required) (#144)",
-        "description": "A draw is NOT an invoice payment (#114 owns payments): it records a ledger application against the retainer.",
+        "summary": "Retainer apply funds (reason required)",
+        "description": "A draw is NOT an invoice payment (payments are recorded on the invoice ledger): it records a ledger application against the retainer.",
         "requestBody": {
           "required": true,
           "content": {

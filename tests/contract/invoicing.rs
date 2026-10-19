@@ -5,12 +5,86 @@ use axum::http::header;
 use serde_json::Value;
 use serde_json::json;
 
+/// Decode the WinAnsi bytes of a PDF string back to text (the euro sign and
+/// dashes are single high bytes, not UTF-8).
+fn winansi_text(bytes: &[u8]) -> String {
+    bytes
+        .iter()
+        .map(|&b| match b {
+            0x80 => '\u{20ac}',
+            0x96 => '\u{2013}',
+            0x97 => '\u{2014}',
+            b if b < 0x20 => ' ',
+            b => b as char,
+        })
+        .collect()
+}
+
+/// Decode the PDF's text-showing strings back into running text. pdf-writer
+/// emits a literal `(...)` string while the bytes are ASCII and a hex `<...>`
+/// string once they are not (the euro sign), so both forms are decoded. The
+/// layout positions every word itself, so chunks are joined with spaces —
+/// assertions target single words or the joined form.
+fn pdf_joined(pdf: &[u8]) -> String {
+    let mut chunks = Vec::new();
+    let mut i = 0;
+    while i < pdf.len() {
+        match pdf[i] {
+            b'(' => {
+                let mut bytes = Vec::new();
+                i += 1;
+                while i < pdf.len() && pdf[i] != b')' {
+                    if pdf[i] == b'\\' && i + 1 < pdf.len() {
+                        i += 1;
+                        bytes.push(match pdf[i] {
+                            b'n' => b'\n',
+                            b'r' => b'\r',
+                            b't' => b'\t',
+                            other => other,
+                        });
+                    } else {
+                        bytes.push(pdf[i]);
+                    }
+                    i += 1;
+                }
+                chunks.push(winansi_text(&bytes));
+                i += 1;
+            }
+            // `<<` opens a dictionary, not a hex string: skip it untouched.
+            b'<' if pdf.get(i + 1) != Some(&b'<') => {
+                let start = i + 1;
+                let mut end = start;
+                while end < pdf.len() && pdf[end] != b'>' {
+                    end += 1;
+                }
+                let digits: Vec<u8> = pdf[start..end]
+                    .iter()
+                    .copied()
+                    .filter(u8::is_ascii_hexdigit)
+                    .collect();
+                let bytes: Vec<u8> = digits
+                    .chunks(2)
+                    .filter(|pair| pair.len() == 2)
+                    .map(|pair| {
+                        let text = std::str::from_utf8(pair).unwrap_or("00");
+                        u8::from_str_radix(text, 16).unwrap_or(b'?')
+                    })
+                    .collect();
+                chunks.push(winansi_text(&bytes));
+                i = end + 1;
+            }
+            _ => i += 1,
+        }
+    }
+    chunks.join(" ")
+}
+
 // --------------------------------------------------------------- invoices --
 
 #[tokio::test]
 async fn invoice_sums_billable_and_ignores_nonbillable() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
     // 3h billable @60 = 180.00
@@ -41,7 +115,7 @@ async fn invoice_sums_billable_and_ignores_nonbillable() {
 #[tokio::test]
 async fn issuing_invoice_locks_its_entries() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
     let (_, e) = json_req(
@@ -107,7 +181,7 @@ async fn issuing_invoice_locks_its_entries() {
 #[tokio::test]
 async fn regeneration_excludes_invoiced_entries() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
     json_req(
@@ -145,7 +219,7 @@ async fn regeneration_excludes_invoiced_entries() {
 #[tokio::test]
 async fn invoice_rejects_mixed_currencies() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({"currency":"EUR","rate_minor":6000})).await;
     new_project(&app, cid, "P2", json!({"currency":"USD","rate_minor":3000})).await;
@@ -182,7 +256,7 @@ async fn invoice_rejects_mixed_currencies() {
 #[tokio::test]
 async fn invoice_includes_billable_expenses_and_locks_them() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
     // 2h billable time @60 = 12000
@@ -236,7 +310,7 @@ async fn invoice_includes_billable_expenses_and_locks_them() {
 #[tokio::test]
 async fn invoice_can_exclude_expenses() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
     json_req(
@@ -491,21 +565,21 @@ async fn org_profile_round_trips_and_prints_on_the_document() {
     // the bytes are greppable — the determinism contract of #113 in use).
     let (issued, iid) = seed_issued_invoice(&app).await;
     let (_s2, _h2, pdf) = raw_req(&app, "GET", &format!("/api/invoices/{iid}/pdf")).await;
-    let text = String::from_utf8_lossy(&pdf).into_owned();
-    // The layout emits one text-showing op per WORD (positions carry the
-    // spacing), so decode the literals back into running text.
-    let joined: String = text
-        .split('(')
-        .skip(1)
-        .map(|s| s.split(')').next().unwrap_or(""))
-        .collect::<Vec<_>>()
-        .join(" ");
-    assert!(joined.contains("BE0123456789"), "legal id on the PDF");
+    let joined = pdf_joined(&pdf);
+    // Phase 2: the identity lives in the issuer block — one paragraph per
+    // address line and the legal id under its resolved label.
     assert!(
         joined.contains("Tucano BV"),
         "profile name replaces the config default"
     );
-    assert!(joined.contains("Brugge"), "address on the PDF");
+    assert!(
+        joined.contains("VAT / company id:"),
+        "empty legal_id_label keeps the historical wording"
+    );
+    assert!(joined.contains("BE0123456789"), "legal id on the PDF");
+    assert!(joined.contains("Markt 1,"), "address line on the PDF");
+    assert!(joined.contains("8000,"), "one paragraph per address line");
+    assert!(joined.contains("Brugge,"), "address line on the PDF");
     assert_eq!(issued["status"], "issued");
 
     // Member: admin tier on both verbs.
@@ -695,12 +769,7 @@ async fn draft_editing_replaces_lines_and_issued_stays_immutable() {
     // The archived PDF shows the EDITED lines (the document follows the
     // draft at issue time, not the earlier generation).
     let (_sp, _h, pdf) = raw_req(&app, "GET", &format!("/api/invoices/{iid}/pdf")).await;
-    let joined: String = String::from_utf8_lossy(&pdf)
-        .split('(')
-        .skip(1)
-        .map(|x| x.split(')').next().unwrap_or(""))
-        .collect::<Vec<_>>()
-        .join(" ");
+    let joined = pdf_joined(&pdf);
     assert!(
         joined.contains("Extra hosting"),
         "manual line reached the document"
@@ -805,7 +874,7 @@ async fn manual_line_bounds_reject_identically_on_both_endpoints() {
 #[tokio::test]
 async fn invoice_preview_projects_and_paid_exclusion() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap().to_string();
     new_project(&app, &cid, "PA", json!({"rate_minor": 5000})).await;
     new_project(&app, &cid, "PB", json!({"rate_minor": 7000})).await;
@@ -990,12 +1059,7 @@ async fn document_labels_reach_the_pdf_and_validation_binds() {
     let (issued, iid) = seed_issued_invoice(&app).await;
     assert_eq!(issued["status"], "issued");
     let (_sp, _h, pdf) = raw_req(&app, "GET", &format!("/api/invoices/{iid}/pdf")).await;
-    let joined: String = String::from_utf8_lossy(&pdf)
-        .split('(')
-        .skip(1)
-        .map(|x| x.split(')').next().unwrap_or(""))
-        .collect::<Vec<_>>()
-        .join(" ");
+    let joined = pdf_joined(&pdf);
     assert!(
         joined.contains("Amount due"),
         "custom total label on the PDF"
@@ -1104,7 +1168,7 @@ async fn appearance_and_messages_are_honored_not_inert() {
 #[tokio::test]
 async fn invoice_issue_empty_period_conflicts_and_double_issue_is_refused() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
 
@@ -1188,7 +1252,7 @@ async fn invoice_timeline_records_create_issue_and_email_newest_first() {
     assert_eq!(events.as_array().unwrap().len(), 3, "{events}");
     assert_eq!(events[0]["kind"], "email_sent");
     assert_eq!(events[0]["actor_name"], "Admin");
-    assert_eq!(events[0]["meta"]["to"], "billing@acme.test");
+    assert_eq!(events[0]["meta"]["to"], "billing@tucanotime.test");
     assert_eq!(events[0]["meta"]["transport"], "recording");
     assert!(events[0]["meta"]["subject"].is_string());
     assert!(events[0]["meta"]["from_name"].is_string());
@@ -1320,7 +1384,7 @@ async fn invoice_timeline_unknown_id_and_access_control() {
 #[tokio::test]
 async fn invoice_timeline_sidecar_is_a_lenient_dot_file() {
     let (app, d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
     json_req(
@@ -1628,7 +1692,7 @@ fn has_stamp(bytes: &[u8], stamp: &str) -> bool {
 async fn invoice_pdf_preview_renders_a_draft_and_never_archives() {
     let (app, d) = app().await;
     // A DRAFT with billable work: `/pdf` refuses it, the preview must not.
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
     json_req(
@@ -1787,7 +1851,7 @@ async fn an_archived_unbilled_period_still_previews_and_issues() {
     let cutoff = chrono::NaiveDate::from_ymd_opt(2026, 9, 1).unwrap();
 
     let (app, d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap().to_string();
     new_project(&app, &cid, "P1", json!({"rate_minor": 6000})).await;
     let (_, entry) = json_req(
@@ -1863,7 +1927,7 @@ async fn an_archived_unbilled_period_still_previews_and_issues() {
 #[tokio::test]
 async fn issuing_refuses_a_draft_the_timesheet_moved_past() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
     let (s_e, e) = json_req(
@@ -1957,7 +2021,7 @@ async fn issuing_refuses_a_draft_the_timesheet_moved_past() {
 #[tokio::test]
 async fn an_unchanged_draft_still_issues_and_a_second_invoice_is_refused() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
     json_req(
@@ -1992,4 +2056,467 @@ async fn an_unchanged_draft_still_issues_and_a_second_invoice_is_refused() {
     )
     .await;
     assert_eq!(s_second, StatusCode::CONFLICT, "{body}");
+}
+
+// ------------------------------------------- document defaults (phase 1) ---
+
+#[tokio::test]
+async fn customer_legal_id_round_trips_and_oversize_is_refused() {
+    let (app, _d) = app().await;
+    let (s, created) = json_req(
+        &app,
+        "POST",
+        "/api/customers",
+        Some(json!({
+            "name": "Tucano Time",
+            "currency": "EUR",
+            "default_rate_minor": 6000,
+            "legal_id": "  99999999  "
+        })),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{created}");
+    assert_eq!(created["legal_id"], "99999999");
+    let cid = created["id"].as_str().unwrap();
+    let (sg, got) = json_req(&app, "GET", &format!("/api/customers/{cid}"), None).await;
+    assert_eq!(sg, StatusCode::OK);
+    assert_eq!(got["legal_id"], "99999999");
+
+    // Over-long: 422 naming the field, nothing persisted.
+    let (sb, body) = json_req(
+        &app,
+        "PUT",
+        &format!("/api/customers/{cid}"),
+        Some(json!({
+            "name": "Tucano Time",
+            "currency": "EUR",
+            "default_rate_minor": 6000,
+            "legal_id": "1".repeat(61)
+        })),
+    )
+    .await;
+    assert_eq!(sb, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["error"]["fields"][0]["field"], "legal_id");
+    let (_, after) = json_req(&app, "GET", &format!("/api/customers/{cid}"), None).await;
+    assert_eq!(after["legal_id"], "99999999", "rejection persisted nothing");
+}
+
+#[tokio::test]
+async fn org_profile_round_trips_legal_id_label() {
+    let (app, _d) = app().await;
+    let (s, saved) = json_req(
+        &app,
+        "PUT",
+        "/api/admin/org",
+        Some(json!({
+            "name": "Tucano Time",
+            "legal_id": "00.000.000/0000-00",
+            "legal_id_label": "Tax ID"
+        })),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{saved}");
+    assert_eq!(saved["legal_id_label"], "Tax ID");
+    let (_, got) = json_req(&app, "GET", "/api/admin/org", None).await;
+    assert_eq!(got["legal_id_label"], "Tax ID");
+    assert_eq!(got["legal_id"], "00.000.000/0000-00");
+
+    // Over-long label: 422 and the stored profile is untouched.
+    let (sb, body) = json_req(
+        &app,
+        "PUT",
+        "/api/admin/org",
+        Some(json!({
+            "name": "Tucano Time",
+            "legal_id": "00.000.000/0000-00",
+            "legal_id_label": "x".repeat(41)
+        })),
+    )
+    .await;
+    assert_eq!(sb, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["error"]["fields"][0]["field"], "legal_id_label");
+    let (_, after) = json_req(&app, "GET", "/api/admin/org", None).await;
+    assert_eq!(after["legal_id_label"], "Tax ID");
+}
+
+#[tokio::test]
+async fn payment_rails_round_trip_through_the_customer_surface() {
+    let (app, _d) = app().await;
+    let rails = json!([
+        {
+            "currency": "EUR",
+            "account_name": "Tucano Time",
+            "iban": "EX000000000000000000",
+            "bic": "EXAMPLEB"
+        },
+        {
+            "currency": "USD",
+            "account_name": "Tucano Time",
+            "routing_number": "000000000",
+            "swift": "EXAMPLEB"
+        }
+    ]);
+    let (s, created) = json_req(
+        &app,
+        "POST",
+        "/api/customers",
+        Some(json!({
+            "name": "Multi Rail",
+            "currency": "EUR",
+            "default_rate_minor": 6000,
+            "payment_details": { "rails": rails }
+        })),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{created}");
+    let cid = created["id"].as_str().unwrap();
+    let stored = &created["payment_details"]["rails"];
+    assert_eq!(stored.as_array().unwrap().len(), 2, "{created}");
+    assert_eq!(stored[0]["currency"], "EUR");
+    assert_eq!(stored[0]["iban"], "EX000000000000000000");
+    assert_eq!(stored[1]["currency"], "USD");
+    assert_eq!(stored[1]["routing_number"], "000000000");
+
+    let (_, got) = json_req(&app, "GET", &format!("/api/customers/{cid}"), None).await;
+    assert_eq!(got["payment_details"]["rails"], *stored);
+
+    // An empty currency is refused, and nothing is persisted.
+    let (sb, body) = json_req(
+        &app,
+        "PUT",
+        &format!("/api/customers/{cid}"),
+        Some(json!({
+            "name": "Multi Rail",
+            "currency": "EUR",
+            "default_rate_minor": 6000,
+            "payment_details": { "rails": [ { "currency": "", "account_name": "X" } ] }
+        })),
+    )
+    .await;
+    assert_eq!(sb, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert!(
+        body["error"]["fields"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f["field"] == "payment_details.rails[0].currency"),
+        "{body}"
+    );
+    let (_, after) = json_req(&app, "GET", &format!("/api/customers/{cid}"), None).await;
+    assert_eq!(after["payment_details"]["rails"], *stored);
+
+    // `account_name` is required on a rail (the key is in the schema's
+    // `required` list, and a rail without an account holder cannot be paid
+    // into): a blank one is a 422 with the API's field path, and nothing is
+    // persisted.
+    let (sn, body) = json_req(
+        &app,
+        "PUT",
+        &format!("/api/customers/{cid}"),
+        Some(json!({
+            "name": "Multi Rail",
+            "currency": "EUR",
+            "default_rate_minor": 6000,
+            "payment_details": {
+                "rails": [ { "currency": "EUR", "account_name": "   " } ]
+            }
+        })),
+    )
+    .await;
+    assert_eq!(sn, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["error"]["code"], "validation_failed");
+    assert!(
+        body["error"]["fields"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f["field"] == "payment_details.rails[0].account_name"),
+        "{body}"
+    );
+    let (_, after) = json_req(&app, "GET", &format!("/api/customers/{cid}"), None).await;
+    assert_eq!(
+        after["payment_details"]["rails"], *stored,
+        "a refused rail writes nothing"
+    );
+}
+
+#[tokio::test]
+async fn invoice_template_get_returns_the_seeded_defaults() {
+    let (app, _d) = app().await;
+    let (s, body) = json_req(&app, "GET", "/api/admin/invoice-template", None).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(body["template"]["payment_terms"]["kind"], "net_30");
+    assert_eq!(
+        body["template"]["subject"],
+        "%customer_name% invoice for %period_month_padded% %period_year%"
+    );
+    let vars = body["variables"].as_array().unwrap();
+    assert!(vars.iter().any(|v| v["name"] == "%period_month%"));
+    assert!(vars.iter().any(|v| v["name"] == "%period_month_number%"));
+    assert!(vars.iter().any(|v| v["name"] == "%period_month_padded%"));
+    assert!(vars.iter().any(|v| v["name"] == "%period_year%"));
+}
+
+#[tokio::test]
+async fn issuing_freezes_subject_and_terms_in_the_invoice_document() {
+    let (app, _d) = app().await;
+    let (issued, iid) = seed_issued_invoice(&app).await;
+    assert_eq!(issued["subject"], "Tucano Time invoice for 10 2026");
+    assert_eq!(issued["terms"]["kind"], "net_30");
+    // A later template edit cannot rewrite the issued snapshot, while the live
+    // document endpoint reads the snapshot instead of the new template.
+    let (st, _) = json_req(
+        &app,
+        "PUT",
+        "/api/admin/invoice-template",
+        Some(json!({
+            "subject": "CHANGED %customer_name%",
+            "body": "",
+            "footer": "",
+            "payment_terms": {"kind": "net_45"}
+        })),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK);
+    let (_, after) = json_req(&app, "GET", &format!("/api/invoices/{iid}"), None).await;
+    assert_eq!(after["subject"], "Tucano Time invoice for 10 2026");
+    assert_eq!(after["terms"]["kind"], "net_30");
+    let (sd, doc) = json_req(&app, "GET", &format!("/api/invoices/{iid}/document"), None).await;
+    assert_eq!(sd, StatusCode::OK);
+    assert_eq!(doc["subject"], "Tucano Time invoice for 10 2026");
+}
+
+// ------------------------------------- document rendering (phase 2) ---
+
+/// The reference document: title + subject, the issuer and customer blocks,
+/// `dd/mm/yyyy` dates with the frozen `(Net 30)` suffix, the derived total
+/// hours, the item-type column and symbol-first money.
+#[tokio::test]
+async fn invoice_pdf_prints_the_document_sections_and_terms_suffix() {
+    let (app, _d) = app().await;
+    let (sc, c) = json_req(
+        &app,
+        "POST",
+        "/api/customers",
+        Some(json!({
+            "name": "Tucano Time",
+            "currency": "EUR",
+            "default_rate_minor": 6000,
+            "email": "billing@tucanotime.example",
+            "address": {
+                "street": "9 Placeholder Road",
+                "city": "Testville",
+                "postal_code": "AA1 1AA",
+                "country": "Freedonia"
+            },
+            "legal_id": "99999999"
+        })),
+    )
+    .await;
+    assert_eq!(sc, StatusCode::CREATED, "{c}");
+    let cid = c["id"].as_str().unwrap();
+    new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
+    json_req(
+        &app,
+        "POST",
+        "/api/entries",
+        Some(json!({"date":"2026-08-03","customer_id":cid,"project_code":"P1","hours":3})),
+    )
+    .await;
+    let (_s, inv) = json_req(
+        &app,
+        "POST",
+        "/api/invoices",
+        Some(json!({"customer_id":cid,"from":"2026-08-01","to":"2026-08-31"})),
+    )
+    .await;
+    let iid = inv["id"].as_str().unwrap();
+    let (si, issued) = json_req(&app, "POST", &format!("/api/invoices/{iid}/issue"), None).await;
+    assert_eq!(si, StatusCode::OK, "{issued}");
+    assert_eq!(issued["terms"]["kind"], "net_30");
+    assert_eq!(issued["subject"], "Tucano Time invoice for 08 2026");
+
+    let (_sp, _h, pdf) = raw_req(&app, "GET", &format!("/api/invoices/{iid}/pdf")).await;
+    let joined = pdf_joined(&pdf);
+
+    // Subject row (the document name is the plain title).
+    assert!(joined.contains("Subject:"), "subject label: {joined}");
+    assert!(
+        joined.contains("Tucano Time invoice for 08 2026"),
+        "subject text: {joined}"
+    );
+    // Invoice-for block: heading, name, one line per address part, company id.
+    assert!(joined.contains("Invoice for"), "{joined}");
+    assert!(joined.contains("9 Placeholder Road,"), "{joined}");
+    assert!(joined.contains("Testville,"), "{joined}");
+    assert!(joined.contains("AA1 1AA,"), "{joined}");
+    assert!(joined.contains("Freedonia"), "{joined}");
+    assert!(
+        joined.contains("Company number: 99999999"),
+        "customer legal id: {joined}"
+    );
+    // Dates: dd/mm/yyyy, and the due date carries the frozen terms suffix.
+    let due = issued["due_date"].as_str().unwrap();
+    let due_display = format!("{}/{}/{}", &due[8..10], &due[5..7], &due[0..4]);
+    assert!(
+        joined.contains(&format!("{due_display} (Net 30)")),
+        "due date + terms: {joined}"
+    );
+    let issued_at = issued["issued_at"].as_str().unwrap();
+    let issue_display = format!(
+        "{}/{}/{}",
+        &issued_at[8..10],
+        &issued_at[5..7],
+        &issued_at[0..4]
+    );
+    assert!(joined.contains(&issue_display), "issue date: {joined}");
+    // Derived totals and the item-type table header.
+    assert!(joined.contains("Total hours: 3h 00min"), "{joined}");
+    assert!(joined.contains("Item type"), "{joined}");
+    assert!(joined.contains("Service"), "{joined}");
+    // Symbol-first money: `EUR €180.00`, never the email `180.00 EUR` form.
+    assert!(joined.contains("EUR \u{20ac}180.00"), "{joined}");
+    assert!(!joined.contains("180.00 EUR"), "{joined}");
+    // Every page is numbered.
+    assert!(joined.contains("Page 1 of 1"), "{joined}");
+}
+
+/// The on-demand preview works for a draft, so it must render the same
+/// resolved subject `/document` and the email report — not only the frozen
+/// snapshot an issued invoice carries.
+#[tokio::test]
+async fn draft_pdf_preview_prints_the_live_subject() {
+    let (app, _d) = app().await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap();
+    new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
+    json_req(
+        &app,
+        "POST",
+        "/api/entries",
+        Some(json!({"date":"2026-08-03","customer_id":cid,"project_code":"P1","hours":2})),
+    )
+    .await;
+    let (_s, inv) = json_req(
+        &app,
+        "POST",
+        "/api/invoices",
+        Some(json!({"customer_id":cid,"from":"2026-08-01","to":"2026-08-31"})),
+    )
+    .await;
+    assert_eq!(inv["status"], "draft");
+    let iid = inv["id"].as_str().unwrap();
+
+    let (sd, doc) = json_req(&app, "GET", &format!("/api/invoices/{iid}/document"), None).await;
+    assert_eq!(sd, StatusCode::OK, "{doc}");
+    let subject = doc["subject"].as_str().unwrap();
+    assert_eq!(subject, "Tucano Time invoice for 08 2026");
+
+    let (_sp, _h, pdf) = raw_req(&app, "GET", &format!("/api/invoices/{iid}/pdf/preview")).await;
+    let joined = pdf_joined(&pdf);
+    assert!(joined.contains("Subject:"), "subject row: {joined}");
+    assert!(joined.contains(subject), "resolved subject: {joined}");
+    assert!(joined.contains("INVOICE"), "resolved title: {joined}");
+}
+
+/// A partly paid invoice renders the settlement rows on the live preview: the
+/// archive keeps its issue-time bytes, the preview follows the money.
+#[tokio::test]
+async fn partly_paid_preview_prints_payments_and_amount_due() {
+    let (app, _d) = app().await;
+    let (issued, iid) = seed_issued_invoice(&app).await;
+    assert_eq!(issued["total_minor"], 18000);
+    let (sp, paid) = json_req(
+        &app,
+        "POST",
+        &format!("/api/invoices/{iid}/pay"),
+        Some(json!({"amount_minor": 10000})),
+    )
+    .await;
+    assert_eq!(sp, StatusCode::OK, "{paid}");
+    assert_eq!(paid["status"], "partly_paid");
+
+    let (_s, _h, pdf) = raw_req(&app, "GET", &format!("/api/invoices/{iid}/pdf/preview")).await;
+    let joined = pdf_joined(&pdf);
+    assert!(joined.contains("Subtotal"), "{joined}");
+    assert!(joined.contains("Payments"), "{joined}");
+    assert!(
+        joined.contains("EUR -\u{20ac}100.00"),
+        "negative payment, sign before the symbol: {joined}"
+    );
+    assert!(joined.contains("Amount due"), "{joined}");
+    assert!(joined.contains("EUR \u{20ac}80.00"), "{joined}");
+
+    // The write-once archive is the issue-time (unpaid) document and still
+    // shows the bold total rather than a settlement block.
+    let (_sa, _ha, archived) = raw_req(&app, "GET", &format!("/api/invoices/{iid}/pdf")).await;
+    let archived_text = pdf_joined(&archived);
+    assert!(archived_text.contains("Subtotal"), "{archived_text}");
+    assert!(!archived_text.contains("Amount due"), "{archived_text}");
+    assert!(
+        !archived_text.contains("EUR -\u{20ac}100.00"),
+        "{archived_text}"
+    );
+}
+
+/// A customer with structured payment rails renders one `For all <CCY>
+/// Payments;` block per rail, separated by a dashed rule.
+#[tokio::test]
+async fn invoice_pdf_prints_one_block_per_payment_rail() {
+    let (app, _d) = app().await;
+    let (sc, c) = json_req(
+        &app,
+        "POST",
+        "/api/customers",
+        Some(json!({
+            "name": "Tucano Time",
+            "currency": "EUR",
+            "default_rate_minor": 6000,
+            "payment_details": {
+                "rails": [
+                    {
+                        "currency": "EUR",
+                        "account_name": "Tucano Time",
+                        "iban": "EX000000000000000000",
+                        "bic": "EXAMPLEB"
+                    },
+                    {
+                        "currency": "USD",
+                        "account_name": "Tucano Time",
+                        "account_number": "000000000000",
+                        "routing_number": "000000000",
+                        "swift": "EXAMPLEB"
+                    }
+                ]
+            }
+        })),
+    )
+    .await;
+    assert_eq!(sc, StatusCode::CREATED, "{c}");
+    let cid = c["id"].as_str().unwrap();
+    new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
+    json_req(
+        &app,
+        "POST",
+        "/api/entries",
+        Some(json!({"date":"2026-08-03","customer_id":cid,"project_code":"P1","hours":1})),
+    )
+    .await;
+    let (_s, inv) = json_req(
+        &app,
+        "POST",
+        "/api/invoices",
+        Some(json!({"customer_id":cid,"from":"2026-08-01","to":"2026-08-31"})),
+    )
+    .await;
+    let iid = inv["id"].as_str().unwrap();
+    json_req(&app, "POST", &format!("/api/invoices/{iid}/issue"), None).await;
+
+    let (_sp, _h, pdf) = raw_req(&app, "GET", &format!("/api/invoices/{iid}/pdf")).await;
+    let joined = pdf_joined(&pdf);
+    assert!(joined.contains("Notes"), "payment heading: {joined}");
+    assert!(joined.contains("For all EUR Payments;"), "{joined}");
+    assert!(joined.contains("For all USD Payments;"), "{joined}");
+    assert!(joined.contains("EX000000000000000000"), "{joined}");
+    assert!(joined.contains("000000000"), "{joined}");
 }
