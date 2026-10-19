@@ -20,11 +20,20 @@
 #     /data/secrets.bin exists but no key can open it, the app REFUSES to
 #     start (a loud operator error, never a silent downgrade).
 #
-# Hardening applied to **both** services: the container root filesystem is
+# Hardening applied to **every** service: the container root filesystem is
 # read-only (only /data and the /tmp tmpfs are writable), every capability is
 # dropped, privilege escalation is blocked, an init reaps zombies, and the
 # published port binds to loopback unless TUCANO_HOST_ADDR says otherwise.
 # The server was verified to run under exactly this set.
+#
+# The default stack also sends email: the `mailpit` service below is a
+# **development/QA inbox** that *captures* mail for inspection at
+# http://127.0.0.1:8025 and never forwards it. `docker compose up -d` therefore
+# really delivers (into that inbox); production must point
+# TUCANO_SMTP_HOST/TUCANO_SMTP_PORT — or the vault's `smtp.*` entries, which
+# win — at a real relay. A bare `docker run` carries none of this wiring, so
+# the binary keeps its own default there: no SMTP host, email stays "not
+# configured" and only logs the message.
 services:
   tucanotime:
     build: .
@@ -37,6 +46,11 @@ services:
       - "${TUCANO_HOST_ADDR:-127.0.0.1}:${TUCANO_HOST_PORT:-8080}:8080"
     volumes:
       - tucanotime-data:/data
+    # Start only once the relay's HTTP healthcheck passes, so a fresh
+    # `docker compose up -d` cannot race Mailpit's SMTP listener.
+    depends_on:
+      mailpit:
+        condition: service_healthy
     read_only: true
     tmpfs:
       - /tmp
@@ -55,6 +69,15 @@ services:
       # default (secure in production) would break login over http://IP.
       # This flag is independent of the strong-secret enforcement (review A5).
       TUCANO_SECURE_COOKIES: ${TUCANO_SECURE_COOKIES:-}
+      # Default sender: the Mailpit sidecar captures every message for
+      # inspection (UI/API on http://127.0.0.1:8025). Mailpit is a development
+      # and QA inbox, NOT a relay — it never forwards mail. For production set
+      # a real relay instead, through the vault (Settings → Email, which wins
+      # over env) or these two variables. Without them — a bare `docker run`,
+      # for example — the binary's own default applies and email stays
+      # "not configured" (messages are logged, not sent).
+      TUCANO_SMTP_HOST: mailpit
+      TUCANO_SMTP_PORT: "1025"
       # Optional file-based secrets, never plaintext env. The session and vault
       # keys are otherwise auto-generated on the data volume; enable the
       # `secrets:` blocks at the bottom of this file and uncomment these to
@@ -65,6 +88,47 @@ services:
     labels:
       com.tucanotime.backup: >-
         docker compose run --rm tucanotime-cli --backup /backups/manual.tar.gz
+
+  # Mailpit — the default stack's SMTP sink. It **captures** messages so they
+  # can be read at http://127.0.0.1:8025 (web UI and `GET /api/v1/messages`);
+  # it is not a relay and never forwards a message anywhere.
+  #
+  #   * the app reaches it over the compose network at `mailpit:1025`; no SMTP
+  #     port is published to the host, so nothing outside this network can use
+  #     it as a relay. Only the inbox UI is published, on loopback;
+  #   * the image is pinned to an exact release so a rebuild is reproducible;
+  #   * the database lives on a /data tmpfs (in-memory SQLite), so captured
+  #     mail lasts for the container's lifetime and `docker compose down` wipes
+  #     it — an inbox, not a mailbox;
+  #   * production uses a real relay: point TUCANO_SMTP_HOST/TUCANO_SMTP_PORT
+  #     (vault or env) at it, or remove this service.
+  mailpit:
+    image: axllent/mailpit:v1.31.6
+    restart: unless-stopped
+    # Loopback only: the captured mail is unauthenticated by design.
+    ports:
+      - "127.0.0.1:8025:8025"
+    read_only: true
+    tmpfs:
+      - /tmp
+      # message store: in-memory SQLite, writable by the non-root user
+      - /data
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    init: true
+    user: "10001:10001"
+    environment:
+      MP_DATABASE: /data/mailpit.db
+    # Probe the HTTP endpoint the UI/API serve, not the SMTP port.
+    healthcheck:
+      test: [ "CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8025/livez" ]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    stop_grace_period: 10s
 
   # One-shot CLI on the same image for backups/restores against the volume:
   #   docker compose run --rm tucanotime-cli --backup /backups/today.tar.gz

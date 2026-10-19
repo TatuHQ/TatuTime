@@ -109,6 +109,26 @@ services are locked down by default.
 The runtime base is distroless: there is no shell, no package manager and no
 `apt` state. `docker exec … sh` fails by design; use `docker logs`.
 
+## Email in the default stack (Mailpit)
+
+`docker compose up -d` also starts a
+[Mailpit](https://mailpit.axllent.org/) sidecar and points the app at it with
+`TUCANO_SMTP_HOST=mailpit` / `TUCANO_SMTP_PORT=1025`, so the stack really sends
+mail. Mailpit is a **development/QA inbox**: it captures every message for
+inspection at <http://127.0.0.1:8025> and never forwards it.
+
+- The SMTP port is not published; only the inbox UI is, on loopback
+  (`127.0.0.1:8025`). Nothing outside the compose network can use it as a relay.
+- Captured mail lives on a `/data` tmpfs (in-memory SQLite) and is lost when the
+  container is recreated — an inbox, not a mailbox.
+- The app service starts only after the relay's HTTP healthcheck passes.
+- **Production must not use it.** Point `TUCANO_SMTP_HOST`/`TUCANO_SMTP_PORT`
+  (Compose environment or an override file) at a real relay, or configure
+  **Settings → Email** so the vault's `smtp.*` entries win over the environment.
+- A standalone `docker run` (the README command) has none of this wiring: with
+  no SMTP host the binary keeps its default and only logs mail, so email stays
+  "not configured" until you supply a relay.
+
 ## Health and logging
 
 - `GET /healthz` returns the liveness answer. The image `HEALTHCHECK` runs
@@ -179,4 +199,4 @@ generic operations.
 
 ---
 
-Last verified against TucanoTime 0.1.41.
+Last verified against TucanoTime 0.1.45.

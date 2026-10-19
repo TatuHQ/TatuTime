@@ -139,6 +139,14 @@ The tables below cover the variables a container can use. The full reference, in
 
 The SMTP client is plaintext only (no TLS or STARTTLS); use a local relay when your provider requires TLS.
 
+The default Compose stack wires the app to a **Mailpit capture inbox**
+(`TUCANO_SMTP_HOST=mailpit`, `TUCANO_SMTP_PORT=1025`), so `docker compose up -d`
+really sends — read the captured mail at <http://127.0.0.1:8025>. Mailpit is a
+development/QA inbox and never forwards; for production point these variables
+(or the vault's `smtp.*` entries, which win) at a real relay. A standalone
+`docker run` has no sender until configured: with no `TUCANO_SMTP_HOST` the
+binary keeps its "not configured" default and only logs mail.
+
 ### Integrations
 
 | Variable | Default | Purpose | Secret / file variant |

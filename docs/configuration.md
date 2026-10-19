@@ -135,6 +135,32 @@ implement implicit TLS or STARTTLS. Use a local relay when your provider
 requires TLS. Configuration entered in **Settings → Email** is stored in the
 vault and wins over these variables.
 
+#### The Compose default: Mailpit, a capture inbox
+
+The default [`docker-compose.yml`](../docker-compose.yml) stack sets
+`TUCANO_SMTP_HOST=mailpit` and `TUCANO_SMTP_PORT=1025` on the app service and
+runs a `mailpit` sidecar beside it, so `docker compose up -d` **really sends**
+mail instead of only logging it.
+
+Mailpit is a development/QA inbox: it **captures** every message and never
+forwards it anywhere. Read what the stack sent at <http://127.0.0.1:8025> (the
+web UI and `GET /api/v1/messages`). Only the inbox UI is published, on loopback;
+the SMTP port is not published at all, and the app reaches the relay over the
+compose network at `mailpit:1025`.
+
+For production, replace the capture inbox with a real relay:
+
+- change `TUCANO_SMTP_HOST`/`TUCANO_SMTP_PORT` in the Compose environment (or an
+  override file) to the relay's hostname and port; or
+- configure it in **Settings → Email**, which writes the vault's `smtp.*`
+  entries — the vault wins over the environment, so it takes precedence over the
+  Compose defaults without editing the file.
+
+The binary's own default is unchanged: with no `TUCANO_SMTP_HOST` (a bare
+`docker run`, for example) email stays **not configured** — messages are logged,
+not sent — so a host that never opted in cannot deliver anything. The Compose
+wiring is what makes the default stack send, and only into its own Mailpit.
+
 ### Integrations
 
 | Variable | Default | Purpose | Secret / file variant |
@@ -288,4 +314,4 @@ Removing the last stored secret deletes `secrets.bin`.
 
 ---
 
-Last verified against TucanoTime 0.1.41.
+Last verified against TucanoTime 0.1.45.

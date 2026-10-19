@@ -205,8 +205,12 @@ the `v0.1.8` release notes is no longer needed.
 | Latest version of a crate | `cargo info <crate>` (or crates.io API) |
 | Container image (distroless, uid 10001, ~41 MiB) | `docker build -t tucanotime .` |
 | Container run (hardened, loopback-only) | `docker run -d --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges -p 127.0.0.1:8080:8080 -v tucanotime-data:/data tucanotime` |
-| Container stack (same hardening, from `docker-compose.yml`) | `docker compose up -d` |
+| Container stack (same hardening, from `docker-compose.yml`) | `docker compose up -d` (GUI on :8080, Mailpit inbox on http://127.0.0.1:8025) |
 
+The Compose stack wires the app to a local Mailpit **capture** inbox
+(`TUCANO_SMTP_HOST=mailpit`, `TUCANO_SMTP_PORT=1025`), so the stack really sends;
+Mailpit is a QA inbox, not a relay, and production points the SMTP variables (or
+the vault) at a real relay. A bare `docker run` has no sender until configured.
 The toolchain is pinned by `rust-toolchain.toml` and the Dockerfile/CI images
 carry the same version; bump all three in one intentional PR.
 

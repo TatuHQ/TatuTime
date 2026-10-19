@@ -6,6 +6,7 @@
 mod accounting;
 mod auth;
 mod calendar;
+mod compose;
 mod contract_parity;
 mod customers_projects;
 mod email;
