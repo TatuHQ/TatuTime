@@ -1052,6 +1052,24 @@
         <div class="ts-head">
           <h2>Security &amp; runtime</h2>
         </div>
+        <div class="p-card" id="vault-card">
+          <div class="p-card__header">
+            <h2>Vault key</h2>
+          </div>
+          <div class="p-card__content">
+            <p id="vault-status" class="p-form-help-text" role="status" aria-live="polite"></p>
+            <p id="vault-detail" class="p-form-help-text"></p>
+            <p id="vault-warning" class="p-form-help-text" role="alert" hidden></p>
+            <div class="buttons">
+              <button id="vault-enable" type="button" hidden>Enable vault</button>
+              <button id="vault-regenerate" type="button" hidden>Regenerate key</button>
+              <button id="vault-disable" class="danger" type="button" hidden>Disable vault</button>
+            </div>
+            <div class="p-form-validation is-error">
+              <p class="p-form-validation__message" id="vault-error" role="alert" hidden></p>
+            </div>
+          </div>
+        </div>
         <form id="secret-form" class="p-card">
           <div class="p-card__header">
             <h2>Integration credentials <span class="beta">Beta</span></h2>
@@ -1059,7 +1077,6 @@
           <div class="p-card__content">
             <p class="p-form-help-text">Store provider secrets (OAuth, SMTP, calendar feeds) encrypted at rest. The
               integrations that consume these are <strong>Beta</strong> — not yet wired to live providers.</p>
-            <p id="vault-status" class="p-form-help-text"></p>
             <div class="p-form__group"><label class="p-form__label" for="secret-key">Key (e.g.
                 smtp.password)</label><input type="text" class="p-form__control" id="secret-key" maxlength="100"
                 required></div>
@@ -1430,7 +1447,10 @@
             <p id="email-status" class="p-form-help-text" role="status" aria-live="polite"></p>
             <p class="p-form-help-text">Messages go out through this relay. Saving takes effect immediately — the
               next send uses the new settings, with no restart needed.</p>
-            <p id="email-vault-notice" class="p-form-help-text" role="alert" hidden></p>
+            <div id="email-vault-notice" class="p-form-help-text" role="alert" hidden>
+              <p id="email-vault-notice-text"></p>
+              <button type="button" class="link" id="email-vault-settings">Open Security &amp; runtime</button>
+            </div>
             <form id="email-form">
               <div class="p-form__group"><label class="p-form__label" for="email-host">SMTP host</label><input
                   type="text" class="p-form__control" id="email-host" maxlength="255" autocomplete="off"

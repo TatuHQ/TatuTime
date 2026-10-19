@@ -29,7 +29,8 @@ fn audit_subject(value: &str) -> String {
 
 /// The `GET`/`PUT` payload. `password` is only ever an input.
 fn settings_view(app: &AppState) -> serde_json::Value {
-    let resolved = crate::email::SmtpConfig::from_sources(app.vault.as_deref());
+    let vault = app.vault.get();
+    let resolved = crate::email::SmtpConfig::from_sources(vault.as_deref());
     let configured = resolved.is_some();
     let host = resolved
         .as_ref()
@@ -49,7 +50,7 @@ fn settings_view(app: &AppState) -> serde_json::Value {
         .as_ref()
         .is_some_and(|c| c.password.as_ref().is_some_and(|p| !p.is_empty()));
     serde_json::json!({
-        "vault_enabled": app.vault.is_some(),
+        "vault_enabled": app.vault.is_enabled(),
         "configured": configured,
         "transport": if configured { "smtp" } else { "disabled" },
         "host": host,
@@ -87,6 +88,10 @@ pub async fn admin_email_put(
     State(app): State<AppState>,
     ValidJson(input): ValidJson<EmailSettingsInput>,
 ) -> ApiResult {
+    // H1: every secret write path takes the gate *before* resolving the vault,
+    // so a concurrent disable/regenerate cannot delete or rotate the key under
+    // this `put_many`.
+    let gate = app.vault.gate();
     let vault = require_vault(&app)?;
 
     let mut errors: Vec<FieldError> = Vec::new();
@@ -150,6 +155,8 @@ pub async fn admin_email_put(
     vault
         .put_many(&entries)
         .map_err(|e| ApiError::internal(format!("vault write failed: {e}")))?;
+    // No await while the gate is held; release it before the audit write.
+    drop(gate);
     // Audit the host only — credentials never reach the audit log, and the
     // subject is bounded so an oversized host cannot flood it (SET-09).
     record_audit(&app, "email_settings_updated", &audit_subject(host)).await;
@@ -173,7 +180,8 @@ pub async fn admin_email_test(
     if let Some(problem) = crate::email::recipient_problem(&input.to) {
         return Err(ApiError::validation(vec![FieldError::new("to", problem)]));
     }
-    if crate::email::SmtpConfig::from_sources(app.vault.as_deref()).is_none() {
+    let vault = app.vault.get();
+    if crate::email::SmtpConfig::from_sources(vault.as_deref()).is_none() {
         return Err(ApiError::email_not_configured());
     }
     let to = input.to.trim().to_string();

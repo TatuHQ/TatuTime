@@ -44,5 +44,5 @@ loud boot error and registers **no** identity provider — nothing is
 just-in-time provisioned and `/auth/sso/providers` advertises nothing. The
 warning is not fatal (local login and the rest of the timesheet keep working),
 but SSO stays disabled until at least one domain is configured. This mirrors
-the vault (#77: an unset key disables the vault) and lock (#185) fail-closed
-conventions.
+the vault (#77: a store that no key can open refuses boot) and lock (#185)
+fail-closed conventions.

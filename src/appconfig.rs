@@ -37,6 +37,11 @@ pub enum Kind {
     /// canonical uppercase so `eur` and `EUR` cannot both exist. Optional:
     /// unset means "no base currency configured" (never guessed from data).
     Currency,
+    /// Strict `true`/`false`. Env accepts both spellings case-insensitively;
+    /// anything else is ignored (and, in a `PUT`, refused).
+    Bool {
+        default: bool,
+    },
 }
 
 pub struct KeyDef {
@@ -45,6 +50,10 @@ pub struct KeyDef {
     /// Overriding environment variable.
     pub env: &'static str,
     pub kind: Kind,
+    /// Whether `PUT /api/admin/config` may change this key. A read-only key is
+    /// still listed by `GET /api/admin/config`; its dedicated lifecycle
+    /// endpoint is the only writer (M3: `vault_enabled`).
+    pub writable: bool,
     pub description: &'static str,
 }
 
@@ -53,6 +62,7 @@ pub struct KeyDef {
 pub const KEYS: &[KeyDef] = &[
     KeyDef {
         name: "reminder_days",
+        writable: true,
         env: "TUCANO_REMINDER_DAYS",
         kind: Kind::Int {
             min: 1,
@@ -63,6 +73,7 @@ pub const KEYS: &[KeyDef] = &[
     },
     KeyDef {
         name: "org_name",
+        writable: true,
         env: "TUCANO_ORG_NAME",
         kind: Kind::Str {
             default: "TucanoTime",
@@ -71,18 +82,21 @@ pub const KEYS: &[KeyDef] = &[
     },
     KeyDef {
         name: "sso_admin_group",
+        writable: true,
         env: "TUCANO_SSO_ADMIN_GROUP",
         kind: Kind::Str { default: "" },
         description: "IdP group that maps to the admin role on SSO login (#32)",
     },
     KeyDef {
         name: "sso_allowed_domains",
+        writable: true,
         env: "TUCANO_SSO_ALLOWED_DOMAINS",
         kind: Kind::Csv,
         description: "Comma-separated email domains allowed for SSO (#32)",
     },
     KeyDef {
         name: "calendar_oauth_redirect",
+        writable: true,
         env: "TUCANO_CALENDAR_OAUTH_REDIRECT",
         kind: Kind::Str {
             default: "/api/calendar/oauth/callback",
@@ -91,30 +105,35 @@ pub const KEYS: &[KeyDef] = &[
     },
     KeyDef {
         name: "google_calendar_client_id",
+        writable: true,
         env: "TUCANO_GOOGLE_CLIENT_ID",
         kind: Kind::OptionalStr,
         description: "Google OAuth client id (public half of the pair; the secret stays env/vault) (#36)",
     },
     KeyDef {
         name: "ms_calendar_client_id",
+        writable: true,
         env: "TUCANO_MS_CLIENT_ID",
         kind: Kind::OptionalStr,
         description: "Microsoft OAuth client id (secret stays env/vault) (#36)",
     },
     KeyDef {
         name: "qbo_base_url",
+        writable: true,
         env: "TUCANO_QBO_BASE_URL",
         kind: Kind::OptionalStr,
         description: "Override the QuickBooks API base URL (#33)",
     },
     KeyDef {
         name: "xero_base_url",
+        writable: true,
         env: "TUCANO_XERO_BASE_URL",
         kind: Kind::OptionalStr,
         description: "Override the Xero API base URL (#33)",
     },
     KeyDef {
         name: "max_docs",
+        writable: true,
         env: "TUCANO_MAX_DOCS",
         kind: Kind::Int {
             min: 10,
@@ -131,9 +150,22 @@ pub const KEYS: &[KeyDef] = &[
     // off and nothing is converted — the value is never guessed from the data.
     KeyDef {
         name: "base_currency",
+        writable: true,
         env: "TUCANO_BASE_CURRENCY",
         kind: Kind::Currency,
         description: "Optional base currency for mixed-currency invoice Trends (ISO 4217, e.g. EUR); unset disables the conversion",
+    },
+    // Credential-vault enablement: the key is created by default, so this knob
+    // only exists so an operator (or the admin API) can turn the vault off.
+    // It is not a secret and carries no key material.
+    KeyDef {
+        name: "vault_enabled",
+        // M3: the dedicated lifecycle endpoints are the only writer; a generic
+        // PUT must not brick the next boot by disabling a vault with a store.
+        writable: false,
+        env: "TUCANO_VAULT_ENABLED",
+        kind: Kind::Bool { default: true },
+        description: "Enable the credential vault (a master key is created on first boot); env override or stored configuration",
     },
 ];
 
@@ -221,6 +253,16 @@ impl AppConfig {
                         Value::Null
                     }
                 },
+                Kind::Bool { .. } => {
+                    if raw.eq_ignore_ascii_case("true") {
+                        Value::Bool(true)
+                    } else if raw.eq_ignore_ascii_case("false") {
+                        Value::Bool(false)
+                    } else {
+                        tracing::warn!(key = def.name, value = %raw, "invalid bool from env, ignoring");
+                        Value::Null
+                    }
+                }
             };
             if v.is_null() {
                 // fall through to file/default on a parse failure
@@ -235,6 +277,7 @@ impl AppConfig {
             Kind::Int { default, .. } => Value::from(default),
             Kind::Str { default } => Value::String(default.to_string()),
             Kind::OptionalStr | Kind::Csv | Kind::Currency => Value::Null,
+            Kind::Bool { default } => Value::Bool(default),
         };
         (d, Source::Default)
     }
@@ -262,6 +305,13 @@ impl AppConfig {
             Value::String(s) => s,
             _ => String::new(),
         }
+    }
+    pub fn get_bool(&self, name: &str, env: &dyn Fn(&str) -> Option<String>) -> bool {
+        let Some(def) = key_def(name) else {
+            tracing::error!(key = name, "unknown config key requested");
+            return false;
+        };
+        matches!(self.resolve(def, env).0, Value::Bool(true))
     }
     pub fn get_optional_str(
         &self,
@@ -328,6 +378,7 @@ impl AppConfig {
             // uppercase so `eur` and `EUR` cannot both exist. `null` clears it.
             (Kind::Currency, Value::String(s)) => validate_currency(s).map(Value::String),
             (Kind::Currency, Value::Null) => Ok(Value::Null),
+            (Kind::Bool { .. }, Value::Bool(b)) => Ok(Value::Bool(*b)),
             _ => Err(format!(
                 "{} expects {}",
                 def.name,
@@ -335,6 +386,7 @@ impl AppConfig {
                     Kind::Int { .. } => "an integer",
                     Kind::Csv | Kind::Str { .. } | Kind::OptionalStr => "a string",
                     Kind::Currency => "a three-letter currency code",
+                    Kind::Bool { .. } => "true or false",
                 }
             )),
         }
@@ -345,6 +397,15 @@ impl AppConfig {
         for (k, v) in patch {
             match key_def(&k) {
                 Some(def) => {
+                    if !def.writable {
+                        return Err(ConfigError::keyed(
+                            &k,
+                            format!(
+                                "{k} is managed by the vault lifecycle endpoints; use \
+                                 POST /api/admin/vault/enable or POST /api/admin/vault/disable"
+                            ),
+                        ));
+                    }
                     let v = Self::validate(def, &v).map_err(|m| ConfigError::keyed(&k, m))?;
                     if v.is_null() {
                         self.stored.remove(&k);
@@ -361,6 +422,21 @@ impl AppConfig {
                 }
             }
         }
+        self.persist()
+            .map_err(|message| ConfigError { key: None, message })
+    }
+
+    /// Persist a lifecycle flag that `PUT /api/admin/config` is not allowed to
+    /// write (M3). The dedicated vault endpoints are the only callers; the
+    /// value still goes through the same kind validation as a generic patch.
+    pub fn set_lifecycle_bool(&mut self, name: &str, value: bool) -> Result<(), ConfigError> {
+        let def = key_def(name).ok_or_else(|| ConfigError {
+            key: Some(name.to_string()),
+            message: format!("unknown configuration key: {name}"),
+        })?;
+        let stored =
+            Self::validate(def, &Value::Bool(value)).map_err(|m| ConfigError::keyed(name, m))?;
+        self.stored.insert(name.to_string(), stored);
         self.persist()
             .map_err(|message| ConfigError { key: None, message })
     }
@@ -385,6 +461,7 @@ impl AppConfig {
                     Kind::Int { default, .. } => Value::from(default),
                     Kind::Str { default } => Value::String(default.to_string()),
                     Kind::OptionalStr | Kind::Csv | Kind::Currency => Value::Null,
+                    Kind::Bool { default } => Value::Bool(default),
                 };
                 serde_json::json!({
                     "key": def.name,
@@ -393,6 +470,7 @@ impl AppConfig {
                         Source::Env => "env", Source::File => "file", Source::Default => "default"
                     },
                     "default": default,
+                    "writable": def.writable,
                     "description": def.description,
                 })
             })
@@ -548,5 +626,83 @@ mod tests {
             Some("GBP".to_string()),
             "a refused patch must persist nothing"
         );
+    }
+
+    #[test]
+    fn bool_precedence_defaults_and_invalid_values() {
+        let def = key_def("vault_enabled").expect("vault_enabled is whitelisted");
+        let env_none = env_from(&[]);
+        assert_eq!(
+            AppConfig::empty().resolve(def, &env_none),
+            (Value::Bool(true), Source::Default),
+            "the vault defaults to enabled"
+        );
+
+        // file beats default
+        let cfg = file(r#"{"vault_enabled": false}"#);
+        assert_eq!(
+            cfg.resolve(def, &env_none),
+            (Value::Bool(false), Source::File)
+        );
+        assert!(!cfg.get_bool("vault_enabled", &env_none));
+
+        // env beats file, in either spelling
+        for raw in ["true", "TRUE", "True"] {
+            let pairs = [("TUCANO_VAULT_ENABLED", raw)];
+            let env = env_from(&pairs);
+            assert_eq!(
+                cfg.resolve(def, &env),
+                (Value::Bool(true), Source::Env),
+                "{raw}"
+            );
+        }
+        let env = env_from(&[("TUCANO_VAULT_ENABLED", "false")]);
+        assert!(!AppConfig::empty().get_bool("vault_enabled", &env));
+
+        // An invalid env value is ignored, so the file/default still wins.
+        let invalid = env_from(&[("TUCANO_VAULT_ENABLED", "yes")]);
+        assert_eq!(
+            cfg.resolve(def, &invalid),
+            (Value::Bool(false), Source::File),
+            "invalid env bool must not leak into the effective value"
+        );
+
+        // Writes accept a JSON boolean only and persist nothing on rejection.
+        assert_eq!(
+            AppConfig::validate(def, &Value::Bool(false)).unwrap(),
+            Value::Bool(false)
+        );
+        assert!(AppConfig::validate(def, &Value::String("false".into())).is_err());
+        assert!(AppConfig::validate(def, &Value::from(0)).is_err());
+
+        // M3: the generic config endpoint is not a writer for this knob. The
+        // dedicated lifecycle endpoints are, because a stored `false` next to a
+        // `secrets.bin` would hard-fail the next boot.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("config.json"), "{}").unwrap();
+        let mut cfg = AppConfig::load(dir.path()).unwrap();
+        let mut patch = Map::new();
+        patch.insert("vault_enabled".into(), Value::Bool(false));
+        let err = cfg.update(patch).unwrap_err();
+        assert_eq!(err.key.as_deref(), Some("vault_enabled"));
+        assert!(
+            err.message.contains("/api/admin/vault"),
+            "the refusal must point at the lifecycle endpoints: {err:?}"
+        );
+        assert!(
+            AppConfig::load(dir.path())
+                .unwrap()
+                .stored
+                .get("vault_enabled")
+                .is_none(),
+            "a refused PUT must persist nothing"
+        );
+
+        // `GET /api/admin/config` still lists it, flagged read-only.
+        let rows = AppConfig::empty().effective(&env_none);
+        let row = rows.iter().find(|r| r["key"] == "vault_enabled").unwrap();
+        assert_eq!(row["writable"], false);
+        let days = rows.iter().find(|r| r["key"] == "reminder_days").unwrap();
+        assert_eq!(days["writable"], true);
     }
 }

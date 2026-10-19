@@ -77,7 +77,8 @@ the `v0.1.8` release notes is no longer needed.
   `entries/<YYYY-MM-DD>/<id>.json`, `invoices/<id>.json`, `users/<id>.json`,
   `categories/<id>.json`, `expenses/<id>.json`, `submissions/<id>.json`,
   plus `audit.log` (#52), `revoked.json` (#45), `scheduler.json` (#61),
-  `secrets.bin` (#77, AES-256-GCM encrypted), `config.json` + `session.key`
+  `secrets.bin` (#77, AES-256-GCM encrypted) and the auto-created `vault.key`
+  (master key, 0600), `config.json` + `session.key`
   (#94), `.server.lock` (single-instance guard), the `retainers/`, `claims/`,
   `schedules/`, `timers/`, `items/` and `notifications/` doc folders,
   `sync/accounting.json` (#33), archived
@@ -97,8 +98,22 @@ the `v0.1.8` release notes is no longer needed.
   index — the timeline sidecar included — stays out of the `MAX_DOCS` count.
   Atomic writes (tmp + rename).
 - **Secret vault (#77):** admin-entered integration credentials are encrypted at
-  rest with `TUCANO_SECRET_KEY` (32 bytes) and never returned to clients (masked
-  hints only) or logged. Fail-closed: unset key ⇒ vault disabled.
+  rest (AES-256-GCM) under a master key created automatically on first boot at
+  `<data>/vault.key` — 24 CSPRNG bytes as 32 base64url characters (192 bits),
+  written 0600 and atomically. An existing key file that is group/world-readable
+  is tightened to 0600 on read; if that cannot be applied boot fails with an
+  operator message. `TUCANO_SECRET_KEY` / `TUCANO_SECRET_KEY_FILE` are an
+  optional override that always wins and is never copied into the data
+  directory. Fail-closed: a store (`secrets.bin`) with no reachable key, a
+  malformed key (not exactly 32 bytes) or a wrong key is a hard boot failure —
+  never silent regeneration. `vault_enabled` (default true) opts out, but it is
+  read-only through `PUT /api/admin/config` (422 `validation_failed`): only the
+  dedicated lifecycle endpoints write it, and disabling while any credential is
+  stored is refused. A valid `TUCANO_VAULT_ENABLED` (or an env key/`*_FILE`)
+  makes the vault operator-managed: enable/disable/regenerate refuse with 409
+  `vault_managed_externally` and `can_enable`/`can_disable` are false. The key is
+  never returned to clients (source, fingerprint and the fixed file name only)
+  or logged; removing the last stored secret deletes `secrets.bin`.
 - **Locking (#18 seam):** entry edits/deletes and expense deletes consult
   `CombinedLocks`, which composes `InvoiceLock` (entries **and** expenses on
   any **non-draft** invoice — #8/#114. **Invoiced records are permanent:**

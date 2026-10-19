@@ -124,6 +124,9 @@
                   "payload_too_large",
                   "data_dir_invalid",
                   "data_dir_not_writable",
+                  "vault_already_enabled",
+                  "vault_managed_externally",
+                  "vault_in_use",
                   "corrupt_document"
                 ]
               },
@@ -156,6 +159,87 @@
             "type": "string"
           }
         }
+      },
+      "VaultStatus": {
+        "type": "object",
+        "required": [
+          "enabled",
+          "source",
+          "disabled_reason",
+          "fingerprint",
+          "key_file_name",
+          "key_file_present",
+          "secrets_count",
+          "external_override",
+          "can_enable",
+          "can_disable",
+          "can_regenerate"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "env",
+              "env_file",
+              "key_file",
+              "none"
+            ]
+          },
+          "disabled_reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "config",
+              "env",
+              "write_failed",
+              null
+            ]
+          },
+          "fingerprint": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "sha256: plus the first four bytes of the key hash in lowercase hex. Safe to display; never the key itself."
+          },
+          "key_file_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The fixed literal vault.key when the managed key file is in use; null otherwise. Never a host path."
+          },
+          "key_file_present": {
+            "type": "boolean"
+          },
+          "secrets_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "external_override": {
+            "type": "boolean",
+            "description": "TUCANO_SECRET_KEY or TUCANO_SECRET_KEY_FILE is configured; the key is operator-managed out-of-band."
+          },
+          "can_enable": {
+            "type": "boolean"
+          },
+          "can_disable": {
+            "type": "boolean"
+          },
+          "can_regenerate": {
+            "type": "boolean"
+          },
+          "created_key": {
+            "type": "boolean",
+            "description": "Only on enable/regenerate responses: true when a new key file was minted, false when an existing key was reused."
+          }
+        },
+        "additionalProperties": false
       },
       "Currency": {
         "type": "string",
@@ -7035,7 +7119,8 @@
         "tags": [
           "admin"
         ],
-        "summary": "Effective externalised configuration: whitelist of non-secret knobs with value, source (env/file/default) and default (#94)",
+        "summary": "Effective externalised configuration: whitelist of non-secret knobs with value, source (env/file/default), default and writability (#94)",
+        "description": "`vault_enabled` (boolean) is listed read-only (`writable: false`): it controls whether the credential vault starts on the next boot, but it is written only through `POST /api/admin/vault/enable|disable`, never through `PUT /api/admin/config` (a stored `false` next to a `secrets.bin` would make the next boot fail closed).",
         "responses": {
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -7061,6 +7146,7 @@
                           "value",
                           "source",
                           "default",
+                          "writable",
                           "description"
                         ],
                         "properties": {
@@ -7077,6 +7163,10 @@
                             ]
                           },
                           "default": {},
+                          "writable": {
+                            "type": "boolean",
+                            "description": "Whether `PUT /api/admin/config` may change this key. Read-only knobs are written by their dedicated endpoint."
+                          },
                           "description": {
                             "type": "string"
                           }
@@ -7112,7 +7202,8 @@
         "tags": [
           "admin"
         ],
-        "summary": "Patch whitelisted keys into <data>/config.json; unknown or secret-shaped keys are refused (#94)",
+        "summary": "Patch whitelisted keys into <data>/config.json; unknown, secret-shaped and read-only keys are refused (#94)",
+        "description": "Unknown or secret-shaped keys are 422 `validation_failed`. So is `vault_enabled`: the dedicated lifecycle endpoints (`POST /api/admin/vault/enable|disable`) are its only writer (M3).",
         "requestBody": {
           "required": true,
           "content": {
@@ -7438,6 +7529,275 @@
           },
           "502": {
             "$ref": "#/components/responses/BadGateway"
+          }
+        }
+      }
+    },
+    "/api/admin/vault": {
+      "get": {
+        "operationId": "getVaultStatus",
+        "x-admin-only": true,
+        "tags": [
+          "admin"
+        ],
+        "summary": "Credential-vault status: enabled/source/fingerprint and the actions currently allowed (admin only)",
+        "description": "Always 200, even when the vault is disabled, so Settings can render the disabled state. The body never contains the master key, a key path or any host path; `key_file_name` is the literal `vault.key`.",
+        "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "200": {
+            "description": "Current vault status.",
+            "headers": {
+              "Cache-Control": {
+                "description": "no-store",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VaultStatus"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/api/admin/vault/enable": {
+      "post": {
+        "operationId": "enableVault",
+        "x-admin-only": true,
+        "tags": [
+          "admin"
+        ],
+        "summary": "Enable the credential vault: resolve an env key, reuse vault.key, or generate one (admin only)",
+        "description": "Resolves the key (env, env file, existing vault.key, else a newly generated 192-bit key written 0600), persists `vault_enabled=true`, then installs the live vault. 201 when a new key file was minted (`created_key: true`), 200 when an existing key was reused (`created_key: false`).",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
+        "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "200": {
+            "description": "Vault enabled with an existing key (`created_key: false`).",
+            "headers": {
+              "Cache-Control": {
+                "description": "no-store",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VaultStatus"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Vault enabled with a newly minted key (`created_key: true`).",
+            "headers": {
+              "Cache-Control": {
+                "description": "no-store",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VaultStatus"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "description": "vault_already_enabled, or vault_managed_externally when the lifecycle is operator-managed (`TUCANO_VAULT_ENABLED` carries a valid boolean, or an env key/env key file is configured).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/admin/vault/disable": {
+      "post": {
+        "operationId": "disableVault",
+        "x-admin-only": true,
+        "tags": [
+          "admin"
+        ],
+        "summary": "Disable the credential vault and delete the generated key (admin only)",
+        "description": "Requires `{ \"confirm\": true }`. Refused with vault_in_use while any secret is stored, and with vault_managed_externally when the lifecycle is operator-managed (`TUCANO_VAULT_ENABLED` or an env key/env key file). On success `vault_enabled=false` is persisted first, the disabled state is installed, and the managed vault.key is then deleted best-effort — a persistence failure returns 500 and leaves both the slot and the key untouched.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "confirm"
+                ],
+                "properties": {
+                  "confirm": {
+                    "type": "boolean",
+                    "const": true
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "200": {
+            "description": "Vault disabled (`enabled: false`, `disabled_reason: config`, `key_file_present: false`).",
+            "headers": {
+              "Cache-Control": {
+                "description": "no-store",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VaultStatus"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "description": "vault_in_use while credentials exist, or vault_managed_externally when the lifecycle is operator-managed through the environment.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/admin/vault/regenerate": {
+      "post": {
+        "operationId": "regenerateVaultKey",
+        "x-admin-only": true,
+        "tags": [
+          "admin"
+        ],
+        "summary": "Replace the managed vault key with a fresh one (admin only)",
+        "description": "Requires `{ \"confirm\": true }`. Refused with vault_in_use while any secret is stored and with vault_managed_externally when the lifecycle is operator-managed (`TUCANO_VAULT_ENABLED` or an env key/env key file). Answers 200 with a new fingerprint and `created_key: true`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "confirm"
+                ],
+                "properties": {
+                  "confirm": {
+                    "type": "boolean",
+                    "const": true
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "200": {
+            "description": "A new key file is installed (`created_key: true`, new fingerprint).",
+            "headers": {
+              "Cache-Control": {
+                "description": "no-store",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VaultStatus"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "description": "vault_in_use while credentials exist, or vault_managed_externally when the lifecycle is operator-managed through the environment.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/VaultUnavailable"
           }
         }
       }

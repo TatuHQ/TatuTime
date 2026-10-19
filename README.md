@@ -58,8 +58,8 @@ All data lives in the mounted volume; back it up like any document folder.
 ### Unraid
 
 A ready-made Unraid Docker template and a step-by-step runbook — flash-share
-import, uid 10001 permissions, the vault key file, SMTP relay options and
-backups — live in [`deploy/unraid/README.md`](deploy/unraid/README.md). The
+import, uid 10001 permissions, the auto-created vault key, SMTP relay options
+and backups — live in [`deploy/unraid/README.md`](deploy/unraid/README.md). The
 template itself is
 [`deploy/unraid/my-TucanoTime.xml`](deploy/unraid/my-TucanoTime.xml).
 
@@ -72,7 +72,8 @@ volume is the installation:
 | What | Where | Survives `up -d` / image update |
 |---|---|---|
 | Users, entries, invoices, expenses, notifications… | `<data>/…` JSON documents | ✅ (volume) |
-| Integration credentials (Settings tab) | `<data>/secrets.bin`, AES-256-GCM | ✅ — **requires** the same `TUCANO_SECRET_KEY[_FILE]` |
+| Integration credentials (Settings tab) | `<data>/secrets.bin`, AES-256-GCM, encrypted with the key beside it | ✅ (volume) |
+| Credential-vault master key | `<data>/vault.key`, auto-created 0600 on first boot | ✅ — back it up with the data; an external `TUCANO_SECRET_KEY[_FILE]` overrides it |
 | Runtime settings (reminder cadence, SSO group/domains, OAuth redirect, provider base URLs, demo flags…) | `<data>/config.json`, env > file > default | ✅ (volume; no env needed) |
 | Session signing key | `<data>/session.key`, auto-created 0600 on first boot | ✅ — restarts no longer log everyone out |
 | Scheduler last-run state, revocations, audit log | `<data>/…` | ✅ |
@@ -80,16 +81,19 @@ volume is the installation:
 Precedence everywhere is **explicit env → `config.json` → built-in
 default**, so you can pin values with env at the OS layer or persist them on
 the volume via `PUT /api/admin/config` / `GET /api/admin/config` (masked to the
-non-secret whitelist by construction).
+non-secret whitelist by construction). The one read-only knob is
+`vault_enabled`: `GET` lists it with `writable: false`, and a `PUT` that tries
+to change it is refused with **422 `validation_failed`** — only the vault
+lifecycle endpoints below write it.
 
-Secret files (bind-mount / Docker secrets) work for both keys:
-`TUCANO_SESSION_SECRET_FILE` and `TUCANO_SECRET_KEY_FILE` — and that is the
-**recommended** way to supply them: the operator mounts a file, never exports a
-secret into the environment or the Compose file (see the commented `secrets:`
-block in [`docker-compose.yml`](docker-compose.yml)). If the vault store exists
-on disk but the key is missing or wrong, the app **refuses to start** with a
-clear message — a silently disabled Settings tab has historically looked like
-lost data, and we'd rather stop than mislead.
+A secret file (bind-mount / Docker secrets) is the recommended way to supply
+the session key: `TUCANO_SESSION_SECRET_FILE` keeps it out of the environment and
+the Compose file (see the commented `secrets:` block in
+[`docker-compose.yml`](docker-compose.yml)). The vault key needs no setup at all
+— it is created on the volume — and `TUCANO_SECRET_KEY_FILE` is only an external
+override. If the vault store exists on disk but the key is missing or wrong, the
+app **refuses to start** with a clear message — a silently disabled Settings tab
+has historically looked like lost data, and we'd rather stop than mislead.
 
 ### Upgrading an image
 
@@ -160,10 +164,16 @@ Environment variables (all optional; precedence env > `config.json` > default):
 | `TUCANO_DATA_DIR` | data folder (`/data` in the image) |
 | `TUCANO_PORT` | listen port, default `8080` |
 | `TUCANO_SESSION_SECRET[_FILE]` | session signing key; unset ⇒ auto-persisted `<data>/session.key` |
-| `TUCANO_SECRET_KEY[_FILE]` | 32-byte vault key; unset ⇒ vault disabled (fail-closed) |
+| `TUCANO_SECRET_KEY[_FILE]` | optional vault-key override; unset ⇒ key auto-created at `<data>/vault.key`. Setting it makes the vault operator-managed (lifecycle actions 409) |
+| `TUCANO_VAULT_ENABLED` | a valid `true`/`false` makes the vault **operator-managed**: lifecycle actions answer 409 `vault_managed_externally`. `false` disables it (default `true`), and a `secrets.bin` on disk then refuses to start |
 | `TUCANO_ENV=production` | strict secret policy + `Secure` cookies by default |
 | `TUCANO_SECURE_COOKIES=0` | drop the `Secure` flag for plain-HTTP serving on a trusted LAN |
 | `TUCANO_MAX_DOCS` | per-collection document cap, enforced on writes (a create past it is refused with 409 `collection_full`); reads always list what is stored, so a pre-existing over-cap directory stays recoverable |
+
+The local `secrets/` directory in this recipe is listed in both
+[`.gitignore`](.gitignore) and [`.dockerignore`](.dockerignore), so key material
+is never staged in git or baked into the image; point `TUCANO_SECRETS_DIR`
+outside the checkout if you prefer.
 
 ```sh
 # Preferred: mount the key as a file (uid 10001 must be able to read it).
@@ -191,9 +201,32 @@ just-in-time provisions nobody until a domain is configured.
 
 **Integration credentials (#77):** admins store provider secrets (OAuth,
 SMTP, ICS feed URLs) in the **Settings** tab; they are encrypted at rest with
-AES-256-GCM under `TUCANO_SECRET_KEY` (a 32-byte env var) and never returned or
-logged. Without `TUCANO_SECRET_KEY` the vault is disabled (fail-closed).
-`secrets.bin` holds the encrypted blob.
+AES-256-GCM under a master key that is **created automatically** on first boot
+at `<data>/vault.key` — 24 CSPRNG bytes as 32 base64url characters (192 bits),
+written 0600 atomically. An existing key file that is group- or world-readable
+is tightened to 0600 on read; if that cannot be applied, the boot stops with an
+operator message instead of running with a key other local users can read. The
+key is never returned by the API or the GUI: **Settings → Security** shows its
+source, its `sha256:…` fingerprint and the file name, which is how a restored
+key is verified. `TUCANO_SECRET_KEY` / `TUCANO_SECRET_KEY_FILE` are an optional
+override that always wins and is never copied into the data directory. While
+that override is set — or while `TUCANO_VAULT_ENABLED` carries a valid boolean —
+the vault is **operator-managed**: `enable`, `disable` and `regenerate` refuse
+with **409 `vault_managed_externally`**, and `can_enable`/`can_disable` report
+the same to the GUI. When the app owns the key, the lifecycle endpoints can
+persist `vault_enabled: false`, but not while any credential is stored;
+`TUCANO_VAULT_ENABLED=false` likewise disables the vault at boot, and a
+`secrets.bin` on disk then refuses to start. `vault_enabled` itself is
+read-only through `PUT /api/admin/config` (422). A `secrets.bin` store with no
+reachable key, or
+with a malformed (not exactly 32 bytes) or wrong key, stops the boot rather than
+silently losing access. Removing the last stored secret deletes `secrets.bin`.
+
+> **Backup trade-off:** because the generated key lives beside its ciphertext, a
+> backup of the data directory contains both `secrets.bin` and `vault.key` —
+> protect it accordingly. To keep them apart, supply the key externally with
+> `TUCANO_SECRET_KEY[_FILE]` and leave it out of the data directory; the app
+> never copies an external key into the volume.
 
 ## Development
 
@@ -222,7 +255,8 @@ Storage is file-based JSON under `TUCANO_DATA_DIR` (the API is the only
 writer). The canonical layout — customers/projects/tasks, entries by day,
 invoices (+ archived PDFs and the `.seq.json` number ledger), users,
 categories, expenses, submissions, and the `config.json` / `session.key` /
-`secrets.bin` / `audit.log` / `revoked.json` / `scheduler.json` state files —
+`secrets.bin` / `vault.key` / `audit.log` / `revoked.json` / `scheduler.json`
+state files —
 is documented in [`AGENTS.md`](AGENTS.md) "Architecture invariants" so there
 is exactly one list to keep current.
 

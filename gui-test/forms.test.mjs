@@ -31,7 +31,7 @@ const stylesRules = stylesCss.replace(/\/\*[\s\S]*?\*\//g, '');
 const ERROR_IDS = [
     'auth-error', 'entry-error', 'iw-error', 'ed-error',
     'rec-error', 'ret-error', 'expense-error', 'expense-category-error',
-    'submission-error', 'user-error', 'user-password-error', 'secret-error',
+    'submission-error', 'user-error', 'user-password-error', 'secret-error', 'vault-error',
     'config-error', 'category-error', 'org-error', 'template-error',
     'item-error', 'wz-error', 'customer-error', 'project-error', 'task-error',
     'week-row-error', 'aw-error', 'send-email-error', 'send-email-notice',
@@ -64,9 +64,9 @@ test('the shell ships the official form vocabulary and no bespoke class (#232 ph
     assert.equal(groups.length, 144, 'every former .field wrapper is a p-form__group');
     assert.equal(document.querySelectorAll('.p-form__label').length, 139, 'one official label per field row');
     assert.equal(document.querySelectorAll('.p-form__control').length, 139, 'one official control per field row');
-    // 45: the previous 43 plus the Security panel's read-only audit card blurb
-    // and its polite status line (SET-11; both use the official help-text skin).
-    assert.equal(document.querySelectorAll('.p-form-help-text').length, 45, 'the hints became p-form-help-text');
+    // 47: the previous 45 plus the Vault key card's detail line and its
+    // (normally hidden) warning note; the moved #vault-status keeps its count.
+    assert.equal(document.querySelectorAll('.p-form-help-text').length, 47, 'the hints became p-form-help-text');
     assert.equal(document.querySelectorAll('.p-form-validation__message').length, ERROR_IDS.length,
         'every error message is the official validation message');
     assert.equal(document.querySelectorAll('.p-form-validation.is-error').length, ERROR_IDS.length,
@@ -208,10 +208,11 @@ test('every error stays a role=alert validation message while hidden (#232 phase
         seen.push(id);
     }
     assert.deepEqual(seen, ERROR_IDS, 'the error set is unchanged (ids are the JS contract)');
-    // #email-vault-notice is a plain role="alert" explanation (not a form
-    // validation message), so it is the one extra alert node beyond ERROR_IDS.
-    assert.equal(document.querySelectorAll('[role="alert"]').length, ERROR_IDS.length + 1,
-        'the email vault notice is the only extra role=alert node');
+    // #email-vault-notice and the vault card's #vault-warning are plain
+    // role="alert" explanations (not form validation messages), so they are the
+    // two extra alert nodes beyond ERROR_IDS.
+    assert.equal(document.querySelectorAll('[role="alert"]').length, ERROR_IDS.length + 2,
+        'the email vault notice and the vault warning are the only extra role=alert nodes');
     dom.window.close();
 });
 

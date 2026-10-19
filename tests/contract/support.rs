@@ -118,7 +118,9 @@ impl Client {
                     )),
                     audit,
                     revocations,
-                    vault: None,
+                    vault: tucano_time::vault::VaultSlot::disabled(
+                        tucano_time::vault::DisabledReason::Config,
+                    ),
                     email: recorder.clone(),
                     accounting,
                     sso: Arc::new(tucano_time::sso::SsoRegistry::default()),
@@ -126,6 +128,7 @@ impl Client {
                     cfg: Arc::new(std::sync::Mutex::new(Arc::new(
                         tucano_time::appconfig::AppConfig::empty(),
                     ))),
+                    env: Arc::new(tucano_time::appconfig::process_env),
                 }
             }
             None => AppState::with_session(store, session)
@@ -181,6 +184,53 @@ pub(crate) async fn app() -> (Client, tempfile::TempDir) {
 /// session. Vault-enabled tests build their own state through
 /// `AppState::boot(...)` and hand it here; `recorder` is the transport they
 /// injected with `with_email` (or a detached one when they injected none).
+/// A boot state whose key was generated under `root` (`key_file` source).
+pub(crate) fn vault_boot_enabled(root: &std::path::Path) -> tucano_time::vault::VaultBoot {
+    tucano_time::vault::open_for_boot(root, None, None, true).expect("vault boot")
+}
+
+/// A boot state disabled by configuration (no key, no store).
+pub(crate) fn vault_boot_disabled() -> tucano_time::vault::VaultBoot {
+    tucano_time::vault::VaultBoot::disabled(tucano_time::vault::DisabledReason::Config)
+}
+
+/// Build a client from an explicit store + vault boot + config (vault
+/// lifecycle tests construct the slot directly and never mutate process env).
+pub(crate) async fn app_with_vault(
+    store: Store,
+    boot: tucano_time::vault::VaultBoot,
+    cfg: tucano_time::appconfig::AppConfig,
+) -> Client {
+    let session = Arc::new(Session::new(
+        b"test-session-secret-0000000000000032".to_vec(),
+        3600,
+        false,
+    ));
+    let recorder = Arc::new(tucano_time::email::RecordingEmailSender::default());
+    let state = AppState::boot(store, session, boot, Arc::new(cfg)).with_email(recorder.clone());
+    client_for_state(state, recorder).await
+}
+
+/// Same, with an injected environment map. This is how the operator-managed
+/// (`TUCANO_VAULT_ENABLED`) 409s are tested without mutating process env.
+pub(crate) async fn app_with_vault_env(
+    store: Store,
+    boot: tucano_time::vault::VaultBoot,
+    cfg: tucano_time::appconfig::AppConfig,
+    env: tucano_time::api::EnvLookup,
+) -> Client {
+    let session = Arc::new(Session::new(
+        b"test-session-secret-0000000000000032".to_vec(),
+        3600,
+        false,
+    ));
+    let recorder = Arc::new(tucano_time::email::RecordingEmailSender::default());
+    let state = AppState::boot(store, session, boot, Arc::new(cfg))
+        .with_email(recorder.clone())
+        .with_env(env);
+    client_for_state(state, recorder).await
+}
+
 pub(crate) async fn client_for_state(
     state: AppState,
     recorder: Arc<tucano_time::email::RecordingEmailSender>,

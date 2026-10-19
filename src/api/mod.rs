@@ -293,6 +293,11 @@ fn read_string(body: &[u8], start: usize) -> Option<(String, usize)> {
     None
 }
 
+/// The environment lookup injected into [`AppState`]: `TUCANO_*` reads at
+/// request time use this seam instead of `std::env`, so tests can exercise
+/// operator-managed settings without mutating process-wide state.
+pub type EnvLookup = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
+
 #[derive(Clone)]
 pub struct AppState {
     pub store: Arc<Store>,
@@ -302,7 +307,9 @@ pub struct AppState {
     pub rate: Arc<crate::ratelimit::RateLimiter>,
     pub audit: Arc<crate::audit::AuditLog>,
     pub revocations: Arc<crate::revoke::Revocations>,
-    pub vault: Option<Arc<crate::vault::SecretVault>>,
+    /// Swappable credential vault (#77): the admin API can enable, disable or
+    /// regenerate the key without a restart.
+    pub vault: Arc<crate::vault::VaultSlot>,
     /// Email transport (#35). Disabled unless SMTP is configured; tests inject
     /// a recording sender.
     pub email: Arc<dyn crate::email::EmailSender>,
@@ -315,15 +322,30 @@ pub struct AppState {
     /// Externalised runtime configuration (#94): env > config.json > default.
     /// A `Mutex` swap so `PUT /admin/config` can hot-update request-time knobs.
     pub cfg: Arc<std::sync::Mutex<Arc<crate::appconfig::AppConfig>>>,
+    /// Environment lookup used by request-time resolution (the vault lifecycle
+    /// reads `TUCANO_VAULT_ENABLED` / `TUCANO_SECRET_KEY(_FILE)` the same way
+    /// boot does). Defaults to the process environment; tests inject a map so
+    /// operator-managed 409s are exercised without mutating process env.
+    pub env: EnvLookup,
 }
 
 impl AppState {
     /// Convenience wiring with an ephemeral session key (dev/tests). Production
     /// uses `with_session` and a configured secret.
+    #[doc(hidden)]
     pub fn new(store: Store) -> Self {
         Self::with_session(store, Arc::new(ephemeral_session()))
     }
 
+    /// Lenient test/embedding convenience — **not** the production boot path.
+    ///
+    /// Unlike [`AppState::boot`], a vault that cannot be resolved degrades to
+    /// a disabled slot (the error is logged, never propagated), and a corrupt
+    /// `config.json` is replaced with defaults. That is deliberate for test
+    /// harnesses and small embeddings, but it means a caller cannot tell
+    /// "disabled by policy" from "disabled by a broken key". Production
+    /// (`main`) must keep using the hard-checked [`AppState::boot`] path.
+    #[doc(hidden)]
     pub fn with_session(store: Store, session: Arc<Session>) -> Self {
         // Lenient path for tests/dev: resolve config + vault from env, ignoring
         // errors (main() uses `boot`, which arrives with hard-checked values).
@@ -333,13 +355,17 @@ impl AppState {
                 crate::appconfig::AppConfig::empty()
             }),
         );
+        let enabled = cfg.get_bool("vault_enabled", &crate::appconfig::process_env);
         let vault = crate::vault::open_for_boot(
             store.root(),
             std::env::var("TUCANO_SECRET_KEY").ok(),
             std::env::var("TUCANO_SECRET_KEY_FILE").ok(),
+            enabled,
         )
-        .ok()
-        .flatten();
+        .unwrap_or_else(|e| {
+            tracing::error!("vault bootstrap failed ({e}); starting with the vault disabled");
+            crate::vault::VaultBoot::disabled(crate::vault::DisabledReason::Config)
+        });
         Self::boot(store, session, vault, cfg)
     }
 
@@ -349,7 +375,7 @@ impl AppState {
     pub fn boot(
         store: Store,
         session: Arc<Session>,
-        vault: Option<Arc<crate::vault::SecretVault>>,
+        vault: crate::vault::VaultBoot,
         cfg: Arc<crate::appconfig::AppConfig>,
     ) -> Self {
         let store = Arc::new(store);
@@ -362,16 +388,21 @@ impl AppState {
         ]));
         let audit = Arc::new(crate::audit::AuditLog::new(store.root()));
         let revocations = Arc::new(crate::revoke::Revocations::new(store.root()));
+        let vault = crate::vault::VaultSlot::new(vault);
         // Email adapter (#35): a *dynamic* transport that re-resolves the
-        // vault/env SMTP settings on every send, so `PUT /api/admin/email`
-        // applies to the next message without a restart. Tests replace it
-        // wholesale through `with_email` and never touch SMTP.
+        // vault/env SMTP settings on every send, so `PUT /api/admin/email` and
+        // an admin-API key change apply to the next message without a restart.
+        // Tests replace it wholesale through `with_email` and never touch SMTP.
         let email: Arc<dyn crate::email::EmailSender> =
             Arc::new(crate::email::DynamicEmailSender::new(vault.clone()));
+        // Accounting and SSO provider registries stay boot-time snapshots: an
+        // enable/regenerate applies to them on the next restart (only the email
+        // transport re-resolves the vault live).
+        let boot_vault = vault.get();
         // Accounting providers (#33): enabled when an OAuth token exists.
-        let accounting = crate::accounting::registry_from_vault(vault.as_deref(), &cfg);
+        let accounting = crate::accounting::registry_from_vault(boot_vault.as_deref(), &cfg);
         // SSO identity providers (#32): enabled when OIDC/SAML config exists.
-        let sso = Arc::new(crate::sso::registry_from_vault(vault.as_deref(), &cfg));
+        let sso = Arc::new(crate::sso::registry_from_vault(boot_vault.as_deref(), &cfg));
         Self {
             clock: Arc::new(crate::clock::SystemClock),
             locks,
@@ -389,8 +420,24 @@ impl AppState {
             sso,
             oauth_flows: Arc::new(crate::calendar_oauth::OAuthFlows::new()),
             cfg: Arc::new(std::sync::Mutex::new(cfg)),
+            env: Arc::new(crate::appconfig::process_env),
             store,
         }
+    }
+
+    /// Resolve an environment variable exactly as boot does. Request handlers
+    /// must use this seam (not `std::env` directly) so tests can inject a map.
+    #[must_use]
+    pub fn env_var(&self, key: &str) -> Option<String> {
+        (self.env)(key)
+    }
+
+    /// Replace the environment lookup (tests inject operator flags without
+    /// mutating process-wide environment, which is unsafe and racy).
+    #[must_use]
+    pub fn with_env(mut self, env: EnvLookup) -> Self {
+        self.env = env;
+        self
     }
 
     /// Snapshot of the live configuration (#94).
@@ -742,7 +789,8 @@ pub use self::timer_calendar::{
     mark_notifications_read, start_timer, stop_timer, update_schedule,
 };
 pub use self::vault_config::{
-    SecretInput, admin_config, delete_secret, list_secrets, set_secret, update_config,
+    SecretInput, VaultConfirmInput, admin_config, delete_secret, list_secrets, set_secret,
+    update_config, vault_disable, vault_enable, vault_regenerate, vault_status,
 };
 
 #[cfg(test)]

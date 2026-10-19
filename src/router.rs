@@ -260,6 +260,21 @@ pub fn build_router(state: AppState) -> Router {
             "/admin/email/test",
             axum::routing::post(api::admin_email_test),
         )
+        // Credential-vault lifecycle (#77 defaults): inspect, enable, disable and
+        // regenerate the managed key without a restart.
+        .route("/admin/vault", get(api::vault_status))
+        .route(
+            "/admin/vault/enable",
+            axum::routing::post(api::vault_enable),
+        )
+        .route(
+            "/admin/vault/disable",
+            axum::routing::post(api::vault_disable),
+        )
+        .route(
+            "/admin/vault/regenerate",
+            axum::routing::post(api::vault_regenerate),
+        )
         .route("/admin/secrets", get(api::list_secrets))
         .route(
             "/admin/secrets/{key}",
