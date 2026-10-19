@@ -7,6 +7,24 @@ import { $, addDays, announce, askConfirm, askPrompt, clearFormError, el, format
 import { ed, parseHundredths, refreshInvoices } from './invoices.js';
 import { customerName, state } from './state.js';
 
+// ------------------------------------------------ advanced billing gate ----
+//
+// Recurring invoice schedules (#136) and retainers (#144) are not finished, so
+// the GUI does not offer them. One switch controls the whole surface: the
+// `data-advanced-billing` attribute on <html> in web/index.html. `"off"` (the
+// shipped value) hides the `#advanced-billing` block through the stylesheet and
+// makes boot.js skip its data fetches; changing that single attribute to `"on"`
+// turns the tools back on. The API, the stored records and the business logic
+// are untouched — this is a visibility switch only.
+export const ADVANCED_BILLING_ENABLED =
+  document.documentElement.getAttribute('data-advanced-billing') !== 'off';
+
+// Mirror the switch onto the container itself, so the block is inert even when
+// the stylesheet has not loaded: `hidden` removes the whole subtree from the
+// tab order and from the accessibility tree.
+const advancedBilling = document.getElementById('advanced-billing');
+if (advancedBilling) advancedBilling.hidden = !ADVANCED_BILLING_ENABLED;
+
 // --------------------------------------------------- invoice wizard (#134) --
 //
 // Harvest-shaped staged flow over the SAME server pipeline: preview via

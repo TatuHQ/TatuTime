@@ -70,6 +70,13 @@ const PAIRS = [
   ['nav tab ink on the rail', '--fg', '--sidebar-bg', 4.5],
   ['nav tab ink on rail hover', '--fg', '--row-alt', 4.5],
   ['selected nav tab ink on its tint', '--brand-deep', '--accent-soft', 4.5],
+  // #F follow-up: the invoice status toggle is a filter control beside the
+  // Vanilla fields, so it takes the same input fill and underline boundary.
+  // Both states and the two non-text affordances are pinned for both themes.
+  ['status toggle ink on input fill', '--fg', '--input-bg', 4.5],
+  ['pressed status toggle ink on its tint', '--brand-deep', '--accent-soft', 4.5],
+  ['input underline vs input fill (UI)', '--field-rule', '--input-bg', 3.0],
+  ['pressed segment indicator vs input fill (UI)', '--accent', '--input-bg', 3.0],
 ];
 
 let failures = 0;

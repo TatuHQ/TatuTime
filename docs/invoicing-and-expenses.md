@@ -174,6 +174,13 @@ A retainer is an append-only ledger per customer/project:
 The balance is always reconciled from the transactions, never stored as a
 mutable figure. Retainer administration is an admin function.
 
+Recurring invoice schedules and the retainer administration panel are hidden
+in the browser GUI while those tools are being finished: the page shell sets
+`data-advanced-billing="off"` on `<html>`, which removes the `#advanced-billing`
+block from rendering, the accessibility tree and the tab order. Setting that
+one attribute to `on` restores the panels. The REST API for both features
+remains available and unchanged.
+
 ## Catalog and document templates
 
 - **Products and services** are reusable manual invoice line types with a

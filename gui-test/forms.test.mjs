@@ -80,8 +80,10 @@ test('the shell ships the official form vocabulary and no bespoke class (#232 ph
     assert.equal(document.querySelectorAll('.hint').length, 0, 'no .hint survives');
     assert.equal(document.querySelectorAll('.form-error').length, 0, 'no .form-error survives');
     // The filter bars and the dialog prompt stay app-owned on purpose: they are
-    // horizontal/compact controls, not stacked form rows.
-    assert.equal(document.querySelectorAll('.filter-field').length, 5, 'the compact filter controls stay app-owned');
+    // horizontal/compact controls, not stacked form rows. 11 = the hierarchy
+    // registers (1 projects + 2 tasks + 2 expenses) plus the six invoice filter
+    // fields (status, search, customer, project, from, to).
+    assert.equal(document.querySelectorAll('.filter-field').length, 11, 'the compact filter controls stay app-owned');
     dom.window.close();
 });
 

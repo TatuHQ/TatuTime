@@ -2,7 +2,7 @@
 // Moved from the original monolithic app.js; behaviour is unchanged.
 
 
-import { addRecurring, createRetainer, iwClose, iwInit, iwOpen, refreshCatalog, refreshRetainers, refreshSchedules, saveCatalogItem } from './billing.js';
+import { ADVANCED_BILLING_ENABLED, addRecurring, createRetainer, iwClose, iwInit, iwOpen, refreshCatalog, refreshRetainers, refreshSchedules, saveCatalogItem } from './billing.js';
 import { calState, refreshTimeCal, shiftMonth } from './calendar.js';
 import { $, addDays, announce, clearFormError, decorateUbuntuButton, isoDate, mondayOf } from './dom.js';
 import { ADD_CATEGORY_VALUE, addCategory, addExpenseCategory, fillCategorySelect, refreshCategories, refreshExpenses, refreshSubmissions, resetCategoryForm, resetExpenseForm, saveExpense, submitWeek } from './expenses.js';
@@ -39,8 +39,12 @@ export function refreshPanel(tabId) {
     'tab-timesheet': refreshTimesheetView,
     'tab-invoices': async () => {
       await refreshInvoices();
-      await refreshSchedules();
-      await refreshRetainers();
+      // Advanced billing tools are hidden while unfinished (see billing.js):
+      // their DOM stays in place, but a hidden panel is not refreshed.
+      if (ADVANCED_BILLING_ENABLED) {
+        await refreshSchedules();
+        await refreshRetainers();
+      }
     },
     'tab-expenses': refreshExpenses,
     'tab-submissions': refreshSubmissions,
@@ -639,10 +643,13 @@ export async function startApp() {
   wireSetupPanels(today);
   await loadCustomers();
   await refreshCustomerPickers(); // fills all four pickers, no fetches
-  refreshSchedules().catch?.(() => { });
+  // Advanced billing tools are hidden while unfinished (see billing.js): their
+  // admin-tier reads are skipped, not merely hidden, so a boot never fetches
+  // data no view can show.
+  if (ADVANCED_BILLING_ENABLED) refreshSchedules().catch?.(() => { });
   // SET-02: the catalog is an admin-tier read; a member boot must not fetch it.
   if (state.isAdmin) refreshCatalog().catch?.(() => { });
-  refreshRetainers().catch?.(() => { });
+  if (ADVANCED_BILLING_ENABLED) refreshRetainers().catch?.(() => { });
   // First-run trigger (#111): zero customers after a successful login opens
   // the wizard as a modal. Once a customer exists it never auto-opens — the
   // sidebar entry reopens it manually.

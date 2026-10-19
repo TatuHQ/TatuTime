@@ -1578,6 +1578,13 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
 {
   window.document.getElementById('tab-invoices').dispatchEvent(new window.Event('click', { bubbles: true }));
   await settle('the Invoices section to reload before creating the retainer');
+  // The tools are not offered while unfinished: web/index.html's single
+  // `data-advanced-billing="off"` gate hides the whole block. These journeys
+  // drive the retained DOM and the API directly, so the #144/#136 logic stays
+  // covered without pretending the UI is reachable.
+  check('advanced billing tools are hidden from users (#144/#136)',
+    window.document.getElementById('advanced-billing').hidden === true
+    && window.document.documentElement.getAttribute('data-advanced-billing') === 'off');
   window.document.getElementById('ret-customer').value = custOpt.value;
   window.document.getElementById('ret-customer').dispatchEvent(new window.Event('change', { bubbles: true }));
   await waitFor(() => window.document.getElementById('ret-project').options.length > 1, {

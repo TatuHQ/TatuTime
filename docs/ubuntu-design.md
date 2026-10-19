@@ -344,19 +344,34 @@ These are **decided** app-owned surfaces, not leftovers of an unfinished sweep.
 Each keeps its bespoke CSS on purpose, with the reason recorded so it is not
 mistaken for debt:
 
-- **Horizontal filter / tool rows (`.bar`, `.filter-field`).** These are compact,
-  always-horizontal tool rows (a picker plus buttons on one line), not stacked
-  form rows. Vanilla's `p-form--inline` only lays out at `>= 1036px` and turns
-  each `.p-form__group` into an inline row; below that width it does nothing, so
-  the app owns the row's wrap behaviour and intrinsic control widths (the sheet
-  scopes the width reset to `.bar …` / `.inv-filters …`).
+- **Horizontal filter / tool rows (`.bar`, `.filter-row`, `.filter-field`).**
+  These are compact, always-horizontal tool rows (a picker plus buttons on one
+  line), not stacked form rows. `.filter-row` is the shared primitive: a
+  wrapping flex row whose items align on their controls' bottom edge, with the
+  label above its control inside `.filter-field`. One token owns the gap
+  (`--space-sm`) and another the label rhythm (`--space-2xs`), so a new row
+  cannot drift. Intrinsic control widths keep the invoice register on one line
+  at 1280px and wrapped onto two aligned lines at 900px. Vanilla's
+  `p-form--inline` only lays out at `>= 1036px` and turns each `.p-form__group`
+  into an inline row; below that width it does nothing, so the app owns the
+  row's wrap behaviour and intrinsic control widths (the sheet scopes the width
+  reset to `.bar …` and gives the invoice row's search/select/date fields their
+  own widths).
+- **The filter controls' shared skin (`--control-height`, `--field-rule`,
+  `--input-bg`).** Filter fields, the Columns disclosure and the Invoices
+  Open|All control are one boundary treatment: a `--control-height` box
+  (2.26rem, Vanilla's underline control) filled with `--input-bg` and closed by
+  a 1px `--field-rule` bottom rule, with the light values and both dark blocks
+  defining the two colour tokens.
 - **The segmented control (`.seg` / `.seg-btn`).** The Invoices Open|All control
   is a `role="group"` of `aria-pressed` toggle buttons, **not** a tablist, so it
-  keeps the app's segmented skin rather than moving onto `p-tabs` (the plan's
-  earlier "tablist" naming was corrected in increment 5). #349 kept that same
-  `.seg` group and gave it the standard Ubuntu segmented shell (one border,
-  segments divided by the app line colour); the skin changed, never the
-  `aria-pressed` button semantics.
+  keeps its own semantics rather than moving onto `p-tabs` (the plan's earlier
+  "tablist" naming was corrected in increment 5). It wears the same underline
+  control skin as the fields beside it — height, fill and bottom rule from the
+  shared tokens, a flat accent-tinted pressed segment in the rail's
+  selected-tab ink, and an inset bottom indicator in the accent colour — rather
+  than a bordered segmented shell. Weight does not change between the two
+  states, so the segments keep their width and the row never shifts.
 - **The tab / list rails' geometry.** The sidebar rail is a *vertical* tablist
   and the two in-view strips keep their heading-slot widths and #145 uniform
   segment widths; Vanilla's `.p-tabs` container is deliberately unused (it boxes
