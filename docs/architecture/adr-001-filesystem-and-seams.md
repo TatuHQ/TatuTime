@@ -1,7 +1,7 @@
 # ADR-001: Filesystem storage, entity ownership, and integration seams
 
 Status: accepted
-Deciders: Emanuele Ciurleo (owner), AI agent
+Deciders: Emanuele Ciurleo (owner), Maintainers
 Applies to: #11 (model), #18 (seams), and all downstream phases
 
 ## Context
@@ -32,9 +32,9 @@ but first priority to design for**.
   immutable document, and never rewritten — a pure function of the invoice, so
   `backup.rs` (which walks non-JSON files) archives it and its manifest
   checksum proves the bytes survive a restore.
-- Writes are atomic (temp file + rename) and serialised by a single process-local
-  lock. Path components are only ever built from validated ids/codes, so request
-  input can never traverse the tree.
+- Writes are atomic (temp file + rename) and serialised by a process-local lock
+  plus a cross-process file lock (`flock`). Path components are only ever built
+  from validated ids/codes, so request input can never traverse the tree.
 - The GUI never reads storage; it is a pure presentation layer over the API.
 
 ### 2. Money and time are exact integers
@@ -78,15 +78,16 @@ Two hard requirements that must exist **before** Phase 6 so imported/derived dat
 is traceable and lockable:
 
 - Entries carry a **`source`** (`manual | timer | calendar-import`).
-- A single shared **lock check** composing invoice (#8) and submission (#16)
-  providers: an entry locked by any holder rejects edits/deletes with 409, and
-  an unverifiable lock state refuses the write fail-closed with 503 (#185).
-  An invoice locks while it is *open* (`issued | partly_paid`): settling or
-  writing one off **releases** its entries deliberately — the issued document
-  is already frozen by its rate snapshots, while the timesheet stays
-  correctable. Reimbursement claims (#24) lock expenses via a direct scan in
-  `api::expenses`, not through this seam (folding them in is a documented
-  follow-up).
+- A single shared **lock check** composing invoice (#8), submission (#16) and
+  reimbursement-claim (#24) providers: a record locked by any holder rejects
+  edits/deletes with 409, and an unverifiable lock state refuses the write
+  fail-closed with 503 (#185).
+  An invoice freezes its entries and expenses from issue onward. Settling
+  (`paid`/`partly_paid`) or writing off (`written_off`) does **not** release
+  them: the archived invoice document is the record of what was billed, and the
+  timesheet must never drift from it. Drafts lock nothing and can be deleted.
+  Reimbursement claims lock expenses through `ClaimLock`, which is part of
+  `CombinedLocks` (the earlier direct scan in `api::expenses` is gone).
 
 ## Consequences
 

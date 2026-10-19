@@ -20,7 +20,7 @@ non-root uid **10001**, and only `/data` writable.
 - [8. Backups and restore](#8-backups-and-restore)
 - [9. Upgrades](#9-upgrades)
 - [10. Troubleshooting](#10-troubleshooting)
-- [11. Verified environment variables](#11-verified-environment-variables)
+- [11. Environment variables on Unraid](#11-environment-variables-on-unraid)
 
 ---
 
@@ -28,13 +28,12 @@ non-root uid **10001**, and only `/data` writable.
 
 | Item | Value |
 |---|---|
-| Image | `ghcr.io/tucanotechnology/tucanotime:latest` (public) |
+| Image | `ghcr.io/tucanotechnology/tucanotime:latest` (published by CI) |
 | Runtime base | `gcr.io/distroless/cc-debian13:nonroot` — **no shell**, no package manager |
 | User | `10001:10001` (numeric, fixed in the image) |
 | Writable paths | `/data` (bind mount) and `/tmp` (tmpfs); nothing else |
 | Port | container `8080`, host `8080` |
 | State | JSON documents on `/mnt/user/appdata/tucanotime` — no database |
-| Size | ~60 MB compressed image |
 
 Because the image has no shell, Unraid's **Console** button will not open a
 terminal. That is expected and is part of the hardening. Use
@@ -136,17 +135,18 @@ ghcr.io/tucanotechnology/tucanotime:latest
 ghcr.io/tucanotechnology/tucanotime:sha-<short-sha>
 ```
 
-The package is **public**: an anonymous `docker manifest inspect` succeeds, so
-Unraid does **not** need registry credentials to pull `:latest`. Example
-reproducible pin:
+Published at `ghcr.io/tucanotechnology/tucanotime` as `:latest` and
+`:sha-<short>`. Check the registry package visibility: when it is public, an
+anonymous `docker manifest inspect` succeeds and Unraid does **not** need
+registry credentials to pull `:latest`. Example reproducible pin:
 
 ```
-ghcr.io/tucanotechnology/tucanotime:sha-53c8da9
+ghcr.io/tucanotechnology/tucanotime:sha-<short-sha>
 ```
 
 Use the `sha-`-prefixed tag, not a bare SHA, when you want a fixed build.
 
-If the package is ever made private, authenticate on Unraid once and pull:
+If the package is private, authenticate on Unraid once and pull:
 
 ```sh
 docker login ghcr.io -u <github-user> -p <PAT-with-read:packages>
@@ -165,8 +165,9 @@ cd TucanoTime
 docker build -t tucanotime:unraid .
 ```
 
-The final image is about **60 MB**. Then set the template **Repository** to
-`tucanotime:unraid`. Unraid refuses to start a container if it cannot resolve
+Measure the result with `docker image ls tucanotime:unraid` if you need the
+compressed size. Then set the template **Repository** to `tucanotime:unraid`.
+Unraid refuses to start a container if it cannot resolve
 the image in a registry, so keep the local tag present (build before *Apply*,
 or `docker tag tucanotime:unraid tucanotime:latest`) and use **Apply** without
 forcing a pull.
@@ -202,8 +203,9 @@ characters (192 bits), written atomically with mode 0600 by uid 10001. The
 The **Vault key file** field in the template (`TUCANO_SECRET_KEY_FILE`) is an
 *optional* external override and is empty by default. Set it only when the key
 must live outside the data directory — for example a Docker secret mounted
-into the container. The file it names must hold exactly 32 ASCII bytes (a
-trailing newline is trimmed); an external key always wins and is never copied
+into the container. The file it names must hold exactly 32 bytes (the generated
+key is 32 base64url characters; a trailing newline is trimmed); an external key
+always wins and is never copied
 into `/data`. With no override, the app uses the key file it generated.
 
 While either key variable (or a valid `TUCANO_VAULT_ENABLED`) is set, the
@@ -302,7 +304,7 @@ use:
 If you prefer environment variables over the vault, the equivalent names are
 `TUCANO_SMTP_HOST`, `TUCANO_SMTP_PORT`, `TUCANO_SMTP_FROM`,
 `TUCANO_SMTP_USERNAME` and `TUCANO_SMTP_PASSWORD` (the vault wins when both
-are set; see [section 11](#11-verified-environment-variables)).
+are set; see [section 11](#11-environment-variables-on-unraid)).
 
 ### Option B — MailHog (testing only)
 
@@ -333,9 +335,12 @@ the invoice/reminder flows without touching a real mailbox.
   creates the first administrator, so start it on a trusted network, create
   the admin immediately, and firewall the port if the LAN is not trusted.
 - **TLS.** Put a TLS reverse proxy in front of the WebUI when it is exposed
-  beyond a trusted LAN, and then set `TUCANO_SECURE_COOKIES=1`. Over plain
-  HTTP keep it at `0`, otherwise the browser discards the session cookie and
-  login loops.
+  beyond a trusted LAN, and then set **both** `TUCANO_ENV=production` and
+  `TUCANO_SECURE_COOKIES=1`. The template's `TUCANO_SECURE_COOKIES=0` overrides
+  the Secure-cookie default that `TUCANO_ENV=production` would otherwise enable.
+  Over plain HTTP keep `TUCANO_SECURE_COOKIES=0` (the template default) and do
+  not set `TUCANO_ENV=production`, otherwise the browser discards the session
+  cookie and login loops.
 - **Read-only root.** `--read-only` is intentional. Only the `/data` bind
   mount and the `/tmp` tmpfs accept writes; the binary itself needs nothing
   else. Upgrades work normally because the image is replaced, not modified.
@@ -439,7 +444,7 @@ writable by uid 10001.
 | **`vault_disabled`** in Settings → Email | The vault is disabled by configuration (`TUCANO_VAULT_ENABLED=false` or `vault_enabled: false` in `config.json`), or the app could not write `/data/vault.key` because the data directory is not writable by uid 10001. Check the *Vault key* card in Settings → Security: `config`/`env` means it was switched off deliberately; `write_failed` means fix ownership/permissions and restart. |
 | **Vault actions disabled / 409 `vault_managed_externally`** | `TUCANO_VAULT_ENABLED`, `TUCANO_SECRET_KEY` or `TUCANO_SECRET_KEY_FILE` is set, so the environment owns the lifecycle. Change or remove that variable (or the external key file) — the Settings enable/disable/regenerate actions only work when the app manages `/data/vault.key`. |
 | Container **refuses to start** with "vault store found on disk ... key is missing" | `secrets.bin` exists but no key can open it. Restore the original `vault.key` (or the backup that contains it), or point `TUCANO_SECRET_KEY_FILE` at the original external key; do not delete `secrets.bin` unless you accept losing the stored credentials. |
-| Container **refuses to start** with "TUCANO_SECRET_KEY is configured but invalid" | An external key is not exactly 32 ASCII characters. Generated keys are always 32 characters; for a manual one, `openssl rand -hex 16` prints 32 characters (`-hex 32` prints 64 and is rejected). |
+| Container **refuses to start** with "TUCANO_SECRET_KEY is configured but invalid" | An external key is not exactly 32 bytes. Generated keys are 32 base64url characters; for a manual one, `openssl rand -hex 16` prints 32 characters (`-hex 32` prints 64 and is rejected). |
 | **Console / `docker exec` fails** | Expected: distroless has no shell. Use `docker logs -f TucanoTime`. |
 | **Port already in use** | Change the host side of the WebUI port mapping (for example `8081`), keep the container side at `8080`, and update the WebUI URL. |
 | Second container on the same appdata exits immediately | The single-instance guard (`.server.lock`) refuses a second server on the same data directory. Run one container per appdata folder. |
@@ -455,62 +460,36 @@ docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' TucanoTime
 
 ---
 
-## 11. Verified environment variables
+## 11. Environment variables on Unraid
 
-Every variable below is read by the binary (grep of `src/` at v0.1.40), with
-the file and line where it is read. Only the first four appear in the Unraid
-template; the rest are optional and can be supplied through the template's
-**Extra Parameters** (`-e NAME=value`) or left to `config.json` / the vault.
+The template sets only the variables that must match its own mapping. Everything
+else is optional and can be supplied through the template's **Extra Parameters**
+(`-e NAME=value`), `config.json`, or the credential vault. The complete
+catalogue, defaults and `_FILE` recipes are in
+[`docs/configuration.md`](../../docs/configuration.md).
 
-| Variable | Read at | Format / default |
-|---|---|---|
-| `TUCANO_DATA_DIR` | [`src/main.rs:17`](../../src/main.rs#L17) | path, default `Data`; the image sets `/data` |
-| `TUCANO_PORT` | [`src/main.rs:54`](../../src/main.rs#L54), [`src/main.rs:124`](../../src/main.rs#L124) | TCP port, default `8080` |
-| `TUCANO_ENV` | [`src/main.rs:153`](../../src/main.rs#L153) | `production` enables the strict secret policy and Secure cookies by default |
-| `TUCANO_SECURE_COOKIES` | [`src/main.rs:162`](../../src/main.rs#L162) | `0` / `false` disables the cookie `Secure` flag; empty means "the `TUCANO_ENV` default" |
-| `TUCANO_SESSION_SECRET` | [`src/main.rs:156`](../../src/main.rs#L156), [`src/auth.rs:202`](../../src/auth.rs#L202) | at least 32 bytes in production |
-| `TUCANO_SESSION_SECRET_FILE` | [`src/main.rs:157`](../../src/main.rs#L157), [`src/auth.rs:205`](../../src/auth.rs#L205) | path; file contents trimmed; at least 32 bytes in production |
-| `TUCANO_SECRET_KEY` | [`src/main.rs:180`](../../src/main.rs#L180), [`src/vault.rs:254`](../../src/vault.rs#L254) | optional override; **exactly 32 bytes** (ASCII), AES-256-GCM vault key; makes the Settings key actions 409 `vault_managed_externally` |
-| `TUCANO_SECRET_KEY_FILE` | [`src/main.rs:181`](../../src/main.rs#L181), [`src/vault.rs:254`](../../src/vault.rs#L254) | optional override; path to a file whose trimmed contents are **exactly 32 bytes**; same 409 behaviour |
-| `TUCANO_VAULT_ENABLED` | [`src/main.rs:174`](../../src/main.rs#L174), [`src/appconfig.rs:161`](../../src/appconfig.rs#L161) | valid `true`/`false` (default `true`); `false` disables the vault (a `secrets.bin` on disk then refuses to start); a valid value makes the lifecycle operator-managed (409 `vault_managed_externally`) |
-| `TUCANO_MAX_DOCS` | [`src/main.rs:182`](../../src/main.rs#L182), [`src/store/mod.rs:385`](../../src/store/mod.rs#L385) | integer, default `50000`, range 10..1,000,000 |
-| `TUCANO_REMINDER_DAYS` | [`src/appconfig.rs:56`](../../src/appconfig.rs#L56) | integer 1..365, default `7` |
-| `TUCANO_ORG_NAME` | [`src/appconfig.rs:66`](../../src/appconfig.rs#L66) | string, default `TucanoTime` |
-| `TUCANO_BASE_CURRENCY` | [`src/appconfig.rs:134`](../../src/appconfig.rs#L134) | ISO 4217 code, e.g. `EUR`; unset disables FX display |
-| `TUCANO_SSO_ADMIN_GROUP` | [`src/appconfig.rs:74`](../../src/appconfig.rs#L74), [`src/api/auth.rs:271`](../../src/api/auth.rs#L271) | string, default empty |
-| `TUCANO_SSO_ALLOWED_DOMAINS` | [`src/appconfig.rs:80`](../../src/appconfig.rs#L80), [`src/sso.rs:313`](../../src/sso.rs#L313) | comma-separated domains; empty is fail-closed |
-| `TUCANO_CALENDAR_OAUTH_REDIRECT` | [`src/appconfig.rs:86`](../../src/appconfig.rs#L86) | string, default `/api/calendar/oauth/callback` |
-| `TUCANO_GOOGLE_CLIENT_ID` | [`src/appconfig.rs:94`](../../src/appconfig.rs#L94), [`src/calendar_oauth.rs:379`](../../src/calendar_oauth.rs#L379) | OAuth client id (public half) |
-| `TUCANO_MS_CLIENT_ID` | [`src/appconfig.rs:100`](../../src/appconfig.rs#L100), [`src/calendar_oauth.rs:401`](../../src/calendar_oauth.rs#L401) | OAuth client id (public half) |
-| `TUCANO_QBO_BASE_URL` | [`src/appconfig.rs:106`](../../src/appconfig.rs#L106), [`src/accounting.rs:85`](../../src/accounting.rs#L85) | URL override |
-| `TUCANO_XERO_BASE_URL` | [`src/appconfig.rs:112`](../../src/appconfig.rs#L112), [`src/accounting.rs:100`](../../src/accounting.rs#L100) | URL override |
-| `TUCANO_FX_RATES_FILE` | [`src/fx.rs:23`](../../src/fx.rs#L23) | path to an offline rates document |
-| `TUCANO_WEB_DIR` | [`src/assets.rs:52`](../../src/assets.rs#L52) | **development only**: serve assets from disk |
-| `TUCANO_SMTP_HOST` | [`src/email.rs:279`](../../src/email.rs#L279) | hostname; unset disables SMTP |
-| `TUCANO_SMTP_PORT` | [`src/email.rs:280`](../../src/email.rs#L280) | integer, default `25` |
-| `TUCANO_SMTP_FROM` | [`src/email.rs:284`](../../src/email.rs#L284) | address, default `noreply@localhost` |
-| `TUCANO_SMTP_USERNAME` | [`src/email.rs:289`](../../src/email.rs#L289) | string; with a password enables `AUTH LOGIN` |
-| `TUCANO_SMTP_PASSWORD` | [`src/email.rs:290`](../../src/email.rs#L290) | string; **set it in the vault, not the template** |
-| `TUCANO_OIDC_CLIENT_SECRET` | [`src/sso.rs:330`](../../src/sso.rs#L330) | string |
-| `TUCANO_OIDC_ISSUER` | [`src/sso.rs:348`](../../src/sso.rs#L348) | string, default `oidc` |
-| `TUCANO_SAML_CERT_FINGERPRINT` | [`src/sso.rs:331`](../../src/sso.rs#L331) | string |
-| `TUCANO_SAML_SIGNING_SECRET` | [`src/sso.rs:332`](../../src/sso.rs#L332) | string |
-| `TUCANO_SAML_ISSUER` | [`src/sso.rs:360`](../../src/sso.rs#L360) | string, default `saml` |
-| `TUCANO_CALENDAR_ICS` | [`src/api/timer_calendar.rs:145`](../../src/api/timer_calendar.rs#L145) | http(s) URL or local file path |
-| `TUCANO_CALENDAR_PROVIDER` | [`src/calendar_oauth.rs:355`](../../src/calendar_oauth.rs#L355) | `google` or `microsoft` |
-| `TUCANO_GOOGLE_TOKEN` / `TUCANO_GOOGLE_REFRESH_TOKEN` | [`src/calendar_oauth.rs:372`](../../src/calendar_oauth.rs#L372), [`src/calendar_oauth.rs:377`](../../src/calendar_oauth.rs#L377) | OAuth tokens |
-| `TUCANO_GOOGLE_CALENDAR` | [`src/calendar_oauth.rs:373`](../../src/calendar_oauth.rs#L373) | calendar id, default `primary` |
-| `TUCANO_GOOGLE_CLIENT_SECRET` | [`src/calendar_oauth.rs:382`](../../src/calendar_oauth.rs#L382) | string |
-| `TUCANO_MS_TOKEN` / `TUCANO_MS_REFRESH_TOKEN` | [`src/calendar_oauth.rs:396`](../../src/calendar_oauth.rs#L396), [`src/calendar_oauth.rs:398`](../../src/calendar_oauth.rs#L398) | OAuth tokens |
-| `TUCANO_MS_CLIENT_SECRET` | [`src/calendar_oauth.rs:404`](../../src/calendar_oauth.rs#L404) | string |
-| `TUCANO_QBO_TOKEN` | [`src/accounting.rs:79`](../../src/accounting.rs#L79) | OAuth token |
-| `TUCANO_XERO_TOKEN` | [`src/accounting.rs:93`](../../src/accounting.rs#L93) | OAuth token |
+| Variable | Template value | Why it is in the template |
+| --- | --- | --- |
+| `TUCANO_DATA_DIR` | `/data` | Must match the `Data` path target |
+| `TUCANO_PORT` | `8080` | Must match the WebUI port target and the healthcheck |
+| `TUCANO_SECURE_COOKIES` | `0` | Plain-HTTP LAN login; set `1` for HTTPS. This template value overrides the production Secure-cookie default |
+| `TUCANO_SECRET_KEY_FILE` | empty | Optional external vault-key override; empty means the app manages `/data/vault.key` |
 
-`RUST_LOG` is also honoured by the tracing subscriber (default `info`).
+Common optional additions:
+
+| Variable | Use |
+| --- | --- |
+| `TUCANO_ENV` | Set `production` when serving over HTTPS; it enables the strict session-secret policy. For HTTPS set **both** `TUCANO_ENV=production` and `TUCANO_SECURE_COOKIES=1` — the template's `0` overrides the Secure-cookie default |
+| `TUCANO_SESSION_SECRET_FILE` | Mount an external session key instead of the auto-created `/data/session.key` |
+| `TUCANO_VAULT_ENABLED` | `false` disables the vault; any valid value makes the lifecycle operator-managed |
+| `TUCANO_MAX_DOCS` | Per-collection document cap (default 50,000) |
+| `TUCANO_SSO_ALLOWED_DOMAINS` | Comma-separated SSO domains; empty is fail-closed |
+| `TUCANO_SMTP_HOST` / `_PORT` / `_FROM` / `_USERNAME` / `_PASSWORD` | SMTP relay; prefer configuring these in **Settings → Email** so they live in the vault |
+| `RUST_LOG` | Tracing filter (default `info`) |
 
 Neither vault key variable is required: the app generates and manages
 `<data>/vault.key` on its own. When an external key is wanted, prefer
-`TUCANO_SECRET_KEY_FILE` over the plain `TUCANO_SECRET_KEY` (and likewise
+`TUCANO_SECRET_KEY_FILE` over `TUCANO_SECRET_KEY` (and likewise
 `TUCANO_SESSION_SECRET_FILE` over `TUCANO_SESSION_SECRET`): the value never
 appears in the Unraid template XML or `docker inspect`. Setting either (or
 `TUCANO_VAULT_ENABLED`) makes the vault operator-managed: the Settings

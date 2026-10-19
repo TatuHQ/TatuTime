@@ -1,5 +1,10 @@
 # Ubuntu/Vanilla rollout — page-by-page migration plan
 
+> **Historical tracker.** This page records the page-by-page migration as it was
+> planned and reviewed. It is kept for the record and is not maintained as
+> current documentation; the current design rationale is in
+> [`ubuntu-design.md`](ubuntu-design.md).
+
 Goal: standardise the whole GUI on Ubuntu/Vanilla components **without any
 big-bang layout change**. Each page is migrated, reviewed live at its own URL,
 and signed off before the next one starts. This doc is the tracker;
@@ -14,7 +19,7 @@ component backlog.
   `p-card` twins.
 - **Page routing** — the JSON API moved under `/api`; every view now has a
   stable, case-insensitive URL (`spa_page` in `src/lib.rs`, `TAB_ROUTES` in
-  `web/app.js`). This is what makes per-page review-and-sign-off practical.
+  `web/js/route.js`). This is what makes per-page review-and-sign-off practical.
 - **Auth + form controls (#232 increment 1)** — the vendor bundle now carries the
   official form family (`vf-b-forms`/`vf-p-links`); the hand-rolled control
   styles are retired and the auth/wizard/entry/user/customer forms use the
@@ -201,6 +206,8 @@ before #232 can be closed.
 | 13 | Settings — Invoice template | `/settings/invoice-template` | ⬜ |
 | 14 | Settings — Products & services | `/settings/catalog` | ⬜ |
 | 15 | Settings — Expense categories | `/settings/expenses` | ⬜ |
+| 16 | Settings — Company identity | `/settings/company` | ⬜ |
+| 17 | Settings — Email | `/settings/email` | ⬜ |
 
 Cross-navigation (row "Projects" buttons, wizard finish, calendar → day) is
 expected to keep working through the tabs' click handlers; a follow-up ticket

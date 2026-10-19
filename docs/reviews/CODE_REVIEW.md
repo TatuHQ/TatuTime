@@ -1,5 +1,7 @@
 # Code review — TucanoTime (2026-10-05)
 
+> *Historical snapshot — not current guidance. See the reviews index.*
+
 Full-system review after the integration burst. Every line reference was re-read
 and verified; two sub-review claims I could **not** reproduce are called out at the
 bottom so nobody chases them.

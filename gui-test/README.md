@@ -1,7 +1,9 @@
 # GUI harness (jsdom + real browser)
 
-Headless smoke test that loads `web/index.html` + `web/app.js` into jsdom and
-drives the real forms against a running server (default `http://localhost:8099`).
+Headless smoke test that loads `web/index.html` into jsdom and concatenates the
+ES modules in `web/js/` (see [`load-app.mjs`](./load-app.mjs)); `web/app.js` is
+the browser entry point. It drives the real forms against a running server
+(default `http://localhost:8099`).
 
 ```sh
 cargo build --release

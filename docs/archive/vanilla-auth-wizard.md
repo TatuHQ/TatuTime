@@ -1,5 +1,9 @@
 # Task: make auth window + first-customer wizard share the Vanilla card look (#229)
 
+> **Historical session notes.** This file records a past implementation session.
+> It is kept for the record, is not part of the human documentation index and is
+> not maintained as current guidance.
+
 ## Goal
 The first-run **sign-in window** (`#auth-form`) and the **add-first-customer
 setup wizard** (`#wizard-dialog`) must look the **same**, built on **pure

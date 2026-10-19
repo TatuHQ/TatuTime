@@ -1,5 +1,7 @@
 # Code, refactor and data-layout review — TucanoTime (2026-10-15)
 
+> *Historical snapshot — not current guidance. See the reviews index.*
+
 Branch: `fix/gui-diagnosable-refusals` (three commits on `23e3af9`). Method: read the
 source, run every gate in the repository, and drive the running server with crafted
 payloads — each claim below carries the `file:line` or the command that produced it.

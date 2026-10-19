@@ -1,5 +1,9 @@
 # Ubuntu and Vanilla Design Review (#181)
 
+> **Status: design record.** This page records the design rationale and the
+> component backlog behind the current GUI. The rollout order and per-page
+> tracking are in the [historical migration plan](ubuntu-migration-plan.md).
+
 ## Findings
 
 The existing UI used Ubuntu colour names but not the Ubuntu typeface. Small
@@ -269,7 +273,7 @@ each gated by the jsdom + contrast suites and a manual keyboard/AT pass on the
 affected screens. **Page-by-page execution order, review URLs and ground rules
 moved to [`ubuntu-migration-plan.md`](ubuntu-migration-plan.md)** after the API
 moved under `/api` and every view gained a stable path (`spa_page` in
-`src/lib.rs` ↔ `TAB_ROUTES` in `web/app.js` — keep them in sync):
+`src/lib.rs` ↔ `TAB_ROUTES` in `web/js/route.js` — keep them in sync):
 
 0. **Stage 2b** — cards: ✅ the **first-admin sign-in** and the
    **first-run setup wizard** are twins built on Vanilla `p-card`
