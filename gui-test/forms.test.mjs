@@ -93,10 +93,12 @@ test('every p-form__group pairs its label with its own control (#232 phase 2b)',
     for (const group of groups) {
         const label = [...group.children].find((child) => child.tagName === 'LABEL');
         if (!label) {
-            // The composed rows carry no label of their own: the four grouped
+            // The composed rows carry no label of their own: the seven grouped
             // fieldsets (their rows are nested groups) and the "Contacts" row,
             // whose caption is a span referenced by the fieldset heading.
-            composed.push(`${group.tagName}${group.id ? '#' + group.id : ''}`);
+            // Keep the tag and the id apart: #354 gave three of the fieldsets
+            // ids, and the census counts elements, not their rendered selector.
+            composed.push({ tag: group.tagName, id: group.id });
             continue;
         }
         assert.ok(label.classList.contains('p-form__label'), `label in ${group.id || 'a group'} is p-form__label`);
@@ -112,8 +114,8 @@ test('every p-form__group pairs its label with its own control (#232 phase 2b)',
     // 151: the Settings split's 141 plus the ten Document label rows (#354).
     assert.equal(paired, 151, 'all 151 label/control pairs were verified');
     assert.equal(composed.length, 8, 'eight composed rows have no label of their own');
-    assert.equal(composed.filter((tag) => tag === 'FIELDSET').length, 7, 'seven grouped fieldsets');
-    assert.equal(composed.filter((tag) => tag.startsWith('DIV')).length, 1, 'the Contacts row');
+    assert.equal(composed.filter((row) => row.tag === 'FIELDSET').length, 7, 'seven grouped fieldsets');
+    assert.equal(composed.filter((row) => row.tag === 'DIV').length, 1, 'the Contacts row');
     dom.window.close();
 });
 

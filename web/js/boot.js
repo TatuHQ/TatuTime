@@ -380,9 +380,6 @@ export function wireWeekGrid() {
     $('contact-rows').appendChild(contactRow()).focus?.();
     $('contact-rows').lastChild.querySelector('input')?.focus();
   });
-  // #354: the payment-rail list's add control. Remove buttons are wired by the
-  // row builder itself (one <button> per row, no delegated handlers).
-  $('pay-rail-add').addEventListener('click', addPaymentRail);
   $('template-form').addEventListener('submit', saveInvoiceTemplate);
   $('template-terms').addEventListener('change', () => {
     $('template-terms-days-field').hidden = $('template-terms').value !== 'custom';
@@ -411,6 +408,10 @@ export function wireWeekGrid() {
 // `today` is passed in: the submission-week seed belongs to the boot date
 // seeding, not the wiring block (see #189 extraction).
 export function wireSetupPanels(today) {
+  // #354: the customer dialog's payment-rail list. The add control is wired
+  // with the other setup-panel controls; each row's Remove button is wired by
+  // the row builder itself (one <button> per row, no delegated handlers).
+  $('pay-rail-add').addEventListener('click', addPaymentRail);
   // #116: the day input only makes sense for `custom` terms.
   $('customer-terms').addEventListener('change', () => {
     $('customer-terms-days-field').hidden = $('customer-terms').value !== 'custom';

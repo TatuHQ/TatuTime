@@ -38,6 +38,11 @@ function setup({ customerList = customers } = {}) {
   const stub = `
 window.calls = { post: [], put: [] };
 api.get = async (path) => {
+  // The app's DOMContentLoaded boot probes /auth/status. The offline harness
+  // drives the wiring directly, so leave that probe pending: otherwise the
+  // first-run admin wizard opens at the first await and moves focus away from
+  // the dialog under test.
+  if (path === '/auth/status') return new Promise(() => { });
   if (path === '/customers') return { customers: ${JSON.stringify(customerList)} };
   let m = path.match(/^\\/customers\\/([^/]+)\\/projects$/);
   if (m) return { projects: ${JSON.stringify(projectsByCustomer)}[m[1]] || [] };
@@ -261,6 +266,10 @@ test('payment rails add, remove, renumber and validate against the right input (
   const rows = () => [...document.querySelectorAll('#pay-rails .payment-rail')];
   h.wireSetupPanels('2026-10-19');
   h.cancelCustomerEdit();
+  // The rails live in the customer dialog, which the app opens before Add is
+  // reachable; jsdom only focuses controls inside an open dialog (the setup
+  // stub's showModal records that state).
+  document.getElementById('customer-dialog').showModal();
 
   // Add: a real button appends a labelled fieldset and focuses its currency.
   const add = document.getElementById('pay-rail-add');

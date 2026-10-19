@@ -662,8 +662,12 @@ check('panels lead with their action, not a duplicate H2',
   && window.document.querySelector('#panel-expenses .ts-head button').id === 'expense-new'
   && window.document.querySelector('#panel-settings > .settings-head h2') === null);
 // Click "Projects" on the Tucano Time row: cross-navigation filters the Projects
-// section (#182) — no shared selection state anymore.
-const projBtn = [...window.document.querySelectorAll('#customer-table button')].find((b) => b.textContent === 'Projects');
+// section (#182) — no shared selection state anymore. Scope the button to that
+// row: the table is sorted by name and Globex comes first, so a document-wide
+// first match would open Globex's projects instead.
+const tucanoRow = [...window.document.querySelectorAll('#customer-table tbody tr')]
+  .find((row) => row.textContent.includes('Tucano Time'));
+const projBtn = [...tucanoRow.querySelectorAll('button')].find((b) => b.textContent === 'Projects');
 projBtn.dispatchEvent(new window.Event('click', { bubbles: true }));
 // The checks below read the *rendered* scoped list (scope label, empty state and
 // rows). Waiting only for the panel and the picker raced the table re-render the
@@ -1079,8 +1083,15 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
   check('the panel keeps its heading and accessible name (#349)',
     panel.getAttribute('aria-label') === 'Invoice document preview'
     && panel.querySelector('.ip-title').textContent === 'Invoice document');
-  check('the subject and letter HTML previews are gone (#349)',
-    !byId('ip-subject') && !byId('ip-letter'));
+  // #354 adds the invoice's frozen subject as a plain-text subtitle; the old
+  // letter HTML preview is still gone. Assert the exact frozen text (never
+  // injected markup) rather than only the element's presence.
+  check('the frozen subject is a plain-text subtitle and no letter HTML preview remains (#354)',
+    !!byId('ip-subject')
+    && byId('ip-subject').querySelectorAll('*').length === 0
+    && byId('ip-subject').hidden === false
+    && byId('ip-subject').textContent === String(issuedBody.subject || '').trim()
+    && !byId('ip-letter'));
   // The history is GET /invoices/{id}/timeline, newest-first, appended as text:
   // the description, the actor, then "on <Mon D, YYYY> at <h:mm AM/PM>".
   await waitFor(() => byId('ip-timeline').querySelectorAll('li').length > 0, {

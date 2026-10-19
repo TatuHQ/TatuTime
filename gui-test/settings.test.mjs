@@ -294,6 +294,9 @@ function setup({
 }
 
 const tabs = (document) => [...document.querySelectorAll('#settings-tabs [role="tab"]')];
+// The shell wraps long labels across source lines; the rendered/accessible
+// text collapses whitespace, so compare that form rather than the raw markup.
+const collapsedText = (element) => element.textContent.replace(/\s+/g, ' ').trim();
 const visibleTabs = (document) => tabs(document).filter((tab) => !tab.hidden).map((tab) => tab.id);
 const selected = (document) => tabs(document).filter((tab) => tab.getAttribute('aria-selected') === 'true').map((tab) => tab.id);
 const setValue = (document, id, value) => {
@@ -316,7 +319,7 @@ test('Settings lists the seven focused tabs in order for an admin', () => {
     const { dom, document } = setup();
     assert.deepEqual(tabs(document).map((tab) => tab.id), ROUTES.map(([, tab]) => tab));
     assert.deepEqual(
-        tabs(document).map((tab) => tab.textContent.trim()),
+        tabs(document).map(collapsedText),
         ['Users', 'Company', 'Invoice template', 'Products & services', 'Expense categories', 'Email', 'Security & runtime'],
     );
     for (const [tab, panelId] of ROUTES.map(([, tab, panel]) => [tab, panel])) {
@@ -875,8 +878,8 @@ test('a test send posts once and announces the recipient', async () => {
     await Promise.all([first, second]);
     assert.equal(t.calls().post.length, 1, 'single-flight: a double click sends once');
     assert.deepEqual(JSON.parse(JSON.stringify(t.calls().post[0])), { path: '/admin/email/test', body: { to: 'qa@tucanotime.test' } });
-    assert.match(document.getElementById('email-test-result').textContent, /qa@tucano\.test/);
-    assert.match(window.document.getElementById('live-region').textContent, /qa@tucano\.test/);
+    assert.match(document.getElementById('email-test-result').textContent, /qa@tucanotime\.test/);
+    assert.match(window.document.getElementById('live-region').textContent, /qa@tucanotime\.test/);
     dom.window.close();
 });
 

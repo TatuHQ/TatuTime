@@ -1346,7 +1346,7 @@ class Gate:
             "  for (var j = 0; j < g.children.length; j++) {"
             "    if (g.children[j].tagName === 'LABEL') { label = g.children[j]; break; }"
             "  }"
-            "  if (!label) continue;"  # the 3 grouped fieldsets + the Contacts row
+            "  if (!label) continue;"  # the 7 grouped fieldsets + the Contacts row
             "  var id = label.getAttribute('for');"
             "  var ctl = id ? document.getElementById(id) : null;"
             "  if (!ctl) { bad.push(String(id) + ': no control'); continue; }"

@@ -167,8 +167,8 @@ test('two ticked contacts send one request with both addresses in order', async 
         'both addresses travel in one ordered list');
     const result = document.getElementById('send-email-result');
     assert.equal(result.hidden, false, 'the result is announced inline');
-    assert.match(result.textContent, /ada@tucano\.test, bob@tucano\.test/,
-        'the success message names every recipient');
+    assert.match(result.textContent, /ada@tucanotime\.test, bob@tucanotime\.test/,
+        'the success message names every recipient, in order');
     dom.window.close();
 });
 
