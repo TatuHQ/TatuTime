@@ -1902,6 +1902,11 @@ if (emailBtn) {
     .some((b) => b.textContent === 'Preview' && b.closest('tr').textContent.includes(custInv.number)), {
     message: 'the issued invoice row to offer Preview again',
   });
+  // The tab click's refresh is still in flight when the row appears. Opening
+  // the preview before it settles lets both renders run: the second clears the
+  // history while the first appends, duplicating the list and breaking the
+  // idempotency count below. Drain the refresh first (#265).
+  await settle('the invoice register to finish refreshing before the preview opens');
   [...window.document.querySelectorAll('#invoice-table tbody button')]
     .find((b) => b.textContent === 'Preview' && b.closest('tr').textContent.includes(custInv.number))
     .dispatchEvent(new window.Event('click', { bubbles: true }));
