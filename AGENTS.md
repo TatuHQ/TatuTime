@@ -145,8 +145,10 @@ the `v0.1.8` release notes is no longer needed.
   `build_router`); only `/healthz`, `/openapi.json`, `/docs` and the GUI stay
   at the root. Each GUI view owns a top-level path (`/timesheets/day|week|
   calendar`, `/customers`, `/projects`, `/tasks`, `/invoices`, `/expenses`,
-  `/approvals`, `/reports`, `/settings/security|users|invoices|catalog|
-  expenses`). `spa_page` (lib.rs) is the case-insensitive allowlist serving
+  `/approvals`, `/reports`, `/settings/security`, `/settings/users`,
+  `/settings/company`, `/settings/invoice-template`, `/settings/catalog`,
+  `/settings/expenses`, `/settings/email`). `spa_page` (lib.rs) is the
+  case-insensitive allowlist serving
   `index.html`; unknown paths keep the JSON 404. `TAB_ROUTES`/`DEFAULT_ROUTE`
   in `web/js/route.js` mirror that list; `tests::route_parity` fails the build if the two drift (#264).
 - `web/` is dependency-free vanilla HTML/CSS/JS embedded via rust-embed (no

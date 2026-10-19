@@ -1,5 +1,7 @@
 # TucanoTime — Full Repository Review (2026-10-06)
 
+> *Historical snapshot — not current guidance. See the reviews index.*
+
 Companion document for issue #183. Supersedes the provisional notes files created earlier
 on this branch. Every finding below was re-verified against HEAD `7f09701` with concrete
 file:line evidence.
