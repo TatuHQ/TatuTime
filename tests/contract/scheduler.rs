@@ -77,7 +77,7 @@ async fn notifications_hide_stale_and_resolved_no_time_reminders() {
 #[tokio::test]
 async fn schedule_crud_admin_only() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     let (s, sched) = json_req(&app, "POST", "/api/schedules", Some(json!({"customer_id":cid,"cadence":"monthly","mode":"retainer","retainer_amount_minor":150000,"currency":"EUR"}))).await;
     assert_eq!(s, StatusCode::CREATED, "{sched}");
@@ -113,7 +113,7 @@ async fn schedule_crud_admin_only() {
 #[tokio::test]
 async fn recurring_schedule_pause_resume_keeps_the_cursor() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     let (s, scd) = json_req(
         &app,
@@ -216,7 +216,7 @@ async fn recurring_never_rebills_settled_or_written_off_entries() {
         ("written_off", 0u64),
     ] {
         let (app, dir) = app().await;
-        let c = new_customer(&app, "ACME", "EUR", 6000).await;
+        let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
         let cid = c["id"].as_str().unwrap().to_string();
         new_project(&app, &cid, "P1", json!({"rate_minor": 6000})).await;
         json_req(
@@ -275,7 +275,7 @@ async fn recurring_never_rebills_settled_or_written_off_entries() {
 
     // (c) A DRAFT's lines stay billable: the same recurring run still bills.
     let (app, dir) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap().to_string();
     new_project(&app, &cid, "P1", json!({"rate_minor": 6000})).await;
     json_req(

@@ -746,22 +746,22 @@ mod tests {
     fn copy_email_names_requester_and_carries_note() {
         let s = render_copy_email(
             "INV-9",
-            "ACME",
+            "Tucano Time",
             "Pat Admin",
             Some("for the books"),
             "Tucano",
         );
-        assert!(s.contains("INV-9") && s.contains("ACME") && s.contains("Pat Admin"));
+        assert!(s.contains("INV-9") && s.contains("Tucano Time") && s.contains("Pat Admin"));
         assert!(s.contains("for the books"));
         // Blank notes drop the section entirely.
-        let bare = render_copy_email("INV-9", "ACME", "Pat", Some("   "), "Tucano");
+        let bare = render_copy_email("INV-9", "Tucano Time", "Pat", Some("   "), "Tucano");
         assert!(!bare.contains("Note:"));
     }
 
     #[test]
     fn templates_include_key_fields() {
         let inv = render_invoice_email(
-            "ACME",
+            "Tucano Time",
             "INV-1",
             "1,200.00 EUR",
             Some("2026-10-19"),
@@ -776,7 +776,7 @@ mod tests {
         assert!(!inv.contains("How to pay"));
         // Configured: the block rides along verbatim.
         let with_pay = render_invoice_email(
-            "ACME",
+            "Tucano Time",
             "INV-1",
             "1,200.00 EUR",
             Some("2026-10-19"),
@@ -786,7 +786,7 @@ mod tests {
         );
         assert!(with_pay.contains("How to pay:") && with_pay.contains("IBAN: EX00"));
         let rem = render_reminder_email(
-            "ACME",
+            "Tucano Time",
             "INV-1",
             "1,200.00 EUR",
             "2026-10-19",
@@ -923,25 +923,25 @@ mod tests {
         // The guard rejects injections, not address shapes: a display-name
         // recipient and an ASCII display name build exactly as they always did.
         let m = EmailMessage {
-            to: vec!["billing@acme.test".into()],
+            to: vec!["billing@tucanotime.test".into()],
             subject: "Invoice INV-0001 from Tucano".into(),
             text: "b".into(),
             html: None,
             attachment: None,
-            from_name: Some("Acme Widgets GmbH".into()),
+            from_name: Some("Tucano Time".into()),
             reply_to: Some("billing@tucano.test".into()),
         };
         let mime = build_mime(&m).expect("a legitimate message builds");
-        assert!(mime.contains("From: Acme Widgets GmbH\r\n"), "{mime}");
-        assert!(mime.contains("To: billing@acme.test\r\n"), "{mime}");
+        assert!(mime.contains("From: Tucano Time\r\n"), "{mime}");
+        assert!(mime.contains("To: billing@tucanotime.test\r\n"), "{mime}");
         assert!(mime.contains("Reply-To: billing@tucano.test\r\n"), "{mime}");
         let named = EmailMessage {
-            to: vec!["Acme Widgets GmbH <billing@tucano.test>".into()],
+            to: vec!["Tucano Time <billing@tucanotime.example>".into()],
             ..m.clone()
         };
         let mime = build_mime(&named).expect("a display-name recipient builds");
         assert!(
-            mime.contains("To: Acme Widgets GmbH <billing@tucano.test>\r\n"),
+            mime.contains("To: Tucano Time <billing@tucanotime.example>\r\n"),
             "{mime}"
         );
         // The recording transport takes it exactly as before.
@@ -996,7 +996,7 @@ mod tests {
             Err(EmailError::Header("reply-to"))
         ));
         let m = EmailMessage {
-            from_name: Some("Acme\r\nBcc: attacker@evil.example".into()),
+            from_name: Some("Tucano\r\nBcc: attacker@evil.example".into()),
             ..base.clone()
         };
         assert!(matches!(
@@ -1061,8 +1061,8 @@ mod tests {
     #[test]
     fn recipient_resolution_defaults_dedupes_and_validates() {
         // Absent/empty list -> the single customer default, exactly as before.
-        let default = resolve_recipients(&[], Some("billing@acme.test")).unwrap();
-        assert_eq!(default, vec!["billing@acme.test".to_string()]);
+        let default = resolve_recipients(&[], Some("billing@tucanotime.test")).unwrap();
+        assert_eq!(default, vec!["billing@tucanotime.test".to_string()]);
         assert!(resolve_recipients(&[], None).is_err());
         assert!(resolve_recipients(&[], Some("   ")).is_err());
         // Explicit order is preserved; a case-insensitive duplicate drops the
@@ -1073,7 +1073,7 @@ mod tests {
                 "first@x.test".into(),
                 " second@x.TEST ".into(),
             ],
-            Some("ignored@acme.test"),
+            Some("ignored@tucanotime.test"),
         )
         .unwrap();
         assert_eq!(

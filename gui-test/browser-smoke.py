@@ -1102,7 +1102,7 @@ class Gate:
         csrf = {"x-csrf-protection": "1"}
         status, _, raw = self.http(
             "POST", "/api/customers",
-            {"name": "ACME", "currency": "EUR", "default_rate_minor": 6000},
+            {"name": "Tucano Time", "currency": "EUR", "default_rate_minor": 6000},
             cookie=cookie, extra_headers=csrf,
         )
         if status != 201:

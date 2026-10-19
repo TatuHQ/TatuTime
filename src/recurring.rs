@@ -204,7 +204,7 @@ mod tests {
         let store = Arc::new(Store::open(dir.path().join("data")).unwrap());
         let cust = Customer {
             id: uuid::Uuid::new_v4(),
-            name: "ACME".into(),
+            name: "Tucano Time".into(),
             currency: Currency("EUR".into()),
             default_rate_minor: 6000,
             active: true,

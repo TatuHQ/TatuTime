@@ -386,18 +386,18 @@ mod tests {
 
     #[test]
     fn signed_token_roundtrip_and_rejections() {
-        let idp = SignedTokenIdp::new("okta", "test-secret", vec!["acme.test".into()])
+        let idp = SignedTokenIdp::new("okta", "test-secret", vec!["tucanotime.test".into()])
             .with_clock(move || Utc.timestamp_opt(1_000_000, 0).unwrap());
         let claims = TokenClaims {
             sub: "u1".into(),
-            email: "Alice@ACME.test".into(),
+            email: "Alice@tucanotime.test".into(),
             name: "Alice".into(),
             groups: vec!["timesheet-admins".into()],
             exp: 1_000_600,
         };
         let token = idp.issue(&claims);
         let id = idp.verify(&token, "").unwrap();
-        assert_eq!(id.email, "alice@acme.test");
+        assert_eq!(id.email, "alice@tucanotime.test");
         assert_eq!(id.groups, vec!["timesheet-admins".to_string()]);
 
         // Tampered payload fails the signature.
@@ -498,7 +498,7 @@ mod tests {
         let deny_all = SignedTokenIdp::new("okta", "test-secret", vec![]);
         let claims = TokenClaims {
             sub: "u1".into(),
-            email: "alice@acme.test".into(),
+            email: "alice@tucanotime.test".into(),
             name: "Alice".into(),
             groups: vec![],
             exp: chrono::Utc::now().timestamp() + 300,
@@ -509,9 +509,9 @@ mod tests {
         ));
 
         // A configured matching domain still succeeds (behaviour preserved).
-        let allow = SignedTokenIdp::new("okta", "test-secret", vec!["acme.test".into()]);
+        let allow = SignedTokenIdp::new("okta", "test-secret", vec!["tucanotime.test".into()]);
         let id = allow.verify(&allow.issue(&claims), "").unwrap();
-        assert_eq!(id.email, "alice@acme.test");
+        assert_eq!(id.email, "alice@tucanotime.test");
     }
 
     #[test]
@@ -532,7 +532,7 @@ mod tests {
         );
 
         // Once a domain is configured the provider is enabled as before.
-        vault.put("sso.allowed_domains", "acme.test").unwrap();
+        vault.put("sso.allowed_domains", "tucanotime.test").unwrap();
         let registry = registry_from_vault(Some(&vault), &cfg);
         assert!(registry.enabled());
         assert_eq!(registry.names(), vec!["oidc".to_string()]);

@@ -872,7 +872,7 @@ mod tests {
 
     #[test]
     fn customer_validation_boundaries() {
-        assert!(validate_customer_input(&customer_input("ACME", "EUR", 6000)).is_ok());
+        assert!(validate_customer_input(&customer_input("Tucano Time", "EUR", 6000)).is_ok());
         let errs = validate_customer_input(&customer_input("  ", "EUR", 6000)).unwrap_err();
         assert_eq!(errs[0].field, "name");
         let errs = validate_customer_input(&customer_input("x", "EUR", 100_000_001)).unwrap_err();
@@ -989,7 +989,7 @@ mod tests {
 
     #[test]
     fn legal_id_is_bounded_and_printable() {
-        let mut input = customer_input("ACME", "EUR", 6000);
+        let mut input = customer_input("Tucano Time", "EUR", 6000);
         input.legal_id = "1".repeat(61);
         let errs = validate_customer_input(&input).unwrap_err();
         assert_eq!(errs[0].field, "legal_id");

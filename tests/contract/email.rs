@@ -19,11 +19,11 @@ async fn invoice_email_sends_to_customer() {
         &app,
         "POST",
         "/api/customers",
-        Some(json!({"name":"ACME","currency":"EUR","default_rate_minor":6000,"email":"billing@acme.test"})),
+        Some(json!({"name":"Tucano Time","currency":"EUR","default_rate_minor":6000,"email":"billing@tucanotime.test"})),
     )
     .await;
     assert_eq!(sc, StatusCode::CREATED, "{cust}");
-    assert_eq!(cust["email"], "billing@acme.test");
+    assert_eq!(cust["email"], "billing@tucanotime.test");
     let cid = cust["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
     json_req(
@@ -49,10 +49,10 @@ async fn invoice_email_sends_to_customer() {
     json_req(&app, "POST", &format!("/api/invoices/{iid}/issue"), None).await;
     let (se, body) = json_req(&app, "POST", &format!("/api/invoices/{iid}/email"), None).await;
     assert_eq!(se, StatusCode::OK, "{body}");
-    assert_eq!(body["sent_to"], "billing@acme.test");
+    assert_eq!(body["sent_to"], "billing@tucanotime.test");
     // The no-body path keeps the historical single recipient, now also exposed
     // as an array so the GUI can render the list.
-    assert_eq!(body["recipients"], json!(["billing@acme.test"]));
+    assert_eq!(body["recipients"], json!(["billing@tucanotime.test"]));
     // #130: the result names the transport; the test recorder never claims smtp.
     assert_eq!(body["transport"], "recording");
     let msgs = app.email.messages();
@@ -64,7 +64,7 @@ async fn invoice_email_sends_to_customer() {
     );
     // The default template now names the billing period (not the invoice
     // number) and the issued snapshot is what the email carries.
-    assert_eq!(msgs[0].subject, "ACME invoice for 10 2026");
+    assert_eq!(msgs[0].subject, "Tucano Time invoice for 10 2026");
 }
 
 #[tokio::test]
@@ -309,7 +309,7 @@ async fn email_result_reports_disabled_transport_honestly() {
     let (sc, cust) = call(
         "POST".to_string(),
         "/api/customers".into(),
-        Some(json!({"name":"ACME","currency":"EUR","default_rate_minor":6000,"email":"billing@acme.test"})),
+        Some(json!({"name":"Tucano Time","currency":"EUR","default_rate_minor":6000,"email":"billing@tucanotime.test"})),
     )
     .await;
     assert_eq!(sc, StatusCode::CREATED, "{cust}");
@@ -336,7 +336,7 @@ async fn email_result_reports_disabled_transport_honestly() {
     call("POST".into(), format!("/api/invoices/{iid}/issue"), None).await;
     let (se, body) = call("POST".into(), format!("/api/invoices/{iid}/email"), None).await;
     assert_eq!(se, StatusCode::OK, "{body}");
-    assert_eq!(body["sent_to"], "billing@acme.test");
+    assert_eq!(body["sent_to"], "billing@tucanotime.test");
     assert_eq!(body["transport"], "disabled", "no SMTP => honest label");
     let (sc2, copy) = call(
         "POST".to_string(),
@@ -376,7 +376,7 @@ async fn invoice_email_refuses_control_characters_at_the_sink() {
         &app,
         "PUT",
         "/api/admin/org",
-        Some(json!({"name":"Tucano BV","from_name":"Acme\r\nBcc: attacker@evil.example"})),
+        Some(json!({"name":"Tucano BV","from_name":"Tucano\r\nBcc: attacker@evil.example"})),
     )
     .await;
     assert_eq!(

@@ -53,7 +53,7 @@ test('invoice chart exposes its numbers through the accessible name (#191)', () 
 test('payment-rail rows are labelled fieldsets with keyboard-operable controls (#354)', () => {
   const { dom, t, document } = setup();
   t.setPaymentRails([{
-    currency: 'EUR', account_name: 'Acme', iban: 'EX000000000000000000', instructions: 'Quote INV-1',
+    currency: 'EUR', account_name: 'Tucano', iban: 'EX000000000000000000', instructions: 'Quote INV-1',
   }]);
   const row = document.querySelector('#pay-rails .payment-rail');
   assert.ok(row, 'the rail renders as a fieldset');

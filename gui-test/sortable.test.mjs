@@ -75,7 +75,7 @@ test('dashFilter keeps the sort contract (#232 phase 2d)', () => {
     const dom = setup();
     const t = dom.window.t;
     t.state.customers = [
-        { id: 'c1', name: 'Acme', currency: 'EUR' },
+        { id: 'c1', name: 'Tucano', currency: 'EUR' },
         { id: 'c2', name: 'Zeta', currency: 'EUR' },
     ];
     // default sort is Number ascending, toggling to descending
@@ -86,7 +86,7 @@ test('dashFilter keeps the sort contract (#232 phase 2d)', () => {
     // numeric columns compare numerically, not lexicographically
     assert.deepEqual(sortedNumbers(t, 'total', 1), ['INV-0001', 'INV-0003', 'INV-0002']);
     assert.deepEqual(sortedNumbers(t, 'total', -1), ['INV-0002', 'INV-0003', 'INV-0001']);
-    // string columns sort by resolved value (customer name: Acme < Zeta)
+    // string columns sort by resolved value (customer name: Tucano < Zeta)
     assert.deepEqual(sortedNumbers(t, 'customer', 1), ['INV-0002', 'INV-0003', 'INV-0001']);
     // period sorts by period_to
     assert.deepEqual(sortedNumbers(t, 'period', 1), ['INV-0001', 'INV-0002', 'INV-0003']);

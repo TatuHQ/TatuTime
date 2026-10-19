@@ -323,11 +323,11 @@ mod tests {
         store
             .put_customer(&Customer {
                 id: customer_id,
-                name: "ACME".into(),
+                name: "Tucano Time".into(),
                 currency: Currency("EUR".into()),
                 default_rate_minor: 6000,
                 active: true,
-                email: "billing@acme.test".into(),
+                email: "billing@tucanotime.test".into(),
                 payment_terms: None,
                 invoice_notes: String::new(),
                 invoice_subject: String::new(),

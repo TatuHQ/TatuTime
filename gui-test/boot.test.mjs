@@ -216,7 +216,7 @@ api.post = async () => ({});
 test('dashboard customer filter is populated by refreshCustomerPickers (#188)', async () => {
   const { dom, context, document } = makeDom();
   context.state.customers = [
-    { id: 'c1', name: 'ACME', currency: 'EUR', active: true, default_rate_minor: 6000 },
+    { id: 'c1', name: 'Tucano Time', currency: 'EUR', active: true, default_rate_minor: 6000 },
     { id: 'c2', name: 'Globex', currency: 'USD', active: true, default_rate_minor: 9000 },
   ];
   await context.refreshCustomerPickers();
@@ -436,7 +436,7 @@ test('week "+ Add row" appends an empty project row and focuses its first cell (
   // jsdom only focuses an element that is actually rendered, and the Week panel
   // ships hidden — reveal it so the focus-lands-on-the-cell assertion is honest.
   document.getElementById('panel-week').hidden = false;
-  context.state.customers = [{ id: 'c1', name: 'ACME', active: true }];
+  context.state.customers = [{ id: 'c1', name: 'Tucano Time', active: true }];
   context.api.get = async (path) => {
     if (path.startsWith('/submissions')) return { submissions: [] };
     if (path.startsWith('/invoices')) return { invoices: [] };
@@ -550,9 +550,9 @@ api.getBlob = async (path) => {
 api.get = async (path) => {
   if (path !== '/invoices/i1/timeline') throw new Error('unexpected ' + path);
   return { events: [
-    { kind: 'email_sent', description: 'Sent invoice to ap@x.test, from Acme <a@x.test>.',
+    { kind: 'email_sent', description: 'Sent invoice to ap@x.test, from Tucano <a@x.test>.',
       actor_name: 'Emanuele Ciurleo', at: '2026-10-01T11:26:00Z',
-      meta: { to: 'ap@x.test', subject: 'INV-0001', from_name: 'Acme', from_email: 'a@x.test', transport: 'smtp' } },
+      meta: { to: 'ap@x.test', subject: 'INV-0001', from_name: 'Tucano', from_email: 'a@x.test', transport: 'smtp' } },
     { kind: 'created', description: 'Invoice created.', actor_name: 'Emanuele Ciurleo', at: '2026-09-28T10:12:00Z' },
   ] };
 };
@@ -595,7 +595,7 @@ api.get = async (path) => {
   const rec = document.getElementById('message-fields');
   assert.match(rec.textContent, /ap@x\.test/, 'the recipient that was actually used');
   assert.match(rec.textContent, /INV-0001/, 'the retained subject');
-  assert.match(rec.textContent, /Acme <a@x\.test>/, 'the From identity');
+  assert.match(rec.textContent, /Tucano <a@x\.test>/, 'the From identity');
   assert.ok([...rec.children].every((n) => n.children.length === 0), 'the record is text only');
   assert.match(document.getElementById('message-note').textContent, /not retained/);
   assert.ok(!/Apologies|Dear/.test(document.getElementById('message-dialog').textContent),
@@ -609,7 +609,7 @@ api.get = async (path) => {
 });
 
 test('the frozen subject rides the register row and the detail panel (#354)', async () => {
-  const subject = 'Acme Widgets GmbH invoice for 08 2026';
+  const subject = 'Tucano Time invoice for 08 2026';
   const { dom, context, document } = makeDom(`
 api.get = async (path) => {
   if (path === '/invoices') return { invoices: [
@@ -620,7 +620,7 @@ api.get = async (path) => {
       period_from: '2026-09-01', period_to: '2026-09-30', total_minor: 1000, payments: [], subject: '' },
   ] };
   if (path === '/invoices/summary') return { draft: 1, issued: 1, overdue: 0, partly_paid: 0, paid: 0, written_off: 0, outstanding: {} };
-  if (path === '/customers') return { customers: [{ id: 'c1', name: 'Acme Widgets GmbH', currency: 'EUR', default_rate_minor: 0, active: true }] };
+  if (path === '/customers') return { customers: [{ id: 'c1', name: 'Tucano Time', currency: 'EUR', default_rate_minor: 0, active: true }] };
   if (path.endsWith('/timeline')) return { events: [] };
   if (path === '/admin/config') return { config: [] };
   return {};
@@ -637,7 +637,7 @@ api.getBlob = async () => new Blob([new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d
   const rows = [...document.querySelectorAll('#invoice-table tbody tr')];
   assert.equal(rows[0].querySelector('.inv-row-subject').textContent, subject,
     'the issued invoice shows its frozen subject as a subtitle');
-  assert.match(rows[0].getAttribute('aria-label'), /Acme Widgets GmbH invoice for 08 2026/);
+  assert.match(rows[0].getAttribute('aria-label'), /Tucano Time invoice for 08 2026/);
   assert.equal(rows[1].querySelector('.inv-row-subject'), null,
     'a draft has no frozen subject yet');
 
@@ -768,7 +768,7 @@ test('the timestamp helper is the requested "on Oct 1, 2026 at 11:26 AM" shape (
 
 test('+ Invoice opens the tracked-work wizard as a modal at step 1 and + Manual Invoice opens the editor (#349)', () => {
   const { dom, context, document } = makeDom();
-  context.state.customers = [{ id: 'c1', name: 'ACME', currency: 'EUR' }];
+  context.state.customers = [{ id: 'c1', name: 'Tucano Time', currency: 'EUR' }];
   context.iwInit();
   context.wireWeekGrid();
   const wizard = document.getElementById('invoice-wizard');
@@ -818,7 +818,7 @@ function addCustomerOption(document, id, label) {
 
 test('the manual editor Cancel saves nothing and Save posts exactly one manual draft (#349/#143)', async () => {
   const { dom, context, document } = makeDom('refreshInvoices = async () => {};');
-  context.state.customers = [{ id: 'c1', name: 'ACME', currency: 'EUR' }];
+  context.state.customers = [{ id: 'c1', name: 'Tucano Time', currency: 'EUR' }];
   context.wireWeekGrid();
   const posts = [];
   context.api.post = async (path, body) => {
@@ -833,7 +833,7 @@ test('the manual editor Cancel saves nothing and Save posts exactly one manual d
   // Cancel is the explicit way out: it discards the draft with no request at
   // all (the "no partial persistence" rule -- nothing half-saved to undo).
   openEditor();
-  addCustomerOption(document, 'c1', 'ACME');
+  addCustomerOption(document, 'c1', 'Tucano Time');
   document.getElementById('ed-customer').value = 'c1';
   document.getElementById('ed-lines').querySelector('tbody tr')
     .querySelector('input[type=text]').value = 'Should not persist';
@@ -845,7 +845,7 @@ test('the manual editor Cancel saves nothing and Save posts exactly one manual d
   // Save: exactly one POST /invoices/manual, carrying the line as typed, with
   // money in integer hundredths/minor units.
   openEditor();
-  addCustomerOption(document, 'c1', 'ACME');
+  addCustomerOption(document, 'c1', 'Tucano Time');
   document.getElementById('ed-customer').value = 'c1';
   const row = document.getElementById('ed-lines').querySelector('tbody tr');
   row.querySelector('input[type=text]').value = 'Consulting';
