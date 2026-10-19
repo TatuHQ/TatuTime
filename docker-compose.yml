@@ -91,7 +91,7 @@ services:
       # File-based secrets (recommended over plaintext env). To enable:
       #
       #   mkdir -p secrets
-      #   openssl rand -hex 32 > secrets/vault.key     # 32-byte AES-256-GCM key
+      #   openssl rand -hex 16 > secrets/vault.key     # 32 ASCII chars = the 32-byte key
       #   openssl rand -hex 32 > secrets/session.key
       #   chmod 600 secrets/*.key
       #

@@ -55,6 +55,14 @@ bookmarkable GUI views — `/timesheets/day|week|calendar`, `/customers`,
 `/settings/security|users|invoices|catalog|expenses` (case-insensitive).
 All data lives in the mounted volume; back it up like any document folder.
 
+### Unraid
+
+A ready-made Unraid Docker template and a step-by-step runbook — flash-share
+import, uid 10001 permissions, the vault key file, SMTP relay options and
+backups — live in [`deploy/unraid/README.md`](deploy/unraid/README.md). The
+template itself is
+[`deploy/unraid/my-TucanoTime.xml`](deploy/unraid/my-TucanoTime.xml).
+
 ## Persistence & upgrades (#94)
 
 **Everything an installation knows lives in one place: the data dir**
