@@ -54,9 +54,16 @@ pub struct InvoiceTemplate {
     /// Markdown-subset body shown before the line table.
     #[serde(default)]
     pub body: String,
-    /// Markdown-subset footer (e.g. bank details), after body + notes.
+    /// Markdown-subset footer (e.g. bank details), after the totals and
+    /// before the `Notes` section.
     #[serde(default)]
     pub footer: String,
+    /// Org-wide free text for the document's `Notes` section, printed under
+    /// its heading above the customer's own notes and the payment details.
+    /// Markdown subset + `%variables%`, like `footer`. Not seeded, so a fresh
+    /// install keeps its historical bytes.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub notes: String,
     /// Default terms for customers that carry none.
     #[serde(default)]
     pub payment_terms: Option<PaymentTerms>,

@@ -2482,6 +2482,7 @@ check('template editor renders the variable cheat-sheet from the server', varRow
 window.document.getElementById('template-subject').value = 'Invoice %invoice_number%';
 window.document.getElementById('template-body').value = 'Dear %customer_name%,\n\n- consulting work';
 window.document.getElementById('template-footer').value = 'Wire to IBAN TT16';
+window.document.getElementById('template-notes').value = 'Thanks from the smoke run.';
 window.document.getElementById('template-terms').value = 'net_30';
 window.document.getElementById('template-terms').dispatchEvent(new window.Event('change', { bubbles: true }));
 window.document.getElementById('template-body').value = 'bad %nope% here';
@@ -2501,6 +2502,7 @@ window.document.getElementById('template-form').dispatchEvent(new window.Event('
 await settle('the template with custom terms to save');
 const tpl = await (await fetch(BASE + '/api/admin/invoice-template', { headers: { Cookie: SESSION_COOKIE } })).json();
 check('template saved with custom terms', tpl.template.body.includes('%customer_name%') && tpl.template.payment_terms.kind === 'custom' && tpl.template.payment_terms.days === 21);
+check('template notes persist through the editor', tpl.template.notes === 'Thanks from the smoke run.');
 check('template save announced', /template saved/i.test(window.document.getElementById('live-region').textContent));
 
 // ---- CUSTOMER INVOICE FIELDS (#116): terms, subject, notes via the form ----

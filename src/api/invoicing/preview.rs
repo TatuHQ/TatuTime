@@ -121,9 +121,9 @@ pub(crate) fn sample_invoice() -> Invoice {
 }
 
 /// The customer the sample invoice bills: a billing contact, a company
-/// number and one EUR + one USD payment rail, so `%payment_details%`, the
-/// `Company number` row and the document's multi-rail "Notes" section are
-/// exercised.
+/// number, a short free-text note and one EUR + one USD payment rail, so
+/// `%payment_details%`, the `Company number` row, the free-text `Notes`
+/// section and the `Payment details` block are all exercised.
 #[must_use]
 pub(crate) fn sample_customer() -> crate::domain::Customer {
     crate::domain::Customer {
@@ -137,7 +137,7 @@ pub(crate) fn sample_customer() -> crate::domain::Customer {
             kind: TermsKind::Net30,
             days: None,
         }),
-        invoice_notes: String::new(),
+        invoice_notes: "Thank you for your business. Please quote the invoice number.".into(),
         invoice_subject: String::new(),
         address: Some(Address {
             street: "12 Sample Street".into(),
@@ -219,6 +219,25 @@ pub(crate) fn validate_template(template: &InvoiceTemplate) -> Vec<FieldError> {
         crate::template::FOOTER_MAX,
         &mut errors,
     );
+    // The org-wide notes field has the same markdown subset and `%variables%`
+    // support as the footer, and the same save-time gauntlet.
+    crate::template::validate_field(
+        "notes",
+        &template.notes,
+        crate::template::NOTES_MAX,
+        &mut errors,
+    );
+    // A subject is one header line. A variable whose value can span lines
+    // would freeze a broken subject at issue, so it is refused here — the
+    // value belongs in the body, footer or notes.
+    for token in crate::template::multiline_tokens(&template.subject) {
+        errors.push(FieldError::new(
+            "subject",
+            format!(
+                "cannot use %{token}% in the subject: its value spans multiple lines (use it in the body, footer or notes)"
+            ),
+        ));
+    }
     crate::domain::validate_payment_terms(template.payment_terms.as_ref(), &mut errors);
     template.labels.validate(&mut errors);
     errors
@@ -251,7 +270,9 @@ pub(crate) fn render_sample_pdf(template: &InvoiceTemplate, org: &crate::pdf::Or
 /// Bumped whenever the sample fixture or the renderer changes in a way that can
 /// alter the bytes. Part of the input-keyed `ETag`, so a renderer upgrade can
 /// never leave a stale tag looking current (SET-06).
-const PREVIEW_ETAG_VERSION: u32 = 2;
+///
+/// 3: the sample customer carries a note and the payment block is canonical.
+const PREVIEW_ETAG_VERSION: u32 = 3;
 
 /// The preview `ETag`, keyed on the **inputs** — canonical candidate-template
 /// JSON, the resolved org profile and the renderer/sample version — so it can be
@@ -377,6 +398,10 @@ mod tests {
             })
         );
         assert!(!customer.legal_id.is_empty(), "company number");
+        assert!(
+            !customer.invoice_notes.is_empty(),
+            "the preview sample carries a free-text note"
+        );
         let details = customer.payment_details.as_ref().expect("payment details");
         assert_eq!(details.rails.len(), 2, "one EUR and one USD rail");
         assert!(details.rails.iter().any(|r| r.currency == "EUR"));
@@ -433,12 +458,38 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert!(texts.contains(&"For all EUR Payments;"), "{texts:?}");
-        assert!(texts.contains(&"For all USD Payments;"), "{texts:?}");
-        assert!(doc.footer.iter().any(|b| matches!(
-            b,
-            crate::pdf::Block::Heading { spans, .. } if spans[0].text == "Notes"
-        )));
+        assert!(
+            texts.contains(&"Thank you for your business. Please quote the invoice number."),
+            "{texts:?}"
+        );
+        let headings: Vec<&str> = doc
+            .footer
+            .iter()
+            .filter_map(|b| match b {
+                crate::pdf::Block::Heading { spans, .. } => Some(spans[0].text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            headings,
+            vec!["Notes", "Payment details"],
+            "two sections, notes before the generated payment block"
+        );
+        // The canonical payment block is currency-labelled rows, not the old
+        // `For all <CCY> Payments;` prose.
+        let keys: Vec<&str> = doc
+            .footer
+            .iter()
+            .filter_map(|b| match b {
+                crate::pdf::Block::KeyVal { key, .. } => Some(key.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            keys.iter().filter(|key| **key == "Currency").count(),
+            2,
+            "{keys:?}"
+        );
     }
 
     #[test]
@@ -457,6 +508,35 @@ mod tests {
         };
         let errors = validate_template(&bad);
         assert!(errors.iter().any(|e| e.field == "subject"));
+        // A multi-line variable cannot be frozen into a subject.
+        bad = InvoiceTemplate {
+            subject: "Invoice %payment_details%".into(),
+            ..Default::default()
+        };
+        let errors = validate_template(&bad);
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.field == "subject" && e.message.contains("%payment_details%")),
+            "{errors:?}"
+        );
+        // Notes have their own cap and the closed %variable% set.
+        bad = InvoiceTemplate {
+            notes: "%bogus%".into(),
+            ..Default::default()
+        };
+        assert!(
+            validate_template(&bad).iter().any(|e| e.field == "notes"),
+            "unknown notes token"
+        );
+        bad = InvoiceTemplate {
+            notes: "x".repeat(crate::template::NOTES_MAX + 1),
+            ..Default::default()
+        };
+        assert!(
+            validate_template(&bad).iter().any(|e| e.field == "notes"),
+            "over-long notes"
+        );
         // The default template is valid and renders deterministically.
         let org = crate::pdf::Org::named("Sample Org");
         let a = render_sample_pdf(&InvoiceTemplate::default(), &org);

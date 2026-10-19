@@ -129,6 +129,19 @@ pub fn unknown_tokens(text: &str) -> Vec<String> {
         .collect()
 }
 
+/// Variables whose resolved value is a multi-line block. A subject that
+/// interpolates one of these would freeze a line break into a header-bound
+/// subject at issue, so the save-time validators refuse them there.
+pub const MULTILINE_VARS: &[&str] = &["payment_details"];
+
+/// Multi-line variables referenced by `text` — the save-time subject guard.
+pub fn multiline_tokens(text: &str) -> Vec<String> {
+    candidates(text)
+        .into_iter()
+        .filter(|t| MULTILINE_VARS.contains(&t.as_str()))
+        .collect()
+}
+
 fn token_error(field: &str, token: &str) -> FieldError {
     FieldError::new(
         field,
@@ -210,6 +223,12 @@ pub fn vars_for(
 
 /// Replace known `%tokens%` with their values. Unknown token candidates are
 /// left **literal** with a warning (fail-safe: never panics, never guesses).
+///
+/// A value that spans lines is a **block**, not a wrapped phrase: each of its
+/// newlines becomes a paragraph break, so the markdown parser and the HTML
+/// renderer keep one line per line (`%payment_details%` is the common case).
+/// Special-casing the variable name here would let a customer's own multi-line
+/// value collapse instead.
 #[must_use]
 pub fn interpolate(text: &str, vars: &Vars) -> String {
     let mut out = String::with_capacity(text.len());
@@ -219,7 +238,24 @@ pub fn interpolate(text: &str, vars: &Vars) -> String {
         if let Some((token, len)) = token_at(&chars, i) {
             match vars.get(&token) {
                 Some(value) => {
-                    out.push_str(value);
+                    if value.contains('\n') {
+                        // The block must start on its own paragraph even when
+                        // the token follows a source line break ("Pay to:\n
+                        // %payment_details%"): one trailing newline becomes a
+                        // paragraph break, an existing blank line stays as is.
+                        let trailing = out.chars().rev().take_while(|c| *c == '\n').count();
+                        if trailing == 1 {
+                            out.push('\n');
+                        }
+                    }
+                    for (n, line) in value.split('\n').enumerate() {
+                        if n > 0 {
+                            // One paragraph per newline: the parser flushes on
+                            // a blank line, so the value's lines never merge.
+                            out.push_str("\n\n");
+                        }
+                        out.push_str(line);
+                    }
                     i += len;
                     continue;
                 }
@@ -432,10 +468,19 @@ pub fn to_html(blocks: &[Block]) -> String {
 
 // ------------------------------------------------------- document glue ---
 
+/// The heading of the document's free-text section. It is deliberately not a
+/// `LabelOverrides` key: it names the *notes* section, while
+/// `payment_heading` renames the generated payment block below it.
+pub const NOTES_HEADING: &str = "Notes";
+
 /// Compose the content parts of the #116 document — org body, org footer,
-/// customer notes — from the template and customer, interpolated against the
-/// invoice. Each piece is `""`/unset when absent, and empty pieces produce
-/// empty vecs, keeping the caller's legacy behaviour untouched.
+/// notes section, subject — from the template and customer, interpolated
+/// against the invoice. Each piece is `""`/unset when absent, and empty pieces
+/// produce empty vecs, keeping the caller's legacy behaviour untouched.
+///
+/// The notes section exists **only** when there is text: the template's
+/// `notes` and/or the customer's `invoice_notes`, printed together under one
+/// `Notes` heading (template text first).
 #[must_use]
 pub fn doc_content(
     invoice: &Invoice,
@@ -444,10 +489,21 @@ pub fn doc_content(
     vars: &Vars,
 ) -> DocContent {
     let md = |src: &str| parse_markdown(&interpolate(src, vars));
+    let mut notes = Vec::new();
+    if !template.notes.trim().is_empty() || !customer.invoice_notes.trim().is_empty() {
+        notes.push(Block::Heading {
+            level: 2,
+            // Plain span: the layout bolds headings itself, and the email
+            // HTML must read `<h2>Notes</h2>`, not a nested `<strong>`.
+            spans: vec![Span::text(NOTES_HEADING)],
+        });
+        notes.extend(md(&template.notes));
+        notes.extend(md(&customer.invoice_notes));
+    }
     DocContent {
         body: md(&template.body),
         footer: md(&template.footer),
-        notes: md(&customer.invoice_notes),
+        notes,
         subject: resolve_subject(invoice, template, customer, vars),
     }
 }
@@ -490,9 +546,10 @@ pub struct DocContent {
 }
 
 /// Merge template content into a `Doc` built by `pdf::doc_for`: body blocks
-/// flow before the line table; the footer becomes generated-line → org
-/// footer → customer notes. With no template and no notes the doc is
-/// unchanged, which is what keeps unset templates byte-identical.
+/// flow before the line table; the footer becomes org footer → notes section
+/// → the generated payment block → the credit line. With no template and no
+/// notes the doc is unchanged, which is what keeps unset templates
+/// byte-identical.
 pub fn apply_doc_content(doc: &mut Doc, content: &DocContent) {
     if !content.body.is_empty() {
         let mut blocks = content.body.clone();
@@ -500,13 +557,13 @@ pub fn apply_doc_content(doc: &mut Doc, content: &DocContent) {
         doc.blocks = blocks;
     }
     // #256: `doc.footer` is replaced wholesale below, so drain it by move
-    // rather than cloning it first.
+    // rather than cloning it first. `doc.footer` already ends with the
+    // generated credit line, so appending it after the notes keeps that line
+    // last while the customer's notes move *before* the payment block.
     let mut footer = content.footer.clone();
+    footer.extend_from_slice(&content.notes);
     footer.append(&mut doc.footer);
     doc.footer = footer;
-    if !content.notes.is_empty() {
-        doc.footer.extend_from_slice(&content.notes);
-    }
 }
 
 /// The email HTML letter: body, then footer, then notes. `None` when there
@@ -848,15 +905,205 @@ mod tests {
         assert!(
             matches!(&doc.blocks[0], Block::Heading { level: 2, spans } if spans[0].text == "Work for October")
         );
-        // Generated line stays, org footer precedes notes.
-        let last = doc.footer.last().unwrap();
-        match last {
-            Block::Paragraph(spans) => assert!(spans[0].text.contains("swift payment")),
-            other => panic!("{other:?}"),
-        }
+        // Org footer, then the `Notes` section, then the generated credit line.
+        let footer: Vec<String> = doc
+            .footer
+            .iter()
+            .map(|b| match b {
+                Block::Heading { spans, .. } => format!("heading:{}", spans[0].text),
+                Block::Paragraph(spans) => spans[0].text.clone(),
+                other => format!("{other:?}"),
+            })
+            .collect();
+        assert_eq!(footer[0], "Bank: IBAN XX01", "{footer:?}");
+        assert_eq!(footer[1], "heading:Notes", "{footer:?}");
+        assert_eq!(footer[2], "Thanks for the swift payment!", "{footer:?}");
+        assert!(
+            footer.last().unwrap().starts_with("Generated by"),
+            "{footer:?}"
+        );
         let html = email_html(&content).unwrap();
         assert!(html.contains("<h2>Work for October</h2>"), "{html}");
         assert!(html.contains("Bank: IBAN XX01"), "{html}");
+        assert!(html.contains("<h2>Notes</h2>"), "{html}");
         assert!(html.contains("swift payment"), "{html}");
+    }
+
+    /// The notes section exists only when there is text. An empty template
+    /// `notes` and an empty customer note produce no heading at all.
+    #[test]
+    fn empty_notes_produce_no_heading() {
+        use crate::domain::InvoiceTemplate;
+        let inv = sample_invoice();
+        let customer = customer_named("C");
+        let content = doc_content(&inv, &InvoiceTemplate::default(), &customer, &vars());
+        assert!(content.notes.is_empty(), "{:?}", content.notes);
+    }
+
+    /// The org-wide `notes` and the customer's `invoice_notes` share one
+    /// `Notes` section: template text first, customer text after it, and the
+    /// whole section prints before the generated payment block.
+    #[test]
+    fn notes_section_orders_template_then_customer_before_payment() {
+        use crate::domain::{Customer, InvoiceTemplate, PaymentDetails, PaymentRail};
+        let inv = sample_invoice();
+        let customer = Customer {
+            invoice_notes: "Customer note.".into(),
+            payment_details: Some(PaymentDetails {
+                iban: "EX000000000000000000".into(),
+                rails: vec![PaymentRail {
+                    currency: "EUR".into(),
+                    account_name: "Holder".into(),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }),
+            ..customer_named("C")
+        };
+        let template = InvoiceTemplate {
+            footer: "Org footer.".into(),
+            notes: "Org note.".into(),
+            ..Default::default()
+        };
+        let mut doc = crate::pdf::doc_for(&inv, &customer, &crate::pdf::Org::named("Tucano"));
+        let content = doc_content(&inv, &template, &customer, &vars_for(&inv, &customer, None));
+        apply_doc_content(&mut doc, &content);
+        let rows: Vec<String> = doc
+            .footer
+            .iter()
+            .map(|b| match b {
+                Block::Heading { spans, .. } => format!("heading:{}", spans[0].text),
+                Block::Paragraph(spans) => spans[0].text.clone(),
+                Block::KeyVal { key, .. } => format!("row:{key}"),
+                other => format!("{other:?}"),
+            })
+            .collect();
+        let position = |needle: &str| {
+            rows.iter()
+                .position(|row| row == needle)
+                .unwrap_or_else(|| panic!("{needle} missing from {rows:?}"))
+        };
+        assert!(position("Org footer.") < position("heading:Notes"));
+        assert!(position("heading:Notes") < position("Org note."));
+        assert!(position("Org note.") < position("Customer note."));
+        assert!(
+            position("Customer note.") < position("heading:Payment details"),
+            "{rows:?}"
+        );
+        assert!(
+            position("heading:Payment details") < rows.len() - 1,
+            "credit line follows the payment block: {rows:?}"
+        );
+        assert!(rows.last().unwrap().starts_with("Generated by"), "{rows:?}");
+        // Email letter follows the same content order.
+        let html = email_html(&content).unwrap();
+        let org = html.find("Org note.").unwrap();
+        let cust = html.find("Customer note.").unwrap();
+        assert!(org < cust, "{html}");
+    }
+
+    /// A multi-line interpolated value is a block: every newline becomes its
+    /// own paragraph in the PDF blocks and in the email HTML. Uses a two-rail
+    /// customer so the real `%payment_details%` value is exercised.
+    #[test]
+    fn multiline_variable_expands_to_one_paragraph_per_line() {
+        use crate::domain::{Customer, InvoiceTemplate, PaymentDetails, PaymentRail};
+        let inv = sample_invoice();
+        let customer = Customer {
+            payment_details: Some(PaymentDetails {
+                bank_name: "Example Bank".into(),
+                account_name: "Holder".into(),
+                iban: "EX000000000000000000".into(),
+                instructions: "Quote the invoice number.".into(),
+                rails: vec![
+                    PaymentRail {
+                        currency: "EUR".into(),
+                        account_name: "Holder".into(),
+                        iban: Some("EX111111111111111111".into()),
+                        ..Default::default()
+                    },
+                    PaymentRail {
+                        currency: "USD".into(),
+                        account_name: "Holder".into(),
+                        account_number: Some("000000000000".into()),
+                        ..Default::default()
+                    },
+                ],
+                ..Default::default()
+            }),
+            ..customer_named("C")
+        };
+        let template = InvoiceTemplate {
+            notes: "Pay to:\n%payment_details%".into(),
+            ..Default::default()
+        };
+        let content = doc_content(&inv, &template, &customer, &vars_for(&inv, &customer, None));
+        let paragraphs: Vec<String> = content
+            .notes
+            .iter()
+            .filter_map(|b| match b {
+                Block::Paragraph(spans) => Some(spans[0].text.clone()),
+                _ => None,
+            })
+            .collect();
+        // The "Pay to:" line and every payment line keep their own paragraph.
+        assert!(
+            paragraphs.contains(&"Pay to:".to_string()),
+            "{paragraphs:?}"
+        );
+        assert!(
+            paragraphs.contains(&"Bank: Example Bank".to_string()),
+            "{paragraphs:?}"
+        );
+        assert!(
+            paragraphs.contains(&"IBAN: EX000000000000000000".to_string()),
+            "{paragraphs:?}"
+        );
+        assert!(
+            paragraphs.contains(&"Quote the invoice number.".to_string()),
+            "{paragraphs:?}"
+        );
+        assert!(
+            paragraphs.contains(&"Currency: USD".to_string()),
+            "{paragraphs:?}"
+        );
+        assert!(
+            paragraphs.iter().all(|p| !p.contains('\n')),
+            "a multi-line value never stays one collapsed span: {paragraphs:?}"
+        );
+        let html = email_html(&content).unwrap();
+        assert!(html.contains("<p>Pay to:</p>"), "{html}");
+        assert!(html.contains("<p>Bank: Example Bank</p>"), "{html}");
+        assert!(html.contains("<p>Currency: USD</p>"), "{html}");
+        assert!(!html.contains("Pay to:<br>"), "{html}");
+    }
+
+    /// A legacy template JSON without `notes` loads with an empty field and
+    /// round-trips without inventing the key.
+    #[test]
+    fn legacy_template_without_notes_loads_and_round_trips() {
+        use crate::domain::InvoiceTemplate;
+        let legacy = r#"{"subject":"Invoice %invoice_number%","body":"b","footer":"f","payment_terms":null}"#;
+        let template: InvoiceTemplate = serde_json::from_str(legacy).unwrap();
+        assert_eq!(template.notes, "");
+        let serialized = serde_json::to_string(&template).unwrap();
+        assert!(
+            !serialized.contains("notes"),
+            "an empty notes field is not serialized: {serialized}"
+        );
+        // And the seeded template keeps the historical bytes: no notes key.
+        let seeded = serde_json::to_string(&crate::domain::InvoiceTemplate::seeded()).unwrap();
+        assert!(!seeded.contains("notes"), "{seeded}");
+    }
+
+    #[test]
+    fn subject_guard_flags_multiline_variables() {
+        assert_eq!(
+            multiline_tokens("Invoice %payment_details%"),
+            vec!["payment_details"]
+        );
+        assert!(multiline_tokens("Invoice %invoice_number%").is_empty());
+        // The literal-token scanner never mistakes stray percent signs.
+        assert!(multiline_tokens("100% paid").is_empty());
     }
 }

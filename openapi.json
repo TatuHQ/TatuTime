@@ -1990,7 +1990,12 @@
           "footer": {
             "type": "string",
             "maxLength": 8000,
-            "description": "Markdown-subset footer (e.g. bank details)."
+            "description": "Markdown-subset footer (e.g. bank details). Prints after the totals and before the notes section."
+          },
+          "notes": {
+            "type": "string",
+            "maxLength": 4000,
+            "description": "Markdown-subset free text for the document's `Notes` section (supports %variables%). Prints under a `Notes` heading, after the footer and the customer's own notes, above the generated `Payment details` block."
           },
           "payment_terms": {
             "description": "Org-default payment terms.",
@@ -2621,7 +2626,7 @@
           "payment_heading": {
             "type": "string",
             "maxLength": 40,
-            "description": "Payment-details heading. Labels the structured rails (default `Notes`) and the legacy flat block (default `Payment details`); a configured value replaces both."
+            "description": "Heading of the generated payment block (default `Payment details`). Renames the block; it does not add free text — use the template `notes` field for that."
           },
           "item_type": {
             "type": "string",

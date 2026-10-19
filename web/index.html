@@ -1612,7 +1612,8 @@
                 <fieldset class="p-form__group" id="document-labels">
                   <legend>Document labels</legend>
                   <p class="p-form-help-text">Wording of the invoice document's own headings. Blank prints the
-                    default shown in the field.</p>
+                    default shown in the field. The payment section heading renames the generated payment block; it
+                    does not add text.</p>
                   <div class="p-form__group"><label class="p-form__label" for="lb-from">Issuer block
                       heading</label><input type="text" class="p-form__control" id="lb-from" maxlength="40"
                       autocomplete="off" placeholder="From"></div>
@@ -1631,9 +1632,9 @@
                   <div class="p-form__group"><label class="p-form__label" for="lb-subject">Subject row</label><input
                       type="text" class="p-form__control" id="lb-subject" maxlength="40" autocomplete="off"
                       placeholder="Subject"></div>
-                  <div class="p-form__group"><label class="p-form__label" for="lb-payment-heading">Payment notes
+                  <div class="p-form__group"><label class="p-form__label" for="lb-payment-heading">Payment section
                       heading</label><input type="text" class="p-form__control" id="lb-payment-heading" maxlength="40"
-                      autocomplete="off" placeholder="Notes"></div>
+                      autocomplete="off" placeholder="Payment details"></div>
                   <div class="p-form__group"><label class="p-form__label" for="lb-item-type">Item type column
                       label</label><input type="text" class="p-form__control" id="lb-item-type" maxlength="40"
                       autocomplete="off" placeholder="Item type"></div>
@@ -1651,10 +1652,10 @@
 
             <form id="template-form" class="p-card">
               <div class="p-card__header">
-                <h2>Subject, body and footer</h2>
+                <h2>Subject, body, footer and notes</h2>
               </div>
               <div class="p-card__content">
-                <p class="p-form-help-text">Subject, body and footer for invoice documents and emails.
+                <p class="p-form-help-text">Subject, body, footer and notes for invoice documents and emails.
                   <code>%variable%</code> placeholders resolve at issue/render time; unknown variables are rejected on
                   save. Leave everything empty to keep the built-in wording.
                 </p>
@@ -1675,7 +1676,17 @@
                 <div class="p-form__group"><label class="p-form__label" for="template-footer">Footer (markdown, e.g.
                     bank
                     details)</label>
-                  <textarea class="p-form__control" id="template-footer" maxlength="8000" rows="3"></textarea>
+                  <textarea class="p-form__control" id="template-footer" maxlength="8000" rows="3"
+                    aria-describedby="template-footer-help"></textarea>
+                  <p class="p-form-help-text" id="template-footer-help">Prints after the totals and before the Notes
+                    section.</p>
+                </div>
+                <div class="p-form__group"><label class="p-form__label" for="template-notes">Notes (markdown, prints
+                    in the Notes section)</label>
+                  <textarea class="p-form__control" id="template-notes" maxlength="4000" rows="3"
+                    aria-describedby="template-notes-help"></textarea>
+                  <p class="p-form-help-text" id="template-notes-help">Prints under the Notes heading, above the
+                    customer's own notes and the payment details. Supports <code>%variables%</code>.</p>
                 </div>
                 <div class="p-form__group"><label class="p-form__label" for="template-terms">Default payment
                     terms</label>

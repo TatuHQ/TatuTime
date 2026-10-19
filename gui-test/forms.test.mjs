@@ -64,14 +64,13 @@ test('the shell ships the official form vocabulary and no bespoke class (#232 ph
     const groups = document.querySelectorAll('.p-form__group');
     // #354 added the Company legal-details fieldset, the payment-rails
     // fieldset and the ten Document label rows (each in its own grouped
-    // fieldset) to the Settings split's 146 groups.
-    assert.equal(groups.length, 159, 'every former .field wrapper is a p-form__group');
-    assert.equal(document.querySelectorAll('.p-form__label').length, 151, 'one official label per field row');
-    assert.equal(document.querySelectorAll('.p-form__control').length, 151, 'one official control per field row');
-    // The previous 47 plus the Company legal/default notes, the customer legal
-    // id hint, the rail list's notes and status line, the Document labels hint,
-    // the subject formatting hint and the invoice detail's frozen-terms note.
-    assert.equal(document.querySelectorAll('.p-form-help-text').length, 55, 'the hints became p-form-help-text');
+    // fieldset) to the Settings split's 146 groups; the template notes row
+    // added one more.
+    assert.equal(groups.length, 160, 'every former .field wrapper is a p-form__group');
+    assert.equal(document.querySelectorAll('.p-form__label').length, 152, 'one official label per field row');
+    assert.equal(document.querySelectorAll('.p-form__control').length, 152, 'one official control per field row');
+    // The previous 55 plus the template footer and notes placement hints.
+    assert.equal(document.querySelectorAll('.p-form-help-text').length, 57, 'the hints became p-form-help-text');
     assert.equal(document.querySelectorAll('.p-form-validation__message').length, ERROR_IDS.length,
         'every error message is the official validation message');
     assert.equal(document.querySelectorAll('.p-form-validation.is-error').length, ERROR_IDS.length,
@@ -113,8 +112,9 @@ test('every p-form__group pairs its label with its own control (#232 phase 2b)',
         assert.ok(label.textContent.trim().length > 0, `${control.id} keeps an accessible name`);
         paired += 1;
     }
-    // 151: the Settings split's 141 plus the ten Document label rows (#354).
-    assert.equal(paired, 151, 'all 151 label/control pairs were verified');
+    // 152: the Settings split's 141 plus the ten Document label rows (#354)
+    // and the template notes row.
+    assert.equal(paired, 152, 'all 152 label/control pairs were verified');
     assert.equal(composed.length, 8, 'eight composed rows have no label of their own');
     assert.equal(composed.filter((row) => row.tag === 'FIELDSET').length, 7, 'seven grouped fieldsets');
     assert.equal(composed.filter((row) => row.tag === 'DIV').length, 1, 'the Contacts row');
@@ -165,6 +165,11 @@ test('the migrated fields keep their ids, order and validation attributes (#232 
         ['^#[0-9a-fA-F]{6}$', 7, '#E95420'], 'the accent pattern/maxlength survive');
     const termsDays = document.getElementById('template-terms-days');
     assert.deepEqual([termsDays.type, termsDays.min, termsDays.max, termsDays.step], ['number', '1', '365', '1']);
+    const notes = document.getElementById('template-notes');
+    assert.deepEqual([notes.tagName, notes.maxLength, notes.rows], ['TEXTAREA', 4000, 3],
+        'the template notes field is a bounded textarea');
+    assert.match(document.getElementById('template-notes-help').textContent, /%variables%/);
+    assert.match(document.getElementById('template-footer-help').textContent, /before the Notes/);
     const currency = document.getElementById('expense-currency');
     assert.deepEqual([currency.maxLength, currency.placeholder, currency.required], [3, 'EUR', true]);
     dom.window.close();

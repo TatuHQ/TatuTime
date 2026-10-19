@@ -47,6 +47,7 @@ const TEMPLATE = {
         subject: 'Invoice %invoice_number%',
         body: 'Dear %customer_name%',
         footer: 'Bank: BE00',
+        notes: 'Note %customer_name%',
         payment_terms: { kind: 'net_30' },
         labels: {
             description: 'Work',
@@ -421,6 +422,7 @@ test('Invoice template loads the cheat-sheet and saves labels with the template'
     const { dom, document, t } = setup();
     await t.refreshInvoiceTemplate();
     assert.equal(document.getElementById('template-subject').value, 'Invoice %invoice_number%');
+    assert.equal(document.getElementById('template-notes').value, 'Note %customer_name%');
     assert.equal(document.getElementById('lb-total').value, 'Due');
     // The ten document labels (#354) load from the same `labels` object, each
     // in its own input whose placeholder is the built-in default.
@@ -450,6 +452,35 @@ test('Invoice template loads the cheat-sheet and saves labels with the template'
     dom.window.close();
 });
 
+test('Invoice template notes load, travel in the payload and re-render the preview', async () => {
+    const { dom, document, window, t } = setup();
+    await t.refreshInvoiceTemplate();
+    const notes = document.getElementById('template-notes');
+    assert.equal(notes.value, 'Note %customer_name%', 'the stored notes load');
+    assert.equal(notes.maxLength, 4000, 'bounded like the API field');
+    assert.equal(notes.rows, 3);
+    assert.equal(notes.labels.length, 1);
+    assert.match(notes.labels[0].textContent, /Notes/);
+    assert.match(document.getElementById('template-notes-help').textContent, /%variables%/);
+    assert.match(document.getElementById('template-footer-help').textContent, /before the Notes/);
+    setValue(document, 'template-notes', 'Pay within 30 days.');
+    assert.equal(t.templatePayload().notes, 'Pay within 30 days.', 'notes travel in the exact payload');
+    await t.saveInvoiceTemplate({ preventDefault() { } });
+    const call = t.calls().put.find((entry) => entry.path === '/admin/invoice-template');
+    assert.equal(call.body.notes, 'Pay within 30 days.');
+
+    // The notes box is a preview field: an edit re-renders the candidate.
+    t.initTemplatePreview();
+    document.getElementById('settings-panel-invoice-template').hidden = false;
+    await waitFor(() => t.calls().preview.length === 1, { message: 'the first preview render' });
+    t.calls().preview.length = 0;
+    notes.value = 'A different note.';
+    notes.dispatchEvent(new window.Event('input', { bubbles: true }));
+    await waitFor(() => t.calls().preview.length === 1, { message: 'the notes edit to re-render' });
+    assert.equal(t.calls().preview[0].body.notes, 'A different note.');
+    dom.window.close();
+});
+
 test('the Document labels section is grouped, optional and prints its defaults (#354)', () => {
     const { dom, document } = setup();
     const group = document.getElementById('document-labels');
@@ -462,7 +493,7 @@ test('the Document labels section is grouped, optional and prints its defaults (
         'lb-issue-date': 'Issue date',
         'lb-due-date': 'Due date',
         'lb-subject': 'Subject',
-        'lb-payment-heading': 'Notes',
+        'lb-payment-heading': 'Payment details',
         'lb-item-type': 'Item type',
         'lb-payments': 'Payments',
         'lb-amount-due': 'Amount due',
@@ -574,6 +605,7 @@ test('typing in the body and labels debounces one preview POST with the form pay
         subject: 'Invoice %invoice_number%',
         body: 'Dear %customer_name%, please pay.',
         footer: 'Bank: BE00',
+        notes: 'Note %customer_name%',
         payment_terms: { kind: 'net_30' },
         labels: {
             description: 'Work',
