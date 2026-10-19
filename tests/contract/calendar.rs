@@ -10,7 +10,7 @@ use tucano_time::store::Store;
 #[tokio::test]
 async fn timer_start_stop_creates_entry() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({})).await;
 
@@ -172,7 +172,7 @@ async fn calendar_oauth_start_and_callback_plumbing() {
 #[tokio::test]
 async fn timer_invalid_project_is_422_and_stop_without_timer_is_404() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
 
     let (s_bad, body) = json_req(
@@ -196,7 +196,7 @@ async fn timer_invalid_project_is_422_and_stop_without_timer_is_404() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn parallel_timer_starts_yield_exactly_one_winner() {
     let (app, d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
 

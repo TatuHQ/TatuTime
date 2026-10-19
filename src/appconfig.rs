@@ -575,10 +575,13 @@ mod tests {
 
     #[test]
     fn csv_parsing() {
-        let env = env_from(&[("TUCANO_SSO_ALLOWED_DOMAINS", "acme.test, other.test ,")]);
+        let env = env_from(&[(
+            "TUCANO_SSO_ALLOWED_DOMAINS",
+            "tucanotime.test, other.test ,",
+        )]);
         assert_eq!(
             AppConfig::empty().get_csv("sso_allowed_domains", &env),
-            vec!["acme.test".to_string(), "other.test".to_string()]
+            vec!["tucanotime.test".to_string(), "other.test".to_string()]
         );
     }
 

@@ -58,7 +58,7 @@ Issuing:
 
 A fresh install resolves an absent `invoice_template.json` to seeded defaults:
 the subject `%customer_name% invoice for %period_month_padded% %period_year%`
-(e.g. `Acme Widgets GmbH invoice for 08 2026`) and `net_30` payment terms.
+(e.g. `Tucano Time invoice for 08 2026`) and `net_30` payment terms.
 Saving a template explicitly replaces those defaults; a saved template with
 `payment_terms: null` still uses the legacy net-14 fallback.
 

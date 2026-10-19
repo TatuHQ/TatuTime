@@ -8,7 +8,7 @@ use serde_json::json;
 #[tokio::test]
 async fn member_sees_only_own_entries() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({})).await;
     // Admin logs one entry.
@@ -71,7 +71,7 @@ async fn member_sees_only_own_entries() {
 #[tokio::test]
 async fn member_cannot_invoice_or_approve() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({})).await;
     json_req(
@@ -130,7 +130,7 @@ async fn member_cannot_invoice_or_approve() {
 #[tokio::test]
 async fn delete_invoice_over_http_is_admin_only_and_draft_only() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
     json_req(
@@ -209,7 +209,7 @@ async fn delete_invoice_over_http_is_admin_only_and_draft_only() {
 #[tokio::test]
 async fn delete_entry_over_http_returns_204_and_removes_it() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({})).await;
     let (sc, entry) = json_req(
@@ -247,7 +247,7 @@ async fn delete_entry_over_http_returns_204_and_removes_it() {
 #[tokio::test]
 async fn non_owner_member_mutations_are_404_not_403() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({})).await;
 
@@ -332,7 +332,7 @@ async fn non_owner_member_mutations_are_404_not_403() {
 #[tokio::test]
 async fn submissions_and_claims_lists_filter_by_owner() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({})).await;
 
@@ -382,7 +382,7 @@ async fn submissions_and_claims_lists_filter_by_owner() {
 #[tokio::test]
 async fn member_entries_read_the_index_and_survive_its_loss() {
     let (app, d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap().to_string();
     new_project(&app, &cid, "P1", json!({})).await;
 
@@ -495,7 +495,7 @@ async fn member_entries_read_the_index_and_survive_its_loss() {
 #[tokio::test]
 async fn member_expenses_read_the_index_and_hide_others() {
     let (app, d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap().to_string();
     new_project(&app, &cid, "P1", json!({})).await;
 

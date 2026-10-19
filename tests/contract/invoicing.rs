@@ -84,7 +84,7 @@ fn pdf_joined(pdf: &[u8]) -> String {
 #[tokio::test]
 async fn invoice_sums_billable_and_ignores_nonbillable() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
     // 3h billable @60 = 180.00
@@ -115,7 +115,7 @@ async fn invoice_sums_billable_and_ignores_nonbillable() {
 #[tokio::test]
 async fn issuing_invoice_locks_its_entries() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
     let (_, e) = json_req(
@@ -181,7 +181,7 @@ async fn issuing_invoice_locks_its_entries() {
 #[tokio::test]
 async fn regeneration_excludes_invoiced_entries() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
     json_req(
@@ -219,7 +219,7 @@ async fn regeneration_excludes_invoiced_entries() {
 #[tokio::test]
 async fn invoice_rejects_mixed_currencies() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({"currency":"EUR","rate_minor":6000})).await;
     new_project(&app, cid, "P2", json!({"currency":"USD","rate_minor":3000})).await;
@@ -256,7 +256,7 @@ async fn invoice_rejects_mixed_currencies() {
 #[tokio::test]
 async fn invoice_includes_billable_expenses_and_locks_them() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
     // 2h billable time @60 = 12000
@@ -310,7 +310,7 @@ async fn invoice_includes_billable_expenses_and_locks_them() {
 #[tokio::test]
 async fn invoice_can_exclude_expenses() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
     json_req(
@@ -874,7 +874,7 @@ async fn manual_line_bounds_reject_identically_on_both_endpoints() {
 #[tokio::test]
 async fn invoice_preview_projects_and_paid_exclusion() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap().to_string();
     new_project(&app, &cid, "PA", json!({"rate_minor": 5000})).await;
     new_project(&app, &cid, "PB", json!({"rate_minor": 7000})).await;
@@ -1168,7 +1168,7 @@ async fn appearance_and_messages_are_honored_not_inert() {
 #[tokio::test]
 async fn invoice_issue_empty_period_conflicts_and_double_issue_is_refused() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
 
@@ -1252,7 +1252,7 @@ async fn invoice_timeline_records_create_issue_and_email_newest_first() {
     assert_eq!(events.as_array().unwrap().len(), 3, "{events}");
     assert_eq!(events[0]["kind"], "email_sent");
     assert_eq!(events[0]["actor_name"], "Admin");
-    assert_eq!(events[0]["meta"]["to"], "billing@acme.test");
+    assert_eq!(events[0]["meta"]["to"], "billing@tucanotime.test");
     assert_eq!(events[0]["meta"]["transport"], "recording");
     assert!(events[0]["meta"]["subject"].is_string());
     assert!(events[0]["meta"]["from_name"].is_string());
@@ -1384,7 +1384,7 @@ async fn invoice_timeline_unknown_id_and_access_control() {
 #[tokio::test]
 async fn invoice_timeline_sidecar_is_a_lenient_dot_file() {
     let (app, d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
     json_req(
@@ -1692,7 +1692,7 @@ fn has_stamp(bytes: &[u8], stamp: &str) -> bool {
 async fn invoice_pdf_preview_renders_a_draft_and_never_archives() {
     let (app, d) = app().await;
     // A DRAFT with billable work: `/pdf` refuses it, the preview must not.
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
     json_req(
@@ -1851,7 +1851,7 @@ async fn an_archived_unbilled_period_still_previews_and_issues() {
     let cutoff = chrono::NaiveDate::from_ymd_opt(2026, 9, 1).unwrap();
 
     let (app, d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap().to_string();
     new_project(&app, &cid, "P1", json!({"rate_minor": 6000})).await;
     let (_, entry) = json_req(
@@ -1927,7 +1927,7 @@ async fn an_archived_unbilled_period_still_previews_and_issues() {
 #[tokio::test]
 async fn issuing_refuses_a_draft_the_timesheet_moved_past() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
     let (s_e, e) = json_req(
@@ -2021,7 +2021,7 @@ async fn issuing_refuses_a_draft_the_timesheet_moved_past() {
 #[tokio::test]
 async fn an_unchanged_draft_still_issues_and_a_second_invoice_is_refused() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
     json_req(
@@ -2068,7 +2068,7 @@ async fn customer_legal_id_round_trips_and_oversize_is_refused() {
         "POST",
         "/api/customers",
         Some(json!({
-            "name": "Acme Widgets GmbH",
+            "name": "Tucano Time",
             "currency": "EUR",
             "default_rate_minor": 6000,
             "legal_id": "  99999999  "
@@ -2088,7 +2088,7 @@ async fn customer_legal_id_round_trips_and_oversize_is_refused() {
         "PUT",
         &format!("/api/customers/{cid}"),
         Some(json!({
-            "name": "Acme Widgets GmbH",
+            "name": "Tucano Time",
             "currency": "EUR",
             "default_rate_minor": 6000,
             "legal_id": "1".repeat(61)
@@ -2109,7 +2109,7 @@ async fn org_profile_round_trips_legal_id_label() {
         "PUT",
         "/api/admin/org",
         Some(json!({
-            "name": "Acme Widgets GmbH",
+            "name": "Tucano Time",
             "legal_id": "00.000.000/0000-00",
             "legal_id_label": "Tax ID"
         })),
@@ -2127,7 +2127,7 @@ async fn org_profile_round_trips_legal_id_label() {
         "PUT",
         "/api/admin/org",
         Some(json!({
-            "name": "Acme Widgets GmbH",
+            "name": "Tucano Time",
             "legal_id": "00.000.000/0000-00",
             "legal_id_label": "x".repeat(41)
         })),
@@ -2145,13 +2145,13 @@ async fn payment_rails_round_trip_through_the_customer_surface() {
     let rails = json!([
         {
             "currency": "EUR",
-            "account_name": "Acme Widgets GmbH",
+            "account_name": "Tucano Time",
             "iban": "EX000000000000000000",
             "bic": "EXAMPLEB"
         },
         {
             "currency": "USD",
-            "account_name": "Acme Widgets GmbH",
+            "account_name": "Tucano Time",
             "routing_number": "000000000",
             "swift": "EXAMPLEB"
         }
@@ -2261,7 +2261,7 @@ async fn invoice_template_get_returns_the_seeded_defaults() {
 async fn issuing_freezes_subject_and_terms_in_the_invoice_document() {
     let (app, _d) = app().await;
     let (issued, iid) = seed_issued_invoice(&app).await;
-    assert_eq!(issued["subject"], "ACME invoice for 10 2026");
+    assert_eq!(issued["subject"], "Tucano Time invoice for 10 2026");
     assert_eq!(issued["terms"]["kind"], "net_30");
     // A later template edit cannot rewrite the issued snapshot, while the live
     // document endpoint reads the snapshot instead of the new template.
@@ -2279,11 +2279,11 @@ async fn issuing_freezes_subject_and_terms_in_the_invoice_document() {
     .await;
     assert_eq!(st, StatusCode::OK);
     let (_, after) = json_req(&app, "GET", &format!("/api/invoices/{iid}"), None).await;
-    assert_eq!(after["subject"], "ACME invoice for 10 2026");
+    assert_eq!(after["subject"], "Tucano Time invoice for 10 2026");
     assert_eq!(after["terms"]["kind"], "net_30");
     let (sd, doc) = json_req(&app, "GET", &format!("/api/invoices/{iid}/document"), None).await;
     assert_eq!(sd, StatusCode::OK);
-    assert_eq!(doc["subject"], "ACME invoice for 10 2026");
+    assert_eq!(doc["subject"], "Tucano Time invoice for 10 2026");
 }
 
 // ------------------------------------- document rendering (phase 2) ---
@@ -2299,10 +2299,10 @@ async fn invoice_pdf_prints_the_document_sections_and_terms_suffix() {
         "POST",
         "/api/customers",
         Some(json!({
-            "name": "Acme Widgets GmbH",
+            "name": "Tucano Time",
             "currency": "EUR",
             "default_rate_minor": 6000,
-            "email": "billing@acme.example",
+            "email": "billing@tucanotime.example",
             "address": {
                 "street": "9 Placeholder Road",
                 "city": "Testville",
@@ -2334,7 +2334,7 @@ async fn invoice_pdf_prints_the_document_sections_and_terms_suffix() {
     let (si, issued) = json_req(&app, "POST", &format!("/api/invoices/{iid}/issue"), None).await;
     assert_eq!(si, StatusCode::OK, "{issued}");
     assert_eq!(issued["terms"]["kind"], "net_30");
-    assert_eq!(issued["subject"], "Acme Widgets GmbH invoice for 08 2026");
+    assert_eq!(issued["subject"], "Tucano Time invoice for 08 2026");
 
     let (_sp, _h, pdf) = raw_req(&app, "GET", &format!("/api/invoices/{iid}/pdf")).await;
     let joined = pdf_joined(&pdf);
@@ -2342,7 +2342,7 @@ async fn invoice_pdf_prints_the_document_sections_and_terms_suffix() {
     // Subject row (the document name is the plain title).
     assert!(joined.contains("Subject:"), "subject label: {joined}");
     assert!(
-        joined.contains("Acme Widgets GmbH invoice for 08 2026"),
+        joined.contains("Tucano Time invoice for 08 2026"),
         "subject text: {joined}"
     );
     // Invoice-for block: heading, name, one line per address part, company id.
@@ -2387,7 +2387,7 @@ async fn invoice_pdf_prints_the_document_sections_and_terms_suffix() {
 #[tokio::test]
 async fn draft_pdf_preview_prints_the_live_subject() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "Acme Widgets GmbH", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
     json_req(
@@ -2410,7 +2410,7 @@ async fn draft_pdf_preview_prints_the_live_subject() {
     let (sd, doc) = json_req(&app, "GET", &format!("/api/invoices/{iid}/document"), None).await;
     assert_eq!(sd, StatusCode::OK, "{doc}");
     let subject = doc["subject"].as_str().unwrap();
-    assert_eq!(subject, "Acme Widgets GmbH invoice for 08 2026");
+    assert_eq!(subject, "Tucano Time invoice for 08 2026");
 
     let (_sp, _h, pdf) = raw_req(&app, "GET", &format!("/api/invoices/{iid}/pdf/preview")).await;
     let joined = pdf_joined(&pdf);
@@ -2469,20 +2469,20 @@ async fn invoice_pdf_prints_one_block_per_payment_rail() {
         "POST",
         "/api/customers",
         Some(json!({
-            "name": "Acme Widgets GmbH",
+            "name": "Tucano Time",
             "currency": "EUR",
             "default_rate_minor": 6000,
             "payment_details": {
                 "rails": [
                     {
                         "currency": "EUR",
-                        "account_name": "Acme Widgets GmbH",
+                        "account_name": "Tucano Time",
                         "iban": "EX000000000000000000",
                         "bic": "EXAMPLEB"
                     },
                     {
                         "currency": "USD",
-                        "account_name": "Acme Widgets GmbH",
+                        "account_name": "Tucano Time",
                         "account_number": "000000000000",
                         "routing_number": "000000000",
                         "swift": "EXAMPLEB"

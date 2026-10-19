@@ -237,7 +237,7 @@ mod tests {
         assert_eq!(Currency::parse(" eur").unwrap().0, "EUR");
         assert!(Currency::parse("EU").is_none());
         assert!(Currency::parse("EU1").is_none());
-        assert_eq!(ProjectCode::parse(" acme-42 ").unwrap().0, "ACME-42");
+        assert_eq!(ProjectCode::parse(" tucano-42 ").unwrap().0, "TUCANO-42");
         assert!(ProjectCode::parse("").is_none());
         assert!(ProjectCode::parse("-abc").is_none());
         assert!(ProjectCode::parse("a/b").is_none());

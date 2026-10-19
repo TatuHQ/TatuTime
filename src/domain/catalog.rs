@@ -66,7 +66,7 @@ pub struct InvoiceTemplate {
 }
 
 /// The subject a fresh install's template carries: the billing period, not
-/// the issue date, e.g. `Acme Widgets GmbH invoice for 08 2026`.
+/// the issue date, e.g. `Tucano Time invoice for 08 2026`.
 pub const DEFAULT_TEMPLATE_SUBJECT: &str =
     "%customer_name% invoice for %period_month_padded% %period_year%";
 

@@ -751,11 +751,11 @@ mod tests {
     fn customer() -> Customer {
         Customer {
             id: "22222222-2222-2222-2222-222222222222".parse().unwrap(),
-            name: "Acme Widgets GmbH".into(),
+            name: "Tucano Time".into(),
             currency: Currency("EUR".into()),
             default_rate_minor: 9000,
             active: true,
-            email: "billing@acme.example".into(),
+            email: "billing@tucanotime.example".into(),
             payment_terms: None,
             invoice_notes: String::new(),
             invoice_subject: String::new(),

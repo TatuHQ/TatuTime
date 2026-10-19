@@ -39,7 +39,7 @@ async fn accounting_sync_idempotent_with_visible_status() {
     let registry = tucano_time::accounting::AccountingRegistry::new(vec![qbo]);
     let app = Client::with_accounting(store, registry).await;
 
-    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
     json_req(

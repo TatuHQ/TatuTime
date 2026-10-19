@@ -764,11 +764,11 @@ mod tests {
     fn customer() -> Customer {
         Customer {
             id: "22222222-2222-2222-2222-222222222222".parse().unwrap(),
-            name: "Acme Widgets GmbH".into(),
+            name: "Tucano Time".into(),
             currency: Currency("EUR".into()),
             default_rate_minor: 9000,
             active: true,
-            email: "billing@acme.example".into(),
+            email: "billing@tucanotime.example".into(),
             payment_terms: None,
             invoice_notes: String::new(),
             invoice_subject: String::new(),
@@ -914,16 +914,13 @@ mod tests {
         assert!(!meta_rows(&doc)[2].1.contains('('));
         // No address on either side, so the only customer text is its name.
         let texts = header_texts(&doc);
-        assert_eq!(
-            texts,
-            vec!["From", "Tucano", "Invoice for", "Acme Widgets GmbH"]
-        );
+        assert_eq!(texts, vec!["From", "Tucano", "Invoice for", "Tucano Time"]);
     }
 
     #[test]
     fn subject_and_terms_print_on_the_metadata_block() {
         let mut inv = sample_invoice();
-        inv.subject = "Acme Widgets GmbH invoice for 08 2026".into();
+        inv.subject = "Tucano Time invoice for 08 2026".into();
         inv.terms = Some(PaymentTerms {
             kind: TermsKind::Net30,
             days: None,
@@ -933,20 +930,17 @@ mod tests {
         assert_eq!(doc.title, "INVOICE");
         assert_eq!(
             doc.subject.as_deref(),
-            Some("Acme Widgets GmbH invoice for 08 2026")
+            Some("Tucano Time invoice for 08 2026")
         );
         let rows = meta_rows(&doc);
-        assert_eq!(
-            rows[0],
-            ("Subject", "Acme Widgets GmbH invoice for 08 2026")
-        );
+        assert_eq!(rows[0], ("Subject", "Tucano Time invoice for 08 2026"));
         assert_eq!(rows[3], ("Due date", "15/10/2026 (Net 30)"));
     }
 
     #[test]
     fn invoice_for_block_prints_the_address_and_company_number() {
         let mut c = customer();
-        c.name = "Acme Widgets GmbH".into();
+        c.name = "Tucano Time".into();
         c.address = Some(Address {
             street: "9 Placeholder Road".into(),
             city: "Testville".into(),
@@ -978,7 +972,7 @@ mod tests {
                 if key == "Tax ID" && spans[0].text == "00.000.000/0000-00"
         )));
         assert_eq!(texts[6], "Invoice for");
-        assert_eq!(texts[7], "Acme Widgets GmbH");
+        assert_eq!(texts[7], "Tucano Time");
         assert_eq!(texts[8], "9 Placeholder Road,");
         assert_eq!(texts[9], "Testville,");
         assert_eq!(texts[10], "AA1 1AA,");
@@ -1152,14 +1146,14 @@ mod tests {
             rails: vec![
                 PaymentRail {
                     currency: "EUR".into(),
-                    account_name: "Acme Widgets GmbH".into(),
+                    account_name: "Tucano Time".into(),
                     iban: Some("EX000000000000000000".into()),
                     bic: Some("EXAMPLEB".into()),
                     ..Default::default()
                 },
                 PaymentRail {
                     currency: "USD".into(),
-                    account_name: "Acme Widgets GmbH".into(),
+                    account_name: "Tucano Time".into(),
                     account_number: Some("000000000000".into()),
                     routing_number: Some("000000000".into()),
                     swift: Some("EXAMPLEB".into()),

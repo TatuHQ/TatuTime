@@ -136,7 +136,7 @@ test('catalog register renders rows with mobile-card headings', async () => {
 
 test('retainer and schedule registers render rows with mobile-card headings', async () => {
     const { dom, document, reg } = setup();
-    reg.state.customers = [{ id: 'c1', name: 'ACME', currency: 'EUR', default_rate_minor: 6000, active: true, email: '' }];
+    reg.state.customers = [{ id: 'c1', name: 'Tucano Time', currency: 'EUR', default_rate_minor: 6000, active: true, email: '' }];
     reg.api.get = async (path) => {
         if (path === '/retainers') {
             return {

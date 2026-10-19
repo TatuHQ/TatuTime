@@ -255,7 +255,7 @@
         "pattern": "^[A-Z0-9][A-Z0-9_-]{0,23}$",
         "description": "Normalised upper case; letters and digits, dashes and underscores after the first character; at most 24 characters.",
         "examples": [
-          "ACME-42"
+          "TUCANO-42"
         ]
       },
       "Hours": {

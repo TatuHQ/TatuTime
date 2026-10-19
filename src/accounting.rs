@@ -592,7 +592,7 @@ mod tests {
     fn sample_invoice() -> (Invoice, Customer) {
         let customer = Customer {
             id: Uuid::new_v4(),
-            name: "ACME".into(),
+            name: "Tucano Time".into(),
             currency: Currency("EUR".into()),
             default_rate_minor: 6000,
             active: true,

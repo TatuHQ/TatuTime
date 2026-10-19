@@ -23,11 +23,11 @@ const app = loadAppSource();
 
 const CUSTOMER = {
     id: 'c1',
-    name: 'ACME',
-    email: 'legacy@acme.test',
+    name: 'Tucano Time',
+    email: 'legacy@tucanotime.test',
     contacts: [
-        { name: 'Ada', role: 'Accounts', email: 'ada@acme.test', billing: true },
-        { name: 'Bob', role: 'Operations', email: 'bob@acme.test', billing: false },
+        { name: 'Ada', role: 'Accounts', email: 'ada@tucanotime.test', billing: true },
+        { name: 'Bob', role: 'Operations', email: 'bob@tucanotime.test', billing: false },
     ],
 };
 const INVOICE = { id: 'i1', number: 'INV-0001', customer_id: 'c1' };
@@ -49,8 +49,8 @@ function setup({ adminEmail = { configured: true, transport: 'smtp' }, postResul
       window.__adminEmail = ${JSON.stringify(adminEmail)};
       window.__postError = ${JSON.stringify(postError)};
       window.__postResult = ${JSON.stringify(postResult || {
-        sent_to: 'ada@acme.test',
-        recipients: ['ada@acme.test'],
+        sent_to: 'ada@tucanotime.test',
+        recipients: ['ada@tucanotime.test'],
         transport: 'smtp',
     })};
       api.get = async (path) => {
@@ -121,7 +121,7 @@ test('clicking #ip-send opens the recipient dialog and sends nothing', async () 
     await waitFor(() => isOpen(dlgOf(document)), { message: 'the recipient dialog to open' });
     assert.equal(t.calls().length, 0, 'opening the dialog must not POST anything');
     assert.equal(t.state.isAdmin, false, 'the harness never loads the register');
-    assert.deepEqual(checked(document), ['ada@acme.test'], 'the billing address is checked by default');
+    assert.deepEqual(checked(document), ['ada@tucanotime.test'], 'the billing address is checked by default');
     assert.ok(dlgOf(document).contains(document.activeElement), 'focus moves into the dialog on open');
     // Escape closes and returns focus to the opener.
     dlgOf(document).dispatchEvent(new window.KeyboardEvent('keydown', {
@@ -136,11 +136,11 @@ test('the billing contact leads the list and other on-file addresses follow unch
     const { dom, document, t } = setup();
     await t.openSendEmailDialog(INVOICE, null);
     const list = boxes(document);
-    assert.deepEqual(list.map((b) => b.value), ['ada@acme.test', 'bob@acme.test', 'legacy@acme.test'],
+    assert.deepEqual(list.map((b) => b.value), ['ada@tucanotime.test', 'bob@tucanotime.test', 'legacy@tucanotime.test'],
         'billing contact first, then the other contact, then the legacy address');
     assert.deepEqual(list.map((b) => b.checked), [true, false, false], 'only the billing address is pre-ticked');
     assert.deepEqual([...t.emailCandidates({ ...CUSTOMER, contacts: [] }).map((c) => c.email)],
-        ['legacy@acme.test'], 'without contacts the legacy email is the default');
+        ['legacy@tucanotime.test'], 'without contacts the legacy email is the default');
     assert.deepEqual([...t.emailCandidates({ id: 'c2', email: '', contacts: [] })], [],
         'no address on file yields no candidates');
     dom.window.close();
@@ -151,8 +151,8 @@ test('the billing contact leads the list and other on-file addresses follow unch
 test('two ticked contacts send one request with both addresses in order', async () => {
     const { dom, document, window, t } = setup({
         postResult: {
-            sent_to: 'ada@acme.test, bob@acme.test',
-            recipients: ['ada@acme.test', 'bob@acme.test'],
+            sent_to: 'ada@tucanotime.test, bob@tucanotime.test',
+            recipients: ['ada@tucanotime.test', 'bob@tucanotime.test'],
             transport: 'smtp',
         },
     });
@@ -163,11 +163,11 @@ test('two ticked contacts send one request with both addresses in order', async 
     assert.equal(t.calls().length, 1, 'exactly one request');
     const call = t.calls()[0];
     assert.equal(call.path, '/invoices/i1/email', 'the invoice email endpoint');
-    assert.deepEqual([...call.body.recipients], ['ada@acme.test', 'bob@acme.test'],
+    assert.deepEqual([...call.body.recipients], ['ada@tucanotime.test', 'bob@tucanotime.test'],
         'both addresses travel in one ordered list');
     const result = document.getElementById('send-email-result');
     assert.equal(result.hidden, false, 'the result is announced inline');
-    assert.match(result.textContent, /ada@acme\.test, bob@acme\.test/,
+    assert.match(result.textContent, /ada@tucano\.test, bob@tucano\.test/,
         'the success message names every recipient');
     dom.window.close();
 });
@@ -184,10 +184,10 @@ test('the untouched single default omits the body entirely', async () => {
 test('a typed extra address is merged and de-duplicated', async () => {
     const { dom, document, window, t } = setup();
     await t.openSendEmailDialog(INVOICE, null);
-    document.getElementById('send-email-extra').value = 'ADA@acme.test, extra@client.test';
+    document.getElementById('send-email-extra').value = 'ADA@tucanotime.test, extra@client.test';
     click(window, document.getElementById('send-email-send'));
     await waitFor(() => t.calls().length === 1, { message: 'the merged send' });
-    assert.deepEqual([...t.calls()[0].body.recipients], ['ada@acme.test', 'extra@client.test'],
+    assert.deepEqual([...t.calls()[0].body.recipients], ['ada@tucanotime.test', 'extra@client.test'],
         'the extra merges after the ticked address and the case-insensitive duplicate drops');
     dom.window.close();
 });

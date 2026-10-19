@@ -336,7 +336,7 @@ pub(crate) async fn seed_issued_invoice(client: &Client) -> (Value, String) {
         client,
         "POST",
         "/api/customers",
-        Some(json!({"name":"ACME","currency":"EUR","default_rate_minor":6000,"email":"billing@acme.test"})),
+        Some(json!({"name":"Tucano Time","currency":"EUR","default_rate_minor":6000,"email":"billing@tucanotime.test"})),
     )
     .await;
     assert_eq!(sc, StatusCode::CREATED, "{cust}");

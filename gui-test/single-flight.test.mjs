@@ -61,10 +61,10 @@ const busy = (button) => button.disabled === true && button.getAttribute('aria-b
 
 function seedCustomer(t, document, selectId) {
     t.state.customers = [{
-        id: 'c1', name: 'ACME', currency: 'EUR', default_rate_minor: 6000, active: true,
+        id: 'c1', name: 'Tucano Time', currency: 'EUR', default_rate_minor: 6000, active: true,
     }];
     if (selectId) {
-        t.fillSelect(document.getElementById(selectId), [{ value: 'c1', text: 'ACME' }]);
+        t.fillSelect(document.getElementById(selectId), [{ value: 'c1', text: 'Tucano Time' }]);
         document.getElementById(selectId).value = 'c1';
     }
 }
@@ -178,7 +178,7 @@ const CASES = [
         name: 'customer',
         button: 'customer-save',
         prepare(t, doc) {
-            doc.getElementById('customer-name').value = 'ACME';
+            doc.getElementById('customer-name').value = 'Tucano Time';
             doc.getElementById('customer-currency').value = 'EUR';
             doc.getElementById('customer-rate').value = '60.00';
         },
@@ -254,7 +254,7 @@ const CASES = [
         name: 'wizard customer',
         button: 'wz-next',
         prepare(t, doc) {
-            doc.getElementById('wz-cust-name').value = 'ACME';
+            doc.getElementById('wz-cust-name').value = 'Tucano Time';
             doc.getElementById('wz-cust-currency').value = 'EUR';
             doc.getElementById('wz-cust-rate').value = '60.00';
         },
