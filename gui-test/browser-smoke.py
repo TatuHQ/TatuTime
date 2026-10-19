@@ -1403,18 +1403,16 @@ class Gate:
             "the bespoke .field/.hint/.form-error markup is gone and the official "
             "form vocabulary is in place (#232 phase 2b)",
             counts["field"] == 0 and counts["hint"] == 0 and counts["formError"] == 0
-            # 151/151: the Settings split's 139 plus the ten Document label
-            # rows (#354), the Company legal id and its label row.
-            # 159 groups: those rows plus the composed fieldsets and the
+            # 152/152: the Settings split's 139 plus the ten Document label
+            # rows (#354), the Company legal id and its label row, and the
+            # template notes row.
+            # 160 groups: those rows plus the composed fieldsets and the
             # Contacts row. Mirrors the shell census in
-            # gui-test/forms.test.mjs:69, so the two suites cannot drift.
-            and counts["groups"] == 159 and counts["labels"] == 151
-            and counts["controls"] == 151
-            # 55: the previous 47 plus the Company legal/default notes, the
-            # customer legal id hint, the rail list's notes and status line,
-            # the Document labels hint, the subject formatting hint and the
-            # invoice detail's frozen-terms note.
-            and counts["help"] == 55
+            # gui-test/forms.test.mjs:68, so the two suites cannot drift.
+            and counts["groups"] == 160 and counts["labels"] == 152
+            and counts["controls"] == 152
+            # 57: the previous 55 plus the template footer and notes hints.
+            and counts["help"] == 57
             # 28: the previous 27 plus the vault card's #vault-error.
             and counts["messages"] == counts["errorGroups"] == 28,
             f"counts={counts}",

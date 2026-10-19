@@ -255,42 +255,81 @@ impl PaymentDetails {
         out
     }
 
-    /// Plain-text block for emails and the `%payment_details%` document
-    /// variable: rows first, instructions last. `None` when empty so
-    /// senders can omit the section honestly.
+    /// The canonical "How to pay" block every surface renders: the flat rows
+    /// and flat instructions first, then each currency rail's rows and
+    /// instructions, with a separator between the flat block and the rails and
+    /// between rails. The PDF, the email text and `%payment_details%` all read
+    /// this ONE sequence, so no surface can drift from another.
     #[must_use]
-    pub fn email_block(&self) -> Option<String> {
+    pub fn canonical_lines(&self) -> Vec<PaymentLine> {
         let mut lines = Vec::new();
         for (label, value) in self.rows() {
-            lines.push(format!("{label}: {value}"));
+            lines.push(PaymentLine::Row(label, value));
         }
-        if !self.instructions.trim().is_empty() {
-            lines.push(self.instructions.trim().to_string());
+        let instructions = self.instructions.trim();
+        if !instructions.is_empty() {
+            lines.push(PaymentLine::Text(instructions.to_string()));
         }
-        // Structured rails are printed after the flat single-rail block, each
-        // one clearly separated by currency. Display only.
         for rail in &self.rails {
             if rail.currency.trim().is_empty() {
                 continue;
             }
+            // A rail is its own section: separate it from whatever came
+            // before (the flat block or the previous rail).
+            if !lines.is_empty() {
+                lines.push(PaymentLine::Separator);
+            }
             for (label, value) in rail.rows() {
-                lines.push(format!("{label}: {value}"));
+                lines.push(PaymentLine::Row(label, value));
             }
             if let Some(instructions) = rail
                 .instructions
-                .as_ref()
-                .map(|v| v.trim())
+                .as_deref()
+                .map(str::trim)
                 .filter(|v| !v.is_empty())
             {
-                lines.push(instructions.to_string());
+                lines.push(PaymentLine::Text(instructions.to_string()));
             }
         }
+        lines
+    }
+
+    /// Plain-text block for emails and the `%payment_details%` document
+    /// variable, rendered from [`PaymentDetails::canonical_lines`] so it is
+    /// byte-for-byte the same content the PDF prints. `None` when empty so
+    /// senders can omit the section honestly.
+    #[must_use]
+    pub fn email_block(&self) -> Option<String> {
+        let lines: Vec<String> = self
+            .canonical_lines()
+            .into_iter()
+            .filter_map(|line| match line {
+                PaymentLine::Row(label, value) => Some(format!("{label}: {value}")),
+                PaymentLine::Text(text) => Some(text),
+                // A separator is a visual break on paper; the text block
+                // already reads as one section per currency.
+                PaymentLine::Separator => None,
+            })
+            .collect();
         if lines.is_empty() {
             None
         } else {
             Some(lines.join("\n"))
         }
     }
+}
+
+/// One line of the canonical payment block. `Separator` marks the break
+/// between the flat block and the currency rails (and between rails); the PDF
+/// draws it as a dashed rule, the text/HTML renderings omit it.
+#[derive(Debug, Clone, PartialEq)]
+pub enum PaymentLine {
+    /// A labelled row: `(label, value)`.
+    Row(&'static str, String),
+    /// Free-text instruction lines (newlines preserved).
+    Text(String),
+    /// A section break between the flat block and a rail.
+    Separator,
 }
 
 impl Customer {
@@ -743,6 +782,16 @@ pub fn validate_customer_input(input: &CustomerInput) -> Result<CustomerDraft, V
         errors.push(FieldError::new(
             "invoice_subject",
             "must be a single line without control characters",
+        ));
+    }
+    // A variable whose value spans lines is a document block, never a subject:
+    // interpolating it would freeze a broken subject at issue.
+    for token in crate::template::multiline_tokens(&input.invoice_subject) {
+        errors.push(FieldError::new(
+            "invoice_subject",
+            format!(
+                "cannot use %{token}% in the subject: its value spans multiple lines (use it in the body, footer or notes)"
+            ),
         ));
     }
     // Customer company/registration number: bounded and printable (a control

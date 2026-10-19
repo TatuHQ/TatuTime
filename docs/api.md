@@ -101,7 +101,13 @@ The invoice document model gained these fields; the schemas live in
 - `LabelOverrides` gains display-only, ≤ 40-character keys for the reference
   document's wording: `from`, `invoice_for`, `invoice_id`, `issue_date`,
   `due_date`, `subject`, `payment_heading`, `item_type`, `payments`,
-  `amount_due`.
+  `amount_due`. `payment_heading` renames the generated payment block (default
+  `Payment details`).
+- `InvoiceTemplate.notes` — the org-wide free text of the document's `Notes`
+  section (≤ 4000 characters, markdown subset, `%variables%` supported; optional
+  and omitted from the stored bytes when empty). It prints under the `Notes`
+  heading after the template footer and before the customer's `invoice_notes`
+  and the generated `Payment details` block.
 - `PaymentDetails.rails` — up to four `PaymentRail` entries for multi-currency
   customers. `currency` (3 uppercase letters) and `account_name` are required;
   the remaining account fields are optional and shape-checked (`iban` 5-34

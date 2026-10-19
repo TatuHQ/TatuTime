@@ -195,16 +195,64 @@ async fn template_save_validates_and_rejects_without_persisting() {
     .await;
     assert_eq!(s6, StatusCode::UNPROCESSABLE_ENTITY);
 
+    // Notes: same closed %variable% set and the 4000-character cap.
+    let (sn, bn) = json_req(
+        &app,
+        "PUT",
+        "/api/admin/invoice-template",
+        Some(json!({"notes": "pay %bogus% now"})),
+    )
+    .await;
+    assert_eq!(sn, StatusCode::UNPROCESSABLE_ENTITY, "{bn}");
+    assert_eq!(bn["error"]["fields"][0]["field"], "notes", "{bn}");
+    let (sl, bl) = json_req(
+        &app,
+        "PUT",
+        "/api/admin/invoice-template",
+        Some(json!({"notes": "x".repeat(4001)})),
+    )
+    .await;
+    assert_eq!(sl, StatusCode::UNPROCESSABLE_ENTITY, "{bl}");
+    assert_eq!(bl["error"]["fields"][0]["field"], "notes", "{bl}");
+    assert!(
+        !d.path().join("data").join("invoice_template.json").exists(),
+        "rejected notes persist nothing"
+    );
+
+    // A multi-line variable can never be frozen into the subject: refused at
+    // save time, with the field named and nothing persisted.
+    let (ss, bs) = json_req(
+        &app,
+        "PUT",
+        "/api/admin/invoice-template",
+        Some(json!({"subject": "Invoice %payment_details%"})),
+    )
+    .await;
+    assert_eq!(ss, StatusCode::UNPROCESSABLE_ENTITY, "{bs}");
+    assert_eq!(bs["error"]["fields"][0]["field"], "subject", "{bs}");
+    assert!(
+        bs["error"]["fields"][0]["message"]
+            .as_str()
+            .unwrap()
+            .contains("%payment_details%"),
+        "{bs}"
+    );
+    assert!(
+        !d.path().join("data").join("invoice_template.json").exists(),
+        "the subject guard persists nothing"
+    );
+
     // A valid template round-trips and lands on disk atomically.
     let (s7, saved) = json_req(
         &app,
         "PUT",
         "/api/admin/invoice-template",
-        Some(json!({"subject":"Invoice %invoice_number% for %customer_name%","body":"# Hello\n\nthanks","footer":"Bank: IBAN","payment_terms":{"kind":"net_30"}})),
+        Some(json!({"subject":"Invoice %invoice_number% for %customer_name%","body":"# Hello\n\nthanks","footer":"Bank: IBAN","notes":"Thanks from the org.","payment_terms":{"kind":"net_30"}})),
     )
     .await;
     assert_eq!(s7, StatusCode::OK, "{saved}");
     assert_eq!(saved["body"], "# Hello\n\nthanks");
+    assert_eq!(saved["notes"], "Thanks from the org.");
 
     // GET returns the template plus the variable cheatsheet.
     let (_s8, got) = json_req(&app, "GET", "/api/admin/invoice-template", None).await;
@@ -547,15 +595,22 @@ async fn template_preview_renders_a_pdf_with_no_invoice_in_the_store() {
         text.contains("INV-0000"),
         "the sample invoice number is on the document"
     );
-    // Phase 2: the sample shows the new document sections, not just the
-    // template body — the subject, the customer's company number and the two
-    // currency rails.
+    // The sample shows the document sections, not just the template body: the
+    // subject, the customer's company number, the free-text Notes section and
+    // the canonical, currency-labelled Payment details block.
     assert!(text.contains("Subject"), "{text}");
     assert!(text.contains("Sample Customer"), "{text}");
     assert!(text.contains("Company number"), "{text}");
     assert!(text.contains("Notes"), "{text}");
-    assert!(text.contains("For all EUR Payments;"), "{text}");
-    assert!(text.contains("For all USD Payments;"), "{text}");
+    assert!(
+        text.contains("Thank you for your business. Please quote the invoice number."),
+        "{text}"
+    );
+    assert!(text.contains("Payment details"), "{text}");
+    assert!(
+        text.matches("Currency").count() >= 2,
+        "one Currency row per rail: {text}"
+    );
     assert!(text.contains("Page 1 of 1"), "{text}");
 
     // Same candidate template + org => the same ETag, so the GUI can skip a
@@ -838,4 +893,153 @@ async fn template_subject_refuses_control_characters() {
         got["template"]["subject"], "October: %invoice_number%",
         "the rejection persisted nothing: {got}"
     );
+}
+
+// ------------------------------------------------------ template notes ------
+
+/// The org-wide `notes` field prints in the candidate preview and in the
+/// issued archived PDF, in the documented order: footer → Notes (template
+/// text, then the customer's own) → Payment details → credit line. Clearing
+/// it removes the section when the customer has no note of their own.
+#[tokio::test]
+async fn template_notes_print_in_preview_and_issued_pdf_in_order() {
+    let (app, d) = app().await;
+    let pay = json!({
+        "bank_name": "Example Bank",
+        "account_name": "Tucano Time",
+        "iban": "EX000000000000000000",
+        "instructions": "Quote the invoice number.",
+        "rails": [
+            {
+                "currency": "EUR",
+                "account_name": "Tucano Time",
+                "iban": "EX111111111111111111"
+            },
+            {
+                "currency": "USD",
+                "account_name": "Tucano Time",
+                "account_number": "000000000000"
+            }
+        ]
+    });
+    let template = json!({
+        "subject": "Statement %invoice_number%",
+        "body": "",
+        "footer": "Footer marker text.",
+        "notes": "Template note text.",
+        "payment_terms": null
+    });
+    let (s, saved) = json_req(
+        &app,
+        "PUT",
+        "/api/admin/invoice-template",
+        Some(template.clone()),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{saved}");
+
+    // The unsaved-template preview renders the same notes section.
+    let (sp, _, preview) = preview_req(&app, template, Some(&app.cookie)).await;
+    assert_eq!(sp, StatusCode::OK, "{}", String::from_utf8_lossy(&preview));
+    let preview_text = pdf_text(&preview);
+    assert!(preview_text.contains("Notes"), "{preview_text}");
+    assert!(
+        preview_text.contains("Template note text."),
+        "{preview_text}"
+    );
+    assert!(preview_text.contains("Payment details"), "{preview_text}");
+
+    // Issued + archived PDF for a customer that carries its own note.
+    let (c, inv) = seed_customer_invoice(
+        &app,
+        "NOTES",
+        json!({"invoice_notes": "Customer note text.", "payment_details": pay}),
+    )
+    .await;
+    let iid = inv["id"].as_str().unwrap();
+    let (si, issued) = json_req(&app, "POST", &format!("/api/invoices/{iid}/issue"), None).await;
+    assert_eq!(si, StatusCode::OK, "{issued}");
+    let (_s, _h, pdf) = raw_req(&app, "GET", &format!("/api/invoices/{iid}/pdf")).await;
+    let text = pdf_text(&pdf);
+    let at = |needle: &str| {
+        text.find(needle)
+            .unwrap_or_else(|| panic!("{needle} missing from {text}"))
+    };
+    assert!(text.contains("Notes"), "{text}");
+    assert!(
+        at("Footer marker text.") < at("Template note text."),
+        "footer before notes: {text}"
+    );
+    assert!(
+        at("Template note text.") < at("Customer note text."),
+        "template note before the customer's: {text}"
+    );
+    assert!(
+        at("Customer note text.") < at("Payment details"),
+        "notes before the payment block: {text}"
+    );
+    assert!(
+        at("Payment details") < at("Generated by"),
+        "payment block before the credit line: {text}"
+    );
+    assert!(
+        at("Generated by") < at("Page 1 of 1"),
+        "the credit line precedes the page footer: {text}"
+    );
+    assert_eq!(
+        text.matches("Currency").count(),
+        2,
+        "both currency rails print: {text}"
+    );
+
+    // `/document` JSON is the same content as the PDF.
+    let (_sd, doc) = json_req(&app, "GET", &format!("/api/invoices/{iid}/document"), None).await;
+    let html = doc["html"].as_str().unwrap();
+    assert!(html.contains("<h2>Notes</h2>"), "{html}");
+    assert!(html.contains("Template note text."), "{html}");
+    assert!(html.contains("Customer note text."), "{html}");
+
+    // Clearing the org notes (and the customer's) removes the section: no
+    // empty heading is ever printed.
+    let cleared = json!({
+        "subject": "Statement %invoice_number%",
+        "body": "",
+        "footer": "",
+        "notes": "",
+        "payment_terms": null
+    });
+    let (sc, cleared_body) =
+        json_req(&app, "PUT", "/api/admin/invoice-template", Some(cleared)).await;
+    assert_eq!(sc, StatusCode::OK, "{cleared_body}");
+    let cid = c["id"].as_str().unwrap();
+    let (su, updated) = json_req(
+        &app,
+        "PUT",
+        &format!("/api/customers/{cid}"),
+        Some(json!({
+            "name": "NOTES",
+            "currency": "EUR",
+            "default_rate_minor": 6000,
+            "email": "billing@t116.test",
+            "invoice_notes": "",
+            "payment_details": pay
+        })),
+    )
+    .await;
+    assert_eq!(su, StatusCode::OK, "{updated}");
+    // The archive is write-once: drop it so the lazy path re-renders with the
+    // current template/customer.
+    std::fs::remove_file(
+        d.path()
+            .join("data")
+            .join("invoices")
+            .join(format!("{iid}.pdf")),
+    )
+    .unwrap();
+    let (_s2, _h2, pdf2) = raw_req(&app, "GET", &format!("/api/invoices/{iid}/pdf")).await;
+    let text2 = pdf_text(&pdf2);
+    assert!(!text2.contains("Notes"), "no empty heading: {text2}");
+    assert!(!text2.contains("Template note text."), "{text2}");
+    assert!(!text2.contains("Customer note text."), "{text2}");
+    assert!(text2.contains("Payment details"), "{text2}");
 }

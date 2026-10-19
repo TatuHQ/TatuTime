@@ -2,7 +2,7 @@ use chrono::{DateTime, Datelike, NaiveDate, Utc};
 
 use crate::domain::{
     Customer, Invoice, InvoiceLine, InvoiceWatermarkStage, LabelOverrides, LineItemKind, LineKind,
-    PaymentRail, PaymentTerms, TermsKind,
+    PaymentLine, PaymentTerms, TermsKind,
 };
 
 // =============================================================== doc model ==
@@ -311,7 +311,9 @@ pub fn doc_for_labeled(
     let item_type_label = labels.label(&labels.item_type, "Item type");
     let payments_label = labels.label(&labels.payments, "Payments");
     let amount_due_label = labels.label(&labels.amount_due, "Amount due");
-    let payment_heading = labels.label(&labels.payment_heading, "Notes");
+    // The generated "How to pay" block. Its default no longer collides with
+    // the free-text `Notes` section: that section owns the word `Notes`.
+    let payment_heading = labels.label(&labels.payment_heading, "Payment details");
 
     let subject = {
         let s = invoice.subject.trim();
@@ -476,17 +478,11 @@ pub fn doc_for_labeled(
         blocks: vec![],
         lines,
         totals,
-        // "How to pay": the customer's structured rails when configured, else
-        // the historical flat payment block. Absent (every legacy customer)
-        // keeps the document at the credit line only. A configured
-        // `payment_heading` labels both shapes; their built-in defaults stay
-        // `Notes` (rails) and `Payment details` (the legacy flat block).
-        footer: payment_footer(
-            customer,
-            &org.name,
-            payment_heading,
-            labels.label(&labels.payment_heading, "Payment details"),
-        ),
+        // "How to pay": one canonical block (flat rows + instructions, then
+        // each currency rail) shared with `%payment_details%` and the email.
+        // Absent (every legacy customer) keeps the document at the credit
+        // line only. A configured `payment_heading` renames the block.
+        footer: payment_footer(customer, &org.name, payment_heading),
     }
 }
 
@@ -529,49 +525,33 @@ fn address_blocks(address: Option<&crate::domain::Address>, order: AddressOrder)
         .collect()
 }
 
-/// The footer blocks of the built-in document: the payment section and the
-/// generator credit. `heading` labels the structured multi-currency rails,
-/// `flat_heading` the legacy single-account block; both follow the
-/// `payment_heading` override when one is configured.
-fn payment_footer(
-    customer: &Customer,
-    org_name: &str,
-    heading: &str,
-    flat_heading: &str,
-) -> Vec<Block> {
+/// The footer blocks of the built-in document: the generated payment section
+/// and the generator credit. The payment block is
+/// [`crate::domain::PaymentDetails::canonical_lines`] — the exact sequence the
+/// email and `%payment_details%` render — so the flat rows and the currency
+/// rails always appear together, in the same order, on every surface.
+/// `heading` is the renameable `payment_heading` label; a customer without
+/// configured details prints only the credit line.
+fn payment_footer(customer: &Customer, org_name: &str, heading: &str) -> Vec<Block> {
     let mut footer: Vec<Block> = Vec::new();
     if let Some(p) = &customer.payment_details {
-        let rails: Vec<&PaymentRail> = p
-            .rails
-            .iter()
-            .filter(|r| !r.currency.trim().is_empty())
-            .collect();
-        if !rails.is_empty() {
-            // Multi-currency: one block per rail, separated by a dashed rule.
+        let lines = p.canonical_lines();
+        if !lines.is_empty() {
             footer.push(Block::Heading {
                 level: 2,
                 spans: vec![Span::bold(heading.to_string())],
             });
-            for (i, rail) in rails.into_iter().enumerate() {
-                if i > 0 {
-                    footer.push(Block::Rule { dashed: true });
-                }
-                footer.extend(rail_blocks(rail));
-            }
-        } else {
-            // Single-rail fallback: the historical flat block, unchanged.
-            let rows = p.rows();
-            let instructions = p.instructions.trim();
-            if !rows.is_empty() || !instructions.is_empty() {
-                footer.push(Block::Heading {
-                    level: 2,
-                    spans: vec![Span::bold(flat_heading.to_string())],
-                });
-                for (label, value) in rows {
-                    footer.push(kv(label, value));
-                }
-                for line in instructions.lines().filter(|l| !l.trim().is_empty()) {
-                    footer.push(Block::Paragraph(vec![Span::text(line.trim().to_string())]));
+            for line in lines {
+                match line {
+                    PaymentLine::Row(label, value) => footer.push(kv(label, value)),
+                    // Instructions are user text: one paragraph per line, so a
+                    // multi-line instruction keeps its line structure.
+                    PaymentLine::Text(text) => {
+                        for line in text.lines().map(str::trim).filter(|l| !l.is_empty()) {
+                            footer.push(Block::Paragraph(vec![Span::text(line.to_string())]));
+                        }
+                    }
+                    PaymentLine::Separator => footer.push(Block::Rule { dashed: true }),
                 }
             }
         }
@@ -580,66 +560,6 @@ fn payment_footer(
         "Generated by {org_name} on TucanoTime."
     ))]));
     footer
-}
-
-/// One currency rail: `For all EUR Payments;`, the account identity lines,
-/// then the labelled bank rows and the free-text instructions.
-fn rail_blocks(rail: &PaymentRail) -> Vec<Block> {
-    let non_empty = |value: &Option<String>| {
-        value
-            .as_deref()
-            .map(str::trim)
-            .filter(|v| !v.is_empty())
-            .map(str::to_string)
-    };
-    let mut out = vec![Block::Paragraph(vec![Span::bold(format!(
-        "For all {} Payments;",
-        rail.currency.trim()
-    ))])];
-    for line in rail
-        .account_name
-        .lines()
-        .map(str::trim)
-        .filter(|l| !l.is_empty())
-    {
-        out.push(Block::Paragraph(vec![Span::text(line.to_string())]));
-    }
-    if let Some(iban) = non_empty(&rail.iban) {
-        out.push(kv("IBAN", iban));
-    }
-    let swift = match (non_empty(&rail.bic), non_empty(&rail.swift)) {
-        (Some(bic), Some(swift)) => Some(format!("{bic} / {swift}")),
-        (bic, swift) => bic.or(swift),
-    };
-    if let Some(swift) = swift {
-        out.push(kv("Swift/BIC", swift));
-    }
-    let bank = match (non_empty(&rail.bank_name), non_empty(&rail.bank_address)) {
-        (Some(name), Some(address)) => Some(format!("{name}, {address}")),
-        (name, address) => name.or(address),
-    };
-    if let Some(bank) = bank {
-        out.push(kv("Bank name and address", bank));
-    }
-    if let Some(value) = non_empty(&rail.account_number) {
-        out.push(kv("Account number", value));
-    }
-    if let Some(value) = non_empty(&rail.account_type) {
-        out.push(kv("Account type", value));
-    }
-    if let Some(value) = non_empty(&rail.routing_number) {
-        out.push(kv("Routing number", value));
-    }
-    if let Some(instructions) = non_empty(&rail.instructions) {
-        for line in instructions
-            .lines()
-            .map(str::trim)
-            .filter(|l| !l.is_empty())
-        {
-            out.push(Block::Paragraph(vec![Span::text(line.to_string())]));
-        }
-    }
-    out
 }
 
 fn line_row(line: &InvoiceLine, money: &impl Fn(u64) -> String) -> LineRow {
@@ -697,7 +617,7 @@ mod tests {
     use super::*;
     use crate::domain::{
         Address, Currency, Customer, InvoiceLine, InvoicePayment, InvoiceStatus, LineKind,
-        PaymentDetails, PaymentTerms, TermsKind,
+        PaymentDetails, PaymentRail, PaymentTerms, TermsKind,
     };
     use crate::pdf::render_invoice_pdf;
     use chrono::TimeZone;
@@ -1163,24 +1083,12 @@ mod tests {
             ..Default::default()
         });
         let doc = doc_for(&sample_invoice(), &c, &org());
-        // Heading is the new "Notes" wording, rails only (no flat rows).
+        // The generated block is labelled `Payment details`, never `Notes`
+        // (that heading belongs to the free-text notes section).
         assert!(matches!(
             &doc.footer[0],
-            Block::Heading { spans, .. } if spans[0].text == "Notes"
+            Block::Heading { spans, .. } if spans[0].text == "Payment details"
         ));
-        let paragraphs: Vec<&str> = doc
-            .footer
-            .iter()
-            .filter_map(|b| match b {
-                Block::Paragraph(spans) => Some(spans[0].text.as_str()),
-                _ => None,
-            })
-            .collect();
-        assert!(
-            paragraphs.contains(&"For all EUR Payments;")
-                && paragraphs.contains(&"For all USD Payments;"),
-            "{paragraphs:?}"
-        );
         let keys: Vec<(&str, &str)> = doc
             .footer
             .iter()
@@ -1189,10 +1097,19 @@ mod tests {
                 _ => None,
             })
             .collect();
+        // Currency-labelled rails, in the canonical row shape shared with the
+        // email and `%payment_details%`.
+        assert_eq!(
+            keys.iter()
+                .filter(|(key, _)| *key == "Currency")
+                .map(|(_, value)| *value)
+                .collect::<Vec<_>>(),
+            vec!["EUR", "USD"],
+            "{keys:?}"
+        );
         assert!(keys.contains(&("IBAN", "EX000000000000000000")), "{keys:?}");
-        assert!(keys.contains(&("Swift/BIC", "EXAMPLEB")), "{keys:?}");
+        assert!(keys.contains(&("BIC/SWIFT", "EXAMPLEB")), "{keys:?}");
         assert!(keys.contains(&("Routing number", "000000000")), "{keys:?}");
-        assert!(keys.contains(&("Swift/BIC", "EXAMPLEB")), "{keys:?}");
         // Exactly one separator, between the two rails.
         let rules = doc
             .footer
@@ -1200,6 +1117,70 @@ mod tests {
             .filter(|b| matches!(b, Block::Rule { dashed: true }))
             .count();
         assert_eq!(rules, 1);
+        // The credit line stays last.
+        assert!(matches!(
+            doc.footer.last(),
+            Some(Block::Paragraph(spans)) if spans[0].text.starts_with("Generated by")
+        ));
+    }
+
+    /// The canonical block is flat rows + instructions, then every rail — the
+    /// same sequence `PaymentDetails::email_block` joins for the email.
+    #[test]
+    fn payment_block_is_canonical_flat_then_rails() {
+        let mut c = customer();
+        c.payment_details = Some(PaymentDetails {
+            bank_name: "Example Bank".into(),
+            account_name: "Tucano Time".into(),
+            iban: "EX000000000000000000".into(),
+            instructions: "Flat instruction.".into(),
+            rails: vec![
+                PaymentRail {
+                    currency: "EUR".into(),
+                    account_name: "Tucano Time".into(),
+                    iban: Some("EX111111111111111111".into()),
+                    instructions: Some("Rail EUR instruction.".into()),
+                    ..Default::default()
+                },
+                PaymentRail {
+                    currency: "USD".into(),
+                    account_name: "Tucano Time".into(),
+                    account_number: Some("000000000000".into()),
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        });
+        let doc = doc_for(&sample_invoice(), &c, &org());
+        let rows: Vec<String> = doc
+            .footer
+            .iter()
+            .map(|b| match b {
+                Block::KeyVal { key, spans } => format!("{}: {}", key, spans[0].text),
+                Block::Rule { dashed: true } => "---".to_string(),
+                Block::Paragraph(spans) => spans[0].text.clone(),
+                other => format!("{other:?}"),
+            })
+            .collect();
+        let position = |needle: &str| {
+            rows.iter()
+                .position(|row| row.contains(needle))
+                .unwrap_or_else(|| panic!("{needle} missing from {rows:?}"))
+        };
+        // Flat rows, flat instructions, then the rails in currency order.
+        assert!(position("Bank: Example Bank") < position("IBAN: EX000000000000000000"));
+        assert!(position("IBAN: EX000000000000000000") < position("Flat instruction."));
+        assert!(position("Flat instruction.") < position("---"));
+        assert!(position("---") < position("Currency: EUR"));
+        assert!(position("Currency: EUR") < position("IBAN: EX111111111111111111"));
+        assert!(position("IBAN: EX111111111111111111") < position("Rail EUR instruction."));
+        assert!(position("Rail EUR instruction.") < position("Currency: USD"));
+        assert!(position("Currency: USD") < position("Generated by"));
+        assert_eq!(
+            position("Generated by"),
+            rows.len() - 1,
+            "credit line last: {rows:?}"
+        );
     }
 
     #[test]

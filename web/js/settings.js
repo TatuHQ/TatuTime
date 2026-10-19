@@ -761,6 +761,7 @@ export async function refreshInvoiceTemplate() {
     $('template-subject').value = t.subject || '';
     $('template-body').value = t.body || '';
     $('template-footer').value = t.footer || '';
+    $('template-notes').value = t.notes || '';
     const lb = t.labels || {};
     for (const k of LABEL_KEYS) {
       $(`lb-${k.replace(/_/g, '-')}`).value = lb[k] || '';
@@ -822,7 +823,7 @@ export const TEMPLATE_PREVIEW_DEBOUNCE_MS = 500;
 /// `change` are observed: typing fires `input`, a pick or the number spinner
 /// fires `change`.
 const TEMPLATE_PREVIEW_FIELDS = [
-  'template-subject', 'template-body', 'template-footer',
+  'template-subject', 'template-body', 'template-footer', 'template-notes',
   'template-terms', 'template-terms-days',
   ...LABEL_KEYS.map((key) => `lb-${key.replace(/_/g, '-')}`),
 ];
@@ -894,6 +895,7 @@ export function templatePayload() {
     subject: $('template-subject').value.trim(),
     body: $('template-body').value,
     footer: $('template-footer').value,
+    notes: $('template-notes').value,
     payment_terms,
     // #147/#354 display labels ride the same template store (no parallel
     // truth). Every key travels, including the blank ones, so clearing an
