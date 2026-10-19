@@ -79,6 +79,57 @@ const AUDIT = {
     ],
 };
 
+// GET /api/admin/vault — the captured enabled/key-file state from the contract.
+const VAULT_ENABLED = {
+    enabled: true,
+    source: 'key_file',
+    disabled_reason: null,
+    fingerprint: 'sha256:9f3a1c0b',
+    key_file_name: 'vault.key',
+    key_file_present: true,
+    secrets_count: 0,
+    external_override: false,
+    can_enable: false,
+    can_disable: true,
+    can_regenerate: true,
+};
+
+const VAULT_DISABLED_CONFIG = {
+    enabled: false,
+    source: 'none',
+    disabled_reason: 'config',
+    fingerprint: null,
+    key_file_name: null,
+    key_file_present: false,
+    secrets_count: 0,
+    external_override: false,
+    can_enable: true,
+    can_disable: false,
+    can_regenerate: false,
+};
+
+const VAULT_DISABLED_WRITE = {
+    ...VAULT_DISABLED_CONFIG,
+    disabled_reason: 'write_failed',
+};
+
+const VAULT_DISABLED_ENV = {
+    ...VAULT_DISABLED_CONFIG,
+    disabled_reason: 'env',
+    can_enable: false,
+};
+
+const VAULT_ENV_OVERRIDE = {
+    ...VAULT_ENABLED,
+    source: 'env',
+    fingerprint: 'sha256:env0override',
+    key_file_name: null,
+    key_file_present: false,
+    external_override: true,
+    can_disable: false,
+    can_regenerate: false,
+};
+
 function setup({
     email = EMAIL,
     putError = null,
@@ -87,6 +138,11 @@ function setup({
     getError = null,
     config = CONFIG,
     audit = AUDIT,
+    vault = VAULT_ENABLED,
+    vaultNext = {},
+    vaultResults = {},
+    vaultErrors = {},
+    secrets = [],
 } = {}) {
     const dom = new JSDOM(html, { runScripts: 'outside-only', url: 'http://localhost/settings/users' });
     const { window } = dom;
@@ -109,6 +165,11 @@ function setup({
       window.__putError = ${JSON.stringify(putError)};
       window.__postResult = ${JSON.stringify(postResult)};
       window.__postError = ${JSON.stringify(postError)};
+      window.__vault = ${JSON.stringify(vault)};
+      window.__vaultNext = ${JSON.stringify(vaultNext)};
+      window.__vaultResults = ${JSON.stringify(vaultResults)};
+      window.__vaultErrors = ${JSON.stringify(vaultErrors)};
+      window.__secrets = ${JSON.stringify(secrets)};
       // The live preview's transport. Tests replace __previewHandler to hold a
       // render open, or to answer 422/304.
       window.__previewHandler = null;
@@ -124,6 +185,8 @@ function setup({
         if (path === '/auth/status') return { initialised: true };
         if (path === '/auth/sso/providers') return { providers: [] };
         if (path === '/auth/me') throw new Error('no session');
+        if (path === '/admin/vault') return window.__vault;
+        if (path === '/admin/secrets') return { secrets: window.__secrets };
         if (path === '/admin/email') return window.__email;
         if (path === '/admin/org') return window.__org;
         if (path === '/admin/invoice-template') return window.__template;
@@ -159,6 +222,20 @@ function setup({
       };
       api.post = async (path, body) => {
         window.calls.post.push({ path, body });
+        if (path.startsWith('/admin/vault')) {
+          const raw = window.__vaultErrors[path];
+          if (raw) {
+            const err = new Error(raw.message);
+            err.status = raw.status;
+            err.payload = { error: { code: raw.code || 'error', message: raw.message } };
+            throw err;
+          }
+          // A successful action moves the simulated server to the next state;
+          // the GUI must re-fetch GET /admin/vault rather than trust this body.
+          if (window.__vaultNext[path]) window.__vault = window.__vaultNext[path];
+          if (window.__vaultResults[path]) return window.__vaultResults[path];
+          return { ...window.__vault };
+        }
         if (window.__postError) {
           const raw = window.__postError;
           const err = new Error(raw.message);
@@ -185,6 +262,7 @@ function setup({
         return url;
       };
       URL.revokeObjectURL = (url) => window.revokedUrls.push(url);
+      initDialog();
       initTabs();
       initSettingsTabs();
       wireSettingsControls();
@@ -194,6 +272,8 @@ function setup({
       refreshSettings, refreshConfig, saveConfig, refreshAuditLog, resetBuiltInLabels,
       refreshOrgProfile, saveOrgProfile, refreshInvoiceTemplate, saveInvoiceTemplate,
       refreshEmailSettings, saveEmailSettings, sendTestEmail, EMAIL_SETTINGS_ROUTE,
+      refreshVault, renderVault, refreshSecrets, enableVault, disableVault, regenerateVault,
+      openVaultSettings, VAULT_SETTINGS_ROUTE,
       initTemplatePreview, renderTemplatePreview, scheduleTemplatePreview,
       releaseTemplatePreview, openTemplatePreviewInNewTab, templatePayload,
       TEMPLATE_PREVIEW_DEBOUNCE_MS, RESTART_REQUIRED_KEYS, NULLABLE_CONFIG_KEYS, state,
@@ -637,7 +717,9 @@ test('a disabled vault disables the Email form with an actionable notice', async
     await t.refreshEmailSettings();
     const notice = document.getElementById('email-vault-notice');
     assert.equal(notice.hidden, false, 'the notice is visible');
-    assert.match(notice.textContent, /TUCANO_SECRET_KEY/);
+    assert.match(notice.textContent, /enable it in Security & runtime/i);
+    assert.equal(document.getElementById('email-vault-settings').hidden, false,
+        'the notice carries the button that routes to the vault card');
     assert.equal(document.getElementById('email-status').textContent,
         'Email delivery: NOT configured — messages are only logged.');
     const controls = [...document.querySelectorAll('#email-form input, #email-form button, #email-test-form input, #email-test-form button')];
@@ -654,7 +736,7 @@ test('a 503 vault_disabled on save disables the form and explains it', async () 
     await t.saveEmailSettings({ preventDefault() { } });
     const notice = document.getElementById('email-vault-notice');
     assert.equal(notice.hidden, false);
-    assert.match(notice.textContent, /TUCANO_SECRET_KEY/);
+    assert.match(notice.textContent, /enable it in Security & runtime/i);
     assert.equal(document.getElementById('email-error').hidden, false, 'the server error is shown inline');
     assert.equal(document.getElementById('email-error').dataset.errorCode, 'vault_disabled');
     assert.equal(document.getElementById('email-host').disabled, true, 'the form is disabled, not left failing');
@@ -937,6 +1019,31 @@ test('every Email control is labelled and the live regions are declared', () => 
     for (const id of ['email-vault-notice', 'email-error', 'email-test-error']) {
         assert.equal(document.getElementById(id).getAttribute('role'), 'alert', `${id} is an alert`);
     }
+    dom.window.close();
+});
+
+test('the Vault key card declares its live regions and named actions', async () => {
+    const { dom, document, t } = setup();
+    const status = document.getElementById('vault-status');
+    assert.equal(status.getAttribute('role'), 'status', 'the state line is a status region');
+    assert.equal(status.getAttribute('aria-live'), 'polite', 'the state line announces politely');
+    for (const id of ['vault-warning', 'vault-error']) {
+        assert.equal(document.getElementById(id).getAttribute('role'), 'alert', `${id} is an alert`);
+        assert.equal(document.getElementById(id).hidden, true, `${id} starts hidden`);
+    }
+    for (const id of ['vault-enable', 'vault-regenerate', 'vault-disable']) {
+        const button = document.getElementById(id);
+        assert.equal(button.tagName, 'BUTTON', `${id} is a real button`);
+        assert.equal(button.getAttribute('type'), 'button', `${id} never submits a form`);
+        assert.ok(button.textContent.trim(), `${id} has an accessible name`);
+        assert.equal(button.hidden, true, `${id} is hidden until the status loads`);
+    }
+    await t.refreshVault();
+    assert.equal(document.getElementById('vault-enable').hidden, true,
+        'an enabled key-file vault offers no Enable action');
+    assert.equal(document.getElementById('vault-regenerate').hidden, false);
+    assert.equal(document.getElementById('vault-regenerate').disabled, false);
+    assert.ok(document.getElementById('vault-regenerate').textContent.trim(), 'the visible action is named');
     dom.window.close();
 });
 

@@ -244,9 +244,10 @@ pub fn restore(in_path: &Path, target: &Path, force: bool) -> Result<Vec<String>
             if rel == "secrets.bin" {
                 had_vault = true;
                 notes.push(
-                    "backup contains the encrypted vault store (secrets.bin): the original \
-                     TUCANO_SECRET_KEY(_FILE) must be configured or the Settings tab will be \
-                     unreadable"
+                    "backup contains the encrypted vault store (secrets.bin): restore \
+                     <data>/vault.key together with the data (or supply the external \
+                     TUCANO_SECRET_KEY / TUCANO_SECRET_KEY_FILE override) or the stored \
+                     credentials cannot be decrypted"
                         .into(),
                 );
             }

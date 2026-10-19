@@ -122,10 +122,11 @@ pub async fn calendar_events(
     Query(q): Query<RangeQuery>,
 ) -> ApiResult {
     let (from, to) = q.dates()?;
+    let vault = app.vault.get();
     // #36: Google/Microsoft OAuth providers take precedence when configured;
     // otherwise the #15 ICS feed remains the default (locked decision).
-    if let Some(source) = crate::calendar_oauth::configured_provider(app.vault.as_deref())
-        .and_then(|p| crate::calendar_oauth::source_for(&p, app.vault.as_deref()))
+    if let Some(source) = crate::calendar_oauth::configured_provider(vault.as_deref())
+        .and_then(|p| crate::calendar_oauth::source_for(&p, vault.as_deref()))
     {
         let events = blocking("calendar provider fetch", move || {
             source.fetch(from, to).map_err(|_| {
@@ -140,7 +141,7 @@ pub async fn calendar_events(
         return Ok(Json(serde_json::json!({ "events": events })).into_response());
     }
     let source = crate::providers::resolve_secret(
-        app.vault.as_deref(),
+        vault.as_deref(),
         "calendar.ics_url",
         "TUCANO_CALENDAR_ICS",
     )
@@ -195,9 +196,10 @@ pub async fn calendar_oauth_start(
         _ => "ms_calendar_client_id",
     };
     let cfg = app.cfg();
+    let vault = app.vault.get();
     let client_id = crate::providers::resolve_setting(
         &cfg,
-        app.vault.as_deref(),
+        vault.as_deref(),
         cfg_key,
         &format!("calendar.{provider}.client_id"),
         &provider_env(&provider, "CLIENT_ID"),
@@ -248,13 +250,14 @@ pub async fn calendar_oauth_callback(
     if code.is_empty() {
         return Err(ApiError::bad_request("missing authorization code"));
     }
-    let get = |key: &str| -> Option<String> { app.vault.as_ref().and_then(|v| v.get(key)) };
+    let vault_handle = app.vault.get();
+    let get = |key: &str| -> Option<String> { vault_handle.as_ref().and_then(|v| v.get(key)) };
     let client_id = get(&format!("calendar.{provider}.client_id")).unwrap_or_default();
     let client_secret = get(&format!("calendar.{provider}.client_secret")).unwrap_or_default();
     let redirect = app
         .cfg()
         .get_str("calendar_oauth_redirect", &crate::appconfig::process_env);
-    let vault = app.vault.as_ref().ok_or_else(|| {
+    let vault = vault_handle.as_ref().ok_or_else(|| {
         ApiError::new(
             StatusCode::SERVICE_UNAVAILABLE,
             "no_vault",

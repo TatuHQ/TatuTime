@@ -220,8 +220,11 @@ export async function refreshSettings() {
   // gated on the role the session already told us.
   if (!state.isAdmin) return;
   // #189: independent admin surfaces load in parallel (was a sequential
-  // six-request waterfall behind the Settings tab).
+  // six-request waterfall behind the Settings tab). `refreshVault` memoises its
+  // in-flight request, so `refreshSecrets` joins it (it needs the vault state to
+  // decide whether the CRUD is usable) instead of issuing a second GET.
   await Promise.all([
+    refreshVault(),
     refreshUsers(),
     refreshSecrets(),
     refreshConfig(),
@@ -233,12 +236,221 @@ export async function refreshSettings() {
   ]);
 }
 
+// --------------------------------------------------- vault key lifecycle ---
+//
+// The credential vault's key is the one admin setting the API reports as a
+// *state* (GET /api/admin/vault) rather than a value: the key itself never
+// leaves the server, so this card shows only the fingerprint and the fixed
+// file name `vault.key`. `state.vault` caches the last status so
+// `refreshSecrets` can gate the hidden CRUD without a second round-trip.
+
+/// The sentence shared by the detail line and the disabled buttons' titles.
+/// A count of 1 reads naturally ("1 credential is stored"), never "1 credentials".
+export function vaultCredentialNote(count) {
+  return `${count} credential${count === 1 ? '' : 's'} ${count === 1 ? 'is' : 'are'} stored; delete ${count === 1 ? 'it' : 'them'} first.`;
+}
+
+/// Render one GET /api/admin/vault payload. The wording follows `source` and
+/// `disabled_reason`; every action's visibility/enabled state follows the
+/// payload's `can_*` flags, so the GUI can never offer a transition the server
+/// refuses for a reason it already knew.
+export function renderVault(status) {
+  const card = $('vault-card');
+  if (!card) return;
+  card.hidden = false;
+  const statusLine = $('vault-status');
+  const detail = $('vault-detail');
+  const warning = $('vault-warning');
+  const enable = $('vault-enable');
+  const regenerate = $('vault-regenerate');
+  const disable = $('vault-disable');
+  warning.hidden = true;
+  warning.textContent = '';
+  for (const button of [enable, regenerate, disable]) {
+    button.hidden = true;
+    button.disabled = false;
+    button.removeAttribute('title');
+    button.removeAttribute('aria-describedby');
+  }
+  const source = status.source;
+  if (status.enabled) {
+    if (source === 'env' || source === 'env_file') {
+      statusLine.textContent = 'Vault enabled — key supplied by the environment (override).';
+      let text = 'The key is managed outside the app; the Settings actions do not change it.';
+      if (status.key_file_present) {
+        text += ` A ${status.key_file_name || 'vault.key'} also exists in the data directory and is ignored while the override is set.`;
+      }
+      detail.textContent = text;
+      return;
+    }
+    statusLine.textContent = 'Vault enabled — the key was created automatically.';
+    let text = `Key file ${status.key_file_name || 'vault.key'} on the data volume. Fingerprint ${status.fingerprint || 'unavailable'}. Back up this file with your data.`;
+    const count = Number(status.secrets_count) || 0;
+    if (count > 0) text += ` ${vaultCredentialNote(count)}`;
+    detail.textContent = text;
+    regenerate.hidden = false;
+    disable.hidden = false;
+    regenerate.disabled = !status.can_regenerate;
+    disable.disabled = !status.can_disable;
+    if (count > 0) {
+      for (const button of [regenerate, disable]) {
+        button.title = vaultCredentialNote(count);
+        button.setAttribute('aria-describedby', 'vault-detail');
+      }
+    }
+    return;
+  }
+  const reason = status.disabled_reason;
+  if (reason === 'env') {
+    statusLine.textContent = 'Vault disabled by TUCANO_VAULT_ENABLED.';
+    detail.textContent = 'Remove the variable to use the Settings controls.';
+    return;
+  }
+  if (reason === 'write_failed') {
+    statusLine.textContent = 'Vault disabled — the key could not be written.';
+    detail.textContent = 'The data directory is not writable; fix ownership/permissions and try again.';
+  } else {
+    statusLine.textContent = 'Vault disabled — no key is configured.';
+    detail.textContent = 'Enable it to store integration credentials.';
+  }
+  enable.hidden = !status.can_enable;
+}
+
+// One HTTP round-trip shared by every caller in the same refresh pass.
+let vaultInFlight = null;
+
+export function refreshVault() {
+  if (vaultInFlight) return vaultInFlight;
+  vaultInFlight = (async () => {
+    try {
+      const payload = await api.get('/admin/vault');
+      state.vault = payload;
+      clearFormError($('vault-error'));
+      renderVault(payload);
+      return payload;
+    } catch (err) {
+      if (err.status === 403) {
+        // Member: the whole Security section is hidden for them; stay silent.
+        $('vault-card').hidden = true;
+        return null;
+      }
+      announce(`Vault status could not be loaded: ${err.message}`);
+      return null;
+    } finally {
+      vaultInFlight = null;
+    }
+  })();
+  return vaultInFlight;
+}
+
+function showVaultError(message, code = null) {
+  const target = $('vault-error');
+  target.textContent = message;
+  if (code) target.dataset.errorCode = code;
+  else delete target.dataset.errorCode;
+  target.hidden = false;
+}
+
+// Map the documented refusals onto the copy contract. A `vault_in_use` or
+// `vault_managed_externally` answer means the local view was stale, so the
+// status is re-fetched first and the explanation is rendered after it.
+async function handleVaultError(err) {
+  const code = err.payload?.error?.code;
+  if (code === 'vault_in_use') {
+    await refreshVault();
+    const count = Number(state.vault?.secrets_count) || 0;
+    showVaultError(count > 0
+      ? vaultCredentialNote(count)
+      : 'The vault still holds credentials; delete them first.', code);
+    return;
+  }
+  if (code === 'vault_managed_externally') {
+    await refreshVault();
+    showVaultError('The key is managed by the environment.', code);
+    return;
+  }
+  if (code === 'vault_disabled') {
+    // Regenerate against a disabled vault: the refreshed state is the answer.
+    await refreshVault();
+    return;
+  }
+  if (code === 'data_dir_not_writable') {
+    showVaultError('The data directory is not writable; fix ownership/permissions and try again.', code);
+    return;
+  }
+  showFormError($('vault-error'), err);
+}
+
+let vaultBusy = false;
+
+async function runVaultAction(request, outcome) {
+  if (vaultBusy) return;
+  vaultBusy = true;
+  clearFormError($('vault-error'));
+  try {
+    const result = await request();
+    await refreshVault();
+    // The secrets CRUD depends on the vault being enabled: re-render it too, so
+    // the section appears (or disappears) with the new state.
+    await refreshSecrets();
+    announce(typeof outcome === 'function' ? outcome(result) : outcome);
+  } catch (err) {
+    await handleVaultError(err);
+  } finally {
+    vaultBusy = false;
+  }
+}
+
+export async function enableVault() {
+  return runVaultAction(
+    () => api.post('/admin/vault/enable'),
+    (result) => (result?.created_key === false
+      ? 'Vault enabled. Existing key reused.'
+      : 'Vault enabled. Key created.'),
+  );
+}
+
+export async function disableVault() {
+  if (!await askConfirm(
+    'Disable the credential vault? The generated vault.key is deleted and anything encrypted with it becomes unreadable. This cannot be undone.',
+    'Disable vault',
+  )) return;
+  return runVaultAction(
+    () => api.post('/admin/vault/disable', { confirm: true }),
+    'Vault disabled.',
+  );
+}
+
+export async function regenerateVault() {
+  if (!await askConfirm(
+    'Regenerate the vault key? A new vault.key replaces the current one, and anything encrypted with the old key becomes unreadable. This cannot be undone.',
+    'Regenerate key',
+  )) return;
+  return runVaultAction(
+    () => api.post('/admin/vault/regenerate', { confirm: true }),
+    'Vault key regenerated.',
+  );
+}
+
 export async function refreshSecrets() {
+  // The vault decides whether the CRUD is usable at all. When it is disabled
+  // the list endpoint answers 503 by design, so it is never even called — the
+  // vault card explains the state instead of this section reporting an error.
+  const vault = state.vault || (await refreshVault());
+  if (!vault) {
+    $('secret-form').hidden = true;
+    $('secret-card').hidden = true;
+    return;
+  }
+  if (!vault.enabled) {
+    $('secret-form').hidden = true;
+    $('secret-card').hidden = true;
+    return;
+  }
+  $('secret-form').hidden = false;
+  $('secret-card').hidden = false;
   try {
     const data = await api.get('/admin/secrets');
-    $('vault-status').textContent = 'Credential vault: enabled (encrypted at rest).';
-    $('secret-form').hidden = false;
-    $('secret-card').hidden = false;
     const tbody = $('secret-table').querySelector('tbody');
     tbody.textContent = '';
     const secrets = data.secrets || [];
@@ -261,13 +473,7 @@ export async function refreshSecrets() {
     }
     $('secret-empty').hidden = secrets.length !== 0;
   } catch (err) {
-    if (err.status === 503) {
-      $('vault-status').textContent = 'Credential vault disabled — set TUCANO_SECRET_KEY to enable.';
-      $('secret-form').hidden = true;
-      $('secret-card').hidden = true;
-    } else {
-      announce(err.message);
-    }
+    announce(err.message);
   }
 }
 
@@ -391,7 +597,15 @@ export async function refreshConfig() {
     ),
   );
   const sel = $('config-key');
-  fillSelect(sel, configRows.map((row) => ({ value: row.key, text: row.key })));
+  // M3: read-only knobs (today only `vault_enabled`) are listed by GET but are
+  // written through their dedicated endpoint, never this generic form; the
+  // vault card in Settings → Security is their control.
+  fillSelect(
+    sel,
+    configRows
+      .filter((row) => row.writable !== false)
+      .map((row) => ({ value: row.key, text: row.key })),
+  );
   // Pre-fill the value box when the key changes.
   sel.onchange = () => {
     const row = configRows.find((c) => c.key === sel.value);
@@ -921,17 +1135,28 @@ export async function refreshEmailSettings() {
     ? 'stored — leave blank to keep'
     : 'No password stored';
   if (!$('email-test-to').value) $('email-test-to').value = orgReplyTo || '';
-  const notice = $('email-vault-notice');
   if (data.vault_enabled) {
-    notice.hidden = true;
-    notice.textContent = '';
+    setEmailVaultNotice(false);
     setEmailControlsEnabled(true);
   } else {
-    notice.textContent =
-      'Email settings need the credential vault. Set TUCANO_SECRET_KEY to enable encrypted storage, then restart and reload this page.';
-    notice.hidden = false;
+    setEmailVaultNotice(true);
     setEmailControlsEnabled(false);
   }
+}
+
+/// The Email panel's vault notice. It points at the one surface that owns the
+/// key lifecycle (Settings → Security & runtime) instead of naming an env var:
+/// the admin can enable the vault there, with no restart and no shell access.
+function setEmailVaultNotice(visible) {
+  const notice = $('email-vault-notice');
+  const text = $('email-vault-notice-text');
+  if (!visible) {
+    text.textContent = '';
+    notice.hidden = true;
+    return;
+  }
+  text.textContent = 'The credential vault is disabled — enable it in Security & runtime.';
+  notice.hidden = false;
 }
 
 export async function saveEmailSettings(evt) {
@@ -958,10 +1183,7 @@ export async function saveEmailSettings(evt) {
       await refreshEmailSettings();
     } catch (err) {
       if (err.status === 503 || err.payload?.error?.code === 'vault_disabled') {
-        const notice = $('email-vault-notice');
-        notice.textContent =
-          'The credential vault is disabled — set TUCANO_SECRET_KEY and restart to save email settings.';
-        notice.hidden = false;
+        setEmailVaultNotice(true);
         setEmailControlsEnabled(false);
       }
       showFormError($('email-error'), err);

@@ -166,17 +166,47 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or(production);
     let session = tucano_time::auth::make_session(secret, production, secure_cookies)?;
 
-    // Vault: hard-fail when the store exists but the key cannot open it
-    // (#94 — never start with a silently disabled Settings tab).
-    let vault = tucano_time::vault::open_for_boot(
+    // Credential vault: a key is created on first boot; the env key/env key
+    // file remain an optional override that always wins. Hard-fail when a store
+    // exists but no key can open it (#94 — never start with a silently disabled
+    // Settings tab). `vault_enabled` resolves env > config.json > true.
+    let (vault_flag, vault_flag_source) = cfg.resolve(
+        tucano_time::appconfig::key_def("vault_enabled").expect("vault_enabled is whitelisted"),
+        &tucano_time::appconfig::process_env,
+    );
+    let vault_enabled = matches!(vault_flag, serde_json::Value::Bool(true));
+    let mut vault_boot = tucano_time::vault::open_for_boot(
         store.root(),
         std::env::var("TUCANO_SECRET_KEY").ok(),
         std::env::var("TUCANO_SECRET_KEY_FILE").ok(),
+        vault_enabled,
     )
     .map_err(|e| {
         tracing::error!("{e}");
         e
     })?;
+    // The policy function reports the config reason; when a **valid** env value
+    // is what disabled it, say so (it is an operator override). L2: presence
+    // alone is not enough — a typo like `TUCANO_VAULT_ENABLED=no` is ignored by
+    // resolution, so it must not be reported as an operator override.
+    if !vault_enabled && vault_flag_source == tucano_time::appconfig::Source::Env {
+        vault_boot.disabled = Some(tucano_time::vault::DisabledReason::Env);
+    }
+    match (
+        vault_boot.source,
+        vault_boot.disabled,
+        &vault_boot.fingerprint,
+    ) {
+        (Some(source), None, fingerprint) => tracing::info!(
+            source = source.as_str(),
+            fingerprint = fingerprint.as_deref().unwrap_or(""),
+            "credential vault enabled"
+        ),
+        (None, Some(reason), _) => {
+            tracing::warn!(reason = reason.as_str(), "credential vault disabled")
+        }
+        _ => tracing::warn!("credential vault state is inconsistent"),
+    }
 
     // Respect a config-file max_docs override (env is handled inside Store::open).
     if std::env::var("TUCANO_MAX_DOCS").is_err() {
@@ -185,7 +215,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             store = store.with_max_docs(max as usize);
         }
     }
-    let state = AppState::boot(store, Arc::new(session), vault, cfg.clone());
+    let state = AppState::boot(store, Arc::new(session), vault_boot, cfg.clone());
 
     // Background scheduler (#61) with the reminder job (#22). Recurring
     // invoices (#26) and budget alerts (#30) register here too.

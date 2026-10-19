@@ -11,8 +11,8 @@ import { cancelCustomerEdit, cancelProjectEdit, cancelTaskEdit, contactRow, fill
 import { closeDeliveryRecord, closeInvoicePreview, closeSendEmailDialog, confirmSendEmail, dash, dashApplyColumns, downloadInvoicePdf, ed, edCancel, edLineRow, edOpen, edRecalc, edSave, invoicePreview, markInvoiceSent, openEmailSettings, refreshInvoiceSummary, refreshInvoices, sendInvoiceEmail } from './invoices.js';
 import { markNotificationsRead, refreshNotifications } from './notifications.js';
 import { initReceiptPreview } from './receipt.js';
-import { initRouter, initSegTabs, initSettingsTabs, initTabs, refreshTimesheetView, segActiveId, showTimesheet } from './route.js';
-import { addSecret, closeUserForm, closeUserPassword, initTemplatePreview, newUserForm, paintAccent, refreshAuditLog, refreshSettings, renderUsers, resetBuiltInLabels, saveConfig, saveEmailSettings, saveInvoiceTemplate, saveOrgProfile, saveUser, saveUserPassword, sendTestEmail } from './settings.js';
+import { applyRoute, initRouter, initSegTabs, initSettingsTabs, initTabs, normaliseRoute, refreshTimesheetView, segActiveId, showTimesheet } from './route.js';
+import { addSecret, closeUserForm, closeUserPassword, disableVault, enableVault, initTemplatePreview, newUserForm, paintAccent, refreshAuditLog, refreshSettings, regenerateVault, renderUsers, resetBuiltInLabels, saveConfig, saveEmailSettings, saveInvoiceTemplate, saveOrgProfile, saveUser, saveUserPassword, sendTestEmail } from './settings.js';
 import { customerName, fillProjectSelect, fillTaskSelect, loadCustomers, state } from './state.js';
 import { discardTimer, refreshTimer, startTimer, stopTimer } from './timer.js';
 import { commitCell, copyLastWeek, copyPreviousDay, entrySaving, navigateDay, navigateWeek, openWeekRowForm, refreshDay, refreshWeek, resetEntryForm, resetWeekRowForm, saveEntry, saveWeekRow, selectDay, showEntryForm, showWeekRowForm, weekState } from './timesheet.js';
@@ -583,6 +583,16 @@ export function wireSetupPanels(today) {
   wireSettingsControls();
 }
 
+// Guarded so the router can send the Email panel's vault notice to the one
+// surface that owns the key lifecycle. The target is the existing
+// `/settings/security` route — no new route is introduced.
+export const VAULT_SETTINGS_ROUTE = '/settings/security';
+
+export function openVaultSettings() {
+  const route = normaliseRoute(VAULT_SETTINGS_ROUTE) || VAULT_SETTINGS_ROUTE;
+  if (!applyRoute(route)) announce('Settings are not available for this account.');
+}
+
 // Settings controls that must answer a plain click (#SET-01 test email,
 // #SET-07 label reset, #SET-11 audit refresh). Exported so the jsdom suite can
 // attach the real listeners instead of calling the handlers directly — calling
@@ -591,6 +601,10 @@ export function wireSettingsControls() {
   $('email-test-send').addEventListener('click', sendTestEmail);
   $('lb-reset').addEventListener('click', resetBuiltInLabels);
   $('audit-refresh').addEventListener('click', refreshAuditLog);
+  $('vault-enable').addEventListener('click', enableVault);
+  $('vault-regenerate').addEventListener('click', regenerateVault);
+  $('vault-disable').addEventListener('click', disableVault);
+  $('email-vault-settings').addEventListener('click', openVaultSettings);
 }
 
 // Wires the app listeners and loads the first data. Called once authenticated.

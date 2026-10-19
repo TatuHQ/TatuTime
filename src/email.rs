@@ -317,22 +317,23 @@ pub fn sender_from_sources(
 
 /// The production transport installed by `AppState::boot`.
 ///
-/// It holds the vault handle, **not** a copy of the settings, and re-resolves
+/// It holds the live vault **slot**, not a boot-time snapshot, and re-resolves
 /// `smtp.*` on every `send`/`transport` call. That is what makes
-/// `PUT /api/admin/email` take effect on the very next message without a
-/// restart. Tests replace the whole transport through
-/// `AppState::with_email`, so the injection seam is unchanged.
+/// `PUT /api/admin/email` — and an admin-API enable/regenerate — take effect on
+/// the very next message without a restart. Tests replace the whole transport
+/// through `AppState::with_email`, so the injection seam is unchanged.
 pub struct DynamicEmailSender {
-    vault: Option<std::sync::Arc<crate::vault::SecretVault>>,
+    vault: std::sync::Arc<crate::vault::VaultSlot>,
 }
 
 impl DynamicEmailSender {
-    pub fn new(vault: Option<std::sync::Arc<crate::vault::SecretVault>>) -> Self {
+    pub fn new(vault: std::sync::Arc<crate::vault::VaultSlot>) -> Self {
         Self { vault }
     }
 
     fn resolve(&self) -> std::sync::Arc<dyn EmailSender> {
-        sender_from_sources(self.vault.as_deref())
+        let vault = self.vault.get();
+        sender_from_sources(vault.as_deref())
     }
 }
 
@@ -405,7 +406,32 @@ impl SmtpConn {
         Ok(code)
     }
 
+    /// Send one SMTP command line and check the reply code.
+    ///
+    /// M2: an `AUTH` command must never appear in the error — the payload is
+    /// the credential. The base64 lines that follow it are handled by
+    /// [`Self::command_labeled`] with an explicit redacted label.
     fn command(&mut self, line: &str, expect: &[u16]) -> Result<(), EmailError> {
+        let label = if line
+            .get(..4)
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("AUTH"))
+        {
+            "AUTH <redacted>"
+        } else {
+            line
+        };
+        self.command_labeled(line, label, expect)
+    }
+
+    /// Like [`Self::command`] with a caller-chosen diagnostic label. Used for
+    /// the base64 username/password argument lines of `AUTH LOGIN`, which are
+    /// secrets but not recognisable by their shape.
+    fn command_labeled(
+        &mut self,
+        line: &str,
+        label: &str,
+        expect: &[u16],
+    ) -> Result<(), EmailError> {
         use std::io::Write;
         self.stream
             .write_all(line.as_bytes())
@@ -416,9 +442,7 @@ impl SmtpConn {
         if expect.contains(&code) {
             Ok(())
         } else {
-            Err(EmailError::Transport(format!(
-                "unexpected reply {code} to {line}"
-            )))
+            Err(unexpected_reply(code, label))
         }
     }
 
@@ -427,8 +451,10 @@ impl SmtpConn {
         self.command("EHLO tucanotime", &[250])?;
         if let (Some(u), Some(p)) = (&cfg.username, &cfg.password) {
             self.command("AUTH LOGIN", &[334])?;
-            self.command(&auth_line(u), &[334])?;
-            self.command(&auth_line(p), &[235])?;
+            // M2: the base64 username/password lines are credentials — label
+            // them generically so a 535 never echoes the secret.
+            self.command_labeled(&auth_line(u), "AUTH <redacted>", &[334])?;
+            self.command_labeled(&auth_line(p), "AUTH <redacted>", &[235])?;
         }
         self.command(&format!("MAIL FROM:<{}>", cfg.from), &[250])?;
         // One envelope recipient per address: all of them see the same DATA.
@@ -472,6 +498,13 @@ impl SmtpConn {
 fn auth_line(s: &str) -> String {
     use base64::Engine;
     base64::engine::general_purpose::STANDARD.encode(s)
+}
+
+/// A refusal that names the command it answered. `label` is the redacted form
+/// for credential-bearing commands (M2), so the base64 `AUTH LOGIN` argument
+/// never reaches an error message, a log line or an API body.
+fn unexpected_reply(code: u16, label: &str) -> EmailError {
+    EmailError::Transport(format!("unexpected reply {code} to {label}"))
 }
 
 /// RFC 2047: headers stay ASCII unless they carry a display name or a
@@ -1060,6 +1093,87 @@ mod tests {
             resolve_recipients(&many, None).unwrap_err()[0].0,
             "recipients"
         );
+    }
+
+    /// M2: an AUTH failure must never echo the command payload (base64
+    /// username/password) into the error that reaches a log or a 502 body.
+    #[test]
+    fn auth_failure_error_never_contains_credentials() {
+        let user = "relay-operator@example.test";
+        let pass = "smtp-password-SUPER-SECRET";
+        let user_b64 = auth_line(user);
+        let pass_b64 = auth_line(pass);
+
+        let text = unexpected_reply(535, "AUTH <redacted>").to_string();
+        assert!(text.contains("535"), "{text}");
+        assert!(text.contains("AUTH <redacted>"), "{text}");
+        for secret in [user, pass, user_b64.as_str(), pass_b64.as_str()] {
+            assert!(!text.contains(secret), "credential leaked in {text}");
+        }
+        // Non-auth diagnostics keep the useful command line (it is not secret).
+        let relay = unexpected_reply(550, "MAIL FROM:<noreply@example.test>").to_string();
+        assert!(relay.contains("MAIL FROM"), "{relay}");
+    }
+
+    /// M2 end-to-end: a relay that rejects `AUTH LOGIN` produces an error with
+    /// the reply code, not the base64 username/password we sent.
+    #[test]
+    fn smtp_auth_rejection_does_not_echo_the_credentials() {
+        use std::io::{BufRead, BufReader, Write};
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let user = "relay-operator";
+        let pass = "relay-password-SUPER-SECRET";
+
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            stream.write_all(b"220 test ESMTP\r\n").unwrap();
+            let mut line = String::new();
+            reader.read_line(&mut line).unwrap(); // EHLO
+            stream.write_all(b"250-test\r\n250 AUTH LOGIN\r\n").unwrap();
+            line.clear();
+            reader.read_line(&mut line).unwrap(); // AUTH LOGIN
+            stream.write_all(b"334 VXNlcm5hbWU6\r\n").unwrap();
+            line.clear();
+            reader.read_line(&mut line).unwrap(); // base64 username
+            stream.write_all(b"334 UGFzc3dvcmQ6\r\n").unwrap();
+            line.clear();
+            reader.read_line(&mut line).unwrap(); // base64 password
+            stream
+                .write_all(b"535 5.7.8 Authentication credentials invalid\r\n")
+                .unwrap();
+            stream.flush().unwrap();
+        });
+
+        let sender = SmtpEmailSender::new(SmtpConfig {
+            host: "127.0.0.1".into(),
+            port,
+            from: "noreply@example.test".into(),
+            username: Some(user.into()),
+            password: Some(pass.into()),
+        });
+        let message = EmailMessage {
+            to: vec!["client@example.test".into()],
+            subject: "test".into(),
+            text: "body".into(),
+            html: None,
+            attachment: None,
+            from_name: None,
+            reply_to: None,
+        };
+        let err = sender.send(&message).unwrap_err();
+        server.join().unwrap();
+
+        let text = err.to_string();
+        assert!(text.contains("535"), "{text}");
+        assert!(text.contains("AUTH <redacted>"), "{text}");
+        let user_b64 = auth_line(user);
+        let pass_b64 = auth_line(pass);
+        for secret in [user, pass, user_b64.as_str(), pass_b64.as_str()] {
+            assert!(!text.contains(secret), "credential leaked in {text}");
+        }
     }
 
     #[test]

@@ -207,6 +207,11 @@ pub const CODE_VOCABULARY: &[&str] = &[
     "data_dir_invalid",
     // QA-12: the filesystem refused a write (permissions, read-only mount).
     "data_dir_not_writable",
+    // Credential-vault lifecycle (admin API): already on, externally managed,
+    // or still holding ciphertext that a key change would orphan.
+    "vault_already_enabled",
+    "vault_managed_externally",
+    "vault_in_use",
     // QA-04/QA-12: a stored document did not decode.
     "corrupt_document",
 ];

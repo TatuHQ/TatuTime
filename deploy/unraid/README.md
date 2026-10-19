@@ -100,17 +100,27 @@ These are the literal values for the Unraid *Add Container* / *Edit* page.
 | Data dir (internal) | Variable | `TUCANO_DATA_DIR` | `/data` |
 | Listen port (internal) | Variable | `TUCANO_PORT` | `8080` |
 | Plain-HTTP cookies | Variable | `TUCANO_SECURE_COOKIES` | `0` |
-| Vault key file | Variable | `TUCANO_SECRET_KEY_FILE` | `/data/vault.key` |
+| Vault key file | Variable | `TUCANO_SECRET_KEY_FILE` | *(optional; leave empty)* |
 
 Notes:
 
-- **Do not** add a container path for the vault key: `/data/vault.key` lives
-  inside the existing `Data` path, so no extra mount is needed.
+- **Do not** add a container path for the vault key: the app creates
+  `/data/vault.key` inside the existing `Data` path, so no extra mount is
+  needed.
+- The **Vault key file** variable is an **optional external override**. Empty
+  means the app generates and manages `/data/vault.key` itself (see
+  [section 4](#4-prepare-the-appdata-folder-and-the-vault-key)).
+- While an override is set (`TUCANO_SECRET_KEY_FILE`, `TUCANO_SECRET_KEY` or a
+  valid `TUCANO_VAULT_ENABLED`), the environment owns the vault lifecycle: the
+  Settings enable/disable/regenerate actions are unavailable and the API
+  answers **409 `vault_managed_externally`**. Remove the variable to hand the
+  lifecycle back to the app.
 - `TUCANO_DATA_DIR` and `TUCANO_PORT` are already baked into the image
   (`ENV` in the [`Dockerfile`](../../Dockerfile)); they are surfaced in the
   template so the mapping is visible and a port change stays consistent.
-- There is **no** `TUCANO_SECRET_KEY_FILE` mount point in the template UI; the
-  value is a path *inside* the container.
+- There is **no** `TUCANO_SECRET_KEY_FILE` mount point in the template UI; when
+  you use the override, mount the key file yourself and give its path *inside*
+  the container.
 
 ---
 
@@ -182,40 +192,52 @@ mkdir -p /mnt/user/appdata/tucanotime
 chown -R 10001:10001 /mnt/user/appdata/tucanotime
 ```
 
-The **credential vault** (Settings → Email and every other integration secret)
-is encrypted at rest with a 32-byte AES-256-GCM key. The app reads the key from
-the file named by `TUCANO_SECRET_KEY_FILE` (the vault key **does** support a
-`_FILE` variant, see [`src/vault.rs`](../../src/vault.rs)). Create it:
+**No manual key is needed.** The **credential vault** (Settings → Email and
+every other integration secret) is encrypted at rest with AES-256-GCM under a
+master key the app generates automatically on first boot at
+`/mnt/user/appdata/tucanotime/vault.key`: 24 random bytes as 32 base64url
+characters (192 bits), written atomically with mode 0600 by uid 10001. The
+`chown` above is the only preparation the key needs.
 
-```sh
-openssl rand -hex 16 > /mnt/user/appdata/tucanotime/vault.key
-chown 10001:10001 /mnt/user/appdata/tucanotime/vault.key
-chmod 400 /mnt/user/appdata/tucanotime/vault.key
-```
+The **Vault key file** field in the template (`TUCANO_SECRET_KEY_FILE`) is an
+*optional* external override and is empty by default. Set it only when the key
+must live outside the data directory — for example a Docker secret mounted
+into the container. The file it names must hold exactly 32 ASCII bytes (a
+trailing newline is trimmed); an external key always wins and is never copied
+into `/data`. With no override, the app uses the key file it generated.
 
-`openssl rand -hex 16` prints **32 characters**, which the code accepts as the
-32-byte key. **Do not use `openssl rand -hex 32`**: that prints 64 characters
-and is rejected (the key check is `len() == 32`). `openssl rand -base64 24`
-also produces 32 characters if you prefer.
+While either key variable (or a valid `TUCANO_VAULT_ENABLED`) is set, the
+vault is **operator-managed**: the Settings actions do not change the key and
+the API refuses them with **409 `vault_managed_externally`**. Remove the
+variable to restore the Settings controls.
 
-The file is trimmed of surrounding whitespace, so the trailing newline that
-`openssl` writes is harmless. Verify:
+If a restored `vault.key` is group- or world-readable, the app tightens it to
+`0600` automatically on the next start. If it cannot (for example an immutable
+file on a read-only mount), the container **refuses to start** with an operator
+message rather than running with a key other local users can read.
 
-```sh
-wc -c /mnt/user/appdata/tucanotime/vault.key   # 33: 32 key characters + newline
-```
+Verify a key after a restore from **Settings → Security**: the *Vault key*
+card shows the source (`key_file` for the generated key), the file name
+`vault.key` and a `sha256:…` fingerprint. The fingerprint identifies the key
+without exposing it — the raw key is never returned by the API or the GUI — and
+the same fingerprint is logged at boot. If the restored fingerprint differs
+from the one recorded with the backup, `secrets.bin` will not open (and the app
+will refuse to start).
 
-If the file is missing, the app still starts but the vault stays **disabled**
-(Settings → Email will report `vault_disabled`). If `secrets.bin` exists and
-the key is missing or wrong, the app **refuses to start** rather than silently
-showing an empty Settings tab.
+If the app cannot write the key (for example a read-only or wrongly owned
+`/data`), it still starts with the vault **disabled** and reports
+`vault_disabled`; fix the ownership of `/data` and restart. If `secrets.bin`
+exists and no key can open it — no key file and no external override, a
+malformed key (not exactly 32 bytes) or the wrong key — the app **refuses to
+start** rather than silently showing an empty Settings tab.
 
-> **Backup trade-off:** keeping `vault.key` inside the appdata folder means a
-> copy of that folder contains both the ciphertext (`secrets.bin`) and its key.
-> Keep a second copy of the key somewhere else, or move it outside the data
-> directory (for example `/mnt/user/system/tucanotime/vault.key`) and set
-> `TUCANO_SECRET_KEY_FILE` to a second read-only path mount. The template keeps
-> it in `/data` for simplicity.
+> **Backup trade-off:** the generated `vault.key` lives inside the appdata
+> folder, so a copy of that folder contains both the ciphertext
+> (`secrets.bin`) and its key. Protect that backup like the credentials it
+> contains, keep an extra copy of `vault.key` elsewhere, or supply the key
+> externally (`TUCANO_SECRET_KEY_FILE` mounted from outside `/data`) and store
+> that copy with the backup. Without the key the stored credentials are
+> permanently unreadable.
 
 ---
 
@@ -325,9 +347,13 @@ the invoice/reminder flows without touching a real mailbox.
   to "fix" permissions — fix the ownership of `/data` instead.
 - **One instance only.** The server holds an exclusive lock in the data
   directory; never point two containers at the same appdata folder.
-- **Vault key.** Anyone who can read both `secrets.bin` and `vault.key` can
-  decrypt every integration credential. Protect the appdata share and the
-  key copy accordingly.
+- **Vault key.** The app creates `vault.key` (0600) in the data directory on
+  first boot, and tightens a restored copy to 0600 if it is group/world-readable
+  (refusing to boot when it cannot). Anyone who can read both `secrets.bin` and
+  `vault.key` can decrypt every integration credential, so protect the appdata
+  share and any backup; use the external `TUCANO_SECRET_KEY_FILE` override if
+  the key must live elsewhere — that also makes the Settings key actions
+  unavailable (409 `vault_managed_externally`).
 
 ---
 
@@ -341,9 +367,12 @@ Everything the installation knows lives in one folder:
 
 That includes the JSON documents (customers, projects, entries, invoices,
 users, expenses, notifications), `config.json`, `session.key`, `audit.log`,
-scheduler state, and the encrypted vault `secrets.bin`. A copy of the folder
-is a complete backup. **Keep `vault.key` separately**: losing it makes
-`secrets.bin` permanently unreadable.
+scheduler state, and the encrypted vault `secrets.bin` together with the
+generated `vault.key`. A copy of the folder is a complete backup **including
+the key** — protect it accordingly. **Keep an extra copy of `vault.key`
+separately**: losing it makes `secrets.bin` permanently unreadable. If you
+supply the key externally with `TUCANO_SECRET_KEY[_FILE]`, back that file up
+instead; it is not part of the appdata folder.
 
 The image ships an operator backup/restore CLI on the same binary. Back up
 while the server is stopped (or accept a torn snapshot across collections):
@@ -407,9 +436,10 @@ writable by uid 10001.
 | Unraid shows the container as **unhealthy** | The image HEALTHCHECK runs `tucano-time --health`, which probes `http://127.0.0.1:8080/healthz` **inside** the container. Check `docker logs TucanoTime`; verify the internal `TUCANO_PORT` is still `8080`. From the Unraid host, `curl -i http://127.0.0.1:8080/healthz` (or the host port you mapped). |
 | **Login loops** back to the sign-in page after an upgrade | The session cookie carries `Secure` but the browser is on plain `http://`. Set `TUCANO_SECURE_COOKIES=0` (the template default), recreate, and log in again. |
 | **Permission denied** writing `/data` | The bind mount is not owned by uid 10001. Run `chown -R 10001:10001 /mnt/user/appdata/tucanotime`. Unraid's *New Permissions* tool can reset ownership to `nobody:users`; re-run the chown after it. |
-| **`vault_disabled`** in Settings → Email | `TUCANO_SECRET_KEY_FILE` points at a missing or unreadable file. Create the 32-character key as shown in section 4, `chown 10001:10001`, and restart the container. |
-| Container **refuses to start** with "vault store found on disk ... key is missing" | `secrets.bin` exists but the key file is absent or wrong. Restore the original `vault.key` (or the backup that contains it); do not delete `secrets.bin` unless you accept losing the stored credentials. |
-| Container **refuses to start** with "TUCANO_SECRET_KEY is configured but invalid" | The key is not exactly 32 characters. `openssl rand -hex 32` is 64 characters — use `openssl rand -hex 16`. |
+| **`vault_disabled`** in Settings → Email | The vault is disabled by configuration (`TUCANO_VAULT_ENABLED=false` or `vault_enabled: false` in `config.json`), or the app could not write `/data/vault.key` because the data directory is not writable by uid 10001. Check the *Vault key* card in Settings → Security: `config`/`env` means it was switched off deliberately; `write_failed` means fix ownership/permissions and restart. |
+| **Vault actions disabled / 409 `vault_managed_externally`** | `TUCANO_VAULT_ENABLED`, `TUCANO_SECRET_KEY` or `TUCANO_SECRET_KEY_FILE` is set, so the environment owns the lifecycle. Change or remove that variable (or the external key file) — the Settings enable/disable/regenerate actions only work when the app manages `/data/vault.key`. |
+| Container **refuses to start** with "vault store found on disk ... key is missing" | `secrets.bin` exists but no key can open it. Restore the original `vault.key` (or the backup that contains it), or point `TUCANO_SECRET_KEY_FILE` at the original external key; do not delete `secrets.bin` unless you accept losing the stored credentials. |
+| Container **refuses to start** with "TUCANO_SECRET_KEY is configured but invalid" | An external key is not exactly 32 ASCII characters. Generated keys are always 32 characters; for a manual one, `openssl rand -hex 16` prints 32 characters (`-hex 32` prints 64 and is rejected). |
 | **Console / `docker exec` fails** | Expected: distroless has no shell. Use `docker logs -f TucanoTime`. |
 | **Port already in use** | Change the host side of the WebUI port mapping (for example `8081`), keep the container side at `8080`, and update the WebUI URL. |
 | Second container on the same appdata exits immediately | The single-instance guard (`.server.lock`) refuses a second server on the same data directory. Run one container per appdata folder. |
@@ -427,7 +457,7 @@ docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' TucanoTime
 
 ## 11. Verified environment variables
 
-Every variable below is read by the binary (grep of `src/` at v0.1.38), with
+Every variable below is read by the binary (grep of `src/` at v0.1.40), with
 the file and line where it is read. Only the first four appear in the Unraid
 template; the rest are optional and can be supplied through the template's
 **Extra Parameters** (`-e NAME=value`) or left to `config.json` / the vault.
@@ -440,8 +470,9 @@ template; the rest are optional and can be supplied through the template's
 | `TUCANO_SECURE_COOKIES` | [`src/main.rs:162`](../../src/main.rs#L162) | `0` / `false` disables the cookie `Secure` flag; empty means "the `TUCANO_ENV` default" |
 | `TUCANO_SESSION_SECRET` | [`src/main.rs:156`](../../src/main.rs#L156), [`src/auth.rs:202`](../../src/auth.rs#L202) | at least 32 bytes in production |
 | `TUCANO_SESSION_SECRET_FILE` | [`src/main.rs:157`](../../src/main.rs#L157), [`src/auth.rs:205`](../../src/auth.rs#L205) | path; file contents trimmed; at least 32 bytes in production |
-| `TUCANO_SECRET_KEY` | [`src/main.rs:173`](../../src/main.rs#L173), [`src/vault.rs:58`](../../src/vault.rs#L58) | **exactly 32 bytes** (ASCII), AES-256-GCM vault key |
-| `TUCANO_SECRET_KEY_FILE` | [`src/main.rs:174`](../../src/main.rs#L174), [`src/vault.rs:59`](../../src/vault.rs#L59) | path; file contents trimmed; **exactly 32 bytes** |
+| `TUCANO_SECRET_KEY` | [`src/main.rs:180`](../../src/main.rs#L180), [`src/vault.rs:254`](../../src/vault.rs#L254) | optional override; **exactly 32 bytes** (ASCII), AES-256-GCM vault key; makes the Settings key actions 409 `vault_managed_externally` |
+| `TUCANO_SECRET_KEY_FILE` | [`src/main.rs:181`](../../src/main.rs#L181), [`src/vault.rs:254`](../../src/vault.rs#L254) | optional override; path to a file whose trimmed contents are **exactly 32 bytes**; same 409 behaviour |
+| `TUCANO_VAULT_ENABLED` | [`src/main.rs:174`](../../src/main.rs#L174), [`src/appconfig.rs:161`](../../src/appconfig.rs#L161) | valid `true`/`false` (default `true`); `false` disables the vault (a `secrets.bin` on disk then refuses to start); a valid value makes the lifecycle operator-managed (409 `vault_managed_externally`) |
 | `TUCANO_MAX_DOCS` | [`src/main.rs:182`](../../src/main.rs#L182), [`src/store/mod.rs:385`](../../src/store/mod.rs#L385) | integer, default `50000`, range 10..1,000,000 |
 | `TUCANO_REMINDER_DAYS` | [`src/appconfig.rs:56`](../../src/appconfig.rs#L56) | integer 1..365, default `7` |
 | `TUCANO_ORG_NAME` | [`src/appconfig.rs:66`](../../src/appconfig.rs#L66) | string, default `TucanoTime` |
@@ -477,6 +508,11 @@ template; the rest are optional and can be supplied through the template's
 
 `RUST_LOG` is also honoured by the tracing subscriber (default `info`).
 
-The plain `TUCANO_SECRET_KEY` and `TUCANO_SESSION_SECRET` variants exist, but
-the `_FILE` forms are preferred: the value never appears in the Unraid
-template XML or `docker inspect`.
+Neither vault key variable is required: the app generates and manages
+`<data>/vault.key` on its own. When an external key is wanted, prefer
+`TUCANO_SECRET_KEY_FILE` over the plain `TUCANO_SECRET_KEY` (and likewise
+`TUCANO_SESSION_SECRET_FILE` over `TUCANO_SESSION_SECRET`): the value never
+appears in the Unraid template XML or `docker inspect`. Setting either (or
+`TUCANO_VAULT_ENABLED`) makes the vault operator-managed: the Settings
+enable/disable/regenerate actions are refused with 409
+`vault_managed_externally` until the variable is removed.

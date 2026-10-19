@@ -1,19 +1,24 @@
 # TucanoTime — recreate-safe, hardened deployment (#94).
 #
 # Everything the app *stores* lives on the named volume: users, entries,
-# invoices, the encrypted vault (secrets.bin), config.json and scheduler
-# state. Restarting or upgrading (`docker compose pull && up -d`) loses
-# nothing, with **zero required environment setup**:
+# invoices, the credential vault (secrets.bin + its auto-generated vault.key),
+# config.json and scheduler state. Restarting or upgrading
+# (`docker compose pull && up -d`) loses nothing, with **zero required
+# environment setup**:
 #
 #   * sessions — the signing key is auto-generated on first boot and kept at
 #     <volume>/session.key (0600), so logins survive restarts. Override with a
 #     mounted TUCANO_SESSION_SECRET_FILE (see "secrets" below);
 #   * settings — resolved env > /data/config.json > default. Make runtime
-#     knobs survive recreation via `PUT /admin/config` (Settings tab in the
-#     GUI) or by editing config.json on the volume;
-#   * vault key — mount TUCANO_SECRET_KEY_FILE (see "secrets" below). If
-#     /data/secrets.bin exists but the key is missing or wrong, the app
-#     REFUSES to start (a loud operator error, never a silent downgrade).
+#     knobs survive recreation via `PUT /api/admin/config` (Settings tab in
+#     the GUI) or by editing config.json on the volume. `vault_enabled` is the
+#     one read-only knob there (422): the vault card in Settings → Security
+#     owns it;
+#   * vault key — a 32-character key (192 bits of entropy, 0600) is generated
+#     automatically at <volume>/vault.key on first boot, so no setup is needed.
+#     The `secrets:` recipe below is only for an external override; if
+#     /data/secrets.bin exists but no key can open it, the app REFUSES to
+#     start (a loud operator error, never a silent downgrade).
 #
 # Hardening applied to **both** services: the container root filesystem is
 # read-only (only /data and the /tmp tmpfs are writable), every capability is
@@ -50,8 +55,10 @@ services:
       # default (secure in production) would break login over http://IP.
       # This flag is independent of the strong-secret enforcement (review A5).
       TUCANO_SECURE_COOKIES: ${TUCANO_SECURE_COOKIES:-}
-      # Recommended secret path: file-based, never plaintext env. Enable the
-      # `secrets:` blocks at the bottom of this file and uncomment these two:
+      # Optional file-based secrets, never plaintext env. The session and vault
+      # keys are otherwise auto-generated on the data volume; enable the
+      # `secrets:` blocks at the bottom of this file and uncomment these to
+      # override them from outside /data:
       # TUCANO_SESSION_SECRET_FILE: /run/secrets/tucano_session_secret
       # TUCANO_SECRET_KEY_FILE: /run/secrets/tucano_vault_key
       # labels are ignored by docker but document the backup recipe:
@@ -84,16 +91,27 @@ services:
     stop_grace_period: 30s
     environment:
       TUCANO_ENV: ${TUCANO_ENV:-production}
-      # Same file-based secrets as the server, so a restore/backup run can see
-      # the vault key it needs to describe (see the `secrets:` block below).
+      # Same optional file-based secrets as the server, so a restore/backup run
+      # sees the same external vault key (see the `secrets:` block below). With
+      # no override, the server's generated <volume>/vault.key is used.
       # TUCANO_SECRET_KEY_FILE: /run/secrets/tucano_vault_key
 
-      # File-based secrets (recommended over plaintext env). To enable:
+      # External-override recipe (the app generates both keys on the volume by
+      # default, so this is only needed to keep them outside /data):
       #
-      #   mkdir -p secrets
-      #   openssl rand -hex 16 > secrets/vault.key     # 32 ASCII chars = the 32-byte key
+      #   mkdir -p secrets                             # ignored by git and Docker
+      #   openssl rand -base64 24 > secrets/vault.key  # 32 ASCII chars, 192 bits
       #   openssl rand -hex 32 > secrets/session.key
       #   chmod 600 secrets/*.key
+      #
+      # `./secrets/` is listed in both .gitignore and .dockerignore, so this
+      # recipe can never stage key material in git or bake it into the image.
+      # To keep it outside the checkout instead, point TUCANO_SECRETS_DIR at a
+      # directory outside the repository.
+      #
+      # Setting either *_FILE variable makes the vault operator-managed: the
+      # Settings key actions are unavailable and the API answers 409
+      # `vault_managed_externally`.
       #
       # then uncomment this block and the matching `secrets:` grants +
       # `*_FILE` environment entries above. The app reads the *files*; the operator

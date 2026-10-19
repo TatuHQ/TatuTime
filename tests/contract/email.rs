@@ -530,8 +530,14 @@ async fn vault_state() -> (AppState, tempfile::TempDir) {
         3600,
         false,
     ));
+    let boot = tucano_time::vault::VaultBoot::from_vault(
+        vault,
+        tucano_time::vault::KeySource::Env,
+        None,
+        true,
+    );
     (
-        AppState::boot(store, session, Some(vault), Arc::new(AppConfig::empty())),
+        AppState::boot(store, session, boot, Arc::new(AppConfig::empty())),
         dir,
     )
 }
@@ -639,7 +645,9 @@ async fn admin_email_put_validates_and_requires_the_vault() {
     assert_eq!(saved["configured"], true);
 
     // Without a vault the write is a fail-closed 503 and mutates nothing.
-    let (plain, _p) = app().await;
+    let plain_dir = tempfile::tempdir().unwrap();
+    let plain_store = Store::open(plain_dir.path().join("data")).unwrap();
+    let plain = app_with_vault(plain_store, vault_boot_disabled(), AppConfig::empty()).await;
     let (s503, body) = json_req(
         &plain,
         "PUT",

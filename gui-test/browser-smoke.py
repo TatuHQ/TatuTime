@@ -1324,13 +1324,13 @@ class Gate:
             # stacked field rows (SMTP host/port/username/password/from and the
             # test-email recipient).
             and counts["groups"] == 144 and counts["labels"] == 139
-            # 45: the previous 43 (which already carried the read-only audit
-            # card's blurb and polite status line, SET-11) plus the Email
-            # section's two help texts. Mirrors the shell census in
-            # gui-test/forms.test.mjs:69, so the two suites cannot drift.
-            and counts["controls"] == 139 and counts["help"] == 45
-            # 27: the previous 25 plus #email-error and #email-test-error.
-            and counts["messages"] == counts["errorGroups"] == 27,
+            # 47: the security vault card's detail line and (normally hidden)
+            # warning note join the previous 45; the moved #vault-status keeps
+            # its count. Mirrors the shell census in gui-test/forms.test.mjs:69,
+            # so the two suites cannot drift.
+            and counts["controls"] == 139 and counts["help"] == 47
+            # 28: the previous 27 plus the vault card's #vault-error.
+            and counts["messages"] == counts["errorGroups"] == 28,
             f"counts={counts}",
             info=f"{counts['groups']} groups, {counts['help']} help texts, "
                  f"{counts['messages']} validation messages",
@@ -1452,7 +1452,7 @@ class Gate:
             "var row = document.querySelector('#entry-form .p-form__group');"
             "var tick = document.getElementById('entry-billable');"
             "var tickLabel = tick ? tick.closest('label') : null;"
-            "var help = document.getElementById('vault-status');"
+            "var help = document.getElementById('vault-detail');"
             "return JSON.stringify({"
             " rowBottom: cs(row, 'marginBottom'),"
             " tickRowBottom: tickLabel ? cs(tickLabel.closest('.p-form__group'), 'marginBottom') : null,"

@@ -71,6 +71,12 @@ async fn calendar_events_from_configured_feed() {
         3600,
         false,
     ));
+    let boot = tucano_time::vault::VaultBoot::from_vault(
+        vault,
+        tucano_time::vault::KeySource::Env,
+        None,
+        true,
+    );
     let state = AppState {
         store: std::sync::Arc::new(store),
         clock: std::sync::Arc::new(SystemClock),
@@ -82,7 +88,7 @@ async fn calendar_events_from_configured_feed() {
         )),
         audit: std::sync::Arc::new(tucano_time::audit::AuditLog::new(&root)),
         revocations: std::sync::Arc::new(tucano_time::revoke::Revocations::new(&root)),
-        vault: Some(vault),
+        vault: tucano_time::vault::VaultSlot::new(boot),
         email: std::sync::Arc::new(tucano_time::email::DisabledEmailSender),
         accounting: std::sync::Arc::new(tucano_time::accounting::AccountingRegistry::default()),
         sso: std::sync::Arc::new(tucano_time::sso::SsoRegistry::default()),
@@ -90,6 +96,7 @@ async fn calendar_events_from_configured_feed() {
         cfg: std::sync::Arc::new(std::sync::Mutex::new(std::sync::Arc::new(
             tucano_time::appconfig::AppConfig::empty(),
         ))),
+        env: std::sync::Arc::new(tucano_time::appconfig::process_env),
     };
     let router = tucano_time::build_router(state);
     raw(

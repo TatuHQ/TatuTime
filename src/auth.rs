@@ -244,20 +244,51 @@ pub fn resolve_session_secret(
 }
 
 /// Write a file with `0600` permissions (owner read/write only), atomically.
+///
+/// M5 hardening, used by the session key and the credential-vault key:
+///
+/// - a stale `<target>.tmp` is removed first and the new temp is opened with
+///   `create_new(true)`, which never follows a pre-existing symlink at the
+///   final component (a planted `.tmp` symlink cannot redirect the secret);
+/// - the mode is applied explicitly with `set_permissions(0o600)` after the
+///   open, because `OpenOptions::mode` only shapes a *newly created* file;
+/// - the temp file is `sync_all`ed before `rename`, and the parent directory
+///   is fsynced afterwards, so the rename survives a crash.
 pub fn write_private_file(path: &std::path::Path, bytes: &[u8]) -> Result<(), String> {
     use std::io::Write;
-    use std::os::unix::fs::OpenOptionsExt;
+    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+
     let tmp = path.with_extension("tmp");
+    // Remove a stale temp first. A directory or an unremovable entry is a hard
+    // failure: better to refuse than to write a secret somewhere unexpected.
+    match std::fs::remove_file(&tmp) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e.to_string()),
+    }
     let mut f = std::fs::OpenOptions::new()
         .write(true)
-        .create(true)
-        .truncate(true)
+        .create_new(true)
         .mode(0o600)
         .open(&tmp)
         .map_err(|e| e.to_string())?;
-    f.write_all(bytes).map_err(|e| e.to_string())?;
+    let written = (|| -> std::io::Result<()> {
+        f.write_all(bytes)?;
+        f.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+        f.sync_all()?;
+        Ok(())
+    })();
     drop(f);
+    if let Err(e) = written {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e.to_string());
+    }
     std::fs::rename(&tmp, path).map_err(|e| e.to_string())?;
+    if let Some(dir) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+        std::fs::File::open(dir)
+            .and_then(|d| d.sync_all())
+            .map_err(|e| e.to_string())?;
+    }
     Ok(())
 }
 
@@ -446,5 +477,47 @@ mod persistence_tests {
         let md = std::fs::metadata(dir.path().join("session.key")).unwrap();
         use std::os::unix::fs::PermissionsExt;
         assert_eq!(md.permissions().mode() & 0o777, 0o600);
+    }
+
+    /// M5: a stale `<target>.tmp` is removed, the target is replaced with 0600
+    /// even when it already existed with a lax mode, and the temp is gone.
+    #[test]
+    fn write_private_file_replaces_a_stale_tmp_and_forces_0600() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("secret.key");
+        let tmp = target.with_extension("tmp");
+        std::fs::write(&tmp, b"stale leftover").unwrap();
+        std::fs::write(&target, b"old").unwrap();
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+        write_private_file(&target, b"fresh").unwrap();
+
+        assert_eq!(std::fs::read(&target).unwrap(), b"fresh");
+        assert_eq!(
+            std::fs::metadata(&target).unwrap().permissions().mode() & 0o777,
+            0o600,
+            "the mode must be forced, not inherited from the replaced file"
+        );
+        assert!(!tmp.exists(), "the temp file must not survive the rename");
+    }
+
+    /// M5: a symlink planted at the temp path is not followed — the write
+    /// lands in the real target and the link target keeps its bytes.
+    #[test]
+    fn write_private_file_does_not_follow_a_symlinked_temp() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("secret.key");
+        let tmp = target.with_extension("tmp");
+        let victim = dir.path().join("victim");
+        std::fs::write(&victim, b"do not touch").unwrap();
+        std::os::unix::fs::symlink(&victim, &tmp).unwrap();
+
+        write_private_file(&target, b"fresh").unwrap();
+
+        assert_eq!(std::fs::read(&victim).unwrap(), b"do not touch");
+        assert_eq!(std::fs::read(&target).unwrap(), b"fresh");
+        assert!(!tmp.exists());
     }
 }

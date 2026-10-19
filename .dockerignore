@@ -29,6 +29,9 @@ scheduler.json
 email_reminders.json
 session.key
 secrets.bin
+vault.key
+# Local key material for the docker-compose `secrets:` recipe.
+secrets/
 .server.lock
 .tucanotime.lock
 config.json

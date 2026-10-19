@@ -1,9 +1,11 @@
 use crate::support::*;
 
 use axum::Router;
-use axum::http::StatusCode;
+use axum::body::Body;
+use axum::http::{Request, StatusCode, header};
 use serde_json::json;
 use std::sync::Arc;
+use tower::ServiceExt;
 use tucano_time::api::AppState;
 use tucano_time::auth::Session;
 use tucano_time::clock::SystemClock;
@@ -25,6 +27,12 @@ async fn secret_vault_endpoints_mask_and_authorize() {
         3600,
         false,
     ));
+    let boot = tucano_time::vault::VaultBoot::from_vault(
+        vault,
+        tucano_time::vault::KeySource::Env,
+        None,
+        true,
+    );
     let state = AppState {
         store: std::sync::Arc::new(store),
         clock: std::sync::Arc::new(SystemClock),
@@ -36,7 +44,7 @@ async fn secret_vault_endpoints_mask_and_authorize() {
         )),
         audit: std::sync::Arc::new(tucano_time::audit::AuditLog::new(&root)),
         revocations: std::sync::Arc::new(tucano_time::revoke::Revocations::new(&root)),
-        vault: Some(vault),
+        vault: tucano_time::vault::VaultSlot::new(boot),
         email: std::sync::Arc::new(tucano_time::email::DisabledEmailSender),
         accounting: std::sync::Arc::new(tucano_time::accounting::AccountingRegistry::default()),
         sso: std::sync::Arc::new(tucano_time::sso::SsoRegistry::default()),
@@ -44,6 +52,7 @@ async fn secret_vault_endpoints_mask_and_authorize() {
         cfg: std::sync::Arc::new(std::sync::Mutex::new(std::sync::Arc::new(
             tucano_time::appconfig::AppConfig::empty(),
         ))),
+        env: std::sync::Arc::new(tucano_time::appconfig::process_env),
     };
     let router = tucano_time::build_router(state);
     // bootstrap admin
@@ -442,6 +451,12 @@ async fn vault_router(dir: &std::path::Path) -> (Router, String) {
             .unwrap()
             .unwrap(),
     );
+    let boot = tucano_time::vault::VaultBoot::from_vault(
+        vault,
+        tucano_time::vault::KeySource::Env,
+        None,
+        true,
+    );
     let state = AppState {
         store: Arc::new(store),
         clock: Arc::new(SystemClock),
@@ -457,7 +472,7 @@ async fn vault_router(dir: &std::path::Path) -> (Router, String) {
         )),
         audit: Arc::new(tucano_time::audit::AuditLog::new(&root)),
         revocations: Arc::new(tucano_time::revoke::Revocations::new(&root)),
-        vault: Some(vault),
+        vault: tucano_time::vault::VaultSlot::new(boot),
         email: Arc::new(tucano_time::email::DisabledEmailSender),
         accounting: Arc::new(tucano_time::accounting::AccountingRegistry::default()),
         sso: Arc::new(tucano_time::sso::SsoRegistry::default()),
@@ -465,6 +480,7 @@ async fn vault_router(dir: &std::path::Path) -> (Router, String) {
         cfg: Arc::new(std::sync::Mutex::new(Arc::new(
             tucano_time::appconfig::AppConfig::empty(),
         ))),
+        env: Arc::new(tucano_time::appconfig::process_env),
     };
     let router = tucano_time::build_router(state);
     let _ = raw(
@@ -502,4 +518,500 @@ async fn secret_put_invalid_key_name_is_422() {
         list["secrets"].as_array().unwrap().is_empty(),
         "an invalid key must not be stored"
     );
+}
+
+// ------------------------------------------------ credential-vault lifecycle --
+
+const FIXED_KEY: &str = "0123456789abcdef0123456789abcdef";
+
+/// Neither the master key nor a host path may appear in any response.
+fn assert_clean(body: &serde_json::Value, root: &std::path::Path, key: &str) {
+    let text = body.to_string();
+    if !key.is_empty() {
+        assert!(!text.contains(key), "master key leaked: {text}");
+    }
+    assert!(
+        !text.contains(root.to_str().unwrap()),
+        "host path leaked: {text}"
+    );
+    assert!(
+        !text.contains("secrets.bin"),
+        "store file name leaked: {text}"
+    );
+}
+
+#[tokio::test]
+async fn vault_status_enabled_reports_key_file_without_leaking() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("data")).unwrap();
+    let root = store.root().to_path_buf();
+    let boot = vault_boot_enabled(&root);
+    let key = std::fs::read_to_string(root.join("vault.key")).unwrap();
+    let client = app_with_vault(store, boot, tucano_time::appconfig::AppConfig::empty()).await;
+
+    let (status, body) = json_req(&client, "GET", "/api/admin/vault", None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["enabled"], true);
+    assert_eq!(body["source"], "key_file");
+    assert_eq!(body["disabled_reason"], serde_json::Value::Null);
+    assert!(body["fingerprint"].as_str().unwrap().starts_with("sha256:"));
+    assert_eq!(body["key_file_name"], "vault.key");
+    assert_eq!(body["key_file_present"], true);
+    assert_eq!(body["secrets_count"], 0);
+    assert_eq!(body["external_override"], false);
+    assert_eq!(body["can_enable"], false);
+    assert_eq!(body["can_disable"], true);
+    assert_eq!(body["can_regenerate"], true);
+    assert_clean(&body, &root, &key);
+
+    // A member is refused (admin tier).
+    json_req(
+        &client,
+        "POST",
+        "/api/users",
+        Some(json!({"name":"M","email":"vault-member@t.local","password":"memberpass1","role":"member"})),
+    )
+    .await;
+    let member = login_cookie(&client.router, "vault-member@t.local", "memberpass1").await;
+    let (s, b, _) = raw(
+        &client.router,
+        "GET",
+        "/api/admin/vault",
+        None,
+        Some(&member),
+    )
+    .await;
+    assert_eq!(s, StatusCode::FORBIDDEN, "{b}");
+}
+
+#[tokio::test]
+async fn vault_status_disabled_is_200_and_offers_enable() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("data")).unwrap();
+    let client = app_with_vault(
+        store,
+        vault_boot_disabled(),
+        tucano_time::appconfig::AppConfig::empty(),
+    )
+    .await;
+
+    let (status, body) = json_req(&client, "GET", "/api/admin/vault", None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["enabled"], false);
+    assert_eq!(body["source"], "none");
+    assert_eq!(body["disabled_reason"], "config");
+    assert_eq!(body["can_enable"], true);
+    assert_eq!(body["can_disable"], false);
+    assert_eq!(body["key_file_present"], false);
+    assert_eq!(body["key_file_name"], serde_json::Value::Null);
+    assert_clean(&body, dir.path(), "");
+}
+
+#[tokio::test]
+async fn vault_enable_mints_a_key_then_refuses_a_second_call() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("data")).unwrap();
+    let root = store.root().to_path_buf();
+    let client = app_with_vault(
+        store,
+        vault_boot_disabled(),
+        tucano_time::appconfig::AppConfig::empty(),
+    )
+    .await;
+
+    let (status, body) = json_req(&client, "POST", "/api/admin/vault/enable", None).await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    assert_eq!(body["created_key"], true);
+    assert_eq!(body["enabled"], true);
+    assert_eq!(body["source"], "key_file");
+    let key_path = root.join("vault.key");
+    let bytes = std::fs::read(&key_path).unwrap();
+    assert_eq!(bytes.len(), 32);
+    use std::os::unix::fs::PermissionsExt;
+    assert_eq!(
+        std::fs::metadata(&key_path).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+    assert_clean(&body, &root, std::str::from_utf8(&bytes).unwrap());
+
+    let (second, b2) = json_req(&client, "POST", "/api/admin/vault/enable", None).await;
+    assert_eq!(second, StatusCode::CONFLICT, "{b2}");
+    assert_eq!(b2["error"]["code"], "vault_already_enabled");
+}
+
+#[tokio::test]
+async fn vault_enable_reuses_an_existing_valid_key() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("data")).unwrap();
+    let root = store.root().to_path_buf();
+    let key_path = root.join("vault.key");
+    std::fs::write(&key_path, FIXED_KEY.as_bytes()).unwrap();
+    let before = std::fs::metadata(&key_path).unwrap();
+    let before_mtime = before.modified().unwrap();
+
+    let client = app_with_vault(
+        store,
+        vault_boot_disabled(),
+        tucano_time::appconfig::AppConfig::empty(),
+    )
+    .await;
+    let (status, body) = json_req(&client, "POST", "/api/admin/vault/enable", None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["created_key"], false);
+    assert_eq!(body["enabled"], true);
+    assert_eq!(std::fs::read(&key_path).unwrap(), FIXED_KEY.as_bytes());
+    assert_eq!(
+        std::fs::metadata(&key_path).unwrap().modified().unwrap(),
+        before_mtime,
+        "a reused key file must not be rewritten"
+    );
+    assert_clean(&body, &root, FIXED_KEY);
+}
+
+#[tokio::test]
+async fn vault_disable_persists_the_flag_and_deletes_the_key() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("data")).unwrap();
+    let root = store.root().to_path_buf();
+    let boot = vault_boot_enabled(&root);
+    let key_path = root.join("vault.key");
+    let key = std::fs::read_to_string(&key_path).unwrap();
+    let client = app_with_vault(store, boot, tucano_time::appconfig::AppConfig::empty()).await;
+
+    let (status, body) = json_req(
+        &client,
+        "POST",
+        "/api/admin/vault/disable",
+        Some(json!({"confirm": true})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["enabled"], false);
+    assert_eq!(body["disabled_reason"], "config");
+    assert_eq!(body["key_file_present"], false);
+    assert_eq!(body["can_enable"], true);
+    assert!(!key_path.exists(), "the generated key file must be deleted");
+    assert_clean(&body, &root, &key);
+
+    let persisted = std::fs::read_to_string(root.join("config.json")).unwrap();
+    assert!(persisted.contains("vault_enabled"), "{persisted}");
+    assert!(persisted.contains("false"), "{persisted}");
+
+    let (_, now) = json_req(&client, "GET", "/api/admin/vault", None).await;
+    assert_eq!(now["enabled"], false);
+}
+
+#[tokio::test]
+async fn vault_disable_and_regenerate_refuse_while_a_secret_is_stored() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("data")).unwrap();
+    let root = store.root().to_path_buf();
+    let boot = vault_boot_enabled(&root);
+    boot.vault
+        .as_ref()
+        .unwrap()
+        .put("smtp.host", "relay.local")
+        .unwrap();
+    let key_path = root.join("vault.key");
+    let store_path = root.join("secrets.bin");
+    let key_bytes = std::fs::read(&key_path).unwrap();
+    let secret_bytes = std::fs::read(&store_path).unwrap();
+    let client = app_with_vault(store, boot, tucano_time::appconfig::AppConfig::empty()).await;
+
+    let (s1, b1) = json_req(
+        &client,
+        "POST",
+        "/api/admin/vault/disable",
+        Some(json!({"confirm": true})),
+    )
+    .await;
+    assert_eq!(s1, StatusCode::CONFLICT, "{b1}");
+    assert_eq!(b1["error"]["code"], "vault_in_use");
+
+    let (s2, b2) = json_req(
+        &client,
+        "POST",
+        "/api/admin/vault/regenerate",
+        Some(json!({"confirm": true})),
+    )
+    .await;
+    assert_eq!(s2, StatusCode::CONFLICT, "{b2}");
+    assert_eq!(b2["error"]["code"], "vault_in_use");
+
+    assert_eq!(std::fs::read(&key_path).unwrap(), key_bytes);
+    assert_eq!(std::fs::read(&store_path).unwrap(), secret_bytes);
+}
+
+#[tokio::test]
+async fn vault_regenerate_changes_the_fingerprint_when_empty() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("data")).unwrap();
+    let root = store.root().to_path_buf();
+    let boot = vault_boot_enabled(&root);
+    let client = app_with_vault(store, boot, tucano_time::appconfig::AppConfig::empty()).await;
+
+    let (_, before) = json_req(&client, "GET", "/api/admin/vault", None).await;
+    let (status, body) = json_req(
+        &client,
+        "POST",
+        "/api/admin/vault/regenerate",
+        Some(json!({"confirm": true})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["created_key"], true);
+    assert_ne!(body["fingerprint"], before["fingerprint"]);
+    assert_eq!(std::fs::read(root.join("vault.key")).unwrap().len(), 32);
+}
+
+#[tokio::test]
+async fn vault_disable_and_regenerate_refuse_an_external_override() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("data")).unwrap();
+    let root = store.root().to_path_buf();
+    let vault = Arc::new(
+        tucano_time::vault::SecretVault::open_with(
+            &root,
+            FIXED_KEY,
+            tucano_time::vault::KeySource::Env,
+        )
+        .unwrap(),
+    );
+    let boot = tucano_time::vault::VaultBoot::from_vault(
+        vault,
+        tucano_time::vault::KeySource::Env,
+        None,
+        true,
+    );
+    let client = app_with_vault(store, boot, tucano_time::appconfig::AppConfig::empty()).await;
+
+    let (s1, b1) = json_req(
+        &client,
+        "POST",
+        "/api/admin/vault/disable",
+        Some(json!({"confirm": true})),
+    )
+    .await;
+    assert_eq!(s1, StatusCode::CONFLICT, "{b1}");
+    assert_eq!(b1["error"]["code"], "vault_managed_externally");
+
+    let (s2, b2) = json_req(
+        &client,
+        "POST",
+        "/api/admin/vault/regenerate",
+        Some(json!({"confirm": true})),
+    )
+    .await;
+    assert_eq!(s2, StatusCode::CONFLICT, "{b2}");
+    assert_eq!(b2["error"]["code"], "vault_managed_externally");
+}
+
+#[tokio::test]
+async fn vault_lifecycle_rejects_invalid_confirmation_shapes() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("data")).unwrap();
+    let root = store.root().to_path_buf();
+    let client = app_with_vault(
+        store,
+        vault_boot_enabled(&root),
+        tucano_time::appconfig::AppConfig::empty(),
+    )
+    .await;
+
+    let cases: Vec<Option<serde_json::Value>> = vec![
+        None,
+        Some(json!({})),
+        Some(json!({"confirm": false})),
+        Some(json!({"confirm": true, "x": 1})),
+    ];
+    for uri in ["/api/admin/vault/disable", "/api/admin/vault/regenerate"] {
+        for body in &cases {
+            let (status, response) = json_req(&client, "POST", uri, body.clone()).await;
+            assert!(
+                status == StatusCode::UNPROCESSABLE_ENTITY || status == StatusCode::BAD_REQUEST,
+                "{uri} {body:?} -> {status}: {response}"
+            );
+            assert_eq!(
+                response["error"]["code"], "validation_failed",
+                "{uri} {body:?}: {response}"
+            );
+        }
+        // Malformed JSON: the same shared error shape, never a panic or a write.
+        let req = Request::builder()
+            .method("POST")
+            .uri(uri)
+            .header(header::COOKIE, &client.cookie)
+            .header("x-csrf-protection", "1")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from("{"))
+            .unwrap();
+        let res = client.router.clone().oneshot(req).await.unwrap();
+        assert!(
+            res.status() == StatusCode::UNPROCESSABLE_ENTITY
+                || res.status() == StatusCode::BAD_REQUEST,
+            "{uri}: malformed JSON must be a client error"
+        );
+        let bytes = axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let response: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(
+            response["error"]["code"], "validation_failed",
+            "{uri}: {response}"
+        );
+    }
+
+    // Nothing above changed the state.
+    let (_, status) = json_req(&client, "GET", "/api/admin/vault", None).await;
+    assert_eq!(status["enabled"], true);
+    assert_eq!(status["secrets_count"], 0);
+}
+
+/// M1: a valid `TUCANO_VAULT_ENABLED=false` is an operator override. The admin
+/// API must refuse to enable the vault instead of flipping the flag behind the
+/// environment's back (which the next boot would simply reverse).
+#[tokio::test]
+async fn vault_enable_refuses_when_the_environment_disables_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("data")).unwrap();
+    let root = store.root().to_path_buf();
+    let env: tucano_time::api::EnvLookup = Arc::new(|key: &str| {
+        if key == "TUCANO_VAULT_ENABLED" {
+            Some("false".to_string())
+        } else {
+            None
+        }
+    });
+    let client = app_with_vault_env(
+        store,
+        vault_boot_disabled(),
+        tucano_time::appconfig::AppConfig::empty(),
+        env,
+    )
+    .await;
+
+    let (status, body) = json_req(&client, "POST", "/api/admin/vault/enable", None).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"]["code"], "vault_managed_externally");
+    assert!(
+        !root.join("vault.key").exists(),
+        "a refused enable must not mint a key"
+    );
+    let (_, now) = json_req(&client, "GET", "/api/admin/vault", None).await;
+    assert_eq!(now["enabled"], false);
+    assert_eq!(now["can_enable"], false);
+}
+
+/// M1, other direction: an env value that enables the vault makes the admin
+/// `disable` a 409 rather than a flag the next boot would ignore.
+#[tokio::test]
+async fn vault_disable_refuses_when_the_environment_enables_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("data")).unwrap();
+    let root = store.root().to_path_buf();
+    let boot = vault_boot_enabled(&root);
+    let key_path = root.join("vault.key");
+    let env: tucano_time::api::EnvLookup = Arc::new(|key: &str| {
+        if key == "TUCANO_VAULT_ENABLED" {
+            Some("true".to_string())
+        } else {
+            None
+        }
+    });
+    let client =
+        app_with_vault_env(store, boot, tucano_time::appconfig::AppConfig::empty(), env).await;
+
+    let (status, body) = json_req(
+        &client,
+        "POST",
+        "/api/admin/vault/disable",
+        Some(json!({"confirm": true})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"]["code"], "vault_managed_externally");
+    assert!(key_path.exists(), "a refused disable keeps the key");
+    let (_, now) = json_req(&client, "GET", "/api/admin/vault", None).await;
+    assert_eq!(now["enabled"], true);
+    assert_eq!(now["can_disable"], false);
+}
+
+/// M3: `PUT /api/admin/config` must not write `vault_enabled` (a stored
+/// `false` next to a `secrets.bin` hard-fails the next boot). The knob stays
+/// readable and is flagged read-only.
+#[tokio::test]
+async fn config_put_cannot_write_the_vault_lifecycle_flag() {
+    let (app, d) = app().await;
+    let (_, before) = json_req(&app, "GET", "/api/admin/vault", None).await;
+    let cfg_path = d.path().join("data").join("config.json");
+
+    for flag in [false, true] {
+        let (status, body) = json_req(
+            &app,
+            "PUT",
+            "/api/admin/config",
+            Some(json!({"vault_enabled": flag})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+        assert_eq!(body["error"]["code"], "validation_failed");
+        assert_eq!(body["error"]["fields"][0]["field"], "vault_enabled");
+        assert!(
+            body["error"]["fields"][0]["message"]
+                .as_str()
+                .unwrap()
+                .contains("/api/admin/vault"),
+            "the refusal must point at the lifecycle endpoints: {body}"
+        );
+    }
+    assert!(
+        !cfg_path.exists(),
+        "a refused config write must persist nothing"
+    );
+    let (_, after) = json_req(&app, "GET", "/api/admin/vault", None).await;
+    assert_eq!(after, before, "the vault state is unchanged");
+
+    // GET still lists the knob, flagged read-only for the GUI table.
+    let (_, eff) = json_req(&app, "GET", "/api/admin/config", None).await;
+    let row = eff["config"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["key"] == "vault_enabled")
+        .expect("vault_enabled stays visible");
+    assert_eq!(row["writable"], false);
+    assert_eq!(row["value"], before["enabled"]);
+}
+
+/// H2: when the flag cannot be persisted, `disable` must leave the live slot
+/// and the key file untouched (500 `data_dir_not_writable`, still enabled).
+#[tokio::test]
+async fn vault_disable_persistence_failure_keeps_the_key_and_enabled_state() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("data")).unwrap();
+    let root = store.root().to_path_buf();
+    let boot = vault_boot_enabled(&root);
+    let key_path = root.join("vault.key");
+    let client = app_with_vault(store, boot, tucano_time::appconfig::AppConfig::empty()).await;
+
+    // A directory at the config write's temp path makes persistence fail
+    // deterministically, regardless of the uid running the tests.
+    std::fs::create_dir(root.join("config.json.tmp")).unwrap();
+
+    let (status, body) = json_req(
+        &client,
+        "POST",
+        "/api/admin/vault/disable",
+        Some(json!({"confirm": true})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "{body}");
+    assert_eq!(body["error"]["code"], "data_dir_not_writable");
+    assert!(
+        key_path.exists(),
+        "the key must not be deleted before the disabled flag is persisted"
+    );
+    assert!(!root.join("config.json").exists());
+    let (_, now) = json_req(&client, "GET", "/api/admin/vault", None).await;
+    assert_eq!(now["enabled"], true, "the live slot stays enabled");
 }

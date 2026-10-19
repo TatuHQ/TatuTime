@@ -20,6 +20,10 @@
 /email_reminders.json
 /session.key
 /secrets.bin
+/vault.key
+# Local key material for the docker-compose `secrets:` recipe. The directory
+# holds operator-supplied keys, so it is ignored as a whole.
+/secrets/
 /.server.lock
 /.tucanotime.lock
 

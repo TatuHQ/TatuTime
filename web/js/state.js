@@ -9,6 +9,7 @@ import { fillSelect } from './dom.js';
 
 export const state = {
   isAdmin: false, // #188: set from /api/auth/me; gates admin-tier panel loads at boot
+  vault: null,             // last GET /admin/vault payload (settings.js)
   customers: [],           // Customer[]
   projectsByCustomer: {},  // id -> Project[]
   // #182: the Setup hierarchy is three sections with filter state instead of
