@@ -403,7 +403,8 @@ mod tests {
             doc.subject.as_deref(),
             Some("Sample Customer invoice for 10 2026")
         );
-        assert_eq!(doc.total_hours.as_deref(), Some("16h 50min"));
+        // 12.00 h + 4.50 h = 16.50 h = 16h 30min.
+        assert_eq!(doc.total_hours.as_deref(), Some("16h 30min"));
         assert_eq!(doc.column_labels[0], "Item type");
         let meta_keys: Vec<&str> = doc
             .meta
