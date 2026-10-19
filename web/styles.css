@@ -29,6 +29,19 @@
   --sidebar-bg: #ffffff;
   --radius: 2px;
   --shadow: 0 1px 2px rgba(44, 0, 30, .06), 0 1px 3px rgba(44, 0, 30, .10);
+  /* Shared filter-row rhythm (#F follow-up): the horizontal tool rows use one
+     spacing scale and one control height instead of per-view magic numbers.
+     The control height is Vanilla's underline control (1.5rem line + 2x.41rem
+     padding + 1px rule = 2.26rem at the 16px root). The field rule and input
+     fill mirror the vendored form control in each theme, so the segmented
+     status toggle and a text field share the same boundary treatment. */
+  --space-2xs: .15rem;    /* 2.4px - label to its control */
+  --space-xs: .4rem;      /* 6.4px - tight inline group */
+  --space-sm: .5rem;      /* 8px - filter-row gap */
+  --space-md: .75rem;     /* 12px - heading-row gap */
+  --control-height: 2.26rem;
+  --field-rule: #707070;  /* Vanilla --vf-color-border-high-contrast, light */
+  --input-bg: #f5f5f5;    /* Vanilla --vf-color-background-inputs, light */
 }
 
 @media (prefers-color-scheme: dark) {
@@ -51,6 +64,8 @@
     --cell-active: #56334b;
     --sidebar-bg: #411934;
     --shadow: none;
+    --field-rule: #939393;  /* Vanilla --vf-color-border-high-contrast, dark */
+    --input-bg: #2f2f2f;    /* Vanilla --vf-color-background-inputs, dark */
   }
 }
 
@@ -73,6 +88,8 @@
   --cell-active: #56334b;
   --sidebar-bg: #411934;
   --shadow: none;
+  --field-rule: #939393;
+  --input-bg: #2f2f2f;
 }
 .theme-switch { border: 0; border-top: 1px solid var(--line); padding: .75rem .5rem; margin: .75rem 0 0; background: none; overflow: visible; } /* Vanilla base `fieldset` (vf-b-forms) tints + clips fieldsets */
 .theme-switch legend { padding: 0 .25rem; font-size: .85rem; color: var(--muted); }
@@ -198,7 +215,7 @@ button.danger { background: none; border: none; color: var(--danger); padding: .
 /* #232 increment 1: Vanilla base forms set width:100% (stacked-form default);
    the app's horizontal filter/tool bars keep intrinsic control widths. */
 .bar input:not([type="checkbox"]):not([type="radio"]), .bar select, .bar textarea,
-.inv-filters input, .inv-filters select, .timerbar select, .copy-bar select,
+.timerbar select, .copy-bar select,
 .accent-row input { width: auto; }
 /* #232 phase 2b (forms): the bespoke `.field` wrapper retires for the official
    `p-form__group`. The .65rem row rhythm the old rule really rendered stays on
@@ -465,14 +482,33 @@ dialog.p-modal::backdrop { background: transparent; }
 #project-dialog form, #task-dialog form { margin: 0; }
 .hierarchy-actions { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
 /* #182: hierarchy-section filter controls + scope label */
-.filter-field { display: flex; flex-direction: column; gap: .15rem; font-size: .8rem; }
+.filter-field { display: flex; flex-direction: column; gap: var(--space-2xs); font-size: .8rem; min-width: 0; }
 .filter-field select { min-width: 11rem; }
 /* #182 follow-up: a section's filter row lines up with its creation action, and
    the filters agree with each other. Vanilla's base `select { width: 100% }`
    stretched them (the actions are 184px = 11.5rem at the 16px root; the filters
    ran past 1000px on Projects and were uneven on Tasks), so every control in the
    row is pinned to the action's width. Long values clip with an ellipsis. */
-.hierarchy-filters { display: flex; flex-wrap: wrap; align-items: flex-end; gap: .5rem; }
+/* The house horizontal filter row (#F follow-up): one primitive for the
+   register filters and the invoice status toggle. Controls align on their
+   bottom edge (the label sits above its control inside `.filter-field`), and
+   one token owns the gap so a new row cannot drift. */
+.filter-row,
+.hierarchy-filters { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--space-sm); }
+.filter-row > * { min-width: 0; }
+/* A vendor base form control carries a stacked-form bottom margin. In a
+   horizontal row that margin leaves the control floating above the baseline
+   while a non-input sibling (the Columns disclosure) sits on it, so the row
+   owns the rhythm instead. */
+.filter-row .filter-field > input,
+.filter-row .filter-field > select,
+.filter-row .filter-field > textarea,
+.filter-row .filter-field > .seg { margin-bottom: 0; }
+/* Intrinsic widths: the row fits the register column on one line at
+   >= 1280px and wraps on the same 8px rhythm below that. */
+.filter-row .filter-field input[type="search"] { width: 10.5rem; }
+.filter-row .filter-field select { min-width: 0; width: 9.25rem; text-overflow: ellipsis; }
+.filter-row .filter-field input[type="date"] { width: 8.5rem; }
 #panel-projects #project-new,
 #panel-tasks #task-new,
 .hierarchy-filters select { width: 11.5rem; }
@@ -514,14 +550,15 @@ dialog.p-modal::backdrop { background: transparent; }
 .settings-tabs { flex-wrap: wrap; }
 .settings-panel { min-width: 0; }
 .seg {
-  display: inline-flex; overflow: hidden;
-  border: 1px solid var(--line); border-radius: var(--radius);
-  background: var(--surface); box-shadow: var(--shadow);
+  display: inline-flex; align-items: stretch; height: var(--control-height);
+  border: 0; border-bottom: 1px solid var(--field-rule); border-radius: 0;
+  background: var(--input-bg); box-shadow: none;
 }
-/* #232 increment 5: the only remaining `.seg` consumer is the invoice
-   Open|All filter — a role="group" of aria-pressed toggle buttons, not a
-   tablist — so the segmented-control skin stays while its retired
-   `[role="tab"]` descendants and their tab state are gone. */
+/* #232 increment 5 / #F follow-up: the only remaining `.seg` consumer is the
+   invoice Open|All filter — a role="group" of aria-pressed toggle buttons,
+   not a tablist — so it keeps that semantics while wearing the same underline
+   control boundary as the Vanilla fields beside it. No `overflow: hidden`:
+   the group must never clip the focus ring. */
 
 /* ------------------------------------------- day view refresh (#108) ---- */
 #day-table { border-collapse: separate; border-spacing: 0 .45rem; }
@@ -768,6 +805,11 @@ caption { padding-bottom: .35rem; }
    p-card, no longer a collapsed <details>. The card supplies the frame, so the
    section itself only keeps its layout constraints. */
 .invoice-trends { min-width: 0; margin: 0; }
+/* Advanced billing tools (recurring schedules and retainers) are not finished:
+   the shell ships `data-advanced-billing="off"` on <html> and this rule keeps
+   the whole block out of rendering, the accessibility tree and the tab order.
+   Turning that single attribute to "on" in web/index.html brings it back. */
+html[data-advanced-billing="off"] #advanced-billing { display: none; }
 .advanced-billing { margin-top: 1rem; border: 1px solid var(--line); border-radius: var(--radius); padding: .35rem .55rem; background: var(--surface); }
 .advanced-billing-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; align-items: start; }
 .advanced-billing-section { min-width: 0; }
@@ -831,25 +873,25 @@ caption { padding-bottom: .35rem; }
 #inv-chart-note { margin: .4rem 0 0; font-size: .75rem; color: var(--muted);
   font-variant-numeric: tabular-nums; text-align: center; }
 #inv-chart-note:empty { display: none; }
-#inv-list-head { display: flex; gap: .75rem; flex-wrap: wrap; align-items: center; margin-bottom: .4rem; }
+#inv-list-head { margin-bottom: var(--space-xs); }
 /* #F: the Open|All filter stays a `.seg` group of aria-pressed toggle buttons
-   — never a `p-tabs` tablist (docs/ubuntu-design.md, increment 5) — and takes
-   the Ubuntu segmented-control skin: one bordered shell, flat segments divided
-   by the app's line colour, and the pressed segment filled with the accent
-   tint in the same ink the sidebar rail's selected tab uses. That pairing
-   (--brand-deep on --accent-soft) is the one pinned in gui-test/contrast.mjs
-   for both themes, so the active segment can never be the lighter one. */
+   — never a `p-tabs` tablist (docs/ubuntu-design.md, increment 5). It now
+   shares the fields' underline control boundary and height. The pressed
+   segment keeps the accent tint in the rail's selected-tab ink (--brand-deep
+   on --accent-soft, the pairing pinned in gui-test/contrast.mjs for both
+   themes) plus a bottom indicator in the accent colour. Weight is unchanged
+   between states so the segments keep a fixed width and the row never shifts. */
 .seg .seg-btn { border: 0; border-inline-start: 1px solid var(--line); border-radius: 0;
-  background: transparent; color: var(--fg); padding: .35rem 1rem;
-  cursor: pointer; font: inherit; line-height: 1.5rem; }
+  margin: 0; background: transparent; color: var(--fg); padding: 0 .75rem;
+  cursor: pointer; font: inherit; font-size: 1rem; line-height: 1.5rem; }
 .seg .seg-btn:first-child { border-inline-start: 0; }
 .seg .seg-btn:hover { background: var(--row-alt); color: var(--fg); }
-.seg .seg-btn[aria-pressed="true"] { background: var(--accent-soft); color: var(--brand-deep); font-weight: 700; }
-.inv-filters { display: flex; gap: .4rem; flex-wrap: wrap; align-items: center; }
-.inv-filters input[type=search], .inv-filters select, .inv-filters input[type=date] { padding: .35rem .5rem; }
+.seg .seg-btn[aria-pressed="true"] { background: var(--accent-soft); color: var(--brand-deep); box-shadow: inset 0 -3px 0 var(--accent); }
+/* The Columns disclosure is a control too. Absolute-position its menu so
+   opening it cannot move the row's shared bottom edge. */
 .cols-pop { position: relative; }
-.cols-pop summary { cursor: pointer; padding: .35rem .6rem; border: 1px solid var(--line); border-radius: var(--radius); list-style: none; }
-.cols-pop[open] { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: .4rem .6rem; }
+.cols-pop summary { cursor: pointer; display: inline-flex; align-items: center; height: var(--control-height); padding: 0 .75rem; border: 0; border-bottom: 1px solid var(--field-rule); border-radius: 0; background: var(--input-bg); color: var(--fg); list-style: none; }
+.cols-pop__menu { position: absolute; right: 0; top: calc(100% + .25rem); z-index: 20; min-width: 11rem; padding: .5rem .6rem; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); display: grid; gap: .3rem; }
 .cols-pop label { display: flex; gap: .4rem; align-items: center; font-weight: 400; }
 /* #232 phase 2d: the bespoke `.sort-th` skin is retired — the Invoices
    register uses Vanilla 4.59's real sortable pattern (aria-sort on the <th>

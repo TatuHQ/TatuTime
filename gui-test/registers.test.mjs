@@ -166,3 +166,43 @@ test('retainer and schedule registers render rows with mobile-card headings', as
     assert.equal(recRow.querySelector('td[data-heading="Retainer"]').textContent, 'EUR 250.00');
     dom.window.close();
 });
+
+// #F follow-up: the invoice filters are the same horizontal primitive as the
+// other registers (a `.filter-row` of `.filter-field` groups), and the Open|All
+// status control is a proper ARIA toggle group inside its own field — not a
+// view tablist and not a bare pair of buttons floating beside the row.
+test('the invoice filter row uses the house primitive and ARIA toggle state (#F)', () => {
+    const dom = new JSDOM(html, { url: 'http://localhost/' });
+    const doc = dom.window.document;
+    const row = doc.getElementById('inv-list-head');
+    assert.ok(row.classList.contains('filter-row'), '#inv-list-head is the shared .filter-row');
+    const fields = [...row.querySelectorAll('.filter-field')];
+    assert.equal(fields.length, 6, 'status + five filter controls each sit in a .filter-field');
+    for (const id of ['invoice-search', 'inv-f-customer', 'inv-f-project', 'inv-f-from', 'inv-f-to']) {
+        const control = doc.getElementById(id);
+        assert.ok(control, `#${id} exists`);
+        assert.ok(control.closest('.filter-field'), `#${id} is wrapped in its own field group`);
+    }
+    const group = row.querySelector('.filter-field .seg');
+    assert.ok(group, 'the status control sits in its own filter field');
+    assert.equal(group.getAttribute('role'), 'group', 'a group, never a tablist');
+    assert.equal(group.getAttribute('aria-labelledby'), 'inv-status-label',
+        'the group is named by its field label');
+    assert.equal(group.getAttribute('aria-label'), null, 'the label is the single source of the name');
+    assert.equal(doc.getElementById('inv-status-label').textContent.trim(), 'Status');
+    assert.equal(row.querySelector('[role="tablist"], [role="tab"]'), null, 'no tab pattern is introduced');
+    const buttons = [...group.querySelectorAll('button')];
+    assert.deepEqual(buttons.map((button) => button.id), ['inv-tab-open', 'inv-tab-all']);
+    for (const button of buttons) {
+        assert.ok(button.classList.contains('seg-btn'), button.id + ' keeps the segment skin');
+        assert.equal(button.type, 'button', button.id + ' stays a real button');
+        assert.ok(['true', 'false'].includes(button.getAttribute('aria-pressed')),
+            button.id + ' exposes its pressed state');
+    }
+    assert.equal(buttons.filter((button) => button.getAttribute('aria-pressed') === 'true').length, 1,
+        'exactly one status is pressed');
+    const cols = row.querySelector('.cols-pop');
+    assert.ok(cols && cols.parentElement === row, 'the Columns disclosure is a direct row control');
+    assert.ok(cols.querySelector('.cols-pop__menu'), 'its menu is a separate positioned panel');
+    dom.window.close();
+});

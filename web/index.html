@@ -1,5 +1,10 @@
 <!doctype html>
-<html lang="en">
+<!-- The advanced billing gate: "off" keeps the recurring-schedule and retainer
+     tools out of the GUI while they are unfinished. This one attribute is the
+     whole switch — web/styles.css hides #advanced-billing from it and
+     web/js/billing.js reads it to skip their data fetches. Change the value to
+     "on" to bring the tools back. -->
+<html lang="en" data-advanced-billing="off">
 
 <head>
   <meta charset="utf-8">
@@ -616,35 +621,56 @@
             </div>
           </section>
           <section class="invoice-register-column" aria-label="Invoice register">
-            <div id="inv-list-head">
-              <div class="seg" role="group" aria-label="Invoice list filter">
-                <button type="button" id="inv-tab-open" class="seg-btn" aria-pressed="true">Open</button>
-                <button type="button" id="inv-tab-all" class="seg-btn" aria-pressed="false">All</button>
+            <!-- #F follow-up: the register filter is the house horizontal
+             filter row — the same `.filter-row` / `.filter-field` primitive
+             the Projects, Tasks and Expenses registers use — so every label,
+             control and the status toggle share one bottom edge and one gap
+             rhythm. The Open|All control stays a `role="group"` of
+             `aria-pressed` buttons (never a tablist): it is a filter state,
+             not a view, so it wears the same underline control skin as the
+             fields beside it. -->
+            <div id="inv-list-head" class="filter-row">
+              <div class="filter-field">
+                <span class="sr-only" id="inv-status-label">Status</span>
+                <div class="seg" role="group" aria-labelledby="inv-status-label">
+                  <button type="button" id="inv-tab-open" class="seg-btn" aria-pressed="true">Open</button>
+                  <button type="button" id="inv-tab-all" class="seg-btn" aria-pressed="false">All</button>
+                </div>
               </div>
-              <div class="inv-filters">
+              <div class="filter-field">
                 <label class="sr-only" for="invoice-search">Search invoices</label>
                 <input id="invoice-search" type="search" placeholder="Number, customer, note…" autocomplete="off">
+              </div>
+              <div class="filter-field">
                 <label class="sr-only" for="inv-f-customer">Customer filter</label>
                 <select id="inv-f-customer">
                   <option value="">All customers</option>
                 </select>
+              </div>
+              <div class="filter-field">
                 <label class="sr-only" for="inv-f-project">Project filter</label>
                 <select id="inv-f-project">
                   <option value="">All projects</option>
                 </select>
+              </div>
+              <div class="filter-field">
                 <label class="sr-only" for="inv-f-from">Period from</label>
                 <input id="inv-f-from" type="date" title="Period from">
+              </div>
+              <div class="filter-field">
                 <label class="sr-only" for="inv-f-to">Period to</label>
                 <input id="inv-f-to" type="date" title="Period to">
-                <details class="cols-pop">
-                  <summary>Columns</summary>
+              </div>
+              <details class="cols-pop">
+                <summary>Columns</summary>
+                <div class="cols-pop__menu">
                   <label><input type="checkbox" class="inv-col" value="customer" checked> Customer</label>
                   <label><input type="checkbox" class="inv-col" value="period" checked> Period</label>
                   <label><input type="checkbox" class="inv-col" value="total" checked> Total</label>
                   <label><input type="checkbox" class="inv-col" value="balance" checked> Balance</label>
                   <label><input type="checkbox" class="inv-col" value="status" checked> Status</label>
-                </details>
-              </div>
+                </div>
+              </details>
             </div>
             <!-- #232 phase 2d: the sortable register uses Vanilla 4.59's real
            pattern — aria-sort on the <th> plus a .p-table__sort-button.

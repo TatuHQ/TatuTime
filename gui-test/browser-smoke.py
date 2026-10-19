@@ -350,6 +350,35 @@ REPORTS_HIDDEN = (
     "});"
 )
 
+# Advanced billing tools (recurring schedules #136 + retainers #144) are hidden
+# while they are unfinished: `#advanced-billing` is `hidden` and `display:none`
+# from the single `data-advanced-billing` attribute on <html>, so it is neither
+# rendered, focusable, nor exposed to assistive technology. The DOM stays in
+# place for the JS contract and the API behind it keeps answering.
+ADVANCED_BILLING_HIDDEN = (
+    "var d = document.getElementById('advanced-billing');"
+    "if (!d) return JSON.stringify({ exists: false });"
+    "var box = d.getBoundingClientRect();"
+    "var nodes = d.querySelectorAll("
+    " 'button, input, select, textarea, a[href], [tabindex], summary');"
+    "var laidOut = 0;"
+    "for (var i = 0; i < nodes.length; i++) {"
+    "  if (nodes[i].getClientRects().length) laidOut += 1;"
+    "}"
+    "return JSON.stringify({"
+    " exists: true,"
+    " hidden: d.hidden,"
+    " flag: document.documentElement.getAttribute('data-advanced-billing'),"
+    " display: getComputedStyle(d).display,"
+    " width: box.width, height: box.height,"
+    " laidOutFocusable: laidOut,"
+    " recForm: !!document.getElementById('rec-form'),"
+    " retForm: !!document.getElementById('ret-form'),"
+    " recTable: !!document.getElementById('rec-table'),"
+    " retTable: !!document.getElementById('ret-table')"
+    "});"
+)
+
 # #232 phase 2f: every form control must wear the SAME Vanilla input skin.
 # Vanilla skins inputs with `[type=text]` / `[type=email]` / ... attribute
 # selectors and never with a bare `<input>`, so a control written without an
@@ -1288,6 +1317,60 @@ class Gate:
             reports["pathname"].rstrip("/") == "/timesheets/day" and reports["timesheetShown"],
             f"pathname={reports['pathname']!r} timesheet shown={reports['timesheetShown']}",
         )
+
+        # Advanced billing tools (recurring schedules + retainers) are hidden
+        # while they are unfinished. The block keeps its markup, but it is not
+        # rendered, contributes no focusable node, and the API behind it still
+        # answers — this is a visibility decision, not a removal.
+        self.navigate("/invoices")
+        self.wait_script(
+            "document.readyState === 'complete'"
+            " && document.getElementById('version').textContent === 'TucanoTime'",
+            "the app to boot at /invoices for the advanced billing probe",
+        )
+        advanced = json.loads(self.marionette.script(ADVANCED_BILLING_HIDDEN))
+        self.check(
+            "the advanced billing entry point is not rendered (#136/#144)",
+            advanced.get("exists") and advanced["hidden"] and advanced["flag"] == "off"
+            and advanced["display"] == "none" and advanced["width"] == 0
+            and advanced["height"] == 0,
+            f"advanced billing={advanced}",
+        )
+        self.check(
+            "no hidden advanced billing control stays focusable (#136/#144)",
+            advanced["laidOutFocusable"] == 0,
+            f"laid-out descendants: {advanced['laidOutFocusable']}",
+        )
+        self.check(
+            "the advanced billing markup stays for the day the tools return (#136/#144)",
+            advanced["recForm"] and advanced["retForm"]
+            and advanced["recTable"] and advanced["retTable"],
+            f"advanced billing={advanced}",
+        )
+        status, _, raw = self.http("GET", "/api/retainers", cookie=self.cookie)
+        self.check(
+            "GET /api/retainers keeps answering while its GUI is hidden (#144)",
+            status == 200 and "retainers" in raw.decode("utf-8", "replace"),
+            f"HTTP {status}",
+        )
+        status, _, raw = self.http("GET", "/api/schedules", cookie=self.cookie)
+        self.check(
+            "GET /api/schedules keeps answering while its GUI is hidden (#136)",
+            status == 200 and "schedules" in raw.decode("utf-8", "replace"),
+            f"HTTP {status}",
+        )
+        # Decision: there is no retainer/recurring page route to redirect. The
+        # API roots stay API roots, and a direct page URL is the ordinary JSON
+        # 404 — never the SPA shell with an empty hidden panel.
+        for page in ("/retainers", "/schedules"):
+            status, headers, _ = self.http("GET", page)
+            ctype = headers.get("content-type", "")
+            self.check(
+                f"the removed {page} page is not an SPA view (no shell, no empty panel)",
+                status == 404 and "html" not in ctype,
+                f"HTTP {status} content-type={ctype!r}",
+            )
+        self.drain_console("advanced billing probe")
 
     # ------------------------------------------------ forms (#232 phase 2b) --
     def forms_audit(self):

@@ -300,8 +300,12 @@ test('the bespoke tab skins are retired in favour of the p-tabs adapter (#232 in
 test('the Open|All filter keeps its .seg semantics under the Ubuntu skin (#F)', () => {
   const { dom, document } = setup();
   const group = document.querySelector('#inv-list-head .seg');
-  assert.ok(group, 'the segmented shell is still there (#F)');
+  assert.ok(group, 'the status toggle is still there (#F)');
+  assert.equal(group.closest('.filter-field') !== null, true,
+    'the toggle is a filter field, like every control beside it');
   assert.equal(group.getAttribute('role'), 'group', 'a group, never a tablist');
+  assert.equal(group.getAttribute('aria-labelledby'), 'inv-status-label',
+    'the group takes its accessible name from its field label');
   const buttons = [...group.querySelectorAll('button')];
   assert.equal(buttons.length, 2, 'Open | All');
   for (const button of buttons) {
@@ -311,10 +315,19 @@ test('the Open|All filter keeps its .seg semantics under the Ubuntu skin (#F)', 
   }
   assert.equal(group.querySelector('[role="tab"]'), null, 'no tab pattern is introduced');
   // The restyle is the app-owned skin over the same group: the pressed segment
-  // is filled with the accent tint in the rail's selected-tab ink, the pairing
-  // contrast.mjs pins for both themes.
+  // is filled with the accent tint in the rail's selected-tab ink (the pairing
+  // contrast.mjs pins for both themes) and carries a bottom indicator.
   assert.match(stylesCss, /\.seg \.seg-btn\[aria-pressed="true"\] \{ background: var\(--accent-soft\); color: var\(--brand-deep\)/,
     'the pressed segment carries the Ubuntu skin on the app ink');
+  // The row itself is the shared primitive, and the status control shares the
+  // fields' control height and underline boundary instead of a floating box.
+  assert.match(stylesCss, /\.filter-row,\n\.hierarchy-filters \{ display: flex; flex-wrap: wrap; align-items: flex-end; gap: var\(--space-sm\); \}/,
+    'the register filter row is the shared .filter-row primitive');
+  assert.match(stylesCss, /\.seg \{\n\s+display: inline-flex; align-items: stretch; height: var\(--control-height\);/,
+    'the status control is sized to the design-system control height');
+  assert.match(stylesCss, /\.seg \{\n\s+display: inline-flex;[^}]*border-bottom: 1px solid var\(--field-rule\);/,
+    'the status control uses the same underline boundary as the fields');
+  assert.ok(!/\.inv-filters/.test(stylesCss), 'the view-specific wrapper and its padding override are gone');
   dom.window.close();
 });
 
