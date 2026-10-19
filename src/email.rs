@@ -782,9 +782,9 @@ mod tests {
             Some("2026-10-19"),
             "Tucano",
             true,
-            Some("IBAN: DE89 3713 1400 0000 0000 00"),
+            Some("IBAN: EX00 0000 0000 0000 0000 00"),
         );
-        assert!(with_pay.contains("How to pay:") && with_pay.contains("IBAN: DE89"));
+        assert!(with_pay.contains("How to pay:") && with_pay.contains("IBAN: EX00"));
         let rem = render_reminder_email(
             "ACME",
             "INV-1",
@@ -928,20 +928,20 @@ mod tests {
             text: "b".into(),
             html: None,
             attachment: None,
-            from_name: Some("Capybara Solutions".into()),
+            from_name: Some("Acme Widgets GmbH".into()),
             reply_to: Some("billing@tucano.test".into()),
         };
         let mime = build_mime(&m).expect("a legitimate message builds");
-        assert!(mime.contains("From: Capybara Solutions\r\n"), "{mime}");
+        assert!(mime.contains("From: Acme Widgets GmbH\r\n"), "{mime}");
         assert!(mime.contains("To: billing@acme.test\r\n"), "{mime}");
         assert!(mime.contains("Reply-To: billing@tucano.test\r\n"), "{mime}");
         let named = EmailMessage {
-            to: vec!["Capybara Solutions <emanuele@tucano.test>".into()],
+            to: vec!["Acme Widgets GmbH <billing@tucano.test>".into()],
             ..m.clone()
         };
         let mime = build_mime(&named).expect("a display-name recipient builds");
         assert!(
-            mime.contains("To: Capybara Solutions <emanuele@tucano.test>\r\n"),
+            mime.contains("To: Acme Widgets GmbH <billing@tucano.test>\r\n"),
             "{mime}"
         );
         // The recording transport takes it exactly as before.

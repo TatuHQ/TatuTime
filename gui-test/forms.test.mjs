@@ -48,7 +48,11 @@ function setup() {
     dom.window.HTMLDialogElement.prototype.showModal = function () { this.open = true; };
     dom.window.HTMLDialogElement.prototype.close = function () { this.open = false; };
     const stub = `
-window.f = { api, state, refreshCatalog, iwLoadProjects, fillSelect, $, decorateUbuntuButton };`;
+window.f = {
+  api, state, refreshCatalog, iwLoadProjects, fillSelect, $, decorateUbuntuButton,
+  setPaymentRails, readPaymentRails, addPaymentRail, removePaymentRail, paymentRailRows,
+  validatePaymentRails, railHasContent, saveCustomer, showFormError,
+};`;
     dom.window.eval(`${app}\n${stub}`);
     return { dom, document: dom.window.document, f: dom.window.f };
 }
@@ -58,15 +62,16 @@ window.f = { api, state, refreshCatalog, iwLoadProjects, fillSelect, $, decorate
 test('the shell ships the official form vocabulary and no bespoke class (#232 phase 2b)', () => {
     const { dom, document } = shell();
     const groups = document.querySelectorAll('.p-form__group');
-    // 144/139/139: the Settings split added the Email section's six stacked
-    // field rows (SMTP host/port/username/password/from and the test-email
-    // recipient) to the previous 138/133/133.
-    assert.equal(groups.length, 144, 'every former .field wrapper is a p-form__group');
-    assert.equal(document.querySelectorAll('.p-form__label').length, 139, 'one official label per field row');
-    assert.equal(document.querySelectorAll('.p-form__control').length, 139, 'one official control per field row');
-    // 47: the previous 45 plus the Vault key card's detail line and its
-    // (normally hidden) warning note; the moved #vault-status keeps its count.
-    assert.equal(document.querySelectorAll('.p-form-help-text').length, 47, 'the hints became p-form-help-text');
+    // #354 added the Company legal-details fieldset, the payment-rails
+    // fieldset and the ten Document label rows (each in its own grouped
+    // fieldset) to the Settings split's 146 groups.
+    assert.equal(groups.length, 159, 'every former .field wrapper is a p-form__group');
+    assert.equal(document.querySelectorAll('.p-form__label').length, 151, 'one official label per field row');
+    assert.equal(document.querySelectorAll('.p-form__control').length, 151, 'one official control per field row');
+    // The previous 47 plus the Company legal/default notes, the customer legal
+    // id hint, the rail list's notes and status line, the Document labels hint,
+    // the subject formatting hint and the invoice detail's frozen-terms note.
+    assert.equal(document.querySelectorAll('.p-form-help-text').length, 55, 'the hints became p-form-help-text');
     assert.equal(document.querySelectorAll('.p-form-validation__message').length, ERROR_IDS.length,
         'every error message is the official validation message');
     assert.equal(document.querySelectorAll('.p-form-validation.is-error').length, ERROR_IDS.length,
@@ -104,11 +109,10 @@ test('every p-form__group pairs its label with its own control (#232 phase 2b)',
         assert.ok(label.textContent.trim().length > 0, `${control.id} keeps an accessible name`);
         paired += 1;
     }
-    // 139 after the Settings split added the Email section's six label/control
-    // pairs to the previous 133.
-    assert.equal(paired, 139, 'all 139 label/control pairs were verified');
-    assert.equal(composed.length, 5, 'five composed rows have no label of their own');
-    assert.equal(composed.filter((tag) => tag === 'FIELDSET').length, 4, 'four grouped fieldsets');
+    // 151: the Settings split's 141 plus the ten Document label rows (#354).
+    assert.equal(paired, 151, 'all 151 label/control pairs were verified');
+    assert.equal(composed.length, 8, 'eight composed rows have no label of their own');
+    assert.equal(composed.filter((tag) => tag === 'FIELDSET').length, 7, 'seven grouped fieldsets');
     assert.equal(composed.filter((tag) => tag.startsWith('DIV')).length, 1, 'the Contacts row');
     dom.window.close();
 });
@@ -263,12 +267,15 @@ test('decoration is attribute-only and every rendered button states what it need
     }
 
     // Pinned coverage: dropping a data-* attribute from any shell button makes
-    // one of these counts drop and fails the guard.
+    // one of these counts drop and fails the guard. (The HTML comment that
+    // mentions `data-icon="plus"` is a comment node, not a button: the shell
+    // ships 18 icon-bearing buttons, 13 of them plus.)
     const icons = [...document.querySelectorAll('button[data-icon]')];
-    assert.equal(icons.length, 17, 'every icon-bearing shell button states data-icon');
+    assert.equal(icons.length, 18, 'every icon-bearing shell button states data-icon');
     const vocab = {};
     for (const b of icons) vocab[b.dataset.icon] = (vocab[b.dataset.icon] || 0) + 1;
-    assert.deepEqual(vocab, { plus: 12, copy: 2, play: 2, stop: 1 }, 'the shell icon vocabulary is pinned');
+    // #354's Add payment rail is the newest plus.
+    assert.deepEqual(vocab, { plus: 13, copy: 2, play: 2, stop: 1 }, 'the shell icon vocabulary is pinned');
     // 36: the previous 35 plus the Email section's `Save email settings` submit.
     // The count is pinned so a new positive action updates this guard on
     // purpose: `+ Manual Invoice` is the secondary action and deliberately
@@ -320,5 +327,97 @@ test('the JS builders emit the official fields and explicit button icons (#232 p
     const actions = [...document.querySelectorAll('#item-table tbody button')];
     assert.deepEqual(actions.map((b) => b.dataset.icon), ['edit', undefined, 'delete'],
         'the Edit/Delete row actions state their icon; Archive/Restore has none');
+    dom.window.close();
+});
+
+// -------------------------------------------------- payment rails (#354) ----
+
+test('payment-rail add/remove produces the documented PaymentDetails.rails payload (#354)', async () => {
+    const { dom, document, f } = setup();
+    const posted = [];
+    f.api.get = async (path) => (path === '/customers' ? { customers: [] } : {});
+    f.api.post = async (path, body) => { posted.push({ path, body }); return body; };
+    f.api.put = async (path, body) => { posted.push({ path, body }); return body; };
+
+    f.setPaymentRails([]);
+    const add = document.getElementById('pay-rail-add');
+    assert.equal(add.tagName, 'BUTTON', 'the add control is a real button');
+    f.addPaymentRail();
+    const rows = () => f.paymentRailRows();
+    assert.equal(rows().length, 1, 'a real button adds a rail');
+    const set = (id, value) => { document.getElementById(id).value = value; };
+    set('pay-rail-0-currency', 'eur');
+    set('pay-rail-0-account-name', 'Acme EUR');
+    set('pay-rail-0-iban', 'EX000000000000000000');
+    set('pay-rail-0-bank-name', 'Tucano Bank');
+    set('pay-rail-0-instructions', 'Quote the invoice number');
+
+    const read = f.readPaymentRails();
+    assert.equal(read[0].currency, 'EUR', 'the currency is upper-cased on read');
+    assert.equal(read[0].bank_name, 'Tucano Bank');
+    assert.equal(f.validatePaymentRails(read), null, 'a well-formed rail validates');
+
+    // A second rail, then remove it: the route back to zero works.
+    f.addPaymentRail();
+    set('pay-rail-1-currency', 'USD');
+    assert.equal(rows().length, 2);
+    f.removePaymentRail(rows()[1]);
+    assert.equal(rows().length, 1, 'remove deletes that row');
+
+    // An untouched blank row is neither validated nor persisted.
+    f.addPaymentRail();
+    assert.equal(rows().length, 2);
+    assert.equal(f.railHasContent(f.readPaymentRails()[1]), false);
+
+    // Save the customer and inspect the exact rails payload.
+    set('customer-name', 'Rails Co');
+    set('customer-currency', 'EUR');
+    set('customer-rate', '90');
+    await f.saveCustomer({ preventDefault() { } });
+    const body = posted[0].body;
+    assert.equal(posted[0].path, '/customers');
+    assert.deepEqual(JSON.parse(JSON.stringify(body.payment_details.rails)), [{
+        currency: 'EUR',
+        account_name: 'Acme EUR',
+        iban: 'EX000000000000000000',
+        bank_name: 'Tucano Bank',
+        instructions: 'Quote the invoice number',
+    }], 'the payload carries the rail with its optional fields and no blank row');
+    dom.window.close();
+});
+
+test('payment-rail validation surfaces the API field path against the right input (#354)', () => {
+    const { dom, document, f } = setup();
+    f.setPaymentRails([
+        { currency: 'EUR', account_name: 'Acme' },
+        { currency: '', account_name: 'No currency' },
+    ]);
+    f.addPaymentRail(); // an untouched third row must not mask the error
+    const problem = f.validatePaymentRails(f.readPaymentRails());
+    assert.ok(problem, 'a rail without a currency is refused');
+    assert.equal(problem.payload.error.fields[0].field, 'payment_details.rails[1].currency');
+
+    // The real shared showFormError maps that field path to the second visible
+    // row's control, not to a name no input owns.
+    f.showFormError(document.getElementById('customer-error'), problem);
+    const control = document.getElementById('pay-rail-1-currency');
+    assert.equal(control.getAttribute('aria-invalid'), 'true', 'the second visible row is marked');
+    assert.match(control.getAttribute('aria-describedby'), /customer-error/);
+    assert.match(document.getElementById('customer-error').textContent,
+        /payment_details\.rails\[1\]\.currency: required/);
+
+    // The rail's account name is required, like the API's own validator: an
+    // otherwise complete rail with a blank one is refused before any request.
+    f.setPaymentRails([{ currency: 'EUR', account_name: '   ', iban: 'EX000000000000000000' }]);
+    const blankName = f.validatePaymentRails(f.readPaymentRails());
+    assert.equal(blankName.payload.error.fields[0].field, 'payment_details.rails[0].account_name');
+
+    // The flat single-rail block maps too: `payment_details.iban` is #pay-iban,
+    // not #customer-payment-details.iban.
+    f.showFormError(document.getElementById('customer-error'), {
+        message: 'payment_details.iban: must be 5-34 letters/digits',
+        payload: { error: { code: 'validation_failed', fields: [{ field: 'payment_details.iban', message: 'must be 5-34 letters/digits' }] } },
+    });
+    assert.equal(document.getElementById('pay-iban').getAttribute('aria-invalid'), 'true');
     dom.window.close();
 });

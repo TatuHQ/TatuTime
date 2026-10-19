@@ -204,6 +204,8 @@ pub fn generate_invoice(
         written_off_at: None,
         tax_hundredths: 0,
         discount_hundredths: 0,
+        subject: String::new(),
+        terms: None,
     })
 }
 
@@ -339,6 +341,8 @@ mod tests {
             written_off_at: None,
             tax_hundredths: 0,
             discount_hundredths: 0,
+            subject: String::new(),
+            terms: None,
         }
     }
 

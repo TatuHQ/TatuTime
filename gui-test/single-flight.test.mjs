@@ -105,7 +105,10 @@ test('QA-01: two rapid submit events post the entry exactly once', async () => {
     assert.equal(t.posts()[0].path, '/entries');
     const save = document.getElementById('entry-save');
     assert.ok(busy(save), 'Save entry is disabled and aria-busy while the request is in flight');
-    assert.equal(save.textContent, 'Save entry', 'the busy control still reads sensibly');
+    // The shell wraps long labels across source lines; rendered/accessible
+    // text collapses whitespace, so compare that form.
+    assert.equal(save.textContent.replace(/\s+/g, ' ').trim(), 'Save entry',
+        'the busy control still reads sensibly');
     assert.equal(t.entrySavingNow(), true, 'the dialog close/Escape guard sees the in-flight save');
 
     t.release();

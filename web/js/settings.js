@@ -669,6 +669,7 @@ export async function refreshOrgProfile() {
     const o = await api.get('/admin/org');
     $('org-name').value = o.name || '';
     $('org-legal').value = o.legal_id || '';
+    $('org-legal-label').value = o.legal_id_label || '';
     const a = o.address || {};
     $('org-street').value = a.street || '';
     $('org-city').value = a.city || '';
@@ -683,6 +684,11 @@ export async function refreshOrgProfile() {
     orgLoaded = true;
     $('org-form').dataset.loaded = '1';
     $('org-save').disabled = false;
+    // The sample document is rendered with this org identity (name, address,
+    // legal id + label), so a fresh profile invalidates the framed preview's
+    // tag: the next render must not answer `304` for bytes that show the old
+    // company block (#354).
+    templatePreviewEtag = null;
   } catch (err) {
     orgLoaded = false;
     $('org-form').dataset.loaded = '0';
@@ -721,6 +727,7 @@ export async function saveOrgProfile(evt) {
       await api.put('/admin/org', {
         name: $('org-name').value.trim(),
         legal_id: $('org-legal').value.trim(),
+        legal_id_label: $('org-legal-label').value.trim(),
         // #146 presentation rides the same org store — no parallel truth.
         from_name: $('org-from').value.trim(),
         reply_to: $('org-reply').value.trim(),
@@ -737,6 +744,16 @@ export async function saveOrgProfile(evt) {
   });
 }
 
+// The document-label overrides (#147/#354), in the order the invoice reads
+// them. Every id is `lb-<key with underscores as dashes>`; the key IS the API
+// field, so this list is the one place the form, the payload and the preview
+// agree on the set.
+export const LABEL_KEYS = [
+  'description', 'quantity', 'unit_price', 'subtotal', 'discount', 'tax', 'total',
+  'from', 'invoice_for', 'invoice_id', 'issue_date', 'due_date',
+  'subject', 'payment_heading', 'item_type', 'payments', 'amount_due',
+];
+
 export async function refreshInvoiceTemplate() {
   try {
     const data = await api.get('/admin/invoice-template');
@@ -745,9 +762,13 @@ export async function refreshInvoiceTemplate() {
     $('template-body').value = t.body || '';
     $('template-footer').value = t.footer || '';
     const lb = t.labels || {};
-    for (const k of ['description', 'quantity', 'unit_price', 'subtotal', 'discount', 'tax', 'total']) {
-      $(`lb-${k.replace('_', '-')}`).value = lb[k] || '';
+    for (const k of LABEL_KEYS) {
+      $(`lb-${k.replace(/_/g, '-')}`).value = lb[k] || '';
     }
+    // The framed bytes may belong to an older stored template / org profile:
+    // dropping the tag makes the next render unconditional, so a reload can
+    // never answer `304` for a document the page should replace (#354).
+    templatePreviewEtag = null;
     const terms = t.payment_terms || null;
     $('template-terms').value = terms ? terms.kind : '';
     $('template-terms-days').value = terms && terms.days != null ? terms.days : '';
@@ -803,8 +824,7 @@ export const TEMPLATE_PREVIEW_DEBOUNCE_MS = 500;
 const TEMPLATE_PREVIEW_FIELDS = [
   'template-subject', 'template-body', 'template-footer',
   'template-terms', 'template-terms-days',
-  'lb-description', 'lb-quantity', 'lb-unit-price', 'lb-subtotal',
-  'lb-discount', 'lb-tax', 'lb-total',
+  ...LABEL_KEYS.map((key) => `lb-${key.replace(/_/g, '-')}`),
 ];
 
 /// True while the first render waits for the document's `load` event. Framing a
@@ -875,16 +895,12 @@ export function templatePayload() {
     body: $('template-body').value,
     footer: $('template-footer').value,
     payment_terms,
-    // #147 display labels ride the same template store (no parallel truth).
-    labels: {
-      description: $('lb-description').value.trim(),
-      quantity: $('lb-quantity').value.trim(),
-      unit_price: $('lb-unit-price').value.trim(),
-      subtotal: $('lb-subtotal').value.trim(),
-      discount: $('lb-discount').value.trim(),
-      tax: $('lb-tax').value.trim(),
-      total: $('lb-total').value.trim(),
-    },
+    // #147/#354 display labels ride the same template store (no parallel
+    // truth). Every key travels, including the blank ones, so clearing an
+    // override is the same edit as setting one.
+    labels: Object.fromEntries(
+      LABEL_KEYS.map((key) => [key, $(`lb-${key.replace(/_/g, '-')}`).value.trim()]),
+    ),
   };
 }
 
@@ -1064,8 +1080,8 @@ export function initTemplatePreview() {
 /// document used to stay stale until the next keystroke. One explicit render
 /// keeps the card honest ("Use built-in labels" is itself an edit).
 export function resetBuiltInLabels() {
-  for (const k of ['lb-description', 'lb-quantity', 'lb-unit-price', 'lb-subtotal', 'lb-discount', 'lb-tax', 'lb-total']) {
-    $(k).value = '';
+  for (const key of LABEL_KEYS) {
+    $(`lb-${key.replace(/_/g, '-')}`).value = '';
   }
   announce('Built-in labels restored (save the template to apply).');
   scheduleTemplatePreview(0);

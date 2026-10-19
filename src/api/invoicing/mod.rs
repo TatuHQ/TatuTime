@@ -37,7 +37,9 @@ pub use org::{org_get, org_put};
 pub use preview::invoice_template_preview;
 pub use sync::{SyncInput, sync_invoice, sync_status};
 
-pub(crate) use document::{content_for, invoice_pdf_for_delivery, load_template, resolve_due_date};
+pub(crate) use document::{
+    content_for, invoice_pdf_for_delivery, load_template, resolve_due_date, resolve_terms,
+};
 pub(crate) use lifecycle::get_invoice_or_404;
 pub(crate) use org::{load_org, org_for};
 

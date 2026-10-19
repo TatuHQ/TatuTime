@@ -41,6 +41,9 @@ pub async fn org_put(
     if profile.legal_id.chars().count() > 60 {
         errors.push(FieldError::new("legal_id", "at most 60 characters"));
     }
+    if profile.legal_id_label.chars().count() > 40 {
+        errors.push(FieldError::new("legal_id_label", "at most 40 characters"));
+    }
     // #146 presentation knobs, validated here so nothing inert is stored.
     if profile.from_name.chars().count() > 120 {
         errors.push(FieldError::new("from_name", "at most 120 characters"));

@@ -1,3 +1,4 @@
+use super::customer::PaymentTerms;
 use super::primitives::{Currency, FieldError, Hours, ProjectCode, is_zero_u16};
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
@@ -266,6 +267,18 @@ pub struct Invoice {
     pub write_off_reason: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub written_off_at: Option<DateTime<Utc>>,
+    /// The resolved invoice subject, frozen at issue. Empty on drafts and on
+    /// legacy issued documents (which keep resolving live or fall back to the
+    /// legacy `Invoice {n} from {org}` wording).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub subject: String,
+    /// The payment terms used to resolve [`Invoice::due_date`] at issue, so a
+    /// document can print `(Net 30)` from its own snapshot instead of looking
+    /// the customer up again (and can never disagree with `due_date`).
+    /// `None` when no terms applied (the legacy net-14-from-period-to
+    /// fallback) and on legacy documents.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terms: Option<PaymentTerms>,
 }
 
 /// One retained entry of an invoice's activity timeline (Subtask A).
@@ -559,7 +572,24 @@ mod tests {
             written_off_at: None,
             tax_hundredths: 0,
             discount_hundredths: 0,
+            subject: String::new(),
+            terms: None,
         }
+    }
+
+    /// A legacy `invoices/<id>.json` (written before `subject`/`terms`
+    /// existed) still loads, defaults both fields, and round-trips
+    /// byte-identically — reading never rewrites a document.
+    #[test]
+    fn legacy_invoice_document_loads_and_round_trips_byte_identically() {
+        // Exactly the canonical bytes the store writes today: empty optionals
+        // are omitted by `skip_serializing_if`, so a legacy file never holds
+        // them. The new fields must default without disturbing that shape.
+        let legacy = r#"{"id":"11111111-1111-1111-1111-111111111111","number":"INV-0001","customer_id":"22222222-2222-2222-2222-222222222222","currency":"EUR","period_from":"2026-10-01","period_to":"2026-10-31","lines":[],"total_minor":1000,"status":"issued","created_at":"2026-10-05T09:00:00Z","issued_at":"2026-10-05T09:00:00Z","due_date":"2026-10-19","payment_reference":""}"#;
+        let invoice: Invoice = serde_json::from_str(legacy).unwrap();
+        assert_eq!(invoice.subject, "");
+        assert_eq!(invoice.terms, None);
+        assert_eq!(serde_json::to_string(&invoice).unwrap(), legacy);
     }
 
     /// A timeline event stamped at a fixed epoch second, so `min` is testable

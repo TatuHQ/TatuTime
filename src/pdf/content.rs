@@ -223,17 +223,19 @@ mod tests {
             written_off_at: None,
             tax_hundredths: 0,
             discount_hundredths: 0,
+            subject: String::new(),
+            terms: None,
         }
     }
 
     fn customer() -> Customer {
         Customer {
             id: "22222222-2222-2222-2222-222222222222".parse().unwrap(),
-            name: "Capybara Solutions".into(),
+            name: "Acme Widgets GmbH".into(),
             currency: Currency("EUR".into()),
             default_rate_minor: 9000,
             active: true,
-            email: "billing@capybara.example".into(),
+            email: "billing@acme.example".into(),
             payment_terms: None,
             invoice_notes: String::new(),
             invoice_subject: String::new(),
@@ -242,6 +244,7 @@ mod tests {
             tax_hundredths: 0,
             discount_hundredths: 0,
             payment_details: None,
+            legal_id: String::new(),
         }
     }
 

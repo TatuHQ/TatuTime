@@ -76,6 +76,8 @@ impl RecurringJob {
                     written_off_at: None,
                     tax_hundredths: 0,
                     discount_hundredths: 0,
+                    subject: String::new(),
+                    terms: None,
                 }))
             }
             RecurMode::Time => {
@@ -216,6 +218,7 @@ mod tests {
             discount_hundredths: 0,
 
             payment_details: None,
+            legal_id: String::new(),
         };
         store.put_customer(&cust).unwrap();
         let sched = RecurringSchedule {

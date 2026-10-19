@@ -146,6 +146,8 @@ pub async fn create_manual_invoice(
         written_off_at: None,
         tax_hundredths: input.tax_hundredths,
         discount_hundredths: input.discount_hundredths,
+        subject: String::new(),
+        terms: None,
     };
     let created = app.store.create_invoice(draft)?;
     record_timeline(
@@ -237,7 +239,7 @@ pub async fn update_invoice_draft(
             if &candidate != *orig {
                 errors.push(FieldError::new(
                     format!("lines[{i}]"),
-                    "tracked lines are immutable (rate snapshot #8)",
+                    "tracked lines are immutable (rate snapshot)",
                 ));
                 continue;
             }

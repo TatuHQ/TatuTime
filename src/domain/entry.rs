@@ -199,6 +199,7 @@ mod tests {
             discount_hundredths: 0,
 
             payment_details: None,
+            legal_id: String::new(),
         };
         let project = Project {
             customer_id: customer.id,

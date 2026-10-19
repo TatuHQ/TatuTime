@@ -2,6 +2,25 @@
 
 Self-hosted timesheet and invoicing server — time per customer and project, exact money, invoices. Full documentation is in [docs/README.md](docs/README.md); licensed under [AGPL-3.0-or-later](LICENSE).
 
+## What an invoice looks like
+
+A fresh install already produces a complete document: a `From` block (company,
+address lines and legal id under its configured label) beside the `Invoice for`
+block (customer, address and company number) and the invoice metadata —
+`Subject`, `Invoice ID`, `Issue date`, `Due date`, `Period`. Dates print as
+`dd/mm/yyyy` and money as `EUR €1,234.56`; hours are summarised as
+`100h 00min`; the totals show `Subtotal` and either the bold `Total` or, once
+money was received, `Payments` and `Amount due`; payment details print the
+single flat account when no rails are configured, or one block per currency
+rail otherwise. Every page is numbered.
+
+The absent invoice template resolves to seeded defaults — the subject
+`%customer_name% invoice for %period_month_padded% %period_year%` and `net_30`
+terms — so the default PDF needs no setup. Issuing freezes the subject, payment
+terms and due date (and the archived PDF is never rewritten); later template or
+customer edits do not change an issued invoice. Details:
+[docs/invoicing-and-expenses.md](docs/invoicing-and-expenses.md).
+
 ## Build locally
 
 Prerequisite: Rust `1.98.0`, as pinned by [`rust-toolchain.toml`](rust-toolchain.toml). The crate uses edition 2024.

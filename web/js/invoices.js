@@ -48,7 +48,7 @@ async function refreshInvoicesBody() {
     if (inv.status === 'draft') {
       actions.push(
         action('link', 'Edit', () => api.get(`/invoices/${inv.id}`).then(edOpen, (e) => announce(e.message)),
-          'Edit the draft lines and percentages (#143)'),
+          'Edit the draft lines and percentages'),
         action('link', 'Issue', () => issueInvoice(inv)),
         action('danger', 'Delete', () => removeInvoice(inv.id)),
       );
@@ -82,9 +82,16 @@ async function refreshInvoicesBody() {
       action('link', 'Preview', (evt) => openInvoicePreview(inv, evt.currentTarget),
         'Preview this invoice document'),
     );
+    // The frozen subject (#354): snapshot at issue, display only. It rides
+    // under the invoice number as a quiet subtitle, never as a new column and
+    // never as editable text.
+    const subject = String(inv.subject || '').trim();
     tbody.appendChild(
       el('tr', {
-        attrs: { tabindex: '0', 'aria-label': `Invoice ${inv.number} — activate to preview` },
+        attrs: {
+          tabindex: '0',
+          'aria-label': `Invoice ${inv.number}${subject ? ` — ${subject}` : ''} — activate to preview`,
+        },
         on: {
           click: (e) => {
             if (!e.target.closest('button')) openInvoicePreview(inv, null);
@@ -94,7 +101,10 @@ async function refreshInvoicesBody() {
           },
         },
       }, [
-        el('th', { attrs: { scope: 'row' }, text: inv.number }),
+        el('th', { attrs: { scope: 'row' } }, [
+          el('span', { text: inv.number }),
+          subject ? el('span', { cls: 'inv-row-subject', text: subject }) : null,
+        ]),
         el('td', { text: customerName(inv.customer_id) }),
         el('td', { text: `${inv.period_from} → ${inv.period_to}` }),
         el('td', { cls: 'num', text: `${inv.currency} ${formatMoney(inv.total_minor)}` }),
@@ -521,7 +531,7 @@ export async function confirmSendEmail() {
   }
   // #349: the delivery updates the panel's history and watermark; re-render
   // behind the dialog instead of closing it under the admin.
-  refreshInvoices().catch(() => {});
+  refreshInvoices().catch(() => { });
 }
 
 /// The register's Email row action: choose recipients before sending.
@@ -1130,11 +1140,25 @@ export async function openInvoicePreview(inv, opener) {
   previewTimeline = [];
   const card = $('invoice-preview');
   card.hidden = false;
-  // #349: the detail panel is PDF-only by design -- there is no facts readout
-  // beside the document. The invoice's identity travels on the framed
-  // document's own accessible name (the iframe title), so nothing is duplicated
-  // here and the region stays the rendered PDF plus the history.
+  // #349: the detail panel carries no amounts/facts readout beside the
+  // document -- the invoice's identity travels on the framed document's own
+  // accessible name (the iframe title). #354 adds only its frozen subject as a
+  // plain-text subtitle and one sentence about when it was frozen; the region
+  // is still the rendered PDF plus that identity and the history.
   const draft = inv.status === 'draft';
+  // `subject` is snapshotted at issue, so an issued invoice shows exactly what
+  // was billed while a draft (which has no frozen subject yet) says it still
+  // follows the live settings. Both are plain text and never editable here —
+  // the API owns the freeze.
+  const subject = String(inv.subject || '').trim();
+  const subjectLine = $('ip-subject');
+  subjectLine.textContent = subject;
+  subjectLine.hidden = !subject;
+  const documentNote = $('ip-document-note');
+  documentNote.hidden = false;
+  documentNote.textContent = draft
+    ? 'This draft follows the current invoice template and customer settings; its subject, terms and due date are frozen when you issue it.'
+    : 'Subject, payment terms and due date are fixed at issue — later template or customer changes do not alter this invoice.';
   // ---- Get paid: the collect-payment box on the invoice. No hosted
   // checkout exists by design, so this shows the customer's own payment
   // details, what has been settled and when, and offers manual
@@ -1168,13 +1192,13 @@ export async function openInvoicePreview(inv, opener) {
     const pd = cust && cust.payment_details;
     const payRows = pd
       ? [
-          ['Bank', pd.bank_name],
-          ['Account name', pd.account_name],
-          ['Account number', pd.account_number],
-          ['IBAN', pd.iban],
-          ['BIC/SWIFT', pd.bic],
-          ['Reference', pd.reference],
-        ].filter((r) => r[1] && String(r[1]).trim())
+        ['Bank', pd.bank_name],
+        ['Account name', pd.account_name],
+        ['Account number', pd.account_number],
+        ['IBAN', pd.iban],
+        ['BIC/SWIFT', pd.bic],
+        ['Reference', pd.reference],
+      ].filter((r) => r[1] && String(r[1]).trim())
       : [];
     const instr = pd && pd.instructions ? String(pd.instructions).trim() : '';
     const hasPay = payRows.length > 0 || !!instr;
@@ -1219,6 +1243,10 @@ export function closeInvoicePreview() {
   $('ip-pdf').textContent = '';
   $('ip-pdf-state').hidden = true;
   $('ip-pdf-state').textContent = '';
+  $('ip-subject').textContent = '';
+  $('ip-subject').hidden = true;
+  $('ip-document-note').textContent = '';
+  $('ip-document-note').hidden = true;
   $('ip-timeline').textContent = '';
   $('ip-timeline-state').hidden = true;
   $('ip-timeline-state').textContent = '';

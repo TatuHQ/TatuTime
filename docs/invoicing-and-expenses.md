@@ -47,8 +47,20 @@ Issuing:
 - sets `issued_at`, calculates `due_date` from the customer's payment terms
   (falling back to the org template default, then the legacy
   net-14-from-period-to rule), and freezes the status;
+- freezes the resolved **subject** and the **payment terms actually used**
+  (`Invoice.subject` / `Invoice.terms`), so a document prints `(Net 30)` from
+  its own snapshot and can never disagree with `due_date`. Later template or
+  customer edits do not rewrite an issued invoice; drafts keep resolving live.
+  Legacy issued documents have neither field and render without a Subject row
+  and without a `(Net N)` suffix;
 - archives the rendered PDF at `invoices/<id>.pdf`, which is never rewritten;
 - makes the invoice immutable and freezes every entry and expense it references.
+
+A fresh install resolves an absent `invoice_template.json` to seeded defaults:
+the subject `%customer_name% invoice for %period_month_padded% %period_year%`
+(e.g. `Acme Widgets GmbH invoice for 08 2026`) and `net_30` payment terms.
+Saving a template explicitly replaces those defaults; a saved template with
+`payment_terms: null` still uses the legacy net-14 fallback.
 
 ### Pay and write off
 
@@ -65,6 +77,12 @@ Issuing:
   reference and free-text instructions). Those details appear in the **Get paid**
   panel, the invoice and reminder emails and the PDF, and are available as the
   `%payment_details%` template variable.
+- Multi-currency customers may add up to four **structured payment rails**
+  (`PaymentDetails.rails`), each with a 3-letter ISO currency, a required
+  account holder name and that currency's account details. The flat fields stay
+  authoritative for the single-rail case; rails are additive display data and
+  are validated before anything is written — a blank `account_name`, currency or
+  malformed IBAN/BIC is a `422` and persists nothing.
 - Every state transition is recorded in the invoice timeline and the audit log.
 
 ## Frozen records
@@ -84,6 +102,21 @@ the invoice. The API answers `409` with a reason for an attempted change, and
 
 - `GET /api/invoices/{id}/pdf` downloads the archived PDF; the preview endpoint
   renders the same document without an archive.
+- The document layout is: the `INVOICE` title with the `Subject` row and the
+  invoice metadata (`Invoice ID`, `Issue date`, `Due date`, `Period`) beside it;
+  a `From` block (name, one line per address line, the org legal id under its
+  configured label); an `Invoice for` block (customer name, one line per address
+  line, `Company number`); a `Total hours` line over the time lines; the
+  `Item type | Description | Quantity | Unit price | Amount` table; the totals
+  (`Subtotal`, plus `Payments`/`Amount due` once money was received, otherwise the
+  bold `Total`); the notes/payment section (the flat account, or one block per
+  currency rail with a dashed rule between rails); and `Page N of M` on every
+  page. A document with no subject and no label overrides keeps the historical
+  `Invoice <number>` title and prints no Subject row.
+- Document money is `EUR €1,200.00` (code, symbol, grouped amount) and a payment
+  is `EUR -€1,300.00`; emails keep their `1,200.00 EUR` wording. Dates on the
+  document are `dd/mm/yyyy`, and an issued invoice's due date carries the terms
+  suffix from its own snapshot (`(Net 30)`, `(Due on receipt)`).
 - `POST /api/invoices/{id}/email` sends the invoice with the PDF attached to the
   customer. `POST /api/invoices/{id}/email-copy` sends an ad-hoc copy to a third
   party such as an accountant; it is audited but is not a customer delivery.
@@ -151,8 +184,23 @@ mutable figure. Retainer administration is an admin function.
   (no tables, links, images or raw HTML). Unknown placeholders are rejected when
   the template is saved. Per-customer notes, subject overrides and payment terms
   refine the document.
+- The billing-period variables are `%period_month%` (`October`),
+  `%period_month_number%` (`10`), `%period_month_padded%` (`10`) and
+  `%period_year%` (`2026`), derived from the invoice period (not the issue date)
+  with integer arithmetic. The seeded subject is
+  `%customer_name% invoice for %period_month_padded% %period_year%`.
+- Subject precedence is: the issued invoice's frozen `subject`, then the
+  customer's `invoice_subject`, then the template `subject`, then the legacy
+  `Invoice {number} from {org}` wording. Drafts follow live template/customer
+  edits; issued invoices never change their subject.
 - **Field labels** rename the wording on the invoice document without changing
-  API field names.
+  API field names. Besides the line/total labels, the mechanism covers the
+  reference document's headings and rows (`from`, `invoice_for`, `invoice_id`,
+  `issue_date`, `due_date`, `subject`, `payment_heading`, `item_type`,
+  `payments`, `amount_due`).
+- The customer's company number (`Customer.legal_id`) and the prefix printed
+  before the org's own id (`OrgProfile.legal_id_label`, e.g. `Tax ID` or `VAT`)
+  feed the issuer/customer blocks.
 - The invoice accent colour and the sender display name / Reply-To are honoured
   by the PDF and the real email transport.
 

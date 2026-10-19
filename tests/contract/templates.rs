@@ -74,8 +74,19 @@ async fn payment_terms_decide_due_date_at_issue() {
 
 #[tokio::test]
 async fn legacy_net14_fallback_is_untouched_and_org_default_applies() {
-    // No terms anywhere: the legacy net-14 from period_to (2026-10-07) stays.
+    // An *explicitly saved*, terms-less template is what a legacy install
+    // holds (the seeded net_30 is only the absent singleton's default, never
+    // hard-coded in the resolver): the legacy net-14 from period_to
+    // (2026-10-07) still applies.
     let (app, _d) = app().await;
+    let (s_legacy, _) = json_req(
+        &app,
+        "PUT",
+        "/api/admin/invoice-template",
+        Some(json!({"subject":"","body":"","footer":"","payment_terms":null})),
+    )
+    .await;
+    assert_eq!(s_legacy, StatusCode::OK);
     let (_c, inv) = seed_customer_invoice(&app, "LEGACY", json!({})).await;
     let iid = inv["id"].as_str().unwrap();
     let (_, issued) = json_req(&app, "POST", &format!("/api/invoices/{iid}/issue"), None).await;
@@ -531,10 +542,21 @@ async fn template_preview_renders_a_pdf_with_no_invoice_in_the_store() {
         bytes.len()
     );
     assert_eq!(pdf_pages(&bytes), 1);
+    let text = pdf_text(&bytes);
     assert!(
-        pdf_text(&bytes).contains("INV-0000"),
+        text.contains("INV-0000"),
         "the sample invoice number is on the document"
     );
+    // Phase 2: the sample shows the new document sections, not just the
+    // template body — the subject, the customer's company number and the two
+    // currency rails.
+    assert!(text.contains("Subject"), "{text}");
+    assert!(text.contains("Sample Customer"), "{text}");
+    assert!(text.contains("Company number"), "{text}");
+    assert!(text.contains("Notes"), "{text}");
+    assert!(text.contains("For all EUR Payments;"), "{text}");
+    assert!(text.contains("For all USD Payments;"), "{text}");
+    assert!(text.contains("Page 1 of 1"), "{text}");
 
     // Same candidate template + org => the same ETag, so the GUI can skip a
     // redundant render.
@@ -631,7 +653,7 @@ async fn template_preview_reflects_the_candidate_bytes_and_text() {
     assert!(alpha.contains("Footer ALPHA"), "{alpha}");
     assert!(alpha.contains("Hours"), "quantity label override: {alpha}");
     assert!(
-        alpha.contains("Sample Bank") && alpha.contains("IBAN"),
+        alpha.contains("Example Bank") && alpha.contains("IBAN"),
         "%payment_details% resolved from the sample customer: {alpha}"
     );
     assert!(
