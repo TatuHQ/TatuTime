@@ -260,8 +260,14 @@ fn two_decimals(hundredths: u32) -> String {
 }
 
 /// Hundredths of an hour as `100h 00min`. Integer arithmetic only.
+///
+/// `hundredths` counts 1/100 h, so the whole-minute value is
+/// `hundredths * 60 / 100`; the remainder of *that* division is the minute
+/// part. Printing `hundredths % 100` directly (the pre-fix bug) labelled
+/// hundredths as minutes: 21.75 h read `21h 75min` instead of `21h 45min`.
 fn hours_minutes_text(hundredths: u64) -> String {
-    format!("{}h {:02}min", hundredths / 100, hundredths % 100)
+    let total_minutes = hundredths.saturating_mul(60) / 100;
+    format!("{}h {:02}min", total_minutes / 60, total_minutes % 60)
 }
 
 /// The `(Net 30)` / `(Due on receipt)` suffix of the due-date row, taken from
@@ -832,6 +838,12 @@ mod tests {
         assert_eq!(hours_minutes_text(10_000), "100h 00min");
         assert_eq!(hours_minutes_text(800), "8h 00min");
         assert_eq!(hours_minutes_text(0), "0h 00min");
+        // Fractional hours are minutes, not hundredths (#new): 21.75 h is
+        // 21h 45min, never the invalid `21h 75min`.
+        assert_eq!(hours_minutes_text(2175), "21h 45min");
+        assert_eq!(hours_minutes_text(1650), "16h 30min");
+        assert_eq!(hours_minutes_text(125), "1h 15min");
+        assert_eq!(hours_minutes_text(1), "0h 00min");
         assert_eq!(two_decimals(10_000), "100.00");
     }
 
