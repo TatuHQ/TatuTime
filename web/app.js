@@ -16,6 +16,7 @@
 // — hence the entire GUI — never evaluates.
 import './js/api.js';
 import './js/dom.js';
+import './js/select.js';
 import './js/seq.js';
 import './js/state.js';
 import './js/pdf.js';

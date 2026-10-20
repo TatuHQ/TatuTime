@@ -664,8 +664,14 @@ dialog.p-modal::backdrop { background: transparent; }
 .pdf-toolbar select { width: auto; margin: 0; }
 .invoice-status-row { border-bottom: 1px solid var(--line); padding-block: .5rem; margin-bottom: .75rem; }
 #inv-filter-row { align-items: center; }
-.invoice-filter-native[hidden] { display: none; }
-.invoice-filter-trigger { display: flex; align-items: center; gap: .5rem; width: 9.25rem; height: var(--control-height); padding: .3rem .6rem; margin: 0; text-align: left; }
+.invoice-filter-native { display: none !important; }
+.select-trigger { width: 100%; }
+.filter-row .select-trigger { width: 9.25rem; }
+.hierarchy-filters .select-trigger { width: 11.5rem; }
+.bar .select-trigger, .timerbar .select-trigger, .copy-bar .select-trigger { width: auto; min-width: 8rem; max-width: 100%; }
+.select-trigger[hidden] { display: none; }
+.select-validation { display: block; color: var(--danger); }
+.invoice-filter-trigger { display: flex; align-items: center; gap: .5rem; width: 100%; height: var(--control-height); padding: .3rem .6rem; margin: 0; text-align: left; }
 .invoice-filter-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .invoice-filter-trigger .p-icon--chevron-down { order: 2; margin: 0; }
 .invoice-filter-menu { position: fixed; inset: auto; margin: 0; padding: .25rem; overflow-y: auto; z-index: 100; background: var(--surface); color: var(--fg); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); }

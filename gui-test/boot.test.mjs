@@ -32,7 +32,7 @@ window.bootTest = {
   // editor are wired by the focused wire*() functions; expose them so a test
   // drives the same listeners the app registers at boot.
   dash, dashFilter, setInvoicePeriod, refreshInvoiceSummary, wireInvoiceDashboard, wireWeekGrid,
-  iwInit, iwOpen, edOpen, edLoadDefaults, edSave, edCancel, ed, catalogItems,
+  iwInit, iwOpen, edOpen, edLoadDefaults, edSave, edCancel, ed, catalogItems, enhanceSelect, initSelectMenus,
   peekLockCache: () => weekLockCache,
   liveText: () => document.getElementById('live-region').textContent,
   api,
@@ -933,7 +933,7 @@ test('invoice filter menus select, dismiss and reset alongside their native stat
   context.wireInvoiceDashboard();
   const button = document.getElementById('inv-f-customer-button');
   const menu = document.getElementById('inv-f-customer-menu');
-  assert.equal(customer.hidden, true);
+  assert.ok(customer.classList.contains('invoice-filter-native'));
   assert.equal(button.getAttribute('aria-haspopup'), 'listbox');
   button.click();
   assert.equal(menu.hidden, false);
@@ -1081,6 +1081,55 @@ test('the catalog preset is distinct from description and hidden without saved i
   document.getElementById(`${kind.id}-menu`).dispatchEvent(new dom.window.KeyboardEvent('keydown', {key:'Escape',bubbles:true,cancelable:true}));
   assert.equal(document.getElementById('invoice-editor').open, true);
   assert.equal(document.getElementById('app-dialog').open, false, 'Escape only dismisses the option menu');
+  dom.window.close();
+});
+
+test('shared selects preserve native values, events, validation and reset', async () => {
+  const { dom, context, document } = makeDom();
+  const form = document.createElement('form');
+  const select = document.createElement('select');
+  select.id = 'shared-select-test'; select.required = true;
+  for (const [value, text] of [['','Choose'],['alpha','Alpha'],['beta','Beta']]) {
+    const option = document.createElement('option'); option.value = value; option.textContent = text; select.appendChild(option);
+  }
+  form.appendChild(select); document.body.appendChild(form);
+  context.enhanceSelect(select, 'Example');
+  assert.equal(select.hidden, false, 'native required validation stays enabled');
+  assert.equal(select.checkValidity(), false);
+  assert.equal(select.__filterButton.getAttribute('aria-invalid'), 'true');
+  assert.ok(form.querySelector('[role="alert"]'));
+  let changes = 0;
+  select.addEventListener('change', () => changes++);
+  select.__filterButton.click();
+  document.getElementById('shared-select-test-option-2').click();
+  assert.equal(select.value, 'beta');
+  assert.equal(changes, 1);
+  assert.equal(form.querySelector('[role="alert"]'), null);
+  select.value = 'alpha';
+  assert.equal(select.__filterButton.textContent.trim(), 'Alpha');
+  select.disabled = true;
+  await waitFor(() => select.__filterButton.disabled, {message:'native disabled state to sync'});
+  select.disabled = false; select.hidden = true;
+  await waitFor(() => select.__filterButton.hidden, {message:'native hidden state to sync'});
+  select.hidden = false; form.reset();
+  await waitFor(() => select.__filterButton.textContent.trim() === 'Choose', {message:'form reset to sync'});
+  assert.equal(select.value, '');
+  dom.window.close();
+});
+
+test('shared dropdown discovery enhances dynamic single selects, not multiple lists', async () => {
+  const { dom, context, document } = makeDom();
+  context.initSelectMenus();
+  const select = document.createElement('select');
+  select.setAttribute('aria-label', 'Dynamic choice');
+  document.body.appendChild(select);
+  await waitFor(() => !!select.__filterButton, {message:'dynamic select discovery'});
+  const option = document.createElement('option'); option.value = 'one'; option.textContent = 'Loaded option';
+  select.appendChild(option);
+  await waitFor(() => select.__filterButton.textContent.trim() === 'Loaded option', {message:'dynamic options to sync'});
+  const multiple = document.createElement('select'); multiple.multiple = true; document.body.appendChild(multiple);
+  await yieldToEventLoop();
+  assert.equal(multiple.__filterButton, undefined);
   dom.window.close();
 });
 

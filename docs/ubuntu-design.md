@@ -1,5 +1,12 @@
 # Ubuntu and Vanilla Design Review (#181)
 
+All single-choice select fields now use the shared anchored adapter in
+`web/js/select.js` (#388), including dynamic fields and native modal dialogs.
+The underlying select keeps its values, form events, validation and reset
+semantics. Disabled/hidden state and asynchronous options are mirrored; menus
+support arrows, Home/End, type-ahead, Escape, viewport clamping and focus return.
+Multi-select/list controls remain native. No CDN or runtime framework is added.
+
 Invoice workspace (#380) keeps the surrounding Vanilla shell and adds a shared
 draft editor with optional tracked-work import, two-row register filters and a
 locally bundled PDF.js viewer. PDF document geometry follows the supplied

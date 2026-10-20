@@ -451,7 +451,7 @@ FILTER_MATCHES_ACTION = (
     "var bw = b.getBoundingClientRect().width;"
     "var bad = [];"
     "for (var i = 0; i < sels.length; i++) {{"
-    "  var sw = sels[i].getBoundingClientRect().width;"
+    "  var sw = (sels[i].__filterButton || sels[i]).getBoundingClientRect().width;"
     "  if (Math.abs(bw - sw) > 1) bad.push(sels[i].id + '=' + Math.round(sw) + 'px');"
     "}}"
     "return bad.length ? 'action ' + Math.round(bw) + 'px vs ' + bad.join(', ') : 'ok';"
@@ -2482,6 +2482,53 @@ class Gate:
         finally:
             self.marionette.call("WebDriver:SetWindowRect", original)
 
+    def shared_dropdown_audit(self):
+        original = self.marionette.call("WebDriver:GetWindowRect")
+        cases = (
+            ("/settings/catalog", None, "item-kind"),
+            ("/projects", None, "proj-filter-customer"),
+            ("/tasks", None, "task-filter-project"),
+            ("/settings/users", "user-new", "user-role"),
+            ("/timesheets/day", "day-add", "entry-customer"),
+            ("/expenses", "expense-new", "expense-category"),
+        )
+        try:
+            for width in (1280, 375):
+                self.marionette.call("WebDriver:SetWindowRect", {"width": width, "height": 812})
+                for path, opener, control in cases:
+                    self.navigate(path)
+                    self.wait_script("document.documentElement.dataset.booted === 'ready'", f"shared dropdown boot {path}")
+                    if opener:
+                        self.marionette.script(f"document.getElementById({json.dumps(opener)}).click(); return true;")
+                    self.wait_script(f"!!document.getElementById({json.dumps(control)}).__filterButton", f"shared dropdown {control}")
+                    for theme in ("light", "dark"):
+                        result = json.loads(self.marionette.script("""
+                            document.querySelector('input[name=colour-mode][value=%s]').click();
+                            const select = document.getElementById(%s);
+                            const button = select.__filterButton;
+                            button.scrollIntoView({block:'center'}); button.click();
+                            const menu = document.getElementById(button.getAttribute('aria-controls'));
+                            const anchor = button.getBoundingClientRect(), bounds = menu.getBoundingClientRect();
+                            const dialog = select.closest('dialog');
+                            const result = {visible:menu.checkVisibility(),proxy:button.checkVisibility(),
+                                nativeHidden:!select.checkVisibility(),
+                                gap:Math.min(Math.abs(bounds.top-anchor.bottom-4),Math.abs(anchor.top-bounds.bottom-4)),
+                                inside:bounds.left>=0 && bounds.right<=innerWidth,
+                                dialogOpen:!dialog || dialog.open};
+                            menu.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));
+                            result.restored=document.activeElement===button;
+                            result.dialogRetained=!dialog || dialog.open;
+                            return JSON.stringify(result);
+                        """ % (json.dumps(theme), json.dumps(control))))
+                        self.check(f"shared dropdown {control} stays anchored at {width}px ({theme})",
+                                   result["visible"] and result["proxy"] and result["nativeHidden"]
+                                   and result["gap"] <= 1 and result["inside"] and result["restored"]
+                                   and result["dialogOpen"] and result["dialogRetained"], str(result))
+                    self.marionette.script("document.querySelectorAll('dialog[open]').forEach(dialog=>dialog.close()); return true;")
+            self.drain_console("shared dropdowns")
+        finally:
+            self.marionette.call("WebDriver:SetWindowRect", original)
+
     def invoice_workspace_audit(self):
         original = self.marionette.call("WebDriver:GetWindowRect")
         self.marionette.call("WebDriver:SetWindowRect", {"width": 1280, "height": 900})
@@ -2628,6 +2675,7 @@ class Gate:
         self.responsive_dialog_audit()
         self.responsive_zoom_audit()
         self.invoice_filter_audit()
+        self.shared_dropdown_audit()
         self.invoice_workspace_audit()
         self.pdf_worker_recovery_audit()
         if self.web_dir:

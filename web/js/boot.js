@@ -11,6 +11,7 @@ import { addPaymentRail, cancelCustomerEdit, cancelProjectEdit, cancelTaskEdit, 
 import { closeDeliveryRecord, closeInvoicePreview, closeSendEmailDialog, confirmSendEmail, dash, downloadInvoicePdf, ed, edCancel, edClose, edHasChanges, edLineRow, edLoadDefaults, edOpen, edRecalc, edSave, initInvoiceDropdowns, invoicePreview, markInvoiceSent, openEmailSettings, refreshInvoiceSummary, refreshInvoices, sendInvoiceEmail, setInvoicePeriod } from './invoices.js';
 import { markNotificationsRead, refreshNotifications } from './notifications.js';
 import { initReceiptPreview } from './receipt.js';
+import { initSelectMenus } from './select.js';
 import { applyRoute, initRouter, initSegTabs, initSettingsTabs, initTabs, normaliseRoute, refreshTimesheetView, segActiveId, showTimesheet } from './route.js';
 import { addSecret, closeUserForm, closeUserPassword, disableVault, enableVault, initTemplatePreview, newUserForm, paintAccent, refreshAuditLog, refreshSettings, regenerateVault, renderUsers, resetBuiltInLabels, saveConfig, saveEmailSettings, saveInvoiceTemplate, saveOrgProfile, saveUser, saveUserPassword, sendTestEmail } from './settings.js';
 import { customerName, fillProjectSelect, fillTaskSelect, loadCustomers, state } from './state.js';
@@ -672,6 +673,7 @@ export async function startApp() {
   wireEntryForm();
   wireWeekGrid();
   wireSetupPanels(today);
+  initSelectMenus();
   await loadCustomers();
   await refreshCustomerPickers(); // fills all four pickers, no fetches
   // Advanced billing tools are hidden while unfinished (see billing.js): their
