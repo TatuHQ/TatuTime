@@ -1502,8 +1502,16 @@
 
           <section id="settings-panel-expenses" class="settings-panel" role="tabpanel"
             aria-labelledby="settings-tab-expenses" tabindex="0" hidden>
+            <!-- Same shape as the Users panel (#230/#232): the section's create
+             action sits in the app-wide heading slot and the card holds the
+             register. Add/rename happens in a dialog, so the primary action
+             aligns with + User on /settings/users instead of sitting inline
+             beside a text field. -->
             <div class="ts-head">
               <h2>Expense categories</h2>
+              <div class="hierarchy-actions" role="group" aria-label="Category actions">
+                <button type="button" id="category-new" data-icon="plus" data-positive="1">Category</button>
+              </div>
             </div>
             <div class="p-card">
               <div class="p-card__header">
@@ -1512,16 +1520,26 @@
               <div class="p-card__content">
                 <p class="p-form-help-text">Choose the categories available when recording expenses. Removing a
                   category is blocked while an expense still uses it.</p>
-                <form id="category-form" class="bar">
-                  <input type="hidden" id="category-id">
-                  <label for="category-name">Category name</label>
-                  <input type="text" id="category-name" maxlength="120" required autocomplete="off">
-                  <button data-positive="1" type="submit" id="category-save" class="primary">Add category</button>
-                  <button type="button" id="category-cancel" class="secondary" hidden>Cancel edit</button>
-                </form>
-                <div class="p-form-validation is-error">
-                  <p class="p-form-validation__message" id="category-error" role="alert" hidden></p>
-                </div>
+                <dialog id="category-dialog" class="p-modal" aria-modal="true"
+                  aria-labelledby="category-dialog-title">
+                  <div class="p-modal__dialog">
+                    <header class="p-modal__header">
+                      <h2 class="p-modal__title" id="category-dialog-title">Add category</h2>
+                    </header>
+                    <form id="category-form">
+                      <input type="hidden" id="category-id">
+                      <div class="p-form__group"><label class="p-form__label" for="category-name">Category
+                          name</label><input type="text" class="p-form__control" id="category-name" maxlength="120"
+                          required autocomplete="off"></div>
+                      <div class="p-form-validation is-error">
+                        <p class="p-form-validation__message" id="category-error" role="alert" hidden></p>
+                      </div>
+                      <footer class="buttons p-modal__footer"><button data-positive="1" type="submit"
+                          id="category-save" class="p-button--positive">Add category</button><button type="button"
+                          id="category-cancel" class="p-button">Cancel</button></footer>
+                    </form>
+                  </div>
+                </dialog>
                 <ul id="category-list" class="chips"></ul>
               </div>
             </div>

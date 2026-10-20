@@ -65,10 +65,10 @@ test('the shell ships the official form vocabulary and no bespoke class (#232 ph
     // #354 added the Company legal-details fieldset, the payment-rails
     // fieldset and the ten Document label rows (each in its own grouped
     // fieldset) to the Settings split's 146 groups; the template notes row
-    // added one more.
-    assert.equal(groups.length, 168, 'every field wrapper is a p-form__group');
-    assert.equal(document.querySelectorAll('.p-form__label').length, 160, 'one official label per field row');
-    assert.equal(document.querySelectorAll('.p-form__control').length, 160, 'one official control per field row');
+    // added one more, and the Expense-categories dialog one more.
+    assert.equal(groups.length, 169, 'every field wrapper is a p-form__group');
+    assert.equal(document.querySelectorAll('.p-form__label').length, 161, 'one official label per field row');
+    assert.equal(document.querySelectorAll('.p-form__control').length, 161, 'one official control per field row');
     // The previous 55 plus the template footer and notes placement hints.
     assert.equal(document.querySelectorAll('.p-form-help-text').length, 57, 'the hints became p-form-help-text');
     assert.equal(document.querySelectorAll('.p-form-validation__message').length, ERROR_IDS.length,
@@ -277,20 +277,19 @@ test('decoration is attribute-only and every rendered button states what it need
 
     // Pinned coverage: dropping a data-* attribute from any shell button makes
     // one of these counts drop and fails the guard. (The HTML comment that
-    // mentions `data-icon="plus"` is a comment node, not a button: the shell
-    // ships 18 icon-bearing buttons, 13 of them plus.)
+    // mentions `data-icon="plus"` is a comment node, not a button.)
     const icons = [...document.querySelectorAll('button[data-icon]')];
-    assert.equal(icons.length, 20, 'every icon-bearing shell button states data-icon');
+    assert.equal(icons.length, 21, 'every icon-bearing shell button states data-icon');
     const vocab = {};
     for (const b of icons) vocab[b.dataset.icon] = (vocab[b.dataset.icon] || 0) + 1;
-    // #354's Add payment rail is the newest plus.
-    assert.deepEqual(vocab, { plus: 13, copy: 2, play: 2, stop: 1, history: 1, file: 1 }, 'the shell icon vocabulary is pinned');
-    // 36: the previous 35 plus the Email section's `Save email settings` submit.
+    // The newest plus is Settings → Expense categories' heading action.
+    assert.deepEqual(vocab, { plus: 14, copy: 2, play: 2, stop: 1, history: 1, file: 1 }, 'the shell icon vocabulary is pinned');
+    // 37: the previous 36 plus that same + Category heading action.
     // The count is pinned so a new positive action updates this guard on
     // purpose: `+ Manual Invoice` is the secondary action and deliberately
     // carries no data-positive, and each dialog's `Cancel`/`Close` is a plain
     // secondary button, so neither adds to it.
-    assert.equal(document.querySelectorAll('button[data-positive]').length, 36,
+    assert.equal(document.querySelectorAll('button[data-positive]').length, 37,
         'every positive shell button states data-positive');
 
     // The deleted label-mutation leaves no trace: no rendered label keeps a "+".
@@ -442,13 +441,13 @@ test('customer invoice prefix is loaded, saved, cleared and reset between custom
     f.startCustomerEdit(customer);
     assert.equal(field.value, 'MONKEY');
     field.value = 'CUST1';
-    await f.saveCustomer({ preventDefault() {} });
+    await f.saveCustomer({ preventDefault() { } });
     assert.equal(saved[0].path, '/customers/c1');
     assert.equal(saved[0].body.invoice_prefix, 'CUST1');
     assert.equal(field.value, '', 'closing the saved form resets the prefix');
     f.startCustomerEdit(customer);
     field.value = '';
-    await f.saveCustomer({ preventDefault() {} });
+    await f.saveCustomer({ preventDefault() { } });
     assert.equal(saved[1].body.invoice_prefix, '', 'an empty field explicitly clears the prefix');
     const legacy = { ...customer };
     delete legacy.invoice_prefix;
@@ -459,7 +458,7 @@ test('customer invoice prefix is loaded, saved, cleared and reset between custom
     document.getElementById('customer-currency').value = 'EUR';
     document.getElementById('customer-rate').value = '1';
     field.value = 'CUST2';
-    await f.saveCustomer({ preventDefault() {} });
+    await f.saveCustomer({ preventDefault() { } });
     assert.equal(saved[2].path, '/customers');
     assert.equal(saved[2].body.invoice_prefix, 'CUST2');
     dom.window.close();

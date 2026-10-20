@@ -112,6 +112,19 @@ export function rowAction(cls, text, fn, title, icon) {
   });
 }
 
+// The Actions cell of a register. The icon buttons sit in one wrapping flex
+// row: a crowded register breaks them over a second line instead of letting
+// them spill past the cell. The spill used to widen the scroll area by the
+// trailing icon margin (a phantom horizontal bar under the table) and push
+// invoice actions out of the register on narrower windows.
+export function iconActionsCell(buttons, attrs = {}) {
+  return el('td', {
+    cls: 'actions-col',
+    data: { iconActions: '1' },
+    attrs: { 'data-heading': 'Actions', ...attrs },
+  }, [el('div', { cls: 'row-actions' }, buttons)]);
+}
+
 // #232 increment 3: the official status pill. Vanilla 4.59 deprecates
 // `p-status-label` — "the status label has been merged into the Chip component"
 // (canonical/vanilla-framework#5535) — so a status renders as `p-chip` +

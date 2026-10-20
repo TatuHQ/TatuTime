@@ -5,7 +5,7 @@
 import { api } from './api.js';
 import { showAuth } from './auth.js';
 import { refreshCatalog } from './billing.js';
-import { $, announce, askConfirm, clearFormError, el, fillSelect, formatMoney, showFormError, singleFlight, statusChip } from './dom.js';
+import { $, announce, askConfirm, clearFormError, el, fillSelect, formatMoney, iconActionsCell, showFormError, singleFlight, statusChip } from './dom.js';
 import { state } from './state.js';
 
 // --------------------------------------------------------------- settings --
@@ -46,7 +46,7 @@ export function renderUsers() {
       el('td', { attrs: { 'data-heading': 'Role' }, text: user.role }),
       el('td', { attrs: { 'data-heading': 'Status' }, text: user.active ? 'active' : 'inactive' }),
       el('td', { attrs: { 'data-heading': 'Rates' }, text: `${formatMoney(user.default_rate_minor)} / ${formatMoney(user.cost_rate_minor)}` }),
-      el('td', { cls: 'actions-col', data: { iconActions: '1' }, attrs: { 'data-heading': 'Actions' } }, [
+      iconActionsCell([
         el('button', { cls: 'link', type: 'button', text: 'Edit', data: { icon: 'edit' }, on: { click: () => editUser(user) } }),
         el('button', { cls: 'link', type: 'button', text: user.active ? 'Deactivate' : 'Activate', data: { icon: user.active ? 'stop' : 'play' }, on: { click: () => toggleUserActive(user.id, !user.active) } }),
         el('button', { cls: 'link', type: 'button', text: 'Change password', data: { icon: 'lock-locked' }, on: { click: () => changeUserPassword(user) } }),

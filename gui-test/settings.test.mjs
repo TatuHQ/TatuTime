@@ -1189,6 +1189,32 @@ test('every Settings panel uses the heading slot and only headed cards', () => {
     dom.window.close();
 });
 
+// Users and Expense categories are both registers, so their create action must
+// sit in the same slot: the app-wide heading row, not inline in the card body
+// beside a text field.
+test('the register panels put their create action in the heading slot', () => {
+    const { dom, document } = setup();
+    for (const [panelId, actionId, group] of [
+        ['settings-panel-users', 'user-new', 'User actions'],
+        ['settings-panel-expenses', 'category-new', 'Category actions'],
+    ]) {
+        const slot = document.querySelector(`#${panelId} > .ts-head .hierarchy-actions`);
+        assert.ok(slot, `${panelId}'s heading slot carries an action group`);
+        assert.equal(slot.getAttribute('role'), 'group');
+        assert.equal(slot.getAttribute('aria-label'), group);
+        const action = slot.querySelector('button');
+        assert.equal(action.id, actionId, `${panelId} leads with ${actionId}`);
+        assert.equal(action.dataset.icon, 'plus', `${actionId} states its icon`);
+        assert.equal(action.dataset.positive, '1', `${actionId} is the positive action`);
+    }
+    const dialog = document.getElementById('category-dialog');
+    assert.equal(dialog.tagName, 'DIALOG', 'adding a category happens in a dialog');
+    assert.equal(dialog.getAttribute('aria-modal'), 'true');
+    assert.equal(document.getElementById('category-form').closest('#category-dialog'), dialog,
+        'the category form lives in its dialog, not in the card body');
+    dom.window.close();
+});
+
 test('the card-body lead rhythm is one shared rule, not a per-view margin', () => {
     const css = readFileSync(new URL('../web/styles.css', import.meta.url), 'utf8')
         .replace(/\/\*[\s\S]*?\*\//g, '');

@@ -4,7 +4,7 @@
 
 
 import { api, fetchAll } from './api.js';
-import { $, announce, askConfirm, clearFormError, el, fillSelect, formatMoney, panelRefresh, showFormError, singleFlight, statusChip } from './dom.js';
+import { $, announce, askConfirm, clearFormError, el, fillSelect, formatMoney, iconActionsCell, panelRefresh, showFormError, singleFlight, statusChip } from './dom.js';
 import { customerName, fillCustomerSelect, fillProjectSelect, loadProjects, state } from './state.js';
 import { adoptExpenseRate, billedCurrency, currencyCode, refreshExpenseConversion, resetExpenseConversion, toMinor } from './fx.js';
 import { invalidateLockCache, refreshDay } from './timesheet.js';
@@ -52,20 +52,35 @@ export async function refreshCategories() {
   if (select) await fillCategorySelect(select.value);
 }
 
-export function startCategoryEdit(category) {
-  $('category-id').value = category.id;
-  $('category-name').value = category.name;
-  $('category-save').textContent = 'Save category';
-  $('category-cancel').hidden = false;
+// Settings → Expense categories uses the same add/edit shape as Users: the
+// heading slot's + Category (or a chip's Edit) opens this dialog.
+export function openCategoryDialog(category = null) {
+  $('category-form').reset();
+  $('category-id').value = category ? category.id : '';
+  $('category-name').value = category ? category.name : '';
+  $('category-dialog-title').textContent = category ? 'Edit category' : 'Add category';
+  $('category-save').textContent = category ? 'Save category' : 'Add category';
+  clearFormError($('category-error'));
+  $('category-dialog').showModal();
   $('category-name').focus();
+}
+
+export function startCategoryEdit(category) {
+  openCategoryDialog(category);
 }
 
 export function resetCategoryForm() {
   $('category-id').value = '';
   $('category-form').reset();
+  $('category-dialog-title').textContent = 'Add category';
   $('category-save').textContent = 'Add category';
-  $('category-cancel').hidden = true;
   clearFormError($('category-error'));
+}
+
+export function closeCategoryDialog() {
+  const dialog = $('category-dialog');
+  if (dialog.open) dialog.close();
+  resetCategoryForm();
 }
 
 export async function removeCategory(category) {
@@ -93,7 +108,7 @@ export async function addCategory(evt) {
       };
       if (id) await api.put(`/categories/${id}`, body);
       else await api.post('/categories', body);
-      resetCategoryForm();
+      closeCategoryDialog();
       await refreshCategories();
       announce(id ? 'Category updated.' : 'Category added.');
     } catch (err) {
@@ -254,7 +269,7 @@ async function refreshExpensesBody() {
         // The stored file's own name, as the link that opens its preview — the
         // column answers "is there a receipt?" without opening the record.
         el('td', { attrs: { 'data-heading': 'Receipt' } }, [receiptCell(x)]),
-        el('td', { cls: 'actions-col', data: { iconActions: '1' }, attrs: { 'data-heading': 'Actions' } }, [
+        iconActionsCell([
           el('button', {
             cls: 'link',
             type: 'button',
