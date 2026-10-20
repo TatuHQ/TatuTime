@@ -10,6 +10,11 @@
 
 use chrono::{DateTime, NaiveDate, TimeZone, Utc};
 use serde::Serialize;
+use std::io::Read;
+
+/// Bound feed and provider responses before parsing so a configured upstream
+/// cannot turn one calendar request into an unbounded allocation.
+pub(crate) const MAX_CALENDAR_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct CalendarEvent {
@@ -151,10 +156,32 @@ pub fn fetch_ics(source: &str) -> Result<String, CalendarError> {
             .call()
             .map_err(|_| CalendarError::Fetch)?
             .body_mut()
+            .with_config()
+            .limit((MAX_CALENDAR_RESPONSE_BYTES + 1) as u64)
             .read_to_string()
             .map_err(|_| CalendarError::Fetch)
+            .and_then(check_response_size)
     } else {
-        std::fs::read_to_string(source).map_err(|_| CalendarError::Fetch)
+        let file = std::fs::File::open(source).map_err(|_| CalendarError::Fetch)?;
+        read_limited(file)
+    }
+}
+
+/// Read at most one byte beyond the limit, then reject oversized content.
+fn read_limited(reader: impl Read) -> Result<String, CalendarError> {
+    let mut limited = reader.take((MAX_CALENDAR_RESPONSE_BYTES + 1) as u64);
+    let mut text = String::new();
+    limited
+        .read_to_string(&mut text)
+        .map_err(|_| CalendarError::Fetch)?;
+    check_response_size(text)
+}
+
+pub(crate) fn check_response_size(text: String) -> Result<String, CalendarError> {
+    if text.len() > MAX_CALENDAR_RESPONSE_BYTES {
+        Err(CalendarError::Fetch)
+    } else {
+        Ok(text)
     }
 }
 
@@ -187,5 +214,17 @@ mod tests {
         std::fs::write(&path, ICS).unwrap();
         let text = fetch_ics(path.to_str().unwrap()).unwrap();
         assert!(text.contains("VEVENT"));
+    }
+
+    #[test]
+    fn fetch_rejects_oversized_local_feed() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("large.ics");
+        std::fs::write(&path, vec![b' '; MAX_CALENDAR_RESPONSE_BYTES + 1]).unwrap();
+
+        assert!(matches!(
+            fetch_ics(path.to_str().unwrap()),
+            Err(CalendarError::Fetch)
+        ));
     }
 }

@@ -117,6 +117,73 @@ async fn sso_jit_provisions_and_logs_in() {
 }
 
 #[tokio::test]
+async fn sso_admin_group_setting_is_resolved_for_new_and_existing_users() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("data")).unwrap();
+    let idp = tucano_time::sso::SignedTokenIdp::new(
+        "okta-test",
+        "stub-secret",
+        vec!["tucanotime.test".into()],
+    );
+    std::fs::write(
+        store.root().join("config.json"),
+        r#"{"sso_admin_group":"tt-admins"}"#,
+    )
+    .unwrap();
+    let registry = Arc::new(tucano_time::sso::SsoRegistry::new(vec![Arc::new(
+        tucano_time::sso::SignedTokenIdp::new(
+            "okta-test",
+            "stub-secret",
+            vec!["tucanotime.test".into()],
+        ),
+    )]));
+    let state = AppState::with_session(
+        store,
+        Arc::new(Session::new(
+            b"test-session-secret-0000000000000032".to_vec(),
+            3600,
+            false,
+        )),
+    )
+    .with_sso(registry)
+    .with_env(Arc::new(|_| None));
+    let router = tucano_time::build_router(state);
+    let claims = |groups: Vec<String>| tucano_time::sso::TokenClaims {
+        sub: "u1".into(),
+        email: "member@tucanotime.test".into(),
+        name: "Member".into(),
+        groups,
+        exp: chrono::Utc::now().timestamp() + 300,
+    };
+
+    // First login provisions a member; the stored group mapping promotes the
+    // existing account on its next verified assertion.
+    let first = idp.issue(&claims(vec![]));
+    let (status, user, _) = raw(
+        &router,
+        "POST",
+        "/api/auth/sso/assertion",
+        Some(json!({"provider":"okta-test","payload":first,"signature":""})),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{user}");
+    assert_eq!(user["role"], "member");
+
+    let second = idp.issue(&claims(vec!["tt-admins".into()]));
+    let (status, user, _) = raw(
+        &router,
+        "POST",
+        "/api/auth/sso/assertion",
+        Some(json!({"provider":"okta-test","payload":second,"signature":""})),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{user}");
+    assert_eq!(user["role"], "admin");
+}
+
+#[tokio::test]
 async fn sso_empty_allowed_domains_denies_and_provisions_nothing() {
     // #260: SSO with an empty allow-list must fail closed — the assertion is
     // rejected and no account is JIT-provisioned (the old allow-all is gone).
