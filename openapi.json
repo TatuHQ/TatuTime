@@ -287,6 +287,11 @@
           "email"
         ],
         "properties": {
+          "invoice_prefix": {
+            "type": "string",
+            "maxLength": 20,
+            "description": "Optional uppercase invoice prefix. Empty prefixes are omitted. Future drafts use PREFIX-001; existing numbers never change. Identical prefixes share a durable sequence. INV is reserved for default numbering."
+          },
           "id": {
             "type": "string",
             "format": "uuid"
@@ -389,6 +394,11 @@
           "default_rate_minor"
         ],
         "properties": {
+          "invoice_prefix": {
+            "type": ["string", "null"],
+            "maxLength": 64,
+            "description": "Optional invoice prefix: 1–20 ASCII letters/digits/internal hyphens after trimming spaces, removing trailing hyphens and uppercasing. Must begin with a letter/digit. Control characters and INV are rejected. Empty string clears the prefix; omission/null preserves it on PUT and uses default INV numbering on POST. Custom prefixes use PREFIX-001."
+          },
           "name": {
             "type": "string",
             "minLength": 1,
@@ -1115,6 +1125,19 @@
         },
         "additionalProperties": false
       },
+      "InvoiceDocument": {
+        "type": "object",
+        "description": "Optional invoice document overrides (contract revision 0.1.48). Omitted/null overrides inherit existing customer/template defaults; empty notes explicitly suppress default notes. Old payloads remain valid. Issued documents cannot be edited.",
+        "additionalProperties": false,
+        "properties": {
+          "po_number": { "type": "string", "maxLength": 120 },
+          "invoice_date": { "type": ["string", "null"], "format": "date" },
+          "due_date": { "type": ["string", "null"], "format": "date" },
+          "payment_terms": { "oneOf": [{ "$ref": "#/components/schemas/PaymentTerms" }, { "type": "null" }] },
+          "subject": { "type": ["string", "null"], "maxLength": 120 },
+          "notes": { "type": ["string", "null"], "maxLength": 4000 }
+        }
+      },
       "Invoice": {
         "type": "object",
         "required": [
@@ -1130,6 +1153,7 @@
           "created_at"
         ],
         "properties": {
+          "document": { "$ref": "#/components/schemas/InvoiceDocument" },
           "id": {
             "type": "string",
             "format": "uuid"
@@ -2385,6 +2409,7 @@
           "lines"
         ],
         "properties": {
+          "document": { "$ref": "#/components/schemas/InvoiceDocument" },
           "customer_id": {
             "type": "string",
             "format": "uuid"
@@ -2540,6 +2565,8 @@
         ],
         "description": "Draft-only full replacement. Tracked lines must come back verbatim; manual amounts are recomputed server-side.",
         "properties": {
+          "document": { "$ref": "#/components/schemas/InvoiceDocument" },
+          "currency": { "$ref": "#/components/schemas/Currency" },
           "lines": {
             "type": "array",
             "minItems": 1,
@@ -6182,7 +6209,7 @@
           "invoices"
         ],
         "summary": "Email an issued invoice to the customer's billing address, or to an explicit recipient list",
-        "description": "Admin only. The body is optional: without it (or with an empty `recipients` list) the invoice goes to the customer's single billing address. An explicit list is used in the given order, de-duplicated case-insensitively, validated before anything is sent (one '@', no control characters, at most 320 characters each, at most 10 recipients), and recorded on the invoice timeline. Drafts are refused with 409; a missing billing email with 422.",
+        "description": "Admin only. The body is optional: without it (or with an empty `recipients` list) the invoice goes to the customer's single billing address. An explicit list is used in the given order, de-duplicated case-insensitively, validated before anything is sent (one '@', no control characters, at most 320 characters each, at most 10 recipients), and recorded on the invoice timeline. Drafts are refused with 409; a missing billing email with 422. Customer attachments have no application preview watermark. New issued archives are unstamped; a legacy archive with the known application stamp yields an in-memory clean delivery copy without modifying the archived file. This does not change the stage-stamped preview endpoint.",
         "requestBody": {
           "required": false,
           "content": {

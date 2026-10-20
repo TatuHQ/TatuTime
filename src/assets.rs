@@ -241,7 +241,7 @@ fn dir_stamp(dir: &str) -> u64 {
 fn content_type(path: &str) -> &'static str {
     match path.rsplit('.').next().unwrap_or("") {
         "html" => "text/html; charset=utf-8",
-        "js" => "text/javascript; charset=utf-8",
+        "js" | "mjs" => "text/javascript; charset=utf-8",
         "css" => "text/css; charset=utf-8",
         "svg" => "image/svg+xml",
         "json" => "application/json",

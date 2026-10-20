@@ -3,7 +3,7 @@ use super::{
     resolve_terms,
 };
 use crate::api::*;
-use crate::domain::{InvoiceTimelineEvent, InvoiceTimelineEventKind, InvoiceWatermarkStage};
+use crate::domain::{InvoiceTimelineEvent, InvoiceTimelineEventKind};
 
 /// `POST /invoices/preview` (#134): run the SAME generation as
 /// `POST /invoices` but without persisting — the staged wizard reviews exact
@@ -212,7 +212,14 @@ pub async fn issue_invoice(
     let now = app.clock.now();
     // ONE terms resolution feeds both the due date and the frozen snapshot, so
     // the printed `(Net N)` can never disagree with `due_date`.
-    let terms = resolve_terms(&customer, &template);
+    let terms = if invoice.document.due_date.is_some() {
+        None
+    } else {
+        invoice
+            .document
+            .payment_terms
+            .or_else(|| resolve_terms(&customer, &template))
+    };
     let due = resolve_due_date(&invoice, &customer, &template, now);
     // Render against the to-be-issued snapshot: the PDF is the issue-time
     // document, and bytes are pure in this state (legacy re-renders match).
@@ -231,10 +238,7 @@ pub async fn issue_invoice(
     let mut doc =
         crate::pdf::doc_for_labeled(&snapshot, &customer, &org_for(&app)?, &template.labels);
     crate::template::apply_doc_content(&mut doc, &content);
-    // Subtask C: the archived PDF is generated at issue time, when the invoice
-    // has not yet been delivered, so its frozen watermark stage is `Draft`.
-    // The archive is write-once, so this stamp is never recomputed later.
-    doc.watermark = Some(InvoiceWatermarkStage::Draft);
+    doc.watermark = None;
     let pdf = crate::pdf::render_invoice_pdf(&doc);
     let issued = app
         .store

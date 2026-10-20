@@ -280,6 +280,22 @@ tbody tr:nth-child(odd) { background: var(--row-alt); }
 tfoot th, tfoot td { font-weight: 700; border-top: 2px solid var(--line); border-bottom: none; }
 td.num, th.num, .ws-total.num { text-align: right; font-variant-numeric: tabular-nums; }
 .actions-col { width: 9.5rem; }
+td[data-icon-actions="1"] { white-space: nowrap; overflow: visible; text-overflow: clip; }
+button.icon-action {
+   display: inline-flex;
+   align-items: center;
+   justify-content: center;
+   width: 44px;
+   height: 44px;
+   min-width: 44px;
+   min-height: 44px;
+   padding: 0;
+   margin: 0 4px 0 0;
+   vertical-align: middle;
+   text-decoration: none;
+}
+button.icon-action > [class*="p-icon--"] { margin: 0; width: 20px; height: 20px; flex-basis: 20px; }
+button.icon-action.is-tooltip-dismissed > .p-tooltip__message { display: none; }
 /* #232 increment 3: status/rate pills are the official Vanilla chip
    (`p-chip` + `p-chip__value`, built by `statusChip` in web/js/dom.js). The
    bespoke `.badge` skin is retired — `p-status-label` is deprecated upstream
@@ -472,7 +488,21 @@ dialog.p-modal::backdrop { background: transparent; }
 #entry-dialog .p-modal__dialog { max-width: 28rem; }
 #week-row-dialog .p-modal__dialog { max-width: 26rem; }
 #expense-dialog .p-modal__dialog { max-width: 36rem; }
-#invoice-editor .p-modal__dialog { max-width: 52rem; }
+#invoice-editor .p-modal__dialog { max-width: 80rem; }
+.invoice-document-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 2rem; }
+.invoice-document-fields > *, #ed-lines td { min-width: 0; }
+#ed-lines { min-width: 42rem; table-layout: fixed; }
+#ed-lines th:first-child { width: auto; }
+#ed-lines th:nth-child(2) { width: 6.5rem; }
+#ed-lines th:nth-child(3) { width: 7.5rem; }
+#ed-lines th:nth-child(4) { width: 8rem; }
+#ed-lines input[type="text"], #ed-lines select { width: 100%; min-width: 0; }
+#invoice-editor .invoice-filter-trigger { width: 100%; min-width: 0; }
+#ed-lines .actions-col { width: 8rem; }
+#ed-lines .actions-col button { padding: .25rem; }
+@media (width < 620px) {
+   .invoice-document-fields { grid-template-columns: minmax(0, 1fr); }
+}
 #expense-category-dialog .p-modal__dialog { max-width: 28rem; }
 #customer-dialog .p-modal__dialog { max-width: 38rem; }
 #project-dialog .p-modal__dialog, #task-dialog .p-modal__dialog { max-width: 32rem; }
@@ -648,6 +678,31 @@ dialog.p-modal::backdrop { background: transparent; }
    beneath it is a plain ordered list. The .ip-letter rule still paints the
    Get paid instructions (upstream #357). */
 .ip-pdf { margin: .4rem 0 .6rem; }
+.pdf-toolbar, .pdf-actions { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem; margin-block: .5rem; }
+.pdf-toolbar select { width: auto; margin: 0; }
+.invoice-status-row { border-bottom: 1px solid var(--line); padding-block: .5rem; margin-bottom: .75rem; }
+#inv-filter-row { align-items: center; }
+.invoice-filter-native { display: none !important; }
+.select-trigger { width: 100%; }
+.filter-row .select-trigger { width: 9.25rem; }
+.hierarchy-filters .select-trigger { width: 11.5rem; }
+.bar .select-trigger, .timerbar .select-trigger, .copy-bar .select-trigger { width: auto; min-width: 8rem; max-width: 100%; }
+.select-trigger[hidden] { display: none; }
+.select-validation { display: block; color: var(--danger); }
+.invoice-filter-trigger { display: flex; align-items: center; gap: .5rem; width: 100%; height: var(--control-height); padding: .3rem .6rem; margin: 0; text-align: left; }
+.invoice-filter-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.invoice-filter-trigger .p-icon--chevron-down { order: 2; margin: 0; }
+.invoice-filter-menu { position: fixed; inset: auto; margin: 0; padding: .25rem; overflow-y: auto; z-index: 100; background: var(--surface); color: var(--fg); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); }
+.invoice-filter-menu[hidden] { display: none; }
+.invoice-filter-option { display: block; width: 100%; margin: 0; padding: .5rem .65rem; border: 0; text-align: left; white-space: normal; overflow-wrap: anywhere; background: transparent; color: var(--fg); }
+.invoice-filter-option[aria-selected="true"], .invoice-filter-option:hover { background: var(--accent-soft); color: var(--brand-deep); }
+.invoice-period-nav { display: flex; align-items: center; gap: .5rem; min-width: 0; }
+.invoice-period-nav[hidden] { display: none; }
+.invoice-period-nav button { width: 2.75rem; height: 2.75rem; padding: .5rem; }
+.invoice-period-nav button i { margin: 0; }
+.pdf-pages { max-height: 80dvh; overflow: auto; background: #e5e5e5; padding: .25rem; }
+.pdf-pages canvas { display: block; background: white; }
+.pdf-pages:focus-visible { outline: 3px solid var(--focus); }
 .ip-pdf iframe { display: block; width: 100%; min-height: 60vh; border: 0; background: var(--surface); }
 .ip-letter { white-space: pre-line; color: var(--fg); margin: .3rem 0 .6rem; }
 .ip-history h3 { margin: 1rem 0 .3rem; font-size: 1rem; }
@@ -897,10 +952,6 @@ html[data-advanced-billing="off"] #advanced-billing { display: none; }
 .seg .seg-btn[aria-pressed="true"] { background: var(--accent-soft); color: var(--brand-deep); box-shadow: inset 0 -3px 0 var(--accent); }
 /* The Columns disclosure is a control too. Absolute-position its menu so
    opening it cannot move the row's shared bottom edge. */
-.cols-pop { position: relative; }
-.cols-pop summary { cursor: pointer; display: inline-flex; align-items: center; height: var(--control-height); padding: 0 .75rem; border: 0; border-bottom: 1px solid var(--field-rule); border-radius: 0; background: var(--input-bg); color: var(--fg); list-style: none; }
-.cols-pop__menu { position: absolute; right: 0; top: calc(100% + .25rem); z-index: 20; min-width: 11rem; padding: .5rem .6rem; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); display: grid; gap: .3rem; }
-.cols-pop label { display: flex; gap: .4rem; align-items: center; font-weight: 400; }
 /* #232 phase 2d: the bespoke `.sort-th` skin is retired — the Invoices
    register uses Vanilla 4.59's real sortable pattern (aria-sort on the <th>
    plus `.p-table__sort-button`), which owns the cursor, hover ink and the

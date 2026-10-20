@@ -2,15 +2,16 @@
 // Moved from the original monolithic app.js; behaviour is unchanged.
 
 
-import { ADVANCED_BILLING_ENABLED, addRecurring, createRetainer, iwClose, iwInit, iwOpen, refreshCatalog, refreshRetainers, refreshSchedules, saveCatalogItem } from './billing.js';
+import { ADVANCED_BILLING_ENABLED, addRecurring, createRetainer, iw, iwClose, iwInit, iwLoadProjects, iwOpen, iwShow, refreshCatalog, refreshRetainers, refreshSchedules, saveCatalogItem } from './billing.js';
 import { calState, refreshTimeCal, shiftMonth } from './calendar.js';
 import { $, addDays, announce, clearFormError, decorateUbuntuButton, isoDate, mondayOf } from './dom.js';
 import { ADD_CATEGORY_VALUE, addCategory, addExpenseCategory, fillCategorySelect, refreshCategories, refreshExpenses, refreshSubmissions, resetCategoryForm, resetExpenseForm, saveExpense, submitWeek } from './expenses.js';
 import { refreshExpenseConversion, resetExpenseConversion, showConverted } from './fx.js';
 import { addPaymentRail, cancelCustomerEdit, cancelProjectEdit, cancelTaskEdit, contactRow, fillParentCustomers, fillTaskParents, prefillProjectParent, refreshCustomerPickers, refreshCustomerTable, refreshCustomersView, refreshProjectTable, refreshProjectsView, refreshTaskTable, refreshTasksView, runReport, saveCustomer, saveProject, saveTask } from './hierarchy.js';
-import { closeDeliveryRecord, closeInvoicePreview, closeSendEmailDialog, confirmSendEmail, dash, dashApplyColumns, downloadInvoicePdf, ed, edCancel, edLineRow, edOpen, edRecalc, edSave, invoicePreview, markInvoiceSent, openEmailSettings, refreshInvoiceSummary, refreshInvoices, sendInvoiceEmail } from './invoices.js';
+import { closeDeliveryRecord, closeInvoicePreview, closeSendEmailDialog, confirmSendEmail, dash, downloadInvoicePdf, ed, edCancel, edClose, edHasChanges, edLineRow, edLoadDefaults, edOpen, edRecalc, edSave, initInvoiceDropdowns, invoicePreview, markInvoiceSent, openEmailSettings, refreshInvoiceSummary, refreshInvoices, sendInvoiceEmail, setInvoicePeriod } from './invoices.js';
 import { markNotificationsRead, refreshNotifications } from './notifications.js';
 import { initReceiptPreview } from './receipt.js';
+import { initSelectMenus } from './select.js';
 import { applyRoute, initRouter, initSegTabs, initSettingsTabs, initTabs, normaliseRoute, refreshTimesheetView, segActiveId, showTimesheet } from './route.js';
 import { addSecret, closeUserForm, closeUserPassword, disableVault, enableVault, initTemplatePreview, newUserForm, paintAccent, refreshAuditLog, refreshSettings, regenerateVault, renderUsers, resetBuiltInLabels, saveConfig, saveEmailSettings, saveInvoiceTemplate, saveOrgProfile, saveUser, saveUserPassword, sendTestEmail } from './settings.js';
 import { customerName, fillProjectSelect, fillTaskSelect, loadCustomers, state } from './state.js';
@@ -104,6 +105,17 @@ export function wireDayAndCalendar() {
 
 // Invoice dashboard controls (#135/#189).
 export function wireInvoiceDashboard() {
+  initInvoiceDropdowns();
+  $('inv-f-period').addEventListener('change', () => {
+    setInvoicePeriod($('inv-f-period').value);
+    refreshInvoices().catch?.(() => {});
+  });
+  for (const [id, shift] of [['inv-period-prev', -1], ['inv-period-next', 1]]) {
+    $(id).addEventListener('click', () => {
+      setInvoicePeriod(dash.periodMode, shift);
+      refreshInvoices().catch?.(() => {});
+    });
+  }
   // #135 dashboard controls
   $('inv-tab-open').addEventListener('click', () => {
     dash.openOnly = true;
@@ -127,10 +139,6 @@ export function wireInvoiceDashboard() {
     // payload — the old double call fired two renders and three GETs.
     refreshInvoices().catch?.(() => { });
   });
-  $('inv-f-project').addEventListener('change', () => {
-    dash.project = $('inv-f-project').value;
-    refreshInvoices().catch?.(() => { });
-  });
   $('inv-f-from').addEventListener('change', () => {
     dash.from = $('inv-f-from').value;
     refreshInvoices().catch?.(() => { });
@@ -139,9 +147,6 @@ export function wireInvoiceDashboard() {
     dash.to = $('inv-f-to').value;
     refreshInvoices().catch?.(() => { });
   });
-  for (const cb of document.querySelectorAll('.inv-col')) {
-    cb.addEventListener('change', dashApplyColumns);
-  }
   for (const btn of document.querySelectorAll('.p-table__sort-button')) {
     btn.addEventListener('click', () => {
       const col = btn.getAttribute('data-col');
@@ -318,8 +323,20 @@ export function wireWeekGrid() {
   // #349: the two creation actions lead the section — `+ Invoice` reveals the
   // tracked-work wizard (#134), `+ Manual Invoice` opens the manual editor
   // (#143) as a p-modal popup.
-  $('invoice-new').addEventListener('click', iwOpen);
+  $('invoice-new').addEventListener('click', () => edOpen(null));
   $('manual-new').addEventListener('click', () => edOpen(null));
+  $('ed-import').addEventListener('click', async () => {
+    if (ed.id) return;
+    const customer = $('ed-customer').value;
+    if (!customer) { showFormError($('ed-error'), { message: 'Choose a customer before importing tracked work.' }); return; }
+    if (edHasChanges() && !(await askConfirm('Import tracked work instead? Unsaved invoice fields and manual items will be discarded.'))) return;
+    edClose();
+    $('iw-customer').value = customer;
+    iw.step = 2;
+    iwShow();
+    iwOpen();
+    iwLoadProjects().catch(error => showFormError($('iw-error'), error));
+  });
   iwInit(); // #134 staged invoice wizard
   // #349: the wizard is a p-modal dialog, so Close, the native `cancel` event
   // and Escape all close it. Closing keeps the entered steps (iwClose), so
@@ -338,6 +355,21 @@ export function wireWeekGrid() {
     }
   });
   $('ed-cancel').addEventListener('click', edCancel);
+  $('ed-preview').addEventListener('click', () => edSave(true));
+  $('ed-defaults').addEventListener('click', () => { ed.defaultsPromise = edLoadDefaults(true); });
+  $('ed-customer').addEventListener('change', () => {
+    if (ed.id) return;
+    const customer = state.customers.find(item => item.id === $('ed-customer').value);
+    ed.currency = customer?.currency || 'EUR';
+    $('ed-currency').value = ed.currency;
+    ed.defaultsPromise = edLoadDefaults(false);
+    edRecalc();
+  });
+  window.addEventListener('beforeunload', event => {
+    if ($('invoice-editor').open && edHasChanges()) { event.preventDefault(); event.returnValue = ''; }
+  });
+  for (const id of ['ed-subject', 'ed-notes']) $(id).addEventListener('input', () => { $(id).dataset.touched = '1'; });
+  $('ed-currency').addEventListener('input', () => { ed.currency = $('ed-currency').value.trim().toUpperCase(); edRecalc(); });
   $('invoice-editor').addEventListener('cancel', (event) => {
     // native Escape on a real browser: cancel, never a half-open popup.
     event.preventDefault();
@@ -641,6 +673,7 @@ export async function startApp() {
   wireEntryForm();
   wireWeekGrid();
   wireSetupPanels(today);
+  initSelectMenus();
   await loadCustomers();
   await refreshCustomerPickers(); // fills all four pickers, no fetches
   // Advanced billing tools are hidden while unfinished (see billing.js): their

@@ -166,6 +166,7 @@ test('two ticked contacts send one request with both addresses in order', async 
     assert.deepEqual([...call.body.recipients], ['ada@tucanotime.test', 'bob@tucanotime.test'],
         'both addresses travel in one ordered list');
     const result = document.getElementById('send-email-result');
+    await waitFor(() => !isOpen(dlgOf(document)), { message: 'successful SMTP send to close the dialog' });
     assert.equal(result.hidden, false, 'the result is announced inline');
     assert.match(result.textContent, /ada@tucanotime\.test, bob@tucanotime\.test/,
         'the success message names every recipient, in order');

@@ -14,23 +14,25 @@ const app = loadAppSource();
 
 function makeDom(prelude = '', url = 'http://localhost/') {
   const dom = new JSDOM(html, { runScripts: 'outside-only', url });
+  dom.window.fetch = async () => ({ ok: true, status: 200, json: async () => ({}), text: async () => '{}' });
   dom.window.HTMLDialogElement.prototype.showModal = function () { this.open = true; };
   dom.window.HTMLDialogElement.prototype.close = function () { this.open = false; };
   // jsdom lays nothing out, so it has no scrollIntoView; the invoice detail
   // panel calls it when it opens (#349). Stub it exactly as gui.mjs does.
   if (!dom.window.Element.prototype.scrollIntoView) dom.window.Element.prototype.scrollIntoView = () => { };
   const exports = `${app}
+renderPdfDocument = async (host) => { host.textContent = 'Rendered invoice'; return () => {}; };
 ${prelude}
 window.bootTest = {
   dashRenderOverview, refreshInvoices, refreshCustomerPickers,
   writeOffInvoice, navigateDay, weekLockIndex, state,
   refreshWeek, openWeekRowForm, saveWeekRow, fillProjectSelect, refreshTimeCal, calState,
-  openInvoicePreview, closeInvoicePreview, showDeliveryRecord, formatTimelineStamp,
+  openInvoicePreview, closeInvoicePreview, showDeliveryRecord, formatTimelineStamp, startPdfWorker, pdfDeadline,
   // #349 journeys: the invoice action row, the year stepper and the manual
   // editor are wired by the focused wire*() functions; expose them so a test
   // drives the same listeners the app registers at boot.
-  dash, refreshInvoiceSummary, wireInvoiceDashboard, wireWeekGrid,
-  iwInit, iwOpen, edOpen, edSave, edCancel, ed,
+  dash, dashFilter, setInvoicePeriod, refreshInvoiceSummary, wireInvoiceDashboard, wireWeekGrid,
+  iwInit, iwOpen, edOpen, edLoadDefaults, edSave, edCancel, ed, catalogItems, enhanceSelect, initSelectMenus,
   peekLockCache: () => weekLockCache,
   liveText: () => document.getElementById('live-region').textContent,
   api,
@@ -609,9 +611,10 @@ api.get = async (path) => {
   assert.equal(document.getElementById('invoice-preview').hidden, false, 'the panel opens');
   const frame = document.getElementById('ip-frame');
   assert.ok(frame, 'the rendered PDF is framed');
-  assert.equal(frame.getAttribute('src'), 'blob:test-1', 'the frame shows the client-side blob URL');
-  assert.equal(document.getElementById('ip-pdf').children.length, 1,
-    'the preview region holds the frame and nothing else (#349)');
+  assert.equal(document.getElementById('ip-open-pdf').getAttribute('href'), 'blob:test-1', 'the PDF has an independent fallback');
+  assert.equal(frame.textContent, 'Rendered invoice');
+  assert.equal(document.getElementById('ip-pdf').children.length, 2,
+    'the preview region holds the renderer and fallback actions');
   assert.equal(document.getElementById('ip-pdf-state').hidden, true, 'no state line while the PDF shows');
   assert.equal(document.getElementById('ip-download').hidden, false,
     'an issued invoice can still download its archived PDF (#113)');
@@ -710,7 +713,8 @@ api.get = async () => ({ events: [] });
 `);
   dom.window.URL.createObjectURL = () => 'blob:never';
   await context.openInvoicePreview({ id: 'x1', number: 'INV-9', status: 'draft' }, null);
-  assert.equal(document.getElementById('ip-pdf').children.length, 0, 'a non-PDF body is never framed');
+  assert.equal(document.getElementById('ip-frame'), null, 'a non-PDF body is never rendered');
+  assert.equal(document.querySelector('#ip-pdf button').textContent, 'Retry preview');
   assert.equal(document.getElementById('ip-pdf-state').hidden, false);
   assert.match(document.getElementById('ip-pdf-state').textContent, /did not return a PDF/);
   assert.equal(document.getElementById('ip-download').hidden, true, 'a draft has no archived PDF to download');
@@ -757,7 +761,7 @@ window.releaseFirst = () => releaseFirst();
   context.closeInvoicePreview();
   await context.openInvoicePreview(inv, null); // render 2, the same invoice
 
-  assert.equal(document.getElementById('ip-frame').getAttribute('src'), 'blob:render-1',
+  assert.equal(document.getElementById('ip-open-pdf').getAttribute('href'), 'blob:render-1',
     'the surviving frame is the newest render');
   dom.window.releaseFirst(); // render 1 resumes and finds itself superseded
   await superseded;
@@ -766,9 +770,9 @@ window.releaseFirst = () => releaseFirst();
     'each render minted exactly one URL');
   assert.deepEqual(revoked, ['blob:render-2'],
     "the superseded render's URL is revoked, not left pinned");
-  assert.equal(document.getElementById('ip-frame').getAttribute('src'), 'blob:render-1',
+  assert.equal(document.getElementById('ip-open-pdf').getAttribute('href'), 'blob:render-1',
     'the newer frame still displays after the stale render resolves');
-  assert.equal(document.querySelectorAll('#ip-pdf iframe').length, 1, 'one frame, never two');
+  assert.equal(document.querySelectorAll('#ip-frame').length, 1, 'one renderer, never two');
   context.closeInvoicePreview();
   assert.deepEqual([...revoked].sort(), ['blob:render-1', 'blob:render-2'],
     'every minted URL is revoked exactly once');
@@ -781,7 +785,8 @@ api.getBlob = async () => { const e = new Error('HTTP 403'); e.status = 403; thr
 api.get = async () => { const e = new Error('GET /api/invoices/x/timeline failed: HTTP 500'); e.status = 500; throw e; };
 `);
   await context.openInvoicePreview({ id: 'x1', number: 'INV-9', status: 'issued' }, null);
-  assert.equal(document.getElementById('ip-pdf').children.length, 0);
+  assert.equal(document.getElementById('ip-frame'), null);
+  assert.equal(document.querySelector('#ip-pdf button').textContent, 'Retry preview');
   assert.match(document.getElementById('ip-pdf-state').textContent, /Preview unavailable/);
   assert.match(document.getElementById('ip-pdf-state').textContent, /HTTP 403/);
   assert.match(document.getElementById('ip-timeline-state').textContent, /History unavailable/);
@@ -801,6 +806,61 @@ test('the timestamp helper is the requested "on Oct 1, 2026 at 11:26 AM" shape (
   dom.window.close();
 });
 
+test('a silent PDF worker falls back instead of loading forever', async () => {
+  const { dom, context } = makeDom();
+  let expire;
+  dom.window.setTimeout = callback => { expire = callback; return 1; };
+  dom.window.clearTimeout = () => {};
+  const workers = [];
+  class WorkerFixture {
+    constructor() {
+      this.destroyed = false;
+      this.promise = workers.length ? Promise.resolve() : new Promise(() => {});
+      workers.push(this);
+    }
+    destroy() { this.destroyed = true; }
+  }
+  const fallback = { WorkerMessageHandler: {} };
+  const pending = context.startPdfWorker({ PDFWorker: WorkerFixture }, async () => fallback);
+  expire();
+  const worker = await pending;
+  assert.equal(workers.length, 2);
+  assert.equal(workers[0].destroyed, true);
+  assert.equal(worker, workers[1]);
+  assert.equal(dom.window.pdfjsWorker, fallback);
+  dom.window.close();
+});
+
+test('a failed PDF worker fallback rejects visibly rather than waiting', async () => {
+  const { dom, context } = makeDom();
+  let destroyed = false;
+  class WorkerFixture {
+    constructor() { this.promise = Promise.reject(new Error('blocked')); }
+    destroy() { destroyed = true; }
+  }
+  await assert.rejects(context.startPdfWorker({ PDFWorker: WorkerFixture },
+    async () => { throw new Error('fallback blocked'); }), /fallback blocked/);
+  assert.equal(destroyed, true);
+  dom.window.close();
+});
+
+test('a stalled PDF request leaves loading with a retryable timeout', async () => {
+  const { dom, context, document } = makeDom(`
+api.getBlob = () => new Promise(() => {});
+api.get = async () => ({events:[]});
+`);
+  let expire;
+  dom.window.setTimeout = callback => { expire = callback; return 1; };
+  dom.window.clearTimeout = () => {};
+  const pending = context.openInvoicePreview({id:'stalled',number:'INV-42',status:'draft'}, null);
+  expire();
+  await pending;
+  assert.match(document.getElementById('ip-pdf-state').textContent, /request timed out/);
+  assert.equal(document.getElementById('ip-pdf-state').hidden, false);
+  assert.equal(document.querySelector('#ip-pdf button').textContent, 'Retry preview');
+  dom.window.close();
+});
+
 // ------------------------------- creation journeys + trends gaps (#349) ----
 //
 // The batch's own suites drive these journeys live in the browser gate; the
@@ -809,43 +869,101 @@ test('the timestamp helper is the requested "on Oct 1, 2026 at 11:26 AM" shape (
 // actually moving the year, and the unset-base-currency honesty for a mixed
 // set. Every assertion reads a real property of the rendered DOM.
 
-test('+ Invoice opens the tracked-work wizard as a modal at step 1 and + Manual Invoice opens the editor (#349)', () => {
-  const { dom, context, document } = makeDom();
+test('New invoice enters the workspace and tracked work is an optional import', async () => {
+  const { dom, context, document } = makeDom(`
+api.get = async path => path === '/admin/invoice-template' ? {template:{}}
+  : path === '/invoices' ? {invoices:[]}
+    : {projects:[],entries:[]};
+`);
   context.state.customers = [{ id: 'c1', name: 'Tucano Time', currency: 'EUR' }];
+  addCustomerOption(document, 'c1', 'Tucano Time');
+  document.getElementById('iw-customer').appendChild(document.getElementById('ed-customer').firstElementChild.cloneNode(true));
   context.iwInit();
   context.wireWeekGrid();
   const wizard = document.getElementById('invoice-wizard');
   const wizardOpen = () => wizard.open === true || wizard.hasAttribute('open');
-  assert.equal(wizardOpen(), false, 'the wizard dialog starts closed -- never open at boot');
-  assert.ok(wizard.classList.contains('p-modal'), 'the wizard is the p-modal overlay');
-  assert.equal(wizard.querySelector('h3'), null, 'the wizard no longer renders as the inline p-card');
+  const editor = document.getElementById('invoice-editor');
   document.getElementById('invoice-new').dispatchEvent(new dom.window.Event('click', { bubbles: true }));
-  assert.equal(wizardOpen(), true, '+ Invoice opens the wizard as a modal');
-  assert.ok(wizard.querySelector('.p-modal__dialog .p-modal__footer'),
-    'the wizard renders inside a p-modal__dialog with a footer');
-  assert.equal(document.getElementById('iw-step1').hidden, false, 'step 1 is shown');
-  assert.equal(document.getElementById('iw-step2').hidden, true, 'step 2 is still hidden');
-  assert.equal(document.getElementById('iw-step3').hidden, true, 'step 3 is still hidden');
-  assert.match(document.getElementById('iw-title').textContent, /^Create from tracked work \u2014 1 of 3:/);
-  // Closing the dialog discards nothing: the step is preserved, so re-pressing
-  // + Invoice resumes where the user left off (never a half-entered restart).
+  assert.equal(editor.open, true);
+  assert.equal(wizardOpen(), false, 'creation has no mandatory wizard');
+  assert.equal(document.getElementById('ed-title').textContent, 'New invoice');
+  assert.equal(document.getElementById('ed-lines').querySelectorAll('tbody tr').length, 1);
+  assert.equal(document.getElementById('manual-new').hidden, true, 'one visible creation entry point');
+  document.getElementById('ed-import').click();
+  await waitFor(wizardOpen, { message: 'optional tracked import' });
+  assert.equal(editor.open, false);
+  assert.equal(document.getElementById('iw-customer').value, 'c1');
+  assert.equal(document.getElementById('iw-step2').hidden, false, 'import starts with work selection');
   document.getElementById('iw-close').dispatchEvent(new dom.window.Event('click', { bubbles: true }));
-  assert.equal(wizardOpen(), false, 'Close dismisses the wizard dialog');
-  document.getElementById('invoice-new').dispatchEvent(new dom.window.Event('click', { bubbles: true }));
-  assert.equal(wizardOpen(), true, '+ Invoice reopens the wizard');
-  assert.equal(document.getElementById('iw-step1').hidden, false, 'the wizard step is preserved');
-  // The shared keydown Escape fallback (jsdom never fires `cancel`) is wired too.
+  context.iwOpen();
+  assert.equal(document.getElementById('iw-step2').hidden, false, 'import selection is preserved');
   wizard.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-  assert.equal(wizardOpen(), false, 'Escape closes the wizard dialog');
-  document.getElementById('invoice-new').dispatchEvent(new dom.window.Event('click', { bubbles: true }));
-  assert.equal(wizardOpen(), true, 'the wizard stays usable after Escape');
-  const dlg = document.getElementById('invoice-editor');
-  const isOpen = () => dlg.open === true || dlg.hasAttribute('open');
-  assert.equal(isOpen(), false, 'the editor starts closed');
-  document.getElementById('manual-new').dispatchEvent(new dom.window.Event('click', { bubbles: true }));
-  assert.equal(isOpen(), true, '+ Manual Invoice opens the manual editor modal');
-  assert.equal(document.getElementById('ed-title').textContent, 'Manual invoice');
-  assert.equal(document.getElementById('ed-lines').querySelectorAll('tbody tr').length, 1, 'one empty line row');
+  assert.equal(wizardOpen(), false);
+  dom.window.close();
+});
+
+test('invoice periods step across years and filter invoice dates, not work dates', () => {
+  const { dom, context, document } = makeDom();
+  context.dash.periodAnchor = '2026-12-15';
+  context.setInvoicePeriod('quarter');
+  assert.equal(context.dash.from, '2026-10-01');
+  assert.equal(context.dash.to, '2026-12-31');
+  context.setInvoicePeriod('quarter', 1);
+  assert.equal(context.dash.from, '2027-01-01');
+  assert.equal(context.dash.to, '2027-03-31');
+  const rows = context.dashFilter([
+    {number:'A',status:'draft',document:{invoice_date:'2027-02-01'},period_from:'2026-01-01',period_to:'2026-01-31'},
+    {number:'B',status:'draft',document:{invoice_date:'2026-02-01'},period_from:'2027-01-01',period_to:'2027-01-31'},
+  ]);
+  assert.deepEqual([...rows].map(row => row.number), ['A']);
+  context.wireInvoiceDashboard();
+  document.getElementById('inv-f-period').value = 'all';
+  document.getElementById('inv-f-period').dispatchEvent(new dom.window.Event('change', { bubbles: true }));
+  assert.equal(context.dash.from, '');
+  assert.equal(context.dash.periodMode, 'all');
+  dom.window.close();
+});
+
+test('invoice filter menus select, dismiss and reset alongside their native state', () => {
+  const { dom, context, document } = makeDom('refreshInvoices = async () => {};');
+  document.getElementById('panel-invoices').hidden = false;
+  const customer = document.getElementById('inv-f-customer');
+  const option = document.createElement('option');
+  option.value = 'c1'; option.textContent = 'Example customer'; customer.appendChild(option);
+  context.wireInvoiceDashboard();
+  const button = document.getElementById('inv-f-customer-button');
+  const menu = document.getElementById('inv-f-customer-menu');
+  assert.ok(customer.classList.contains('invoice-filter-native'));
+  assert.equal(button.getAttribute('aria-haspopup'), 'listbox');
+  button.click();
+  assert.equal(menu.hidden, false);
+  assert.equal(button.getAttribute('aria-expanded'), 'true');
+  menu.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'End', bubbles: true }));
+  assert.equal(document.activeElement.id, 'inv-f-customer-option-1');
+  document.activeElement.click();
+  assert.equal(context.dash.customer, 'c1');
+  assert.equal(customer.value, 'c1');
+  assert.equal(menu.hidden, true);
+  assert.equal(document.activeElement, button);
+  assert.equal(button.textContent.trim(), 'Example customer');
+  button.click();
+  menu.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  assert.equal(menu.hidden, true);
+  button.click();
+  document.body.dispatchEvent(new dom.window.Event('pointerdown', { bubbles: true }));
+  assert.equal(menu.hidden, true);
+  button.click();
+  document.getElementById('inv-f-customer-option-0').click();
+  assert.equal(button.textContent.trim(), 'Customer');
+  assert.equal(context.dash.customer, '');
+  assert.equal(customer.value, '');
+  const period = document.getElementById('inv-f-period-button');
+  period.click();
+  document.getElementById('inv-f-period-option-1').click();
+  assert.equal(context.dash.periodMode, 'month');
+  assert.equal(period.textContent.trim(), 'Month');
+  assert.equal(document.getElementById('inv-clear'), null);
+  assert.equal(document.getElementById('inv-f-project'), null);
   dom.window.close();
 });
 
@@ -860,7 +978,7 @@ function addCustomerOption(document, id, label) {
 }
 
 test('the manual editor Cancel saves nothing and Save posts exactly one manual draft (#349/#143)', async () => {
-  const { dom, context, document } = makeDom('refreshInvoices = async () => {};');
+  const { dom, context, document } = makeDom('refreshInvoices = async () => {}; askConfirm = async () => true;');
   context.state.customers = [{ id: 'c1', name: 'Tucano Time', currency: 'EUR' }];
   context.wireWeekGrid();
   const posts = [];
@@ -881,6 +999,7 @@ test('the manual editor Cancel saves nothing and Save posts exactly one manual d
   document.getElementById('ed-lines').querySelector('tbody tr')
     .querySelector('input[type=text]').value = 'Should not persist';
   document.getElementById('ed-cancel').dispatchEvent(new dom.window.Event('click', { bubbles: true }));
+  await waitFor(() => !isOpen(), { message: 'confirmed draft cancellation' });
   assert.equal(isOpen(), false, 'Cancel closes the editor');
   assert.equal(posts.length, 0, 'Cancel issues no request at all');
   assert.match(context.liveText(), /cancelled/);
@@ -905,6 +1024,126 @@ test('the manual editor Cancel saves nothing and Save posts exactly one manual d
   assert.equal(posts[0].body.lines[0].unit_price_minor, 1000, 'unit price in minor units');
   assert.equal(isOpen(), false, 'Save closes the editor');
   assert.match(context.liveText(), /Draft INV-0042 saved/);
+  dom.window.close();
+});
+
+test('document defaults restore customer/template content and report their result', async () => {
+  const { dom, context, document } = makeDom(`
+api.get = async path => path === '/admin/invoice-template'
+  ? {template:{subject:'Org subject',notes:'Org notes',payment_terms:{kind:'net_30'}}}
+  : {projects:[]};
+`);
+  context.state.customers = [{id:'c1',name:'Example',currency:'EUR',invoice_subject:'Customer subject',invoice_notes:'Customer notes'}];
+  addCustomerOption(document, 'c1', 'Example');
+  context.wireWeekGrid();
+  context.edOpen(null);
+  await context.edLoadDefaults();
+  document.getElementById('ed-subject').value = 'Edited subject';
+  document.getElementById('ed-notes').value = 'Edited notes';
+  document.getElementById('ed-terms').value = 'net_45';
+  document.getElementById('ed-due').value = '2027-01-01';
+  document.getElementById('ed-defaults').click();
+  await waitFor(() => document.getElementById('ed-defaults-state').textContent === 'Document defaults restored.', {message:'visible defaults reset'});
+  assert.equal(document.getElementById('ed-subject').value, 'Customer subject');
+  assert.equal(document.getElementById('ed-notes').value, 'Org notes\n\nCustomer notes');
+  assert.equal(document.getElementById('ed-due').value, '');
+  assert.equal(document.getElementById('ed-terms').value, '');
+  assert.equal(document.getElementById('ed-terms-button').textContent.trim(), 'Default (Net 30)');
+  document.getElementById('ed-defaults').click();
+  await waitFor(() => document.getElementById('ed-defaults-state').textContent === 'Already using document defaults.', {message:'unchanged defaults result'});
+  context.api.get = async () => { throw new Error('unavailable'); };
+  await context.edLoadDefaults(true);
+  assert.match(document.getElementById('ed-defaults-state').textContent, /Defaults unavailable/);
+  dom.window.close();
+});
+
+test('the catalog preset is distinct from description and hidden without saved items', async () => {
+  const { dom, context, document } = makeDom('api.get = async () => ({template:{},projects:[]});');
+  context.wireWeekGrid();
+  context.edOpen(null);
+  const preset = document.querySelector('#ed-lines [aria-label="Saved catalog item"]');
+  const description = document.querySelector('#ed-lines [aria-label="Line description"]');
+  assert.ok(description);
+  assert.equal(preset.options[0].textContent, 'Custom item');
+  assert.equal(preset.__filterButton.hidden, true);
+  context.catalogItems.push({id:'item1',active:true,name:'Consulting',kind:'service',currency:'EUR',default_price_minor:6000});
+  const row = document.querySelector('#ed-lines tbody tr');
+  row.__attachItemSelect();
+  preset.__filterSync();
+  assert.equal(preset.__filterButton.hidden, false);
+  preset.value = 'item1';
+  preset.dispatchEvent(new dom.window.Event('change', {bubbles:true}));
+  assert.equal(description.value, 'Consulting');
+  assert.equal(row.querySelector('[aria-label="Product or service"]'), null);
+  assert.equal(row.__read().item_kind, 'service', 'catalog metadata remains compatible without a visible type');
+  preset.__filterButton.click();
+  document.getElementById(`${preset.id}-menu`).dispatchEvent(new dom.window.KeyboardEvent('keydown', {key:'Escape',bubbles:true,cancelable:true}));
+  assert.equal(document.getElementById('invoice-editor').open, true);
+  assert.equal(document.getElementById('app-dialog').open, false, 'Escape only dismisses the option menu');
+  dom.window.close();
+});
+
+test('editing existing invoice items preserves legacy metadata without a type field', () => {
+  const { dom, context, document } = makeDom('api.get = async () => ({template:{},projects:[]});');
+  addCustomerOption(document, 'c1', 'Example');
+  context.edOpen({id:'draft1',number:'INV-42',status:'draft',customer_id:'c1',currency:'EUR',lines:[
+    {kind:'fixed',note:'Existing item',item_kind:'product',quantity_hundredths:100,unit_price_minor:5000,amount_minor:5000},
+  ]});
+  const row = document.querySelector('#ed-lines tbody tr');
+  assert.equal(row.__read().item_kind, 'product');
+  assert.equal(row.querySelector('[aria-label="Product or service"]'), null);
+  assert.equal(row.children.length, 5);
+  assert.equal(document.getElementById('invoice-new').textContent.trim(), 'Invoice');
+  assert.equal(document.getElementById('settings-tab-catalog').textContent.trim(), 'Catalog');
+  dom.window.close();
+});
+
+test('shared selects preserve native values, events, validation and reset', async () => {
+  const { dom, context, document } = makeDom();
+  const form = document.createElement('form');
+  const select = document.createElement('select');
+  select.id = 'shared-select-test'; select.required = true;
+  for (const [value, text] of [['','Choose'],['alpha','Alpha'],['beta','Beta']]) {
+    const option = document.createElement('option'); option.value = value; option.textContent = text; select.appendChild(option);
+  }
+  form.appendChild(select); document.body.appendChild(form);
+  context.enhanceSelect(select, 'Example');
+  assert.equal(select.hidden, false, 'native required validation stays enabled');
+  assert.equal(select.checkValidity(), false);
+  assert.equal(select.__filterButton.getAttribute('aria-invalid'), 'true');
+  assert.ok(form.querySelector('[role="alert"]'));
+  let changes = 0;
+  select.addEventListener('change', () => changes++);
+  select.__filterButton.click();
+  document.getElementById('shared-select-test-option-2').click();
+  assert.equal(select.value, 'beta');
+  assert.equal(changes, 1);
+  assert.equal(form.querySelector('[role="alert"]'), null);
+  select.value = 'alpha';
+  assert.equal(select.__filterButton.textContent.trim(), 'Alpha');
+  select.disabled = true;
+  await waitFor(() => select.__filterButton.disabled, {message:'native disabled state to sync'});
+  select.disabled = false; select.hidden = true;
+  await waitFor(() => select.__filterButton.hidden, {message:'native hidden state to sync'});
+  select.hidden = false; form.reset();
+  await waitFor(() => select.__filterButton.textContent.trim() === 'Choose', {message:'form reset to sync'});
+  assert.equal(select.value, '');
+  dom.window.close();
+});
+
+test('shared dropdown discovery enhances dynamic single selects, not multiple lists', async () => {
+  const { dom, context, document } = makeDom();
+  context.initSelectMenus();
+  const select = document.createElement('select');
+  select.setAttribute('aria-label', 'Dynamic choice');
+  document.body.appendChild(select);
+  await waitFor(() => !!select.__filterButton, {message:'dynamic select discovery'});
+  const option = document.createElement('option'); option.value = 'one'; option.textContent = 'Loaded option';
+  select.appendChild(option);
+  await waitFor(() => select.__filterButton.textContent.trim() === 'Loaded option', {message:'dynamic options to sync'});
+  const multiple = document.createElement('select'); multiple.multiple = true; document.body.appendChild(multiple);
+  await yieldToEventLoop();
+  assert.equal(multiple.__filterButton, undefined);
   dom.window.close();
 });
 

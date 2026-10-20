@@ -18,6 +18,41 @@ An invoice moves through these statuses:
 
 ### Generate a draft
 
+Choose **New invoice** to open the shared draft workspace. Select the customer,
+then enter manual invoice items or choose **Import tracked work** to
+select a work period, projects and expenses. Import is optional; it creates a
+tracked draft and opens that draft in the same editor for review. It does not
+append work to an existing invoice. Unsaved manual changes must be discarded
+explicitly before switching to import.
+
+The workspace supports PO reference, invoice date, optional due date/terms,
+subject and notes, as well as tax, discount, manual-line project links and manual
+row ordering. Source-backed time/expense lines remain read-only and must be
+retained exactly once. Currency cannot change once a draft contains tracked
+work. Save is explicit; **Save & preview** saves first and then renders the PDF.
+The Catalog and draft editor do not distinguish products from services. Legacy
+type metadata is retained internally for compatibility; no type selection is
+required and editing an existing item preserves its stored value.
+Cancel asks before discarding changes, and leaving the page warns about unsaved
+edits. Invoice numbers remain server-assigned at draft creation.
+
+Customers can set an optional **Invoice prefix** in their customer form. `CUST1`,
+`CUST2` and `MONKEY` produce independent sequences beginning `CUST1-001`,
+`CUST2-001` and `MONKEY-001`. Prefixes are uppercased; trailing hyphens are
+optional. Two customers with the same prefix share its sequence. Existing
+drafts and issued invoices keep their numbers when the prefix changes; changing
+back resumes that prefix's sequence. A blank prefix retains the original
+`INV-0001` format and global sequence. Deleting a draft never recycles its number.
+Prefixes allow up to 20 letters/digits/internal hyphens and cannot be `INV`.
+
+Subject and notes prefill from customer/template settings; blank explicit notes
+suppress default notes. **Reset document defaults** restores those
+fields and inherited terms, with a visible restored/unchanged/error result. The
+catalog selector prefills a manual line from saved items; it is not the description
+field, and is hidden when no saved items exist. Editor dropdowns use anchored
+menus within the invoice dialog. Explicit due dates take precedence and print without
+a potentially contradictory `(Net N)` suffix. All overrides are draft-only.
+
 A tracked-work invoice is generated from a period's **billable, not-yet-invoiced**
 entries and expenses:
 
@@ -38,12 +73,40 @@ A manual invoice can also be created from fixed lines and catalog items. Manual
 amounts are recomputed on the server from quantity × unit price with integer
 math, and the document may apply a discount and VAT.
 
+### Browse and preview
+
+Open/All is on its own row, above the filters in table order: Number, Customer,
+Time. There is no Clear all or Columns control; all table columns stay visible.
+All time is the initial period; Month, Quarter and Year
+have previous/next navigation, and Custom range exposes from/to dates. Period
+filters use the invoice's document date, then its issue/creation date for older
+records. Importing tracked work uses work dates instead.
+
+Invoice previews use locally bundled PDF.js rather than a browser-specific PDF
+plugin. Page and zoom controls, accessible page text, loading/errors, Retry and
+an Open PDF fallback remain available. No invoice is uploaded to an external
+viewer. Issued-download PDFs remain write-once archives; new rendering/layout
+changes never overwrite those files.
+New issued archives and customer email attachments have no preview watermark.
+For older archives carrying the application DRAFT/SENT/PAID stamp, email delivery
+uses an in-memory copy with only that known stamp removed; the archived file is
+not modified. Successful SMTP acceptance closes the recipient popup; validation
+or transport errors leave it open for correction.
+If an embedded browser does not start its PDF worker promptly, the viewer uses
+PDF.js's local main-thread fallback. Network and rendering stages have deadlines;
+a stalled request reports a retryable error rather than loading indefinitely.
+Invoice filter option menus are anchored to their filter buttons, including when
+the row wraps on mobile; Escape dismisses a menu and returns focus to its filter.
+
 ### Issue
+
+When no company name is configured, the fallback issuer name is `TucanoTime`.
+An explicit company profile or configured organisation name takes precedence.
 
 Issuing:
 
-- assigns the next sequential number (`INV-0001`, `INV-0002`, …) from the
-  number ledger under the writer lock;
+- retains the number allocated at draft creation under the writer lock,
+  from `invoices/.seq.json` (default) or `invoices/.seq.prefixes.json` (custom);
 - sets `issued_at`, calculates `due_date` from the customer's payment terms
   (falling back to the org template default, then the legacy
   net-14-from-period-to rule), and freezes the status;

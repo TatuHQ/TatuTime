@@ -40,6 +40,7 @@ fn day(year: i32, month: u32, day: u32) -> NaiveDate {
 #[must_use]
 pub(crate) fn sample_invoice() -> Invoice {
     Invoice {
+        document: Default::default(),
         id: Uuid::nil(),
         number: "INV-0000".into(),
         customer_id: Uuid::nil(),
@@ -139,6 +140,7 @@ pub(crate) fn sample_customer() -> crate::domain::Customer {
         }),
         invoice_notes: "Thank you for your business. Please quote the invoice number.".into(),
         invoice_subject: String::new(),
+        invoice_prefix: Default::default(),
         address: Some(Address {
             street: "12 Sample Street".into(),
             city: "Sampleville".into(),

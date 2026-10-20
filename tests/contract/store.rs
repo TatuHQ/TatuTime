@@ -62,6 +62,7 @@ fn concurrent_writer_times_out_with_lock_busy() {
         payment_terms: None,
         invoice_notes: String::new(),
         invoice_subject: String::new(),
+        invoice_prefix: Default::default(),
         address: None,
         contacts: vec![],
         tax_hundredths: 0,
@@ -337,6 +338,7 @@ mod storage_layout {
             payment_terms: None,
             invoice_notes: String::new(),
             invoice_subject: String::new(),
+            invoice_prefix: Default::default(),
             address: None,
             contacts: vec![],
             tax_hundredths: 0,
@@ -427,6 +429,7 @@ mod storage_layout {
                 discount_hundredths: 0,
                 subject: String::new(),
                 terms: None,
+                document: Default::default(),
             })
             .unwrap();
 

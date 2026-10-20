@@ -9,6 +9,8 @@ import { $, announce, askConfirm, askPrompt, clearFormError, el, formatMoney, pa
 import { convertMinor, currencyCode, fetchRateQuote } from './fx.js';
 import { applyRoute, normaliseRoute } from './route.js';
 import { createSeqGuard } from './seq.js';
+import { closeSelectMenus, enhanceSelect } from './select.js';
+import { pdfDeadline, renderPdfDocument } from './pdf.js';
 import { customerName, state } from './state.js';
 import { MONTH_NAMES, invalidateLockCache } from './timesheet.js';
 
@@ -48,39 +50,39 @@ async function refreshInvoicesBody() {
     if (inv.status === 'draft') {
       actions.push(
         action('link', 'Edit', () => api.get(`/invoices/${inv.id}`).then(edOpen, (e) => announce(e.message)),
-          'Edit the draft lines and percentages'),
-        action('link', 'Issue', () => issueInvoice(inv)),
-        action('danger', 'Delete', () => removeInvoice(inv.id)),
+          'Edit the draft lines and percentages', 'edit'),
+        action('link', 'Issue', () => issueInvoice(inv), 'Issue invoice', 'credit-card'),
+        action('danger', 'Delete', () => removeInvoice(inv.id), 'Delete invoice', 'delete'),
       );
     } else if (open) {
       actions.push(
         action('link', 'Record payment', () => recordPayment(inv, balance),
-          'Record a full or partial payment (partly paid keeps the rest open)'),
+          'Record a full or partial payment (partly paid keeps the rest open)', 'credit-card'),
 
         action('link', 'PDF', () => downloadInvoicePdf(inv.id, inv.number),
-          'Download the archived invoice PDF'),
+          'Download the archived invoice PDF', 'file'),
         action('link', 'Email', (evt) => emailInvoice(inv, evt.currentTarget),
-          'Choose recipients and send this invoice (PDF attached)'),
+          'Choose recipients and send this invoice (PDF attached)', 'email'),
         action('link', 'Email copy', () => emailInvoiceCopy(inv.id),
-          'Send a PDF copy to another address, e.g. the accountant'),
+          'Send a PDF copy to another address, e.g. the accountant', 'copy'),
         action('danger', 'Write off', () => writeOffInvoice(inv, balance),
-          'Forgive the remaining balance (final; excluded from outstanding)'),
+          'Forgive the remaining balance (final; excluded from outstanding)', 'stop'),
       );
     } else if (inv.status === 'paid') {
       actions.push(
         action('link', 'PDF', () => downloadInvoicePdf(inv.id, inv.number),
-          'Download the archived invoice PDF'),
+          'Download the archived invoice PDF', 'file'),
         action('link', 'Email', (evt) => emailInvoice(inv, evt.currentTarget),
-          'Choose recipients and send this invoice (PDF attached)'),
+          'Choose recipients and send this invoice (PDF attached)', 'email'),
         action('link', 'Email copy', () => emailInvoiceCopy(inv.id),
-          'Send a PDF copy to another address, e.g. the accountant'),
+          'Send a PDF copy to another address, e.g. the accountant', 'copy'),
       );
     }
     // #133: selecting the row (its Preview button, a click anywhere on the
     // row, or Enter with the row focused) opens the live document preview.
     actions.unshift(
       action('link', 'Preview', (evt) => openInvoicePreview(inv, evt.currentTarget),
-        'Preview this invoice document'),
+        'Preview this invoice document', 'show'),
     );
     // The frozen subject (#354): snapshot at issue, display only. It rides
     // under the invoice number as a quiet subtitle, never as a new column and
@@ -116,7 +118,7 @@ async function refreshInvoicesBody() {
           // ratified lifecycle vocabulary (#349) -- presentation only.
           statusChip(statusLabel(inv.status), open),
         ]),
-        el('td', { cls: 'actions-col' }, actions),
+        el('td', { cls: 'actions-col', data: { iconActions: '1' } }, actions),
       ]),
     );
   }
@@ -124,7 +126,6 @@ async function refreshInvoicesBody() {
   $('invoice-empty').textContent = (data.invoices || []).length && !invoices.length
     ? 'No invoices match the current filters.'
     : 'No invoices yet.';
-  dashApplyColumns(); // #135 column visibility
   if (invoicePreview) {
     const fresh = invoices.find((i) => i.id === invoicePreview.id);
     if (fresh) {
@@ -161,22 +162,6 @@ export async function refreshInvoiceSummary(preloaded) {
     const all = preloaded ?? (await api.get('/invoices')).invoices ?? [];
     if (all.length && !dash.currency) dash.currency = all.find((i) => i.status !== 'draft')?.currency || '';
     dashRenderOverview(all);
-    // project filter options follow the customer filter
-    const projSel = $('inv-f-project');
-    const keep = projSel.value;
-    projSel.textContent = '';
-    projSel.appendChild(el('option', { attrs: { value: '' }, text: 'All projects' }));
-    const seen = new Set();
-    for (const i of all) {
-      if (dash.customer && i.customer_id !== dash.customer) continue;
-      for (const l of i.lines || []) {
-        if (l.project_code && !seen.has(l.project_code)) {
-          seen.add(l.project_code);
-          projSel.appendChild(el('option', { attrs: { value: l.project_code }, text: l.project_code }));
-        }
-      }
-    }
-    if (keep) projSel.value = keep;
   } catch { /* overview is additive; table remains authoritative */ }
 }
 
@@ -528,6 +513,8 @@ export async function confirmSendEmail() {
     // this send was a logged no-op. Keep the settings link in reach.
     $('send-email-notice').hidden = false;
     $('send-email-send').disabled = true;
+  } else if (sendEmail.invoice?.id === inv.id) {
+    closeSendEmailDialog();
   }
   // #349: the delivery updates the panel's history and watermark; re-render
   // behind the dialog instead of closing it under the admin.
@@ -598,7 +585,40 @@ export const dash = {
   sortKey: 'number',
   sortDir: 1,
   currency: '',
+  periodMode: 'all',
+  periodAnchor: new Date().toISOString().slice(0, 10),
+  dateBasis: 'period',
 };
+
+export function initInvoiceDropdowns(controls = [["inv-f-customer", "Customer"], ["inv-f-period", "Time"]]) {
+  for (const [control, caption] of controls) {
+    enhanceSelect(typeof control === "string" ? $(control) : control, caption);
+  }
+}
+
+export function setInvoicePeriod(mode, shift = 0) {
+  dash.periodMode = mode;
+  dash.dateBasis = 'issue';
+  const anchor = new Date(`${dash.periodAnchor}T12:00:00Z`);
+  const span = mode === 'quarter' ? 3 : mode === 'year' ? 12 : 1;
+  if (shift) anchor.setUTCMonth(anchor.getUTCMonth() + shift * span, 1);
+  dash.periodAnchor = anchor.toISOString().slice(0, 10);
+  const year = anchor.getUTCFullYear();
+  const month = mode === 'year' ? 0 : mode === 'quarter' ? Math.floor(anchor.getUTCMonth() / 3) * 3 : anchor.getUTCMonth();
+  if (mode === 'all') { dash.from = ''; dash.to = ''; }
+  else if (mode !== 'custom') {
+    dash.from = new Date(Date.UTC(year, month, 1)).toISOString().slice(0, 10);
+    dash.to = new Date(Date.UTC(year, month + span, 0)).toISOString().slice(0, 10);
+  }
+  $('inv-f-from').value = dash.from;
+  $('inv-f-to').value = dash.to;
+  document.querySelectorAll('.inv-custom-period').forEach(node => { node.hidden = mode !== 'custom'; });
+  document.querySelector('.invoice-period-nav').hidden = mode === 'all' || mode === 'custom';
+  $('inv-period-label').textContent = mode === 'year' ? String(year)
+    : mode === 'quarter' ? `Q${Math.floor(month / 3) + 1} ${year}`
+      : new Intl.DateTimeFormat('en', { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(anchor);
+  for (const id of ['inv-f-period', 'inv-f-customer']) $(id).__filterSync?.();
+}
 
 // "Collectable right now": issued or partly paid — drives the Record-payment
 // affordance, the balance column and which row actions appear. NOT the lock
@@ -664,8 +684,9 @@ export function dashFilter(invoices) {
   }
   if (dash.customer) rows = rows.filter((i) => i.customer_id === dash.customer);
   if (dash.project) rows = rows.filter((i) => (i.lines || []).some((l) => l.project_code === dash.project));
-  if (dash.from) rows = rows.filter((i) => i.period_to >= dash.from);
-  if (dash.to) rows = rows.filter((i) => i.period_from <= dash.to);
+  const invoiceDate = invoice => invoice.document?.invoice_date || invoice.invoice_date || (invoice.issued_at || invoice.created_at || invoice.period_to || '').slice(0, 10);
+  if (dash.from) rows = rows.filter((i) => (dash.dateBasis === 'issue' ? invoiceDate(i) : i.period_to) >= dash.from);
+  if (dash.to) rows = rows.filter((i) => (dash.dateBasis === 'issue' ? invoiceDate(i) : i.period_from) <= dash.to);
   const key = {
     number: (i) => i.number,
     customer: (i) => customerName(i.customer_id),
@@ -909,19 +930,6 @@ export function dashRenderOverview(invoices) {
     .catch(() => { });
 }
 
-export function dashApplyColumns() {
-  const on = new Set([...document.querySelectorAll('.inv-col:checked')].map((c) => c.value));
-  const table = $('invoice-table');
-  const idx = { customer: 1, period: 2, total: 3, balance: 4, status: 5 };
-  for (const [name, i] of Object.entries(idx)) {
-    const hide = !on.has(name);
-    table.querySelectorAll('tr').forEach((row) => {
-      const cell = row.children[i];
-      if (cell) cell.hidden = hide;
-    });
-  }
-}
-
 // ------------------------------------------- invoice detail panel (#349) --
 //
 // Selecting a register row opens the invoice detail view (#133): the invoice's
@@ -943,6 +951,7 @@ export let invoicePreview = null; // { id, inv, opener }
 /// multi-hundred-kilobyte PDF must not stay alive in an object URL the panel
 /// stopped showing (the rule the receipt preview follows, #332).
 let previewPdfUrl = '';
+let releasePdfDocument = null;
 
 /// The history the panel last rendered, so a delivery action can tell an
 /// idempotent repeat (no new entry) from a first transition without a second
@@ -950,6 +959,8 @@ let previewPdfUrl = '';
 let previewTimeline = [];
 
 function releasePreviewPdfUrl() {
+  releasePdfDocument?.();
+  releasePdfDocument = null;
   if (previewPdfUrl) URL.revokeObjectURL(previewPdfUrl);
   previewPdfUrl = '';
 }
@@ -1007,11 +1018,15 @@ async function renderPreviewPdf(inv) {
   const seq = ++previewRenderSeq;
   host.textContent = '';
   releasePreviewPdfUrl();
+  state.hidden = false;
+  state.textContent = 'Loading invoice PDF…';
   const id = inv.id;
+  const retry = el('button', { type: 'button', cls: 'p-button', text: 'Retry preview', on: { click: () => renderPreviewPdf(inv) } });
+  host.appendChild(retry);
   try {
-    const blob = await api.getBlob(`/invoices/${id}/pdf/preview`);
+    const blob = await pdfDeadline(api.getBlob(`/invoices/${id}/pdf/preview`), 15000, 'The PDF request timed out. Retry preview.');
     if (!previewRenderCurrent(seq, id)) return; // superseded by a newer selection
-    const bytes = new Uint8Array(await blob.arrayBuffer());
+    const bytes = new Uint8Array(await pdfDeadline(blob.arrayBuffer()));
     if (!isPdfBody(blob, bytes)) {
       state.textContent = `Preview unavailable — the server did not return a PDF (${blob.type || 'no content type'}).`;
       state.hidden = false;
@@ -1031,10 +1046,12 @@ async function renderPreviewPdf(inv) {
       return;
     }
     previewPdfUrl = url;
-    host.appendChild(el('iframe', {
-      cls: 'ip-frame',
-      attrs: { id: 'ip-frame', src: previewPdfUrl, title: `Invoice ${inv.number} PDF preview` },
-    }));
+    const fallback = el('a', { text: 'Open PDF', attrs: { href: url, target: '_blank', rel: 'noopener', id: 'ip-open-pdf' } });
+    const viewer = el('div', { cls: 'pdf-viewer', attrs: { id: 'ip-frame', role: 'region', 'aria-label': `Invoice ${inv.number} PDF preview`, title: `Invoice ${inv.number} PDF preview` } });
+    host.replaceChildren(viewer, el('div', { cls: 'pdf-actions' }, [fallback, retry]));
+    const dispose = await renderPdfDocument(viewer, bytes, () => previewRenderCurrent(seq, id));
+    if (!previewRenderCurrent(seq, id)) { dispose(); return; }
+    releasePdfDocument = dispose;
     state.hidden = true;
     state.textContent = '';
   } catch (err) {
@@ -1349,12 +1366,8 @@ export function edTotals(subtotal, taxH, discH) {
 
 export function edLineRow(line = null) {
   const desc = el('input', { attrs: { type: 'text', maxlength: 500, placeholder: 'Description', 'aria-label': 'Line description', value: line ? line.note : '' } });
-  const itemSel = el('select', { attrs: { 'aria-label': 'Catalog item type (prefills this line)' } });
-  const kind = el('select', { attrs: { 'aria-label': 'Product or service' } }, [
-    el('option', { attrs: { value: 'product', selected: !line || line.item_kind !== 'service' ? '' : null }, text: 'Product' }),
-    el('option', { attrs: { value: 'service' }, text: 'Service' }),
-  ]);
-  if (line && line.item_kind === 'service') kind.value = 'service';
+  const itemSel = el('select', { data: { catalog: '1' }, attrs: { 'aria-label': 'Saved catalog item' } });
+  let legacyKind = line?.item_kind || 'service';
   const qty = el('input', {
     cls: 'num',
     attrs: {
@@ -1370,14 +1383,25 @@ export function edLineRow(line = null) {
     },
   });
   const amount = el('td', { cls: 'num' });
+  const project = el('select', { attrs: { 'aria-label': 'Linked project' } });
+  const updateProjects = () => {
+    const selected = project.value || line?.project_code || '';
+    project.replaceChildren(el('option', { value: '', text: 'No linked project' }));
+    for (const item of state.projectsByCustomer[$('ed-customer').value] || []) {
+      project.appendChild(el('option', { value: item.code, text: `${item.code} — ${item.name}` }));
+    }
+    project.value = selected;
+  };
+  updateProjects();
   const row = el('tr', {}, [
-    el('td', {}, [itemSel, desc]),
-    el('td', {}, [kind]),
+    el('td', {}, [itemSel, desc, project]),
     el('td', {}, [qty]),
     el('td', {}, [price]),
     amount,
     el('td', { cls: 'actions-col' }, [
       el('button', { type: 'button', cls: 'link danger', text: 'Remove', on: { click: () => { row.remove(); edRecalc(); } } }),
+      el('button', { type: 'button', cls: 'link', text: 'Up', on: { click: () => { if (row.previousElementSibling) row.before(row.previousElementSibling); edRecalc(); } } }),
+      el('button', { type: 'button', cls: 'link', text: 'Down', on: { click: () => { if (row.nextElementSibling) row.after(row.nextElementSibling); edRecalc(); } } }),
     ]),
   ]);
   const read = () => {
@@ -1385,7 +1409,8 @@ export function edLineRow(line = null) {
     const p = parseHundredths(price.value);
     return {
       description: desc.value.trim(),
-      item_kind: kind.value,
+      project_code: project.value || null,
+      item_kind: legacyKind,
       quantity_hundredths: q,
       unit_price_minor: p,
       amount_minor: Number.isFinite(q) && Number.isFinite(p) ? edAmount(q, p) : NaN,
@@ -1394,7 +1419,7 @@ export function edLineRow(line = null) {
   row.__attachItemSelect = () => {
     const keep = itemSel.value;
     itemSel.textContent = '';
-    itemSel.appendChild(el('option', { attrs: { value: '' }, text: '— custom —' }));
+    itemSel.appendChild(el('option', { attrs: { value: '' }, text: 'Custom item' }));
     for (const it of catalogItems.filter((x) => x.active)) {
       itemSel.appendChild(
         el('option', { attrs: { value: it.id }, text: `${it.name} (${it.currency} ${formatMoney(it.default_price_minor)})` }),
@@ -1402,13 +1427,15 @@ export function edLineRow(line = null) {
     }
     if (keep) itemSel.value = keep;
   };
+  row.__updateProjects = updateProjects;
   row.__attachItemSelect();
+  initInvoiceDropdowns([[itemSel, 'Catalog item'], [project, 'Linked project']]);
   itemSel.addEventListener('change', () => {
     const it = catalogItems.find((x) => x.id === itemSel.value);
     if (!it) return;
     // Prefill only — every field stays editable (#147).
     if (!desc.value.trim()) desc.value = it.description || it.name;
-    kind.value = it.kind;
+    legacyKind = it.kind || 'service';
     if (!Number(price.value)) price.value = (it.default_price_minor / 100).toFixed(2);
     edRecalc();
   });
@@ -1417,14 +1444,13 @@ export function edLineRow(line = null) {
     const r = read();
     amount.textContent = Number.isFinite(r.amount_minor) ? formatMoney(r.amount_minor) : '—';
   };
-  for (const inp of [desc, kind, qty, price]) inp.addEventListener('input', edRecalc);
+  for (const inp of [desc, qty, price]) inp.addEventListener('input', edRecalc);
   return row;
 }
 
 export function edTrackedRow(line) {
   return el('tr', {}, [
     el('td', { text: line.note || (line.project_code || '') }),
-    el('td', { text: 'tracked' }),
     el('td', { cls: 'num', text: line.hours ? (line.hours / 100).toFixed(2) : '1.00' }),
     el('td', { cls: 'num', text: line.rate_minor != null ? formatMoney(line.rate_minor) : formatMoney(line.amount_minor) }),
     el('td', { cls: 'num', text: formatMoney(line.amount_minor) }),
@@ -1453,10 +1479,13 @@ export function edRecalc() {
 }
 
 export function edOpen(draft) {
+  ed.epoch = (ed.epoch || 0) + 1;
+  if (draft?.status && draft.status !== 'draft') { announce('Only draft invoices can be edited.'); return; }
+  if (draft) $('ed-customer').value = draft.customer_id;
   ed.id = draft ? draft.id : null;
   ed.tracked = draft ? (draft.lines || []).filter((l) => l.entry_id || l.expense_id) : [];
   ed.currency = draft ? draft.currency : (state.customers.find((c) => c.id === $('ed-customer').value)?.currency || 'EUR');
-  $('ed-title').textContent = draft ? `Edit draft ${draft.number}` : 'Manual invoice';
+  $('ed-title').textContent = draft ? `Edit invoice ${draft.number}` : 'New invoice';
   $('ed-customer').disabled = Boolean(draft);
   const tbody = $('ed-lines').querySelector('tbody');
   tbody.textContent = '';
@@ -1466,22 +1495,109 @@ export function edOpen(draft) {
   for (const l of manuals) tbody.appendChild(edLineRow(l));
   $('ed-tax').value = draft ? (draft.tax_hundredths / 100).toFixed(2) : '0';
   $('ed-discount').value = draft ? (draft.discount_hundredths / 100).toFixed(2) : '0';
+  const details = draft?.document || {};
+  ed.termsOverride = details.payment_terms || null;
+  $('ed-number').value = draft?.number || 'Assigned on save';
+  $('ed-po').value = details.po_number || '';
+  $('ed-date').value = details.invoice_date || new Date().toISOString().slice(0, 10);
+  $('ed-due').value = details.due_date || '';
+  $('ed-terms').querySelector('option[value="custom"]')?.remove();
+  if (details.payment_terms?.kind === 'custom') {
+    $('ed-terms').appendChild(el('option', { value: 'custom', text: `Custom (${details.payment_terms.days} days)` }));
+  }
+  $('ed-terms').value = details.payment_terms?.kind || '';
+  $('ed-currency').value = ed.currency;
+  $('ed-currency').disabled = ed.tracked.length > 0;
+  $('ed-import').hidden = Boolean(draft);
+  $('ed-defaults').disabled = !$('ed-customer').value;
+  $('ed-defaults-state').textContent = '';
+  $('ed-subject').value = details.subject ?? '';
+  $('ed-notes').value = details.notes ?? '';
+  for (const id of ['ed-subject', 'ed-notes']) $(id).dataset.touched = '';
+  ed.documentOverrides = details;
   clearFormError($('ed-error'));
   // #349: the editor is a native <dialog class="p-modal"> popup; jsdom has no
   // modal support, so fall back to the [open] attribute the harness asserts on.
   const dlg = $('invoice-editor');
   if (typeof dlg.showModal === 'function') dlg.showModal();
   else dlg.setAttribute('open', '');
+  initInvoiceDropdowns([['ed-customer', 'Invoice for'], ['ed-terms', 'Payment terms']]);
+  $('ed-customer').__filterSync?.();
+  $('ed-terms').__filterSync?.();
   edRecalc();
-  $('ed-lines').querySelector('tbody input')?.focus();
+  ed.initial = edFingerprint();
+  ed.defaultsPromise = edLoadDefaults(false);
+  (draft ? $('ed-po') : $('ed-customer').__filterButton).focus({ preventScroll: true });
+  dlg.querySelector('.p-modal__dialog').scrollTop = 0;
   announce(draft ? `Editing draft ${draft.number}.` : 'Manual invoice editor open.');
 }
 
 export function edClose() {
+  closeSelectMenus();
+  ed.epoch = (ed.epoch || 0) + 1;
   ed.id = null;
   const dlg = $('invoice-editor');
   if (typeof dlg.close === 'function') dlg.close();
   else dlg.removeAttribute('open');
+}
+
+function edFingerprint() {
+  return JSON.stringify([...$('invoice-editor').querySelectorAll('input,select,textarea')].map(node => node.value));
+}
+
+export function edHasChanges() {
+  return Boolean(ed.initial && edFingerprint() !== ed.initial);
+}
+
+export async function edLoadDefaults(force = false) {
+  const epoch = ed.epoch;
+  const customerId = $('ed-customer').value;
+  const customer = state.customers.find(item => item.id === customerId);
+  const draftId = ed.id;
+  $('ed-defaults').disabled = !customerId;
+  if (force && !customerId) {
+    $('ed-defaults-state').textContent = 'Select a customer first.';
+    return;
+  }
+  if (force) $('ed-defaults-state').textContent = 'Restoring defaults…';
+  try {
+    const [response, projects] = await Promise.all([
+      api.get('/admin/invoice-template'),
+      customerId ? api.get(`/customers/${customerId}/projects`).catch(() => ({ projects: state.projectsByCustomer[customerId] || [] })) : Promise.resolve({ projects: [] }),
+    ]);
+    if (ed.epoch !== epoch || ed.id !== draftId || $('ed-customer').value !== customerId || !$('invoice-editor').open) return;
+    const beforeDefaults = edFingerprint();
+    const pristine = beforeDefaults === ed.initial;
+    state.projectsByCustomer[customerId] = projects.projects || [];
+    for (const row of $('ed-lines').querySelectorAll('tbody tr')) row.__updateProjects?.();
+    const template = response.template || {};
+    const inheritedTerms = customer?.payment_terms || template.payment_terms;
+    const termsLabel = inheritedTerms?.kind === 'custom' ? `${inheritedTerms.days} days`
+      : inheritedTerms?.kind?.replace('net_', 'Net ').replace('upon_receipt', 'Upon receipt');
+    $('ed-terms').options[0].textContent = termsLabel ? `Default (${termsLabel})` : 'Customer / template default';
+    $('ed-terms').__filterSync?.();
+    const defaults = {
+      'ed-subject': customer?.invoice_subject || template.subject || '',
+      'ed-notes': [template.notes, customer?.invoice_notes].filter(Boolean).join('\n\n'),
+    };
+    for (const [id, value] of Object.entries(defaults)) {
+      const override = id === 'ed-subject' ? ed.documentOverrides.subject : ed.documentOverrides.notes;
+      if (force || (override == null && !$(id).dataset.touched)) $(id).value = value;
+    }
+    if (force) {
+      ed.documentOverrides = {};
+      ed.termsOverride = null;
+      $('ed-terms').value = '';
+      $('ed-due').value = '';
+      $('ed-terms').__filterSync?.();
+      $('ed-defaults-state').textContent = edFingerprint() === beforeDefaults ? 'Already using document defaults.' : 'Document defaults restored.';
+    }
+    if (pristine && !force) ed.initial = edFingerprint();
+  } catch (error) {
+    if (ed.epoch !== epoch) return;
+    $('ed-defaults-state').textContent = `Defaults unavailable: ${error.message}`;
+    announce(`Invoice defaults unavailable: ${error.message}`);
+  }
 }
 
 // #349: Cancel is the explicit way out of the manual editor. The editor only
@@ -1489,23 +1605,29 @@ export function edClose() {
 // all — there is nothing half-saved to undo (the repo's "no partial
 // persistence" rule). The native <dialog> closes and initDialogFocusReturn
 // (web/js/dom.js) hands focus back to the + Manual Invoice button that opened it.
-export function edCancel() {
+export async function edCancel() {
+  if (edHasChanges()
+    && !(await askConfirm('Discard unsaved invoice changes?'))) return;
   edClose();
   announce('Manual invoice cancelled — nothing was saved.');
 }
 
-export async function edSave() {
+export async function edSave(preview = false) {
   // QA-01: a double click on Save draft must not create two drafts.
-  return singleFlight($('ed-save'), edSaveBody);
+  return singleFlight($('ed-save'), () => edSaveBody(preview === true));
 }
 
-async function edSaveBody() {
+async function edSaveBody(preview = false) {
+  const epoch = ed.epoch;
+  await ed.defaultsPromise;
+  if (ed.epoch !== epoch || !$('invoice-editor').open) return;
   clearFormError($('ed-error'));
   const manual = [...$('ed-lines').querySelectorAll('tbody tr')]
     .map((r) => r.__read?.())
     .filter(Boolean);
   const lines = manual.map((m) => ({
     description: m.description, item_kind: m.item_kind,
+    project_code: m.project_code,
     quantity_hundredths: m.quantity_hundredths, unit_price_minor: m.unit_price_minor,
   }));
   const taxH = parseHundredths($('ed-tax').value);
@@ -1515,13 +1637,24 @@ async function edSaveBody() {
     return;
   }
   try {
+    const document = {
+      po_number: $('ed-po').value.trim(), invoice_date: $('ed-date').value || null,
+      due_date: $('ed-due').value || null,
+      payment_terms: $('ed-terms').value ? ($('ed-terms').value === 'custom' ? ed.termsOverride : { kind: $('ed-terms').value }) : null,
+      subject: $('ed-subject').value || ($('ed-subject').dataset.touched || ed.documentOverrides.subject != null ? '' : null),
+      notes: $('ed-notes').value || ($('ed-notes').dataset.touched || ed.documentOverrides.notes != null ? '' : null),
+    };
+    const currency = $('ed-currency').value.trim().toUpperCase();
+    let saved;
     if (!ed.id) {
       const created = await api.post('/invoices/manual', {
+        document, currency,
         customer_id: $('ed-customer').value,
         tax_hundredths: taxH,
         discount_hundredths: discH,
         lines,
       });
+      saved = created;
       announce(`Draft ${created.number} saved (total ${formatMoney(created.total_minor)} ${created.currency}).`);
     } else {
       const payloadLines = [
@@ -1534,19 +1667,23 @@ async function edSaveBody() {
           quantity_hundredths: m.quantity_hundredths,
           unit_price_minor: m.unit_price_minor,
           amount_minor: m.amount_minor,
-          entry_id: null, expense_id: null, project_code: null, task_code: null,
+          entry_id: null, expense_id: null, project_code: m.project_code, task_code: null,
           hours: null, rate_minor: null,
         })),
       ];
       const updated = await api.put(`/invoices/${ed.id}`, {
+        document, currency,
         lines: payloadLines, tax_hundredths: taxH, discount_hundredths: discH,
       });
+      saved = updated;
       announce(`Draft ${updated.number} updated (total ${formatMoney(updated.total_minor)} ${updated.currency}).`);
     }
+    if (ed.epoch !== epoch) return;
     edClose();
     await refreshInvoices();
+    if (preview && saved) await openInvoicePreview(saved, null);
   } catch (err) {
-    showFormError($('ed-error'), err);
+    if (ed.epoch === epoch) showFormError($('ed-error'), err);
   }
 }
 

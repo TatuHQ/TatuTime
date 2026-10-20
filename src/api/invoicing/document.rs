@@ -103,7 +103,9 @@ pub(crate) fn invoice_pdf_for_delivery(
             .as_ref()
             .map(|h| h.filename.clone())
             .unwrap_or_else(|| format!("{}.pdf", crate::domain::safe_filename(&invoice.number)));
-        return Ok((name, bytes));
+        let delivery = crate::pdf::without_delivery_watermark(&bytes)
+            .map_err(|error| ApiError::internal(error.into()))?;
+        return Ok((name, delivery));
     }
     let bytes = render_pdf_now(app, invoice)?;
     let attached = app
@@ -135,10 +137,12 @@ pub(crate) fn content_for(
     customer: &crate::domain::Customer,
     template: &crate::domain::InvoiceTemplate,
 ) -> crate::template::DocContent {
-    let issue_day = invoice
-        .issued_at
-        .or(Some(invoice.created_at))
-        .map(|dt| dt.date_naive());
+    let issue_day = invoice.document.invoice_date.or_else(|| {
+        invoice
+            .issued_at
+            .or(Some(invoice.created_at))
+            .map(|dt| dt.date_naive())
+    });
     let vars = crate::template::vars_for(invoice, customer, issue_day);
     crate::template::doc_content(invoice, template, customer, &vars)
 }
@@ -148,12 +152,9 @@ pub(crate) fn content_for(
 /// (invoice, customer, template, org): a re-render while nothing was edited
 /// yields identical bytes.
 ///
-/// The archive/delivery path stamps the **generation-time stage**, `Draft`: an
-/// invoice cannot be sent before it is issued, so an archived PDF is only ever
-/// produced while undelivered. It is captured here, not resolved live, because
-/// the archive is write-once (#113).
+/// Archive/delivery documents are unstamped; only live previews show a stage.
 pub(crate) fn render_pdf_now(app: &AppState, invoice: &Invoice) -> Result<Vec<u8>, ApiError> {
-    render_pdf_with_stage(app, invoice, InvoiceWatermarkStage::Draft)
+    render_pdf_with_watermark(app, invoice, None)
 }
 
 /// Render the invoice with an explicit watermark stage (Subtask C). The
@@ -165,6 +166,14 @@ pub(crate) fn render_pdf_with_stage(
     invoice: &Invoice,
     stage: InvoiceWatermarkStage,
 ) -> Result<Vec<u8>, ApiError> {
+    render_pdf_with_watermark(app, invoice, Some(stage))
+}
+
+fn render_pdf_with_watermark(
+    app: &AppState,
+    invoice: &Invoice,
+    watermark: Option<InvoiceWatermarkStage>,
+) -> Result<Vec<u8>, ApiError> {
     let customer = get_customer(&app.store, invoice.customer_id)?;
     let template = load_template(app)?;
     let content = content_for(invoice, &customer, &template);
@@ -175,9 +184,25 @@ pub(crate) fn render_pdf_with_stage(
     // reported. The title follows the same resolved value.
     let mut view = invoice.clone();
     view.subject = content.subject.clone().unwrap_or_default();
+    if view.status == crate::domain::InvoiceStatus::Draft {
+        view.due_date = Some(resolve_due_date(
+            invoice,
+            &customer,
+            &template,
+            app.clock.now(),
+        ));
+        view.terms = if invoice.document.due_date.is_some() {
+            None
+        } else {
+            invoice
+                .document
+                .payment_terms
+                .or_else(|| resolve_terms(&customer, &template))
+        };
+    }
     let mut doc = crate::pdf::doc_for_labeled(&view, &customer, &org_for(app)?, &template.labels);
     crate::template::apply_doc_content(&mut doc, &content);
-    doc.watermark = Some(stage);
+    doc.watermark = watermark;
     Ok(crate::pdf::render_invoice_pdf(&doc))
 }
 
@@ -206,9 +231,18 @@ pub(crate) fn resolve_due_date(
     template: &crate::domain::InvoiceTemplate,
     now: chrono::DateTime<chrono::Utc>,
 ) -> chrono::NaiveDate {
-    let terms = resolve_terms(customer, template);
+    if let Some(due) = invoice.document.due_date {
+        return due;
+    }
+    let terms = invoice
+        .document
+        .payment_terms
+        .or_else(|| resolve_terms(customer, template));
     if let Some(days) = terms.as_ref().and_then(|t| t.fixed_days()) {
-        let from = now.date_naive();
+        let from = invoice
+            .document
+            .invoice_date
+            .unwrap_or_else(|| now.date_naive());
         return from
             .checked_add_days(chrono::Days::new(u64::from(days)))
             .unwrap_or(from);

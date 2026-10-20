@@ -188,18 +188,54 @@ impl Store {
         // numbered and persisted, under this same lock.
         self.ensure_capacity::<Invoice>()?;
         std::fs::create_dir_all(self.root.join("invoices"))?;
+        let prefix = self
+            .get_customer(invoice.customer_id)?
+            .map(|customer| customer.invoice_prefix)
+            .unwrap_or_default();
+        let prefix = crate::domain::normalize_invoice_prefix(&prefix)
+            .ok_or_else(|| StoreError::Conflict("customer invoice prefix is invalid".into()))?;
+        if !prefix.is_empty() {
+            let path = self.root.join("invoices").join(".seq.prefixes.json");
+            let mut sequences: std::collections::BTreeMap<String, u64> =
+                read_json(&path)?.unwrap_or_default();
+            let highest = match sequences.get(&prefix) {
+                Some(value) => *value,
+                None => {
+                    let start = format!("{prefix}-");
+                    self.list_invoices()?
+                        .iter()
+                        .filter_map(|existing| {
+                            existing.number.strip_prefix(&start)?.parse::<u64>().ok()
+                        })
+                        .max()
+                        .unwrap_or(0)
+                }
+            };
+            let next = highest.checked_add(1).ok_or_else(|| {
+                StoreError::Conflict("invoice prefix sequence is exhausted".into())
+            })?;
+            sequences.insert(prefix.clone(), next);
+            write_json(&path, &sequences)?;
+            invoice.number = format!("{prefix}-{next:03}");
+            write_json(&self.doc_path::<Invoice>(&invoice.id.to_string()), &invoice)?;
+            self.index_invoice_locked(&invoice)?;
+            return Ok(invoice);
+        }
         let seq_path = self.root.join("invoices").join(".seq.json");
         let stored: u64 = read_json(&seq_path)?.unwrap_or(0);
-        // #255: the count-derived guard only exists to bootstrap a pre-ledger
-        // data dir (one written before B3 introduced `.seq.json`). Once the
-        // ledger exists it is authoritative — the earlier unconditional
-        // `list_invoices()` re-listed every invoice under the write lock on
-        // every creation, which the sequence file already made unnecessary.
-        let n = if seq_path.exists() {
-            stored + 1
+        let highest = if seq_path.exists() {
+            stored
         } else {
-            stored.max(self.list_invoices()?.len() as u64) + 1
+            self.list_invoices()?
+                .iter()
+                .filter_map(|existing| existing.number.strip_prefix("INV-")?.parse::<u64>().ok())
+                .max()
+                .unwrap_or(0)
+                .max(stored)
         };
+        let n = highest
+            .checked_add(1)
+            .ok_or_else(|| StoreError::Conflict("invoice sequence is exhausted".into()))?;
         write_json(&seq_path, &n)?;
         invoice.number = format!("INV-{n:04}");
         write_json(&self.doc_path::<Invoice>(&invoice.id.to_string()), &invoice)?;
@@ -209,7 +245,7 @@ impl Store {
 }
 
 /// Filename sanitiser for derived download names: invoice numbers are
-/// minted by `create_invoice` (`INV-%04d`), but the hint never carries
+/// minted by `create_invoice` (default or customer-prefixed), but the hint never carries
 /// anything that could steer a path (#50).
 /// The `pdf` hint persisted with the invoice (#113).
 pub(super) fn pdf_hint(number: &str, archived: &[u8], now: DateTime<Utc>) -> PdfHint {
@@ -253,6 +289,7 @@ mod invoice_seq_tests {
             discount_hundredths: 0,
             subject: String::new(),
             terms: None,
+            document: Default::default(),
         }
     }
 
@@ -272,5 +309,87 @@ mod invoice_seq_tests {
         assert_eq!(c.number, "INV-0003", "numbers must not be recycled");
         // The counter file is not mistaken for an invoice document.
         assert_eq!(store.list_invoices().unwrap().len(), 2);
+    }
+
+    fn prefixed_draft(store: &Store, prefix: &str) -> Invoice {
+        let invoice = draft("_");
+        let customer = serde_json::from_value(serde_json::json!({
+            "id": invoice.customer_id, "name": prefix, "currency": "EUR",
+            "default_rate_minor": 0, "active": true, "email": "", "invoice_prefix": prefix
+        }))
+        .unwrap();
+        store.put_customer(&customer).unwrap();
+        invoice
+    }
+
+    #[test]
+    fn prefix_sequences_are_independent_durable_and_shared_without_collisions() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("data");
+        let store = Store::open(&root).unwrap();
+        for prefix in ["CUST1", "CUST2", "MONKEY"] {
+            let invoice = prefixed_draft(&store, prefix);
+            let first = store.create_invoice(invoice).unwrap();
+            assert_eq!(first.number, format!("{prefix}-001"));
+            store.delete_invoice(first.id).unwrap();
+        }
+        let same_prefix_other_customer = prefixed_draft(&store, "CUST1");
+        assert_eq!(
+            store
+                .create_invoice(same_prefix_other_customer)
+                .unwrap()
+                .number,
+            "CUST1-002"
+        );
+        drop(store);
+        let store = Store::open(&root).unwrap();
+        let invoice = prefixed_draft(&store, "CUST1");
+        assert_eq!(store.create_invoice(invoice).unwrap().number, "CUST1-003");
+        assert_eq!(store.create_invoice(draft("_")).unwrap().number, "INV-0001");
+        assert_eq!(store.list_invoices().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn prefixes_bootstrap_from_highest_existing_number_and_never_wrap() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path().join("data")).unwrap();
+        let mut restored = prefixed_draft(&store, "MONKEY");
+        restored.number = "MONKEY-042".into();
+        store.put_invoice(&restored).unwrap();
+        let mut global = draft("INV-0099");
+        store.put_invoice(&global).unwrap();
+        let next = prefixed_draft(&store, "MONKEY");
+        assert_eq!(store.create_invoice(next).unwrap().number, "MONKEY-043");
+        assert_eq!(store.create_invoice(draft("_")).unwrap().number, "INV-0100");
+        write_json(
+            &store.root.join("invoices/.seq.prefixes.json"),
+            &serde_json::json!({"MONKEY": u64::MAX}),
+        )
+        .unwrap();
+        global.customer_id = restored.customer_id;
+        assert!(store.create_invoice(global).is_err());
+        assert_eq!(store.list_invoices().unwrap().len(), 4);
+    }
+
+    #[test]
+    fn concurrent_prefix_allocations_are_unique() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = std::sync::Arc::new(Store::open(dir.path().join("data")).unwrap());
+        let invoice = prefixed_draft(&store, "MONKEY");
+        let handles: Vec<_> = (0..8)
+            .map(|_| {
+                let store = store.clone();
+                let mut invoice = invoice.clone();
+                invoice.id = Uuid::new_v4();
+                std::thread::spawn(move || store.create_invoice(invoice).unwrap().number)
+            })
+            .collect();
+        let numbers: std::collections::BTreeSet<_> = handles
+            .into_iter()
+            .map(|handle| handle.join().unwrap())
+            .collect();
+        assert_eq!(numbers.len(), 8);
+        assert!(numbers.contains("MONKEY-001"));
+        assert!(numbers.contains("MONKEY-008"));
     }
 }

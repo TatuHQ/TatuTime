@@ -254,7 +254,7 @@ async function refreshExpensesBody() {
         // The stored file's own name, as the link that opens its preview — the
         // column answers "is there a receipt?" without opening the record.
         el('td', { attrs: { 'data-heading': 'Receipt' } }, [receiptCell(x)]),
-        el('td', { cls: 'actions-col', attrs: { 'data-heading': 'Actions' } }, [
+        el('td', { cls: 'actions-col', data: { iconActions: '1' }, attrs: { 'data-heading': 'Actions' } }, [
           el('button', {
             cls: 'link',
             type: 'button',

@@ -451,7 +451,7 @@ FILTER_MATCHES_ACTION = (
     "var bw = b.getBoundingClientRect().width;"
     "var bad = [];"
     "for (var i = 0; i < sels.length; i++) {{"
-    "  var sw = sels[i].getBoundingClientRect().width;"
+    "  var sw = (sels[i].__filterButton || sels[i]).getBoundingClientRect().width;"
     "  if (Math.abs(bw - sw) > 1) bad.push(sels[i].id + '=' + Math.round(sw) + 'px');"
     "}}"
     "return bad.length ? 'action ' + Math.round(bw) + 'px vs ' + bad.join(', ') : 'ok';"
@@ -1443,8 +1443,8 @@ class Gate:
             # 160 groups: those rows plus the composed fieldsets and the
             # Contacts row. Mirrors the shell census in
             # gui-test/forms.test.mjs:68, so the two suites cannot drift.
-            and counts["groups"] == 160 and counts["labels"] == 152
-            and counts["controls"] == 152
+            and counts["groups"] == 168 and counts["labels"] == 160
+            and counts["controls"] == 160
             # 57: the previous 55 plus the template footer and notes hints.
             and counts["help"] == 57
             # 28: the previous 27 plus the vault card's #vault-error.
@@ -2041,18 +2041,20 @@ class Gate:
         # The frame only exists once the app's own credentialed fetch of
         # /pdf/preview has resolved and the blob URL it minted is framed.
         self.wait_script(
-            "(function () { var f = document.getElementById('ip-frame');"
-            " return !!(f && /^blob:/.test(f.getAttribute('src'))); })()",
-            "the detail panel to frame the rendered PDF from a blob: URL",
+            "(function () { var f = document.querySelector('#ip-frame canvas');"
+            " return !!(f && f.width > 0 && document.getElementById('ip-pdf-state').hidden); })()",
+            "the detail panel to render PDF page pixels",
         )
         framed = json.loads(self.marionette.script(
             "var host = document.getElementById('ip-pdf');"
-            "var f = document.getElementById('ip-frame');"
+            "var f = document.querySelector('#ip-frame canvas');"
+            "var fallback = document.getElementById('ip-open-pdf');"
             "var t = document.querySelector('#ip-timeline li');"
             "var when = t ? t.querySelector('.ip-tl-when time') : null;"
             "return JSON.stringify({"
             " tag: f ? f.tagName : '',"
-            " src: f ? String(f.getAttribute('src')) : '',"
+            " src: fallback ? fallback.href : '',"
+            " ink: f ? Array.from(f.getContext('2d').getImageData(0,0,f.width,f.height).data).some((v,i) => i % 4 !== 3 && v < 180) : false,"
             " children: host ? host.querySelectorAll('*').length : -1,"
             " stateHidden: document.getElementById('ip-pdf-state').hidden,"
             " downloadHidden: document.getElementById('ip-download').hidden,"
@@ -2064,9 +2066,9 @@ class Gate:
             "});"
         ))
         self.check(
-            "the detail panel frames the rendered PDF from a blob: URL (#349)",
-            framed["tag"] == "IFRAME" and framed["src"].startswith("blob:")
-            and framed["children"] == 1 and framed["stateHidden"] and framed["downloadHidden"],
+            "the detail panel renders nonblank PDF pixels with an open-PDF fallback",
+            framed["tag"] == "CANVAS" and framed["src"].startswith("blob:")
+            and framed["ink"] and framed["stateHidden"] and framed["downloadHidden"],
             f"framed={framed}",
             info=f"frame src={framed['src'][:24]}...",
         )
@@ -2301,8 +2303,7 @@ class Gate:
             ("/projects", "project-new", "project-dialog"),
             ("/tasks", "task-new", "task-dialog"),
             ("/expenses", "expense-new", "expense-dialog"),
-            ("/invoices", "invoice-new", "invoice-wizard"),
-            ("/invoices", "manual-new", "invoice-editor"),
+            ("/invoices", "invoice-new", "invoice-editor"),
             ("/settings/users", "user-new", "user-dialog"),
         )
         original = self.marionette.call("WebDriver:GetWindowRect")
@@ -2405,6 +2406,261 @@ class Gate:
             zoom(1, 1)
             self.marionette.call("WebDriver:SetWindowRect", original)
 
+    def pdf_worker_recovery_audit(self):
+        self.navigate("/invoices")
+        self.wait_script("document.documentElement.dataset.booted === 'ready' && !!document.querySelector('#invoice-table tbody button')",
+                         "silent-worker invoice fixture")
+        self.marionette.script("""
+            window.__originalPdfWorker = window.Worker;
+            window.Worker = class extends EventTarget { postMessage() {} terminate() {} };
+            [...document.querySelectorAll('#invoice-table tbody button')]
+                .find(button => button.textContent === 'Preview').click();
+            return true;
+        """)
+        try:
+            self.wait_script("!!document.querySelector('#ip-frame canvas') && document.getElementById('ip-pdf-state').hidden",
+                             "main-thread PDF recovery from a silent worker")
+            self.check("a silent PDF worker recovers to nonblank PDF pixels without endless loading",
+                       self.marionette.script("""
+                           const canvas = document.querySelector('#ip-frame canvas');
+                           const pixels = canvas.getContext('2d').getImageData(0,0,canvas.width,canvas.height).data;
+                           return !!globalThis.pdfjsWorker?.WorkerMessageHandler
+                               && pixels.some((value,index) => index % 4 !== 3 && value < 180);
+                       """))
+        finally:
+            self.marionette.script("window.Worker = window.__originalPdfWorker; delete window.__originalPdfWorker; return true;")
+        self.drain_console("silent PDF worker recovery")
+
+    def invoice_filter_audit(self):
+        original = self.marionette.call("WebDriver:GetWindowRect")
+        try:
+            self.navigate("/invoices")
+            self.wait_script("document.documentElement.dataset.booted === 'ready'", "invoice dropdowns")
+            for width in (1280, 375):
+                self.marionette.call("WebDriver:SetWindowRect", {"width": width, "height": 812})
+                for name in ("customer", "period"):
+                    result = json.loads(self.marionette.script("""
+                        const id = %s;
+                        const button = document.getElementById(id + '-button');
+                        button.scrollIntoView({block:'center'}); button.click();
+                        const menu = document.getElementById(id + '-menu');
+                        const anchor = button.getBoundingClientRect();
+                        const bounds = menu.getBoundingClientRect();
+                        const result = {visible:menu.checkVisibility(), width:innerWidth,
+                            x:bounds.x, right:bounds.right, y:bounds.y, bottom:bounds.bottom,
+                            anchorX:anchor.x, anchorBottom:anchor.bottom,
+                            expanded:button.getAttribute('aria-expanded')};
+                        menu.dispatchEvent(new KeyboardEvent('keydown', {key:'Escape',bubbles:true,cancelable:true}));
+                        result.closed = menu.hidden && document.activeElement === button;
+                        return JSON.stringify(result);
+                    """ % json.dumps(f"inv-f-{name}")))
+                    self.check(f"{name} dropdown anchors to its filter at {width}px and Escape returns focus",
+                               result["visible"] and result["expanded"] == "true"
+                               and abs(result["y"] - result["anchorBottom"] - 4) <= 1
+                               and result["x"] >= 0 and result["right"] <= result["width"]
+                               and result["closed"], str(result))
+                aligned = json.loads(self.marionette.script("""
+                    const number = document.getElementById('invoice-search').getBoundingClientRect();
+                    const customer = document.getElementById('inv-f-customer-button').getBoundingClientRect();
+                    const time = document.getElementById('inv-f-period-button').getBoundingClientRect();
+                    return JSON.stringify({order:[...document.querySelectorAll('#invoice-search,#inv-f-customer-button,#inv-f-period-button')].map(node=>node.id),
+                        sameRow:Math.abs(number.y-customer.y)<=1 && Math.abs(customer.y-time.y)<=1,
+                        leftToRight:number.x<customer.x && customer.x<time.x,
+                        noExtras:!document.querySelector('#inv-clear,#inv-f-project,.cols-pop'),
+                        columnsVisible:[...document.querySelectorAll('#invoice-table th,#invoice-table td')].every(cell=>!cell.hidden)});
+                """))
+                self.check(f"invoice filters follow Number, Customer, Time at {width}px without extra controls",
+                           aligned["order"] == ["invoice-search", "inv-f-customer-button", "inv-f-period-button"]
+                           and aligned["noExtras"] and aligned["columnsVisible"]
+                           and (width < 1000 or (aligned["sameRow"] and aligned["leftToRight"])), str(aligned))
+                if self.args.keep:
+                    self.marionette.script("document.getElementById('inv-f-period-button').click(); return true;")
+                    shot = self.screenshot()
+                    if shot:
+                        shutil.copyfile(shot, os.path.join(self.tmp, f"invoice-filter-{width}.png"))
+                    self.marionette.script("document.getElementById('inv-f-period-menu').hidePopover(); return true;")
+        finally:
+            self.marionette.call("WebDriver:SetWindowRect", original)
+
+    def shared_dropdown_audit(self):
+        original = self.marionette.call("WebDriver:GetWindowRect")
+        cases = (
+            ("/settings/invoice-template", None, "template-terms"),
+            ("/projects", None, "proj-filter-customer"),
+            ("/tasks", None, "task-filter-project"),
+            ("/settings/users", "user-new", "user-role"),
+            ("/timesheets/day", "day-add", "entry-customer"),
+            ("/expenses", "expense-new", "expense-category"),
+        )
+        try:
+            for width in (1280, 375):
+                self.marionette.call("WebDriver:SetWindowRect", {"width": width, "height": 812})
+                for path, opener, control in cases:
+                    self.navigate(path)
+                    self.wait_script("document.documentElement.dataset.booted === 'ready'", f"shared dropdown boot {path}")
+                    if opener:
+                        self.marionette.script(f"document.getElementById({json.dumps(opener)}).click(); return true;")
+                    self.wait_script(f"!!document.getElementById({json.dumps(control)}).__filterButton", f"shared dropdown {control}")
+                    for theme in ("light", "dark"):
+                        result = json.loads(self.marionette.script("""
+                            document.querySelector('input[name=colour-mode][value=%s]').click();
+                            const select = document.getElementById(%s);
+                            const button = select.__filterButton;
+                            button.scrollIntoView({block:'center'}); button.click();
+                            const menu = document.getElementById(button.getAttribute('aria-controls'));
+                            const anchor = button.getBoundingClientRect(), bounds = menu.getBoundingClientRect();
+                            const dialog = select.closest('dialog');
+                            const result = {visible:menu.checkVisibility(),proxy:button.checkVisibility(),
+                                nativeHidden:!select.checkVisibility(),
+                                gap:Math.min(Math.abs(bounds.top-anchor.bottom-4),Math.abs(anchor.top-bounds.bottom-4)),
+                                inside:bounds.left>=0 && bounds.right<=innerWidth,
+                                dialogOpen:!dialog || dialog.open};
+                            menu.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));
+                            result.restored=document.activeElement===button;
+                            result.dialogRetained=!dialog || dialog.open;
+                            return JSON.stringify(result);
+                        """ % (json.dumps(theme), json.dumps(control))))
+                        self.check(f"shared dropdown {control} stays anchored at {width}px ({theme})",
+                                   result["visible"] and result["proxy"] and result["nativeHidden"]
+                                   and result["gap"] <= 1 and result["inside"] and result["restored"]
+                                   and result["dialogOpen"] and result["dialogRetained"], str(result))
+                    self.marionette.script("document.querySelectorAll('dialog[open]').forEach(dialog=>dialog.close()); return true;")
+            self.drain_console("shared dropdowns")
+        finally:
+            self.marionette.call("WebDriver:SetWindowRect", original)
+
+    def invoice_workspace_audit(self):
+        original = self.marionette.call("WebDriver:GetWindowRect")
+        self.marionette.call("WebDriver:SetWindowRect", {"width": 1280, "height": 900})
+        try:
+            self.navigate("/invoices")
+            self.wait_script("document.documentElement.dataset.booted === 'ready'", "invoice workspace boot")
+            self.marionette.script("document.getElementById('invoice-new').click(); return true;")
+            self.wait_script("document.getElementById('invoice-editor').open", "new invoice workspace")
+            self.check("New invoice enters one editor without a mandatory wizard",
+                       self.marionette.script("return !document.getElementById('invoice-wizard').open && document.getElementById('manual-new').hidden;"))
+            menus = json.loads(self.marionette.script("""
+                const controls = [document.getElementById('ed-customer'), document.getElementById('ed-terms'),
+                    document.querySelector('#ed-lines [aria-label="Linked project"]')];
+                return JSON.stringify(controls.map(select => {
+                    const button = select.__filterButton;
+                    button.scrollIntoView({block:'center'}); button.click();
+                    const menu = document.getElementById(button.getAttribute('aria-controls'));
+                    const anchor = button.getBoundingClientRect(), bounds = menu.getBoundingClientRect();
+                    const result = {name:button.getAttribute('aria-label'),visible:menu.checkVisibility(),
+                        gap:Math.min(Math.abs(bounds.top-anchor.bottom-4),Math.abs(anchor.top-bounds.bottom-4)),
+                        contained:bounds.left>=0 && bounds.right<=innerWidth};
+                    menu.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));
+                    result.editorOpen=document.getElementById('invoice-editor').open;
+                    result.noConfirm=!document.getElementById('app-dialog').open;
+                    return result;
+                }));
+            """))
+            self.check("editor dropdowns stay anchored inside the modal and Escape only closes their menus",
+                       all(item["visible"] and item["gap"] <= 1 and item["contained"]
+                           and item["editorOpen"] and item["noConfirm"] for item in menus), str(menus))
+            self.marionette.script("""
+                const set = (id, value) => {
+                    const node = document.getElementById(id); node.value = value;
+                    node.dispatchEvent(new Event('input', {bubbles:true}));
+                };
+                const customer = document.getElementById('ed-customer');
+                customer.value = [...customer.options].find(option => option.value).value;
+                customer.dispatchEvent(new Event('change', {bubbles:true}));
+                set('ed-po','PO-2026-009'); set('ed-date','2026-09-30');
+                set('ed-due','2026-10-30'); set('ed-subject','Consulting for September');
+                set('ed-notes','Payment instructions for this invoice only.');
+                const row = document.querySelector('#ed-lines tbody tr');
+                row.querySelector('input[type=text]').value = 'Implementation support';
+                const numbers = row.querySelectorAll('input[type=number]');
+                numbers[0].value = '2.50'; numbers[1].value = '60.00';
+                numbers[1].dispatchEvent(new Event('input', {bubbles:true}));
+                return true;
+            """)
+            if self.args.keep:
+                shot = self.screenshot()
+                if shot:
+                    shutil.copyfile(shot, os.path.join(self.tmp, "invoice-workspace-desktop.png"))
+            self.marionette.script("document.getElementById('ed-preview').click(); return true;")
+            self.wait_script("!document.getElementById('invoice-editor').open && !!document.querySelector('#ip-frame canvas') && document.getElementById('ip-pdf-state').hidden",
+                             "saved invoice to render PDF pixels")
+            _, _, raw = self.http("GET", "/api/invoices", cookie=self.cookie)
+            invoice = next(item for item in json.loads(raw)["invoices"]
+                           if item.get("document", {}).get("po_number") == "PO-2026-009")
+            self.check("workspace saves exact manual money and document overrides",
+                       invoice["total_minor"] == 15000 and invoice["document"]["invoice_date"] == "2026-09-30"
+                       and invoice["document"]["due_date"] == "2026-10-30"
+                       and invoice["document"]["subject"] == "Consulting for September"
+                       and invoice["document"]["notes"] == "Payment instructions for this invoice only.",
+                       str(invoice.get("document")))
+            self.check("PDF preview includes the saved PO, subject and notes as accessible text",
+                       self.marionette.script("""
+                           const text = document.querySelector('#ip-frame .sr-only')?.textContent || '';
+                           return text.includes('PO-2026-009') && text.includes('Consulting for September')
+                               && text.includes('Payment instructions');
+                       """))
+            if self.args.keep:
+                self.marionette.script("document.getElementById('ip-pdf').scrollIntoView(); return true;")
+                shot = self.screenshot()
+                if shot:
+                    shutil.copyfile(shot, os.path.join(self.tmp, "invoice-document-reference.png"))
+            self.marionette.script("""
+                document.getElementById('ip-close').click();
+                const row = [...document.querySelectorAll('#invoice-table tbody tr')]
+                    .find(node => node.textContent.includes(%s));
+                [...row.querySelectorAll('button')].find(button => button.textContent === 'Edit').click();
+                return true;
+            """ % json.dumps(invoice["number"]))
+            self.wait_script("document.getElementById('invoice-editor').open", "stored draft editor")
+            self.check("reopening a draft preserves document fields and manual type",
+                       self.marionette.script("""
+                           return document.getElementById('ed-po').value === 'PO-2026-009'
+                               && document.getElementById('ed-notes').value.includes('this invoice only')
+                               && !document.querySelector('#ed-lines [aria-label="Product or service"]');
+                       """))
+            self.marionette.script("document.getElementById('invoice-editor').close(); document.getElementById('invoice-new').click(); return true;")
+            self.wait_script("document.getElementById('invoice-editor').open", "new import workspace")
+            self.marionette.script("document.getElementById('ed-import').click(); return true;")
+            self.wait_script("document.getElementById('invoice-wizard').open", "optional tracked import")
+            self.check("optional tracked import skips the customer wizard step",
+                       self.marionette.script("return !document.getElementById('iw-step2').hidden && !document.getElementById('invoice-editor').open;"))
+            self.marionette.script("document.getElementById('iw-close').click(); return true;")
+            self.drain_console("invoice workspace")
+        finally:
+            self.marionette.call("WebDriver:SetWindowRect", original)
+
+    def icon_actions_audit(self):
+        original = self.marionette.call("WebDriver:GetWindowRect")
+        seen = 0
+        try:
+            for width in (1280, 390):
+                self.marionette.call("WebDriver:SetWindowRect", {"width": width, "height": 900})
+                for path in ("/customers", "/timesheets/day", "/projects", "/tasks", "/invoices", "/expenses", "/settings/users"):
+                    self.navigate(path)
+                    self.wait_script("document.documentElement.dataset.booted === 'ready'", "icon action view")
+                    for theme in ("light", "dark"):
+                        result = json.loads(self.marionette.script("""
+                            document.documentElement.setAttribute('data-theme', %s);
+                            const buttons = [...document.querySelectorAll('td[data-icon-actions="1"] button')].filter(button => button.checkVisibility());
+                            const bad = buttons.flatMap(button => {
+                                const rect = button.getBoundingClientRect();
+                                const tooltip = document.getElementById(button.getAttribute('aria-describedby'));
+                                button.focus({preventScroll:true});
+                                const visible = tooltip && getComputedStyle(tooltip).display !== 'none';
+                                const label = button.getAttribute('aria-label');
+                                return rect.width < 44 || rect.height < 44 || !label || !visible
+                                    || !button.querySelector('i[aria-hidden="true"]')
+                                    || tooltip.textContent !== label ? [label || button.textContent] : [];
+                            });
+                            return JSON.stringify({count: buttons.length, bad});
+                        """ % json.dumps(theme)))
+                        seen += result["count"]
+                        self.check(f"icon action targets and tooltips: {path} {width}px {theme}",
+                                   not result["bad"], str(result))
+        finally:
+            self.marionette.call("WebDriver:SetWindowRect", original)
+        self.check("icon action audit exercised real rendered rows", seen > 0, str(seen))
+
     def run(self):
         print("=== TucanoTime browser smoke gate (Firefox + Marionette) ===", flush=True)
         print(f"binary   : {self.binary}")
@@ -2448,6 +2704,11 @@ class Gate:
         self.responsive_audit()
         self.responsive_dialog_audit()
         self.responsive_zoom_audit()
+        self.invoice_filter_audit()
+        self.shared_dropdown_audit()
+        self.invoice_workspace_audit()
+        self.icon_actions_audit()
+        self.pdf_worker_recovery_audit()
         if self.web_dir:
             self.dev_live_reload()
 

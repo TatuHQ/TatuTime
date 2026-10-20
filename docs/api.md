@@ -37,7 +37,7 @@ ignores a trailing slash.
 | `/settings/users` | Users |
 | `/settings/company` | Company identity |
 | `/settings/invoice-template` | Invoice template |
-| `/settings/catalog` | Products and services |
+| `/settings/catalog` | Catalog |
 | `/settings/expenses` | Expense categories |
 | `/settings/email` | Email |
 | `/settings/security` | Security and runtime configuration |
@@ -57,6 +57,46 @@ A member may read and edit only their own entries and expenses; an unowned
 record answers 404. Customers, projects, tasks and categories are shared
 reference data readable by any signed-in user. The complete route-to-tier table
 is `API_ROUTES` in [`src/lib.rs`](../src/lib.rs#L88).
+
+## Contract Revision 0.1.48
+
+### Customer Invoice Prefixes
+
+Application 0.1.48 also extends the closed `Customer` and `CustomerInput`
+schemas with optional `invoice_prefix`. Old stored customer documents and
+requests remain valid. Older response validators must adopt this schema before
+consuming customers with a configured prefix; empty prefixes remain omitted.
+On create, omission/null uses default `INV-0001` numbering. On update,
+omission/null preserves the current prefix; an empty string explicitly clears it.
+Prefixes normalise to uppercase with surrounding spaces and trailing hyphens
+removed. The result must be 1–20 ASCII letters, digits or internal hyphens,
+beginning with a letter/digit; `INV` and control characters are rejected.
+Raw inputs are limited to 64 characters.
+
+New drafts use `CUST1-001`, `CUST1-002`, etc. Each prefix has a durable sequence;
+two customers choosing the same prefix share it to avoid duplicate numbers.
+Changing a prefix affects only future drafts and never renames an existing
+draft or issued invoice. Clearing it resumes the original global sequence.
+Deleted numbers are never reused. Manual, tracked-work and recurring creation
+all use the same writer-locked allocator. The additive revision remains within
+the existing pre-1.0 API rather than introducing a new route version.
+
+### Invoice Documents
+
+The existing invoice endpoints remain under `/api/invoices`. The closed
+`ManualInvoiceInput` and `InvoiceEditInput` schemas now explicitly accept an
+optional `document` object: `po_number`, `invoice_date`, `due_date`,
+`payment_terms`, `subject` and `notes`. `InvoiceEditInput` also accepts currency
+changes for wholly manual drafts. Omitted edit fields preserve stored values;
+null nested overrides restore inheritance, while an empty notes string suppresses
+default notes. Unknown nested fields, invalid dates/terms/template variables and
+oversized text are rejected before writes. Tracked lines cannot be removed,
+duplicated or changed. Non-draft updates remain 409.
+
+This is an additive pre-1.0 contract revision shipped in application 0.1.48,
+not a new URL version. Existing request bodies remain valid. Consumers that
+validate responses against a closed schema must use the matching checked-in
+OpenAPI revision before relying on the new optional `Invoice.document` field.
 
 ## CSRF header
 

@@ -255,9 +255,8 @@ pub fn resolve_recipients(
 // ------------------------------------------------------------ SMTP adapter --
 
 /// SMTP connection settings. `username` + `password`, when both present,
-/// enable `AUTH LOGIN`. This is a plaintext client intended for a trusted
-/// network — point it at a local submit-mail relay (postfix, msmtp, or a TLS
-/// sidecar), which is the deployment model this file-based app assumes.
+/// enable authentication. Port 465 uses verified implicit TLS, 587 requires
+/// STARTTLS; other ports retain the trusted-local-relay plaintext mode.
 #[derive(Debug, Clone)]
 pub struct SmtpConfig {
     pub host: String,
@@ -301,6 +300,75 @@ pub struct SmtpEmailSender {
 impl SmtpEmailSender {
     pub fn new(config: SmtpConfig) -> Self {
         Self { config }
+    }
+
+    fn send_encrypted(&self, msg: &EmailMessage, implicit_tls: bool) -> Result<(), EmailError> {
+        use lettre::Transport;
+        use lettre::address::Envelope;
+        use lettre::transport::smtp::authentication::Credentials;
+
+        let mut transport = if implicit_tls {
+            lettre::SmtpTransport::relay(&self.config.host)
+        } else {
+            lettre::SmtpTransport::starttls_relay(&self.config.host)
+        }
+        .map_err(|_| {
+            EmailError::Transport(
+                "could not configure verified SMTP TLS; check the server hostname".into(),
+            )
+        })?
+        .port(self.config.port)
+        .timeout(Some(std::time::Duration::from_secs(15)));
+        match (
+            self.config
+                .username
+                .as_deref()
+                .filter(|value| !value.is_empty()),
+            self.config
+                .password
+                .as_deref()
+                .filter(|value| !value.is_empty()),
+        ) {
+            (Some(username), Some(password)) => {
+                transport = transport
+                    .credentials(Credentials::new(username.to_string(), password.to_string()));
+            }
+            (None, None) => {}
+            _ => {
+                return Err(EmailError::Transport(
+                    "SMTP authentication requires both username and password".into(),
+                ));
+            }
+        }
+        let from = self
+            .config
+            .from
+            .parse::<lettre::Address>()
+            .map_err(|_| EmailError::Transport("SMTP From address is invalid".into()))?;
+        let recipients = msg
+            .to
+            .iter()
+            .map(|address| address.parse::<lettre::Address>())
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| EmailError::Recipient)?;
+        let envelope = Envelope::new(Some(from), recipients).map_err(|_| EmailError::Recipient)?;
+        let wire = build_mime_with_sender(msg, Some(&self.config.from))?;
+        transport.build().send_raw(&envelope, wire.as_bytes())
+            .map(|_| ())
+            .map_err(|error| {
+                let message = if error.is_timeout() {
+                    "SMTP connection timed out; check the host, port and firewall"
+                } else if error.is_tls() || error.is_client() {
+                    "SMTP TLS negotiation failed; check the hostname, certificate and port (465 TLS / 587 STARTTLS)"
+                } else if error.status().is_some_and(|status| status.to_string().starts_with("535")) {
+                    "SMTP authentication was rejected; check the username, password or provider app-password policy"
+                } else if error.is_permanent() || error.is_transient() || error.is_response() {
+                    "SMTP server rejected the message; check the sender address, recipient and provider sending policy"
+                } else {
+                    "SMTP connection failed; check the server hostname, port and network access"
+                };
+                EmailError::Transport(message.into())
+            })
     }
 }
 
@@ -351,6 +419,9 @@ impl EmailSender for SmtpEmailSender {
         guard_headers(msg)?;
         if !recipients_are_addresses(&msg.to) {
             return Err(EmailError::Recipient);
+        }
+        if self.config.port == 465 || self.config.port == 587 {
+            return self.send_encrypted(msg, self.config.port == 465);
         }
         let stream = std::net::TcpStream::connect((self.config.host.as_str(), self.config.port))
             .map_err(|e| EmailError::Transport(e.to_string()))?;
@@ -462,14 +533,14 @@ impl SmtpConn {
             self.command(&format!("RCPT TO:<{recipient}>"), &[250, 251])?;
         }
         self.command("DATA", &[354])?;
-        self.write_message(msg)?;
+        self.write_message(msg, &cfg.from)?;
         self.command("QUIT", &[221])?;
         Ok(())
     }
 
-    fn write_message(&mut self, msg: &EmailMessage) -> Result<(), EmailError> {
+    fn write_message(&mut self, msg: &EmailMessage, from: &str) -> Result<(), EmailError> {
         use std::io::Write;
-        let body = build_mime(msg)?;
+        let body = build_mime_with_sender(msg, Some(from))?;
         let stuffed: String = body
             .lines()
             .map(|l| {
@@ -526,15 +597,30 @@ pub fn encode_header(value: &str) -> String {
 /// values carry a control character (`guard_headers`) -- the choke point every
 /// caller shares.
 pub fn build_mime(msg: &EmailMessage) -> Result<String, EmailError> {
+    build_mime_with_sender(msg, None)
+}
+
+fn build_mime_with_sender(msg: &EmailMessage, sender: Option<&str>) -> Result<String, EmailError> {
     guard_headers(msg)?;
+    if sender.is_some_and(|address| {
+        recipient_problem(address).is_some()
+            || address.chars().any(char::is_whitespace)
+            || address.contains(['<', '>'])
+    }) {
+        return Err(EmailError::Transport("SMTP From address is invalid".into()));
+    }
     let from_display = msg
         .from_name
         .as_deref()
         .filter(|n| !n.trim().is_empty())
         .unwrap_or("TucanoTime");
+    let from_header = match sender {
+        Some(address) => format!("{} <{address}>", encode_header(from_display)),
+        None => encode_header(from_display),
+    };
     let mut h = format!(
         "From: {}\r\nTo: {}\r\nSubject: {}\r\nDate: {}\r\n",
-        encode_header(from_display),
+        from_header,
         encode_header(&msg.to.join(", ")),
         encode_header(&msg.subject),
         chrono::Utc::now().to_rfc2822(),
@@ -1113,6 +1199,87 @@ mod tests {
         // Non-auth diagnostics keep the useful command line (it is not secret).
         let relay = unexpected_reply(550, "MAIL FROM:<noreply@example.test>").to_string();
         assert!(relay.contains("MAIL FROM"), "{relay}");
+    }
+
+    #[test]
+    fn encrypted_smtp_uses_tls_and_starttls_never_downgrades_auth() {
+        use std::io::{BufRead, BufReader, Read, Write};
+        for implicit_tls in [true, false] {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let port = listener.local_addr().unwrap().port();
+            let server = std::thread::spawn(move || {
+                let (mut stream, _) = listener.accept().unwrap();
+                stream
+                    .set_read_timeout(Some(std::time::Duration::from_secs(2)))
+                    .unwrap();
+                if implicit_tls {
+                    let mut header = [0u8; 3];
+                    stream.read_exact(&mut header).unwrap();
+                    assert_eq!(
+                        header[0], 0x16,
+                        "expected TLS handshake, not plaintext SMTP"
+                    );
+                    assert_eq!(header[1], 0x03);
+                } else {
+                    stream.write_all(b"220 local fixture ESMTP\r\n").unwrap();
+                    let mut reader = BufReader::new(stream.try_clone().unwrap());
+                    let mut line = String::new();
+                    reader.read_line(&mut line).unwrap();
+                    assert!(line.starts_with("EHLO "));
+                    stream
+                        .write_all(b"250-local fixture\r\n250 AUTH PLAIN LOGIN\r\n")
+                        .unwrap();
+                    line.clear();
+                    assert_eq!(
+                        reader.read_line(&mut line).unwrap(),
+                        0,
+                        "must disconnect before credentials when STARTTLS is unavailable"
+                    );
+                }
+            });
+            let config = SmtpConfig {
+                host: "127.0.0.1".into(),
+                port,
+                from: "billing@example.test".into(),
+                username: Some("private-user".into()),
+                password: Some("private-password".into()),
+            };
+            let message = EmailMessage {
+                to: vec!["recipient@example.test".into()],
+                subject: "Local fixture".into(),
+                text: "No external mail".into(),
+                html: None,
+                attachment: None,
+                from_name: None,
+                reply_to: None,
+            };
+            let error = SmtpEmailSender::new(config)
+                .send_encrypted(&message, implicit_tls)
+                .unwrap_err();
+            server.join().unwrap();
+            let text = error.to_string();
+            for secret in ["private-user", "private-password"] {
+                assert!(!text.contains(secret));
+                assert!(!text.contains(&auth_line(secret)));
+            }
+        }
+    }
+
+    #[test]
+    fn smtp_mime_uses_configured_from_address() {
+        let message = EmailMessage {
+            to: vec!["recipient@example.test".into()],
+            subject: "Invoice".into(),
+            text: "Body".into(),
+            html: None,
+            attachment: None,
+            from_name: Some("Example Billing".into()),
+            reply_to: None,
+        };
+        let wire = build_mime_with_sender(&message, Some("billing@example.test")).unwrap();
+        assert!(wire.starts_with("From: Example Billing <billing@example.test>\r\n"));
+        assert!(build_mime_with_sender(&message, Some("noreply@localhost")).is_ok());
+        assert!(build_mime_with_sender(&message, Some("bad\r\nBcc: leak@example.test")).is_err());
     }
 
     /// M2 end-to-end: a relay that rejects `AUTH LOGIN` produces an error with

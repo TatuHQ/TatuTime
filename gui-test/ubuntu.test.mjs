@@ -33,6 +33,20 @@ test('component stylesheet has no runtime remote asset dependency', () => {
   assert.match(css, /p-button--positive/);
 });
 
+test('local PDF renderer and worker match pinned hashes and ship licences', () => {
+  const pdf = new URL('../web/vendor/pdfjs/', import.meta.url);
+  const metadata = JSON.parse(readFileSync(new URL('manifest.json', pdf), 'utf8'));
+  assert.equal(metadata.package, 'pdfjs-dist');
+  assert.equal(metadata.version, '6.4.299');
+  for (const [name, hash] of Object.entries(metadata.sha256)) {
+    assert.equal(createHash('sha256').update(readFileSync(new URL(name, pdf))).digest('hex'), hash);
+  }
+  assert.ok(existsSync(new URL('pdf.worker.mjs', pdf)));
+  assert.ok(existsSync(new URL('LICENSE', pdf)));
+  assert.ok(existsSync(new URL('standard_fonts/LICENSE_FOXIT', pdf)));
+  assert.ok(existsSync(new URL('standard_fonts/LICENSE_LIBERATION', pdf)));
+});
+
 test('static official icons are decorative and icon-only controls have names', () => {
   const document = new JSDOM(readFileSync(new URL('../web/index.html', import.meta.url), 'utf8')).window.document;
   const bundledIcons = new Set();

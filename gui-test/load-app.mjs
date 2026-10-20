@@ -9,7 +9,7 @@
 import { readFileSync } from 'node:fs';
 
 const MODULES = [
-    'api', 'dom', 'seq', 'state', 'route', 'calendar', 'timesheet', 'hierarchy',
+    'api', 'dom', 'select', 'seq', 'state', 'pdf', 'route', 'calendar', 'timesheet', 'hierarchy',
     'invoices', 'billing', 'receipt', 'expenses', 'fx', 'settings', 'timer', 'notifications',
     'boot', 'wizard', 'setup', 'auth',
 ];

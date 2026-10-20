@@ -266,6 +266,7 @@ pub async fn create_customer(
     let draft = validate_customer_input(&input).map_err(ApiError::validation)?;
     let customer = Customer {
         id: Uuid::new_v4(),
+        invoice_prefix: draft.invoice_prefix,
         name: draft.name,
         currency: Currency(draft.currency),
         default_rate_minor: draft.default_rate_minor,
@@ -294,10 +295,15 @@ pub async fn update_customer(
     Path(id): Path<Uuid>,
     ValidJson(input): ValidJson<CustomerInput>,
 ) -> ApiResult {
-    get_customer(&app.store, id)?;
+    let existing = get_customer(&app.store, id)?;
     let draft = validate_customer_input(&input).map_err(ApiError::validation)?;
     let updated = Customer {
         id,
+        invoice_prefix: if input.invoice_prefix.is_some() {
+            draft.invoice_prefix
+        } else {
+            existing.invoice_prefix
+        },
         name: draft.name,
         currency: Currency(draft.currency),
         default_rate_minor: draft.default_rate_minor,

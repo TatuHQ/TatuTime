@@ -104,7 +104,7 @@ async function settle(message = 'the UI to finish its outstanding work') {
 }
 
 // Inject and run the real app, then fire DOMContentLoaded.
-window.eval(appJs);
+window.eval(`${appJs}\nrenderPdfDocument = async host => { host.textContent = 'Rendered PDF'; return () => {}; };`);
 window.document.dispatchEvent(new window.Event('DOMContentLoaded', { bubbles: true }));
 // The boot flag, not the footer copy: the footer names the build /healthz
 // reported (this harness talks to a live server).
@@ -871,7 +871,7 @@ check('entry logged against task T1', dec.some((e) => e.task_code === 'T1'));
 const tabInv = window.document.getElementById('tab-invoices');
 tabInv.dispatchEvent(new window.Event('click', { bubbles: true }));
 await settle('the Invoices section to load before opening the wizard');
-byId('invoice-new').dispatchEvent(new window.Event('click', { bubbles: true }));
+window.eval('iwOpen()');
 await waitFor(() => dialogOpen(byId('invoice-wizard')), {
   message: 'the + Invoice action to open the tracked-work wizard modal',
 });
@@ -1068,7 +1068,7 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
   // jsdom's URL stub mints "blob:jsdom-stub", enough to assert the frame; the
   // real render is covered by the Firefox gate.
   await waitFor(() => byId('invoice-preview').hidden === false
-    && byId('ip-pdf').querySelector('iframe') !== null, {
+    && byId('ip-frame') !== null, {
     message: 'the detail panel to frame the rendered invoice PDF',
   });
   const panel = window.document.getElementById('invoice-preview');
@@ -1079,8 +1079,8 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
     String(byId('ip-frame').getAttribute('title')).includes(custInv.number));
   const frame = window.document.getElementById('ip-frame');
   check('the preview region frames only the rendered PDF, from a blob: URL (#349)',
-    !!frame && String(frame.getAttribute('src')).startsWith('blob:')
-    && byId('ip-pdf').querySelectorAll('*').length === 1
+    !!frame && String(byId('ip-open-pdf').getAttribute('href')).startsWith('blob:')
+    && byId('ip-pdf').children.length === 2
     && byId('ip-pdf-state').hidden === true);
   check('the panel keeps its heading and accessible name (#349)',
     panel.getAttribute('aria-label') === 'Invoice document preview'
@@ -1153,12 +1153,12 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
     .find((b) => b.textContent === 'Preview' && b.closest('tr').textContent.includes(draft.number));
   dBtn.dispatchEvent(new window.Event('click', { bubbles: true }));
   await waitFor(() => byId('ip-download').hidden === true
-    && byId('ip-pdf').querySelector('iframe') !== null, {
+    && byId('ip-frame') !== null, {
     message: 'the draft preview to render the live PDF and hide the archived-PDF download',
   });
   check('a draft has a real rendered preview (#349)',
     byId('ip-download').hidden === true
-    && String(byId('ip-frame').getAttribute('src')).startsWith('blob:')
+    && String(byId('ip-open-pdf').getAttribute('href')).startsWith('blob:')
     && byId('ip-pdf-state').hidden === true);
   check('draft invoice hides the Get paid box (#357)', byId('ip-getpaid').hidden === true);
   // The detail panel renders the PDF and the timeline as two concurrent
@@ -1377,12 +1377,11 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
   userSearch.value = '';
   userSearch.dispatchEvent(new window.Event('input', { bubbles: true }));
   window.document.getElementById('settings-tab-catalog').dispatchEvent(new window.Event('click', { bubbles: true }));
-  check('Products & services tab shows the catalog only',
+  check('Catalog tab shows the catalog only',
     window.document.getElementById('settings-tab-catalog').getAttribute('aria-selected') === 'true'
     && !window.document.getElementById('settings-panel-catalog').hidden
     && window.document.getElementById('settings-panel-invoice-template').hidden);
   window.document.getElementById('item-name').value = 'Site visit';
-  window.document.getElementById('item-kind').value = 'service';
   window.document.getElementById('item-desc').value = 'On-site engineering visit';
   window.document.getElementById('item-price').value = '120.00';
   window.document.getElementById('item-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
@@ -1403,7 +1402,7 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
     tpl.labels.total === 'Amount due' && tpl.labels.description === 'Work performed');
   window.document.getElementById('tab-invoices').dispatchEvent(new window.Event('click', { bubbles: true }));
   await waitFor(() => !byId('panel-invoices').hidden, { message: 'the Invoices section to show' });
-  window.document.getElementById('manual-new').dispatchEvent(new window.Event('click', { bubbles: true }));
+  window.document.getElementById('invoice-new').dispatchEvent(new window.Event('click', { bubbles: true }));
   await waitFor(() => dialogOpen(byId('invoice-editor'))
     && window.document.querySelector('#ed-lines tbody tr') !== null, {
     message: 'the manual invoice modal to open with a line row',
@@ -1428,6 +1427,8 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
     && !byId('ed-save').hasAttribute('hidden') && !byId('ed-cancel').hasAttribute('hidden'));
   const invsPreCancel = (await (await fetch(BASE + '/api/invoices', { headers: { Cookie: SESSION_COOKIE } })).json()).invoices.length;
   byId('ed-cancel').dispatchEvent(new window.Event('click', { bubbles: true }));
+  await waitFor(() => dialogOpen(byId('app-dialog')), { message: 'unsaved invoice confirmation' });
+  byId('dlg-ok').click();
   await waitFor(() => !dialogOpen(edDlg), { message: 'Cancel to close the manual editor popup' });
   check('Cancel discards the manual draft with no request (#349)',
     (await (await fetch(BASE + '/api/invoices', { headers: { Cookie: SESSION_COOKIE } })).json()).invoices.length === invsPreCancel
@@ -1441,7 +1442,7 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
   // #349: the legacy generator that used to prefill this value is gone; the
   // editor's own customer picker carries the choice.
   byId('ed-customer').value = custOpt.value;
-  byId('manual-new').dispatchEvent(new window.Event('click', { bubbles: true }));
+  byId('invoice-new').dispatchEvent(new window.Event('click', { bubbles: true }));
   await waitFor(() => dialogOpen(byId('invoice-editor')) && byId('invoice-editor').querySelectorAll('tbody tr').length === 1, {
     message: 'the manual editor modal to open with one line row',
   });
@@ -1451,20 +1452,19 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
     && !!edPanel.querySelector('.p-modal__footer #ed-save')
     && !!edPanel.querySelector('.p-modal__footer #ed-cancel')
     && edPanel.querySelectorAll('tbody tr').length === 1);
-  const fill = (row, desc, kind, qty, price) => {
+  const fill = (row, desc, qty, price) => {
     row.querySelector('input[type=text]').value = desc;
-    row.querySelectorAll('select')[1].value = kind; // [0] is the #147 catalog picker
     const nums = row.querySelectorAll('input[type=number]');
     nums[0].value = qty;
     nums[1].value = price;
     for (const elx of row.querySelectorAll('input, select')) elx.dispatchEvent(new window.Event('input', { bubbles: true }));
   };
-  fill(edPanel.querySelector('tbody tr'), 'Office seat', 'product', '2.50', '40.00');
+  fill(edPanel.querySelector('tbody tr'), 'Office seat', '2.50', '40.00');
   window.document.getElementById('ed-add').dispatchEvent(new window.Event('click', { bubbles: true }));
   await waitFor(() => edPanel.querySelectorAll('tbody tr').length === 2, {
     message: 'the editor to append a second line row',
   });
-  fill([...edPanel.querySelectorAll('tbody tr')][1], 'Setup service', 'service', '1.00', '50.00');
+  fill([...edPanel.querySelectorAll('tbody tr')][1], 'Setup service', '1.00', '50.00');
   window.document.getElementById('ed-discount').value = '10';
   window.document.getElementById('ed-discount').dispatchEvent(new window.Event('input', { bubbles: true }));
   window.document.getElementById('ed-tax').value = '21';
@@ -1517,7 +1517,7 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
   const invsBefore = (await (await fetch(BASE + '/api/invoices', { headers: { Cookie: SESSION_COOKIE } })).json()).invoices.length;
   // #349: the wizard is opened by the `+ Invoice` action instead of rendering
   // open at boot; the #134 sequence below is otherwise unchanged.
-  byId('invoice-new').dispatchEvent(new window.Event('click', { bubbles: true }));
+  window.eval('iwOpen()');
   await waitFor(() => dialogOpen(byId('invoice-wizard')), {
     message: 'the + Invoice action to open the tracked-work wizard modal',
   });
@@ -1568,6 +1568,10 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
   const wizardDraft = invsAfter.find((i) => i.total_minor === 28500 && i.status === 'draft');
   check('Save creates exactly one draft from the selection (#134)',
     invsAfter.length === invsBefore + 1 && !!wizardDraft && wizardDraft.lines.length === 2);
+  await waitFor(() => byId('live-region').textContent.includes(`Draft ${wizardDraft.number} created`)
+    && byId('live-region').textContent.includes('Issue'), {
+    message: 'the imported draft to finish opening in the editor and announce its identity',
+  });
   check('draft save announced without issuing (#134)',
     /Draft INV-\d+ created.*Issue/.test(window.document.getElementById('live-region').textContent));
   // the wizard closed and reset back to step 1
@@ -1806,17 +1810,9 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
     custBtn.closest('th').getAttribute('aria-sort') === 'ascending'
     && totalBtn.closest('th').getAttribute('aria-sort') === 'none'
     && headerSorts().filter((a) => a === 'ascending' || a === 'descending').length === 1);
-  // column toggle
-  const colCb = window.document.querySelector('.inv-col[value="customer"]');
-  colCb.checked = false;
-  colCb.dispatchEvent(new window.Event('change', { bubbles: true }));
-  await waitFor(() => window.document.querySelector('#invoice-table tbody tr').children[1].hidden === true, {
-    message: 'the column toggle to hide the customer column',
-  });
-  check('column toggle hides the customer column (#135)',
-    window.document.querySelector('#invoice-table tbody tr').children[1].hidden === true);
-  colCb.checked = true;
-  colCb.dispatchEvent(new window.Event('change', { bubbles: true }));
+  check('invoice columns remain visible without a Columns control',
+    !window.document.querySelector('.cols-pop')
+    && [...window.document.querySelectorAll('#invoice-table th, #invoice-table td')].every(cell => !cell.hidden));
   // keyboard selection opens the #133 preview
   const kbRow = window.document.querySelector('#invoice-table tbody tr');
   kbRow.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
@@ -1967,7 +1963,7 @@ if (emailBtn) {
     && byId('send-email-settings').dataset.route === '/settings/email');
   check('the panel email flow sends nothing while SMTP is unconfigured (#139)',
     sentCount() === emailsBefore
-    && !!byId('ip-frame') && String(byId('ip-frame').getAttribute('src')).startsWith('blob:'));
+    && !!byId('ip-frame') && String(byId('ip-open-pdf').getAttribute('href')).startsWith('blob:'));
   byId('send-email-close').dispatchEvent(new window.Event('click', { bubbles: true }));
   await waitFor(() => !dialogOpen(byId('send-email-dialog')), {
     message: 'Cancel to dismiss the recipient dialog',
@@ -1987,7 +1983,7 @@ if (emailBtn) {
     /Already marked as sent .* no duplicate history entry/.test(byId('live-region').textContent)
     && byId('ip-timeline').querySelectorAll('li').length === before);
   check('the preview frame is re-rendered, never cached, after the actions (#349)',
-    !!byId('ip-frame') && String(byId('ip-frame').getAttribute('src')).startsWith('blob:'));
+    !!byId('ip-frame') && String(byId('ip-open-pdf').getAttribute('href')).startsWith('blob:'));
 }
 
 // ---- PDF DOWNLOAD (#113): GUI button fetches the blob and saves it ----
@@ -2746,7 +2742,7 @@ if (recBtn) {
   window.document.getElementById('tab-invoices').dispatchEvent(new window.Event('click', { bubbles: true }));
   await settle('the Invoices section to reload before reading the draft count');
   const invsBefore = (await getJson('/api/invoices')).invoices.length;
-  byId('invoice-new').dispatchEvent(new window.Event('click', { bubbles: true }));
+  window.eval('iwOpen()');
   await waitFor(() => dialogOpen(byId('invoice-wizard')), {
     message: 'the + Invoice action to open the tracked-work wizard modal',
   });
@@ -2838,7 +2834,7 @@ if (recBtn) {
   await settle('the cleared draft-number search to re-render');
 
   // ---- NO BILLABLE WORK: explains itself, persists nothing (#141) ----
-  byId('invoice-new').dispatchEvent(new window.Event('click', { bubbles: true }));
+  window.eval('iwOpen()');
   await waitFor(() => dialogOpen(byId('invoice-wizard')), {
     message: 'the wizard to reopen for the empty-period check',
   });

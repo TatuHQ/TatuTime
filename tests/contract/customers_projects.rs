@@ -4,6 +4,118 @@ use axum::http::StatusCode;
 use serde_json::json;
 
 #[tokio::test]
+async fn customer_invoice_prefix_validation_and_legacy_updates() {
+    let (app, _dir) = app().await;
+    let base = json!({"name":"Prefix customer", "currency":"EUR", "default_rate_minor":1});
+    let mut input = base.clone();
+    input["invoice_prefix"] = json!(" cust1- ");
+    let (status, customer) = json_req(&app, "POST", "/api/customers", Some(input)).await;
+    assert_eq!(status, StatusCode::CREATED, "{customer}");
+    assert_eq!(customer["invoice_prefix"], "CUST1");
+    let path = format!("/api/customers/{}", customer["id"].as_str().unwrap());
+    let (status, saved) = json_req(&app, "PUT", &path, Some(base.clone())).await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    assert_eq!(saved, customer);
+    for invalid in [
+        json!("INV"),
+        json!("---"),
+        json!("-ACME"),
+        json!("A/B"),
+        json!("A_B"),
+        json!("É"),
+        json!("ACME\n"),
+        json!("A".repeat(21)),
+        json!("A".repeat(65)),
+        json!(42),
+        json!(true),
+        json!([]),
+        json!({}),
+    ] {
+        for (method, target) in [("POST", "/api/customers"), ("PUT", path.as_str())] {
+            let mut input = base.clone();
+            input["invoice_prefix"] = invalid.clone();
+            let (status, error) = json_req(&app, method, target, Some(input)).await;
+            assert_eq!(
+                status,
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "{invalid}: {error}"
+            );
+            assert_eq!(error["error"]["code"], "validation_failed");
+            assert!(
+                error["error"]["fields"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|field| field["field"] == "invoice_prefix"),
+                "{error}"
+            );
+            let (_, unchanged) = json_req(&app, "GET", &path, None).await;
+            assert_eq!(unchanged, customer);
+        }
+    }
+    let (_, list) = json_req(&app, "GET", "/api/customers", None).await;
+    assert_eq!(list["customers"].as_array().unwrap().len(), 1);
+    let mut input = base;
+    input["invoice_prefix"] = json!("A".repeat(20));
+    let (status, customer) = json_req(&app, "PUT", &path, Some(input.clone())).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(customer["invoice_prefix"], "A".repeat(20));
+    input["invoice_prefix"] = json!("");
+    let (status, customer) = json_req(&app, "PUT", &path, Some(input)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(customer.get("invoice_prefix").is_none());
+}
+
+#[tokio::test]
+async fn customer_invoice_prefix_changes_only_future_drafts() {
+    let (app, _dir) = app().await;
+    let mut customer = json!({"name":"Prefix customer", "currency":"EUR", "default_rate_minor":1, "invoice_prefix":"CUST1"});
+    let (status, created) = json_req(&app, "POST", "/api/customers", Some(customer.clone())).await;
+    assert_eq!(status, StatusCode::CREATED);
+    let id = created["id"].as_str().unwrap();
+    let input = json!({"customer_id":id,"lines":[{"description":"Work", "quantity_hundredths":100,"unit_price_minor":100,"item_kind":"service"}]});
+    let mut saved = Vec::new();
+    for (prefix, expected) in [
+        ("CUST1", "CUST1-001"),
+        ("MONKEY", "MONKEY-001"),
+        ("CUST1", "CUST1-002"),
+        ("", "INV-0001"),
+    ] {
+        customer["invoice_prefix"] = json!(prefix);
+        let (status, result) = json_req(
+            &app,
+            "PUT",
+            &format!("/api/customers/{id}"),
+            Some(customer.clone()),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{result}");
+        let (status, invoice) =
+            json_req(&app, "POST", "/api/invoices/manual", Some(input.clone())).await;
+        assert_eq!(status, StatusCode::CREATED, "{invoice}");
+        assert_eq!(invoice["number"], expected);
+        let invoice_id = invoice["id"].as_str().unwrap().to_string();
+        if saved.is_empty() {
+            let (status, issued) = json_req(
+                &app,
+                "POST",
+                &format!("/api/invoices/{invoice_id}/issue"),
+                Some(json!({})),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK, "{issued}");
+            assert_eq!(issued["number"], expected);
+        }
+        saved.push((invoice_id, expected));
+    }
+    for (id, expected) in saved {
+        let (status, invoice) = json_req(&app, "GET", &format!("/api/invoices/{id}"), None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(invoice["number"], expected);
+    }
+}
+
+#[tokio::test]
 async fn unknown_field_rejected_before_persist() {
     let (app, d) = app().await;
     let (status, body) = json_req(

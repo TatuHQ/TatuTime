@@ -125,15 +125,25 @@ timesheet itself stays available.
 | Variable | Default | Purpose | Secret / file variant |
 | --- | --- | --- | --- |
 | `TUCANO_SMTP_HOST` | unset (email disabled) | SMTP relay hostname; unset logs mail instead of sending | Vault `smtp.host` wins |
-| `TUCANO_SMTP_PORT` | `25` | SMTP relay port | Vault `smtp.port` wins |
+| `TUCANO_SMTP_PORT` | `25` | 465 = verified implicit TLS; 587 = required STARTTLS; other ports = trusted plaintext relay | Vault `smtp.port` wins |
 | `TUCANO_SMTP_FROM` | `noreply@localhost` | Envelope/From address | Vault `smtp.from` wins |
 | `TUCANO_SMTP_USERNAME` | unset | Username for optional `AUTH LOGIN` | Vault `smtp.username` wins |
 | `TUCANO_SMTP_PASSWORD` | unset | Password for optional `AUTH LOGIN` | Vault `smtp.password` wins |
 
-The SMTP client speaks plaintext SMTP with optional `AUTH LOGIN`; it does not
-implement implicit TLS or STARTTLS. Use a local relay when your provider
-requires TLS. Configuration entered in **Settings → Email** is stored in the
-vault and wins over these variables.
+Port 465 uses certificate-verified implicit TLS; port 587 requires STARTTLS and
+never sends credentials when the upgrade is unavailable. Other ports retain the
+plaintext local-relay mode and must be used only on a trusted network or through
+a TLS sidecar. Configuration entered in **Settings → Email** is stored in the
+vault and wins over these variables. Hosted providers commonly require the full
+email address as username, an app password, and a permitted From address. A
+previous port-465 timeout reported as `Resource temporarily unavailable (os error
+11)` can indicate a plaintext/TLS mismatch, not invalid credentials.
+
+For Fastmail use `smtp.fastmail.com`, port `465` (implicit TLS), your full
+Fastmail email address as the username, and an app-specific password with mail
+access. A regular account password will not work. AUTH PLAIN is supported over
+the verified TLS connection. Port `587` is the alternative with required STARTTLS.
+Keep the From address set to an address or alias Fastmail permits you to send as.
 
 ### Integrations
 
@@ -281,8 +291,8 @@ Removing the last stored secret deletes `secrets.bin`.
   ([`src/api/auth.rs`](../src/api/auth.rs#L271)). If you need the admin-group
   mapping to apply to existing SSO users, set `TUCANO_SSO_ADMIN_GROUP` rather
   than only `sso_admin_group` in `config.json`.
-- **The SMTP client is plaintext.** It does not implement implicit TLS or
-  STARTTLS; use a local relay that adds TLS.
+- **Nonstandard SMTP ports use plaintext.** Ports 465 and 587 enable verified
+  TLS automatically; use a trusted local relay or TLS sidecar for other ports.
 - **`vault_enabled` is read-only through `PUT /api/admin/config`.** Only the
   dedicated lifecycle endpoints write it.
 

@@ -1,5 +1,20 @@
 # Ubuntu and Vanilla Design Review (#181)
 
+All single-choice select fields now use the shared anchored adapter in
+`web/js/select.js` (#388), including dynamic fields and native modal dialogs.
+The underlying select keeps its values, form events, validation and reset
+semantics. Disabled/hidden state and asynchronous options are mirrored; menus
+support arrows, Home/End, type-ahead, Escape, viewport clamping and focus return.
+Multi-select/list controls remain native. No CDN or runtime framework is added.
+
+Invoice workspace (#380) keeps the surrounding Vanilla shell and adds a shared
+draft editor with optional tracked-work import, two-row register filters and a
+locally bundled PDF.js viewer. PDF document geometry follows the supplied
+title/sender, recipient/identity, full-width subject, line table and totals/notes
+hierarchy; archived issued documents are not regenerated. The viewer's pinned
+renderer, worker, standard fonts and licences live in `web/vendor/pdfjs` and are
+regenerated with `npm run build:pdf` in `gui-test`.
+
 > **Status: design record.** This page records the design rationale and the
 > component backlog behind the current GUI. The rollout order and per-page
 > tracking are in the [historical migration plan](ubuntu-migration-plan.md).

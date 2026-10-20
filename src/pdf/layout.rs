@@ -200,28 +200,35 @@ pub(super) fn layout(doc: &Doc) -> Vec<Vec<Op>> {
     // Title.
     let title = winansi(&doc.title);
     p.cur.push(Op::Text {
-        face: Face::Bold,
-        size: 18,
+        face: Face::Regular,
+        size: 28,
         x: MARGIN,
-        y: p.y + 18,
+        y: p.y + 28,
         bytes: title,
     });
-    p.advance(18 + 16);
-    p.cur.push(Op::Line {
-        x1: MARGIN,
-        y1: p.y,
-        x2: MARGIN + CONTENT_W,
-        y2: p.y,
-        width: 1,
-    });
-    p.advance(10);
-
-    // Two columns share the same top edge: the metadata on the right is
-    // placed with its own cursor, the issuer/customer blocks flow on the left.
+    let recipient = doc
+        .header
+        .iter()
+        .enumerate()
+        .filter(|(_, block)| matches!(block, Block::Heading { .. }))
+        .nth(1)
+        .map(|(index, _)| index);
+    let header = if let Some(index) = recipient {
+        for block in &doc.header[..index] {
+            emit_block_in(&mut p, block, 10, META_X - MARGIN, CONTENT_W);
+        }
+        p.y = p.y.max(MARGIN + 65);
+        p.advance(22);
+        &doc.header[index..]
+    } else {
+        p.advance(44);
+        &doc.header[..]
+    };
+    let subject_rows = usize::from(doc.subject.is_some() && !doc.meta.is_empty());
     let top = p.y;
     let pages_before = p.pages.len();
-    let meta_bottom = emit_meta(&mut p, &doc.meta, top);
-    for b in &doc.header {
+    let meta_bottom = emit_meta(&mut p, &doc.meta[subject_rows..], top);
+    for b in header {
         emit_block_in(&mut p, b, 10, 0, HEADER_W);
     }
     // Only lift the flow cursor when the left column did not page-break (a
@@ -230,26 +237,16 @@ pub(super) fn layout(doc: &Doc) -> Vec<Vec<Op>> {
         p.y = meta_bottom;
     }
     p.advance(8);
+    for block in &doc.meta[..subject_rows] {
+        emit_block(&mut p, block, 10, 0);
+    }
+    p.advance(8);
 
     // Free blocks (template body).
     for b in &doc.blocks {
         emit_block(&mut p, b, 10, 0);
     }
     p.advance(10);
-
-    // Derived total hours, immediately above the table (integer hundredths).
-    if let Some(hours) = &doc.total_hours {
-        emit_block(
-            &mut p,
-            &Block::KeyVal {
-                key: "Total hours".to_string(),
-                spans: vec![Span::text(hours.clone())],
-            },
-            10,
-            0,
-        );
-        p.advance(4);
-    }
 
     // Line table with a repeating header.
     if !doc.lines.is_empty() {
@@ -265,8 +262,25 @@ pub(super) fn layout(doc: &Doc) -> Vec<Vec<Op>> {
     if let Some(rgb) = doc.accent {
         p.cur.push(Op::Color { rgb });
     }
+    p.need((doc.totals.len() as i32 * 16) + 22);
+    let totals_top = p.y;
     for b in &doc.totals {
-        emit_block(&mut p, b, 11, 0);
+        emit_block_in(&mut p, b, 11, CONTENT_W / 2, CONTENT_W);
+    }
+    let totals_bottom = p.y;
+    if let Some(hours) = &doc.total_hours {
+        p.y = totals_top;
+        emit_block_in(
+            &mut p,
+            &Block::KeyVal {
+                key: "Total hours".to_string(),
+                spans: vec![Span::bold(hours.clone())],
+            },
+            10,
+            0,
+            CONTENT_W / 2 - 12,
+        );
+        p.y = p.y.max(totals_bottom);
     }
     if doc.accent.is_some() {
         p.cur.push(Op::Color {
@@ -277,6 +291,9 @@ pub(super) fn layout(doc: &Doc) -> Vec<Vec<Op>> {
 
     // Footer.
     for b in &doc.footer {
+        if matches!(b, Block::Heading { .. }) {
+            p.need(52);
+        }
         emit_block(&mut p, b, 9, 0);
     }
 
@@ -745,6 +762,7 @@ mod tests {
             discount_hundredths: 0,
             subject: String::new(),
             terms: None,
+            document: Default::default(),
         }
     }
 
@@ -759,6 +777,7 @@ mod tests {
             payment_terms: None,
             invoice_notes: String::new(),
             invoice_subject: String::new(),
+            invoice_prefix: Default::default(),
             address: None,
             contacts: vec![],
             tax_hundredths: 0,

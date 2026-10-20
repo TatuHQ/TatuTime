@@ -1,6 +1,6 @@
 [package]
 name = "tucano-time"
-version = "0.1.47"
+version = "0.1.48"
 description = "Timesheet system: daily and weekly time entries, customers and project codes with currencies and rates"
 edition = "2024"
 license = "AGPL-3.0-or-later"
@@ -29,13 +29,14 @@ aes-gcm = { version = "0.11", features = ["getrandom"] }
 ureq = "3"
 pdf-writer = "0.15.0"
 futures-util = { version = "0.3.34", default-features = false }
+lettre = { version = "0.11.23", default-features = false, features = ["smtp-transport", "rustls-tls"] }
+lopdf = { version = "0.45.0", default-features = false }
 
 [dev-dependencies]
 tower = { version = "0.5.3", features = ["util"] }
 http-body-util = "0.1.5"
 tempfile = "3.27.0"
 sha2 = "0.11"
-lopdf = { version = "0.45.0", default-features = false }
 
 [lints.rust]
 unsafe_code = "forbid"

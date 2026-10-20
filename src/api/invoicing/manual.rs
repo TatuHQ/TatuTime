@@ -8,6 +8,8 @@ use crate::domain::InvoiceTimelineEventKind;
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ManualInvoiceInput {
+    #[serde(default)]
+    pub document: crate::domain::InvoiceDocument,
     pub customer_id: Uuid,
     /// Absent = the customer's currency.
     #[serde(default)]
@@ -81,6 +83,10 @@ impl From<&InvoiceLineInput> for crate::domain::InvoiceLine {
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct InvoiceEditInput {
+    #[serde(default)]
+    pub document: Option<crate::domain::InvoiceDocument>,
+    #[serde(default)]
+    pub currency: Option<Currency>,
     pub lines: Vec<InvoiceLineInput>,
     #[serde(default)]
     pub tax_hundredths: u16,
@@ -94,6 +100,67 @@ fn percent_field(value: u16, field: &str, errors: &mut Vec<FieldError>) {
     }
 }
 
+fn validate_document(
+    document: &crate::domain::InvoiceDocument,
+    today: chrono::NaiveDate,
+    errors: &mut Vec<FieldError>,
+) {
+    for (field, value, max) in [
+        ("document.po_number", document.po_number.as_str(), 120),
+        (
+            "document.subject",
+            document.subject.as_deref().unwrap_or(""),
+            120,
+        ),
+        (
+            "document.notes",
+            document.notes.as_deref().unwrap_or(""),
+            4000,
+        ),
+    ] {
+        if value.chars().count() > max || value.contains('\0') {
+            errors.push(FieldError::new(
+                field,
+                format!("at most {max} characters, without null bytes"),
+            ));
+        }
+    }
+    for (field, text, max) in [
+        (
+            "document.subject",
+            document.subject.as_deref().unwrap_or(""),
+            120,
+        ),
+        (
+            "document.notes",
+            document.notes.as_deref().unwrap_or(""),
+            4000,
+        ),
+    ] {
+        crate::template::validate_field(field, text, max, errors);
+    }
+    if let Some(subject) = &document.subject
+        && (subject.contains(['\r', '\n'])
+            || !crate::template::multiline_tokens(subject).is_empty())
+    {
+        errors.push(FieldError::new(
+            "document.subject",
+            "must be a single line without multiline variables",
+        ));
+    }
+    if let Some(terms) = &document.payment_terms {
+        crate::domain::validate_payment_terms(Some(terms), errors);
+    }
+    if let Some(due) = document.due_date
+        && due < document.invoice_date.unwrap_or(today)
+    {
+        errors.push(FieldError::new(
+            "document.due_date",
+            "must not precede invoice date",
+        ));
+    }
+}
+
 /// Create a draft invoice from manual Product/Service lines (#143). Money is
 /// computed server-side with integer math; the draft locks nothing (#8).
 pub async fn create_manual_invoice(
@@ -103,6 +170,7 @@ pub async fn create_manual_invoice(
 ) -> ApiResult {
     let customer = get_customer(&app.store, input.customer_id)?;
     let mut errors = Vec::new();
+    validate_document(&input.document, app.clock.today(), &mut errors);
     if input.lines.is_empty() {
         errors.push(FieldError::new("lines", "at least one line is required"));
     }
@@ -123,6 +191,7 @@ pub async fn create_manual_invoice(
     let totals =
         crate::domain::invoice_totals(subtotal, input.tax_hundredths, input.discount_hundredths);
     let draft = Invoice {
+        document: input.document,
         id: Uuid::new_v4(),
         number: String::new(),
         customer_id: customer.id,
@@ -203,6 +272,22 @@ pub async fn update_invoice_draft(
         return Err(ApiError::conflict("only a draft invoice can be edited"));
     }
     let mut errors = Vec::new();
+    let document = edit.document.as_ref().unwrap_or(&invoice.document);
+    validate_document(document, app.clock.today(), &mut errors);
+    if edit
+        .currency
+        .as_ref()
+        .is_some_and(|currency| currency != &invoice.currency)
+        && invoice
+            .lines
+            .iter()
+            .any(|line| line.entry_id.is_some() || line.expense_id.is_some())
+    {
+        errors.push(FieldError::new(
+            "currency",
+            "cannot change the currency of tracked work",
+        ));
+    }
     if edit.lines.is_empty() {
         errors.push(FieldError::new("lines", "at least one line is required"));
     }
@@ -271,6 +356,21 @@ pub async fn update_invoice_draft(
             out_lines.push(line);
         }
     }
+    for original in &stored_tracked {
+        if out_lines
+            .iter()
+            .filter(|line| {
+                line.entry_id == original.entry_id && line.expense_id == original.expense_id
+            })
+            .count()
+            != 1
+        {
+            errors.push(FieldError::new(
+                "lines",
+                "every tracked line must be retained exactly once",
+            ));
+        }
+    }
     validate_line_projects(&app, &invoice.customer_id, &out_lines, &mut errors)?;
     if !errors.is_empty() {
         return Err(ApiError::validation(errors));
@@ -279,6 +379,8 @@ pub async fn update_invoice_draft(
     let totals =
         crate::domain::invoice_totals(subtotal, edit.tax_hundredths, edit.discount_hundredths);
     let candidate = Invoice {
+        document: edit.document.unwrap_or_else(|| invoice.document.clone()),
+        currency: edit.currency.unwrap_or_else(|| invoice.currency.clone()),
         lines: out_lines,
         total_minor: totals.total_minor,
         tax_hundredths: edit.tax_hundredths,
