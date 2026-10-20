@@ -13,6 +13,7 @@ mod entries_reports;
 mod expenses;
 mod fx;
 mod gui_assets;
+mod imports;
 mod invoicing;
 mod locking;
 mod misc;

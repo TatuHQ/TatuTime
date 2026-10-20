@@ -80,7 +80,7 @@ export async function iwLoadProjects() {
   }
   const unbilledBy = new Map(); // project -> hundredths
   for (const e of entries.rows) {
-    if (e.customer_id !== cid || !e.billable || billed.has(e.id) || !e.project_code) continue;
+    if (e.customer_id !== cid || !e.billable || e.imported?.origin.invoiced || billed.has(e.id) || !e.project_code) continue;
     const k = e.project_code;
     unbilledBy.set(k, (unbilledBy.get(k) || 0) + Math.round(Number(e.hours) * 100));
   }

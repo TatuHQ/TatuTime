@@ -224,6 +224,8 @@ pub fn validate_manual_lines(
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Invoice {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub imported: Option<super::ImportedInvoice>,
     #[serde(default, skip_serializing_if = "InvoiceDocument::is_empty")]
     pub document: InvoiceDocument,
     pub id: Uuid,
@@ -490,8 +492,15 @@ impl Invoice {
     /// so receivables are never overstated by the migration.
     #[must_use]
     pub fn paid_minor(&self) -> u64 {
-        let ledger = self.payments.iter().map(|p| p.amount_minor).sum::<u64>();
-        if ledger == 0 && self.status == InvoiceStatus::Paid {
+        let ledger = self.payments.iter().fold(0_u64, |sum, payment| {
+            sum.saturating_add(payment.amount_minor)
+        });
+        let ledger = ledger.saturating_add(
+            self.imported
+                .as_ref()
+                .map_or(0, |imported| imported.opening_paid_minor),
+        );
+        if self.imported.is_none() && ledger == 0 && self.status == InvoiceStatus::Paid {
             self.total_minor
         } else {
             ledger
@@ -577,6 +586,7 @@ mod tests {
 
     fn inv(status: InvoiceStatus, total: u64, due: Option<NaiveDate>) -> Invoice {
         Invoice {
+            imported: None,
             id: Uuid::new_v4(),
             number: "INV-1".into(),
             customer_id: Uuid::new_v4(),

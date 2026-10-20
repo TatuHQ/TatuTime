@@ -267,6 +267,7 @@ mod invoice_seq_tests {
 
     fn draft(number: &str) -> Invoice {
         Invoice {
+            imported: None,
             id: Uuid::new_v4(),
             number: number.into(),
             customer_id: Uuid::new_v4(),

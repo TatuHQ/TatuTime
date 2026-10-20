@@ -385,6 +385,7 @@ impl AppState {
     ) -> Self {
         let store = Arc::new(store);
         let locks = Arc::new(crate::lock::CombinedLocks::new(vec![
+            Box::new(crate::lock::ImportLock::new(store.clone())),
             Box::new(crate::lock::InvoiceLock::new(store.clone())),
             Box::new(crate::lock::SubmissionLock::new(store.clone())),
             // #255/#190: reimbursement claims (#24) lock their expenses through

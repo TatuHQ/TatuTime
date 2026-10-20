@@ -376,6 +376,7 @@ mod storage_layout {
 
         let date = chrono::NaiveDate::from_ymd_opt(2026, 10, 9).unwrap();
         let entry = Entry {
+            imported: None,
             id: Uuid::new_v4(),
             date,
             customer_id: customer.id,
@@ -407,6 +408,7 @@ mod storage_layout {
 
         let invoice = store
             .create_invoice(Invoice {
+                imported: None,
                 id: Uuid::new_v4(),
                 number: String::new(),
                 customer_id: customer.id,

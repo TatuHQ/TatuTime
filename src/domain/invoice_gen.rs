@@ -1,5 +1,5 @@
 use super::customer::Customer;
-use super::entry::{Entry, effective_rates};
+use super::entry::Entry;
 use super::expense::Expense;
 use super::invoice::{Invoice, InvoiceError, InvoiceLine, InvoiceStatus, LineKind};
 use super::primitives::Currency;
@@ -113,7 +113,12 @@ pub fn generate_invoice(
         }
     };
     for e in entries.iter() {
-        if e.customer_id != customer.id || !e.billable || e.date < from || e.date > to {
+        if e.customer_id != customer.id
+            || !e.billable
+            || e.externally_invoiced()
+            || e.date < from
+            || e.date > to
+        {
             continue;
         }
         if excluded_entry.contains(&e.id) {
@@ -123,7 +128,7 @@ pub fn generate_invoice(
         if *restrict_projects && project.is_none() {
             continue; // deselected project (#134)
         }
-        let (cur, rate) = effective_rates(customer, project, user_rate(e));
+        let (cur, rate) = e.billing_rates(customer, project, user_rate(e));
         set_currency(&cur)?;
         lines.push(InvoiceLine {
             kind: LineKind::Time,
@@ -134,7 +139,7 @@ pub fn generate_invoice(
             task_code: e.task_code.clone(),
             hours: Some(e.hours),
             rate_minor: Some(rate),
-            amount_minor: e.hours.amount_minor(rate),
+            amount_minor: e.billing_amount_minor(rate),
             note: e.note.clone(),
             quantity_hundredths: None,
             unit_price_minor: None,
@@ -143,7 +148,12 @@ pub fn generate_invoice(
     }
     if *include_expenses {
         for x in expenses.iter() {
-            if x.customer_id != customer.id || !x.billable || x.date < from || x.date > to {
+            if x.customer_id != customer.id
+                || !x.billable
+                || x.externally_invoiced()
+                || x.date < from
+                || x.date > to
+            {
                 continue;
             }
             if excluded_expense.contains(&x.id) {
@@ -181,6 +191,7 @@ pub fn generate_invoice(
         .iter()
         .fold(0u64, |acc, l| acc.saturating_add(l.amount_minor)); // #190
     Ok(Invoice {
+        imported: None,
         id: Uuid::new_v4(),
         number,
         customer_id: customer.id,
@@ -269,6 +280,7 @@ pub fn draft_is_stale(
                 };
                 if entry.customer_id != customer.id
                     || !entry.billable
+                    || entry.externally_invoiced()
                     || entry.date < draft.period_from
                     || entry.date > draft.period_to
                     || entry.date != line.date
@@ -279,10 +291,10 @@ pub fn draft_is_stale(
                     return true;
                 }
                 let project = project_by_code.get(entry.project_code.0.as_str()).copied();
-                let (currency, rate) = effective_rates(customer, project, user_rate(entry));
+                let (currency, rate) = entry.billing_rates(customer, project, user_rate(entry));
                 if currency != draft.currency
                     || line.rate_minor != Some(rate)
-                    || line.amount_minor != entry.hours.amount_minor(rate)
+                    || line.amount_minor != entry.billing_amount_minor(rate)
                 {
                     return true; // the period resolution no longer yields the snapshot
                 }
@@ -299,6 +311,7 @@ pub fn draft_is_stale(
                 };
                 if expense.customer_id != customer.id
                     || !expense.billable
+                    || expense.externally_invoiced()
                     || expense.currency != draft.currency
                     || expense.date < draft.period_from
                     || expense.date > draft.period_to
@@ -322,6 +335,7 @@ mod tests {
 
     fn inv(status: InvoiceStatus, total: u64, due: Option<NaiveDate>) -> Invoice {
         Invoice {
+            imported: None,
             id: Uuid::new_v4(),
             number: "INV-1".into(),
             customer_id: Uuid::new_v4(),

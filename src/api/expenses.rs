@@ -188,6 +188,7 @@ fn expense_from_draft(
     now: DateTime<Utc>,
 ) -> Expense {
     Expense {
+        imported: existing.and_then(|expense| expense.imported.clone()),
         id,
         date: draft.date,
         customer_id: draft.customer_id,

@@ -468,6 +468,7 @@ mod txn_tests {
 
     fn invoice() -> Invoice {
         Invoice {
+            imported: None,
             id: Uuid::new_v4(),
             number: "_".into(),
             customer_id: Uuid::new_v4(),
@@ -747,6 +748,7 @@ mod timer_finish_tests {
 
     fn entry(id: Uuid, user: Uuid) -> Entry {
         Entry {
+            imported: None,
             id,
             date: NaiveDate::from_ymd_opt(2026, 10, 2).unwrap(),
             customer_id: Uuid::new_v4(),

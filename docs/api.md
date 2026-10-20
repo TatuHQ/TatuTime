@@ -58,6 +58,24 @@ record answers 404. Customers, projects, tasks and categories are shared
 reference data readable by any signed-in user. The complete route-to-tier table
 is `API_ROUTES` in [`src/lib.rs`](../src/lib.rs#L88).
 
+## Import Provenance Revision 0.1.51
+
+The closed `Entry`, `Expense` and `Invoice` response schemas accept optional,
+read-only `imported` provenance. Existing stored documents and requests remain
+valid; consumers validating responses against a closed schema must adopt this
+revision before reading imported records. Ordinary create/update payloads cannot
+set or remove provenance. Entry updates preserve it and cannot reassign imported
+billing references. Externally invoiced time/expenses are permanently frozen
+and excluded from invoice generation without requiring a local invoice link.
+
+Imported time resolves its historical currency, billable rate and cost rate,
+including explicit zeros. Original hours retain exported monetary snapshots;
+allowed hours changes recompute amounts using the imported rates. Imported
+invoices carry a reviewed opening paid amount separately from later payment
+ledger events. Original imported PDFs are integrity-checked and never regenerated
+or altered for preview or delivery. A missing/corrupt original fails closed.
+The import upload/commit workflow is not yet exposed by this foundation.
+
 ## Contract Revision 0.1.48
 
 ### Customer Invoice Prefixes

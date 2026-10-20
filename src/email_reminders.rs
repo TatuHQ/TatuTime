@@ -282,6 +282,7 @@ mod tests {
 
     fn issued_due(id: &str, due: NaiveDate, status: InvoiceStatus) -> Invoice {
         Invoice {
+            imported: None,
             id: id.parse().unwrap(),
             number: format!("INV-{id}"),
             customer_id: uuid::Uuid::new_v4(),

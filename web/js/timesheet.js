@@ -141,7 +141,7 @@ async function refreshDayBody() {
   let total = 0;
   for (const e of rows) {
     total += Math.round(e.hours * 100);
-    const locked = locks.ids.has(e.id);
+    const locked = locks.ids.has(e.id) || e.imported?.origin.invoiced;
     const inv = locks.invoiced.get(e.id);
     const projName = (state.projectsByCustomer[e.customer_id] || []).find((p) => p.code === e.project_code);
     const custLine =
@@ -184,7 +184,7 @@ async function refreshDayBody() {
                   attrs: {
                     role: 'img',
                     'aria-label': 'locked',
-                    title: 'In a submitted week — editing is blocked until it is rejected or withdrawn',
+                    title: e.imported?.origin.invoiced ? 'Invoiced in Harvest' : 'In a submitted week — editing is blocked until it is rejected or withdrawn',
                   },
                 }, [ubuntuIcon('lock-locked')])]
           : [
@@ -501,6 +501,7 @@ async function refreshWeekBody() {
   const entryDates = new Set(entries.map((e) => e.date));
   const locks = await weekLockIndex();
   const locked = locks.ids;
+  for (const entry of entries) if (entry.imported?.origin.invoiced) locked.add(entry.id);
   // Columns whose day carries invoiced time wear the lock (permanent freeze).
   const invoicedDates = new Set(
     entries.filter((e) => locks.invoiced.has(e.id)).map((e) => e.date),

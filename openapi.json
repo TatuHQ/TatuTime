@@ -640,6 +640,40 @@
         },
         "additionalProperties": false
       },
+      "ImportOrigin": {
+        "type": "object", "additionalProperties": false,
+        "required": ["provider", "namespace", "batch_id", "source_key", "invoiced"],
+        "properties": {
+          "provider": { "type": "string", "enum": ["harvest"] },
+          "namespace": { "type": "string" },
+          "batch_id": { "type": "string", "format": "uuid" },
+          "source_key": { "type": "string" },
+          "invoiced": { "type": "boolean" }
+        }
+      },
+      "ImportedTime": {
+        "type": "object", "additionalProperties": false,
+        "required": ["origin", "currency", "rate_minor", "cost_rate_minor", "source_hours", "amount_minor", "cost_amount_minor"],
+        "properties": {
+          "origin": { "$ref": "#/components/schemas/ImportOrigin" },
+          "currency": { "$ref": "#/components/schemas/Currency" },
+          "rate_minor": { "type": "integer", "minimum": 0 },
+          "cost_rate_minor": { "type": "integer", "minimum": 0 },
+          "source_hours": { "type": "number", "minimum": 0.01, "maximum": 24 },
+          "amount_minor": { "type": "integer", "minimum": 0 },
+          "cost_amount_minor": { "type": "integer", "minimum": 0 }
+        }
+      },
+      "ImportedInvoice": {
+        "type": "object", "additionalProperties": false,
+        "required": ["origin", "original_number", "pdf_sha256", "opening_paid_minor"],
+        "properties": {
+          "origin": { "$ref": "#/components/schemas/ImportOrigin" },
+          "original_number": { "type": "string" },
+          "pdf_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "opening_paid_minor": { "type": "integer", "minimum": 0 }
+        }
+      },
       "Entry": {
         "type": "object",
         "required": [
@@ -655,6 +689,7 @@
           "updated_at"
         ],
         "properties": {
+          "imported": { "$ref": "#/components/schemas/ImportedTime", "readOnly": true },
           "id": {
             "type": "string",
             "format": "uuid"
@@ -1153,6 +1188,7 @@
           "created_at"
         ],
         "properties": {
+          "imported": { "$ref": "#/components/schemas/ImportedInvoice", "readOnly": true },
           "document": { "$ref": "#/components/schemas/InvoiceDocument" },
           "id": {
             "type": "string",
@@ -1417,6 +1453,7 @@
           "updated_at"
         ],
         "properties": {
+          "imported": { "$ref": "#/components/schemas/ImportOrigin", "readOnly": true },
           "id": {
             "type": "string",
             "format": "uuid"

@@ -56,6 +56,7 @@ impl RecurringJob {
                     item_kind: None,
                 };
                 Ok(Some(Invoice {
+                    imported: None,
                     id: uuid::Uuid::new_v4(),
                     number: String::new(),
                     customer_id: customer.id,

@@ -2,12 +2,65 @@ use super::{get_invoice_or_404, org_for};
 use crate::api::*;
 use crate::domain::InvoiceWatermarkStage;
 
+fn original_imported_pdf(
+    app: &AppState,
+    invoice: &crate::domain::Invoice,
+) -> Result<Vec<u8>, ApiError> {
+    use sha2::{Digest, Sha256};
+    let imported = invoice
+        .imported
+        .as_ref()
+        .ok_or_else(|| ApiError::internal("import metadata missing".into()))?;
+    let bytes = app
+        .store
+        .invoice_pdf_bytes(invoice.id)?
+        .ok_or_else(|| ApiError::internal("original imported invoice PDF is unavailable".into()))?;
+    if crate::hex_lower(&Sha256::digest(&bytes)) != imported.pdf_sha256 {
+        return Err(ApiError::internal(
+            "original imported invoice PDF failed integrity verification".into(),
+        ));
+    }
+    Ok(bytes)
+}
+
+fn original_pdf_response(
+    app: &AppState,
+    invoice: &crate::domain::Invoice,
+    inline: bool,
+) -> ApiResult {
+    let bytes = original_imported_pdf(app, invoice)?;
+    let filename = crate::domain::safe_filename(&invoice.number);
+    let disposition = if inline { "inline" } else { "attachment" };
+    Ok((
+        StatusCode::OK,
+        [
+            (
+                axum::http::header::CONTENT_TYPE,
+                "application/pdf".to_string(),
+            ),
+            (
+                axum::http::header::CONTENT_DISPOSITION,
+                format!("{disposition}; filename=\"{filename}.pdf\""),
+            ),
+            (
+                axum::http::header::ETAG,
+                format!("\"{}\"", invoice.imported.as_ref().unwrap().pdf_sha256),
+            ),
+        ],
+        bytes,
+    )
+        .into_response())
+}
+
 /// Download the archived invoice PDF (#113). Admin tier only (the whole
 /// `/invoices` surface is, #51). A legacy issued invoice with no archive yet
 /// gets it rendered lazily from the snapshot-locked document — byte-stable by
 /// the renderer's determinism contract — and persisted on first read.
 pub async fn invoice_pdf(State(app): State<AppState>, Path(id): Path<Uuid>) -> ApiResult {
     let invoice = get_invoice_or_404(&app, id)?;
+    if invoice.imported.is_some() {
+        return original_pdf_response(&app, &invoice, false);
+    }
     if invoice.status == crate::domain::InvoiceStatus::Draft {
         return Err(ApiError::conflict(
             "issue the invoice before downloading its PDF",
@@ -63,6 +116,9 @@ pub async fn invoice_pdf(State(app): State<AppState>, Path(id): Path<Uuid>) -> A
 /// caller **401**.
 pub async fn invoice_pdf_preview(State(app): State<AppState>, Path(id): Path<Uuid>) -> ApiResult {
     let invoice = get_invoice_or_404(&app, id)?;
+    if invoice.imported.is_some() {
+        return original_pdf_response(&app, &invoice, true);
+    }
     let events = store_blocking("invoice timeline read", &app.store, move |s| {
         Ok(s.invoice_timeline(id))
     })
@@ -97,6 +153,12 @@ pub(crate) fn invoice_pdf_for_delivery(
     app: &AppState,
     invoice: &Invoice,
 ) -> Result<(String, Vec<u8>), ApiError> {
+    if invoice.imported.is_some() {
+        return Ok((
+            format!("{}.pdf", crate::domain::safe_filename(&invoice.number)),
+            original_imported_pdf(app, invoice)?,
+        ));
+    }
     if let Some(bytes) = app.store.invoice_pdf_bytes(invoice.id)? {
         let name = invoice
             .pdf

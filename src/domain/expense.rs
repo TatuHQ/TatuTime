@@ -18,6 +18,8 @@ pub struct Category {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Expense {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub imported: Option<super::ImportOrigin>,
     pub id: Uuid,
     pub date: NaiveDate,
     pub customer_id: Uuid,

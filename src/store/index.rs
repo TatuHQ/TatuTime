@@ -637,6 +637,7 @@ mod index_tests {
 
     fn draft() -> Invoice {
         Invoice {
+            imported: None,
             id: Uuid::new_v4(),
             number: String::new(),
             customer_id: Uuid::new_v4(),
@@ -765,6 +766,7 @@ mod per_user_index_tests {
     fn entry_at(user: Option<Uuid>, seq: u32, date: NaiveDate) -> Entry {
         let at = Utc.with_ymd_and_hms(2026, 10, 2, 9, 0, seq).unwrap();
         Entry {
+            imported: None,
             id: Uuid::new_v4(),
             date,
             customer_id: Uuid::new_v4(),
@@ -783,6 +785,7 @@ mod per_user_index_tests {
     fn expense(user: Option<Uuid>) -> Expense {
         let at = Utc.with_ymd_and_hms(2026, 10, 2, 9, 0, 0).unwrap();
         Expense {
+            imported: None,
             id: Uuid::new_v4(),
             date: day(),
             customer_id: Uuid::new_v4(),

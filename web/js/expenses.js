@@ -269,7 +269,7 @@ async function refreshExpensesBody() {
         // The stored file's own name, as the link that opens its preview — the
         // column answers "is there a receipt?" without opening the record.
         el('td', { attrs: { 'data-heading': 'Receipt' } }, [receiptCell(x)]),
-        iconActionsCell([
+        iconActionsCell(x.imported?.invoiced ? [statusChip('Invoiced in Harvest')] : [
           el('button', {
             cls: 'link',
             type: 'button',

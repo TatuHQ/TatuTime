@@ -11,6 +11,7 @@ use uuid::Uuid;
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub enum LockReason {
+    Imported,
     Invoiced {
         id: String,
     },
@@ -31,6 +32,7 @@ pub enum LockReason {
 impl LockReason {
     pub fn message(&self) -> String {
         match self {
+            LockReason::Imported => "record was invoiced in Harvest and is permanent".into(),
             LockReason::Invoiced { id } => {
                 format!("entry is invoiced ({id}); invoiced time is permanent and cannot be changed")
             }
@@ -183,6 +185,66 @@ pub struct InvoiceLock {
     store: std::sync::Arc<crate::store::Store>,
 }
 
+pub struct ImportLock {
+    store: std::sync::Arc<crate::store::Store>,
+}
+
+impl ImportLock {
+    pub fn new(store: std::sync::Arc<crate::store::Store>) -> Self {
+        Self { store }
+    }
+}
+
+impl EntryLock for ImportLock {
+    fn entry_lock(&self, id: Uuid) -> Result<Option<LockReason>, LockUnavailable> {
+        self.store
+            .get_entry(id)
+            .map(|entry| {
+                entry
+                    .filter(|entry| entry.externally_invoiced())
+                    .map(|_| LockReason::Imported)
+            })
+            .map_err(|error| LockUnavailable(error.to_string()))
+    }
+
+    fn locked_entries(&self) -> Result<std::collections::HashSet<Uuid>, LockUnavailable> {
+        self.store
+            .list_all_entries()
+            .map(|entries| {
+                entries
+                    .into_iter()
+                    .filter(|entry| entry.externally_invoiced())
+                    .map(|entry| entry.id)
+                    .collect()
+            })
+            .map_err(|error| LockUnavailable(error.to_string()))
+    }
+
+    fn expense_lock(&self, id: Uuid) -> Result<Option<LockReason>, LockUnavailable> {
+        self.store
+            .get_expense(id)
+            .map(|expense| {
+                expense
+                    .filter(|expense| expense.externally_invoiced())
+                    .map(|_| LockReason::Imported)
+            })
+            .map_err(|error| LockUnavailable(error.to_string()))
+    }
+
+    fn locked_expenses(&self) -> Result<std::collections::HashSet<Uuid>, LockUnavailable> {
+        self.store
+            .list_expenses()
+            .map(|expenses| {
+                expenses
+                    .into_iter()
+                    .filter(|expense| expense.externally_invoiced())
+                    .map(|expense| expense.id)
+                    .collect()
+            })
+            .map_err(|error| LockUnavailable(error.to_string()))
+    }
+}
+
 impl InvoiceLock {
     pub fn new(store: std::sync::Arc<crate::store::Store>) -> Self {
         Self { store }
@@ -309,6 +371,7 @@ mod bulk_tests {
 
     fn entry_ref(id: Uuid) -> Entry {
         Entry {
+            imported: None,
             id,
             date: NaiveDate::from_ymd_opt(2026, 10, 2).unwrap(),
             customer_id: Uuid::new_v4(),
@@ -349,6 +412,7 @@ mod bulk_tests {
 
     fn invoice(number: &str, status: InvoiceStatus, lines: Vec<InvoiceLine>) -> Invoice {
         Invoice {
+            imported: None,
             id: Uuid::new_v4(),
             number: number.into(),
             customer_id: Uuid::new_v4(),

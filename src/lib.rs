@@ -21,6 +21,8 @@ pub mod email;
 pub mod email_reminders;
 pub mod error;
 pub mod fx;
+pub mod harvest;
+pub mod harvest_invoices;
 pub mod lock;
 pub mod pdf;
 pub mod providers;
