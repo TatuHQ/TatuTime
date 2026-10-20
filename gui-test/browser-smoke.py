@@ -1084,7 +1084,7 @@ class Gate:
             "return true;" % (ADMIN_EMAIL, ADMIN_PASSWORD)
         )
         self.wait_script(
-            "document.getElementById('version').textContent === 'TucanoTime'",
+            "document.documentElement.dataset.booted === 'ready'",
             "the app to finish startApp() after signing in",
         )
         info = json.loads(self.marionette.script(
@@ -1093,6 +1093,7 @@ class Gate:
             " accountHidden: document.getElementById('account').hidden,"
             " who: document.getElementById('who').textContent,"
             " version: document.getElementById('version').textContent,"
+            " build: document.getElementById('build').textContent,"
             " dayRows: document.querySelectorAll('#day-table tbody tr').length,"
             "});"
         ))
@@ -1114,7 +1115,11 @@ class Gate:
         self.check(
             "signing in through the real UI boots the app",
             info["overlayHidden"] and not info["accountHidden"]
-            and info["who"] == ADMIN_NAME and info["version"] == "TucanoTime",
+            and info["who"] == ADMIN_NAME
+            # The footer names the running build ("TucanoTime vX.Y.Z · build
+            # abc1234"), stamped from /healthz, so both parts must be there.
+            and info["version"].startswith("TucanoTime v")
+            and info["build"].startswith("· build "),
             f"{info}",
         )
 
@@ -1162,7 +1167,7 @@ class Gate:
             self.navigate(path)
             self.wait_script(
                 "document.readyState === 'complete'"
-                " && document.getElementById('version').textContent === 'TucanoTime'",
+                " && document.documentElement.dataset.booted === 'ready'",
                 f"the app to boot at {path}",
             )
             selected = self.marionette.script(TAB_SELECTED.format(tab=tab))
@@ -1269,7 +1274,7 @@ class Gate:
         self.navigate("/approvals")
         self.wait_script(
             "document.readyState === 'complete'"
-            " && document.getElementById('version').textContent === 'TucanoTime'",
+            " && document.documentElement.dataset.booted === 'ready'",
             "the app to boot at /approvals",
         )
         approvals = json.loads(self.marionette.script(APPROVALS_HIDDEN))
@@ -1296,7 +1301,7 @@ class Gate:
         self.navigate("/reports")
         self.wait_script(
             "document.readyState === 'complete'"
-            " && document.getElementById('version').textContent === 'TucanoTime'",
+            " && document.documentElement.dataset.booted === 'ready'",
             "the app to boot at /reports",
         )
         reports = json.loads(self.marionette.script(REPORTS_HIDDEN))
@@ -1325,7 +1330,7 @@ class Gate:
         self.navigate("/invoices")
         self.wait_script(
             "document.readyState === 'complete'"
-            " && document.getElementById('version').textContent === 'TucanoTime'",
+            " && document.documentElement.dataset.booted === 'ready'",
             "the app to boot at /invoices for the advanced billing probe",
         )
         advanced = json.loads(self.marionette.script(ADVANCED_BILLING_HIDDEN))
@@ -1386,7 +1391,7 @@ class Gate:
         self.navigate("/settings/security")
         self.wait_script(
             "document.readyState === 'complete'"
-            " && document.getElementById('version').textContent === 'TucanoTime'",
+            " && document.documentElement.dataset.booted === 'ready'",
             "the app to boot at /settings/security",
         )
         counts = json.loads(self.marionette.script(
@@ -1482,11 +1487,11 @@ class Gate:
             self.navigate(path)
             self.wait_script(
                 "document.readyState === 'complete'"
-                " && document.getElementById('version').textContent === 'TucanoTime'",
+                " && document.documentElement.dataset.booted === 'ready'",
                 f"the app to boot at {path}",
             )
-            # The router applies the deep link after startApp() set #version, so
-            # wait for the sampled control to have a layout box.
+            # The router applies the deep link after startApp() set the boot
+            # flag, so wait for the sampled control to have a layout box.
             self.wait_script(
                 "(function () {"
                 f" var n = document.getElementById('{ids[0]}');"
@@ -1498,7 +1503,7 @@ class Gate:
         self.navigate("/timesheets/day")
         self.wait_script(
             "document.readyState === 'complete'"
-            " && document.getElementById('version').textContent === 'TucanoTime'",
+            " && document.documentElement.dataset.booted === 'ready'",
             "the app to boot at /timesheets/day",
         )
         self.marionette.script("document.getElementById('day-add').click(); return true;")
@@ -1593,7 +1598,7 @@ class Gate:
         self.navigate("/expenses")
         self.wait_script(
             "document.readyState === 'complete'"
-            " && document.getElementById('version').textContent === 'TucanoTime'",
+            " && document.documentElement.dataset.booted === 'ready'",
             "the app to boot at /expenses",
         )
         self.marionette.script("document.getElementById('expense-new').click(); return true;")
@@ -1633,7 +1638,7 @@ class Gate:
         self.navigate("/expenses")
         self.wait_script(
             "document.readyState === 'complete'"
-            " && document.getElementById('version').textContent === 'TucanoTime'",
+            " && document.documentElement.dataset.booted === 'ready'",
             "the app to boot at /expenses",
         )
         self.marionette.script(
@@ -1871,7 +1876,7 @@ class Gate:
         self.navigate("/invoices")
         self.wait_script(
             "document.readyState === 'complete'"
-            " && document.getElementById('version').textContent === 'TucanoTime'",
+            " && document.documentElement.dataset.booted === 'ready'",
             "the app to boot at /invoices",
         )
         # The register opens on the Open tab, which hides drafts.
@@ -1977,7 +1982,7 @@ class Gate:
         self.navigate("/invoices")
         self.wait_script(
             "document.readyState === 'complete'"
-            " && document.getElementById('version').textContent === 'TucanoTime'",
+            " && document.documentElement.dataset.booted === 'ready'",
             "the app to boot at /invoices for the preview audit",
         )
         # The register opens on Open, which hides drafts.
