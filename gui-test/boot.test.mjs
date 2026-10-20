@@ -27,7 +27,7 @@ window.bootTest = {
   dashRenderOverview, refreshInvoices, refreshCustomerPickers,
   writeOffInvoice, navigateDay, weekLockIndex, state,
   refreshWeek, openWeekRowForm, saveWeekRow, fillProjectSelect, refreshTimeCal, calState,
-  openInvoicePreview, closeInvoicePreview, showDeliveryRecord, formatTimelineStamp,
+  openInvoicePreview, closeInvoicePreview, showDeliveryRecord, formatTimelineStamp, startPdfWorker, pdfDeadline,
   // #349 journeys: the invoice action row, the year stepper and the manual
   // editor are wired by the focused wire*() functions; expose them so a test
   // drives the same listeners the app registers at boot.
@@ -713,7 +713,8 @@ api.get = async () => ({ events: [] });
 `);
   dom.window.URL.createObjectURL = () => 'blob:never';
   await context.openInvoicePreview({ id: 'x1', number: 'INV-9', status: 'draft' }, null);
-  assert.equal(document.getElementById('ip-pdf').children.length, 0, 'a non-PDF body is never framed');
+  assert.equal(document.getElementById('ip-frame'), null, 'a non-PDF body is never rendered');
+  assert.equal(document.querySelector('#ip-pdf button').textContent, 'Retry preview');
   assert.equal(document.getElementById('ip-pdf-state').hidden, false);
   assert.match(document.getElementById('ip-pdf-state').textContent, /did not return a PDF/);
   assert.equal(document.getElementById('ip-download').hidden, true, 'a draft has no archived PDF to download');
@@ -784,7 +785,8 @@ api.getBlob = async () => { const e = new Error('HTTP 403'); e.status = 403; thr
 api.get = async () => { const e = new Error('GET /api/invoices/x/timeline failed: HTTP 500'); e.status = 500; throw e; };
 `);
   await context.openInvoicePreview({ id: 'x1', number: 'INV-9', status: 'issued' }, null);
-  assert.equal(document.getElementById('ip-pdf').children.length, 0);
+  assert.equal(document.getElementById('ip-frame'), null);
+  assert.equal(document.querySelector('#ip-pdf button').textContent, 'Retry preview');
   assert.match(document.getElementById('ip-pdf-state').textContent, /Preview unavailable/);
   assert.match(document.getElementById('ip-pdf-state').textContent, /HTTP 403/);
   assert.match(document.getElementById('ip-timeline-state').textContent, /History unavailable/);
@@ -801,6 +803,61 @@ test('the timestamp helper is the requested "on Oct 1, 2026 at 11:26 AM" shape (
   assert.equal(context.formatTimelineStamp('2026-10-01T11:26:00Z'), `on ${date} at ${time}`);
   assert.match(context.formatTimelineStamp('2026-09-28T10:12:00Z'), /^on Sep 28, 2026 at /);
   assert.match(context.formatTimelineStamp('2026-09-28T10:12:00Z'), / (AM|PM)$/);
+  dom.window.close();
+});
+
+test('a silent PDF worker falls back instead of loading forever', async () => {
+  const { dom, context } = makeDom();
+  let expire;
+  dom.window.setTimeout = callback => { expire = callback; return 1; };
+  dom.window.clearTimeout = () => {};
+  const workers = [];
+  class WorkerFixture {
+    constructor() {
+      this.destroyed = false;
+      this.promise = workers.length ? Promise.resolve() : new Promise(() => {});
+      workers.push(this);
+    }
+    destroy() { this.destroyed = true; }
+  }
+  const fallback = { WorkerMessageHandler: {} };
+  const pending = context.startPdfWorker({ PDFWorker: WorkerFixture }, async () => fallback);
+  expire();
+  const worker = await pending;
+  assert.equal(workers.length, 2);
+  assert.equal(workers[0].destroyed, true);
+  assert.equal(worker, workers[1]);
+  assert.equal(dom.window.pdfjsWorker, fallback);
+  dom.window.close();
+});
+
+test('a failed PDF worker fallback rejects visibly rather than waiting', async () => {
+  const { dom, context } = makeDom();
+  let destroyed = false;
+  class WorkerFixture {
+    constructor() { this.promise = Promise.reject(new Error('blocked')); }
+    destroy() { destroyed = true; }
+  }
+  await assert.rejects(context.startPdfWorker({ PDFWorker: WorkerFixture },
+    async () => { throw new Error('fallback blocked'); }), /fallback blocked/);
+  assert.equal(destroyed, true);
+  dom.window.close();
+});
+
+test('a stalled PDF request leaves loading with a retryable timeout', async () => {
+  const { dom, context, document } = makeDom(`
+api.getBlob = () => new Promise(() => {});
+api.get = async () => ({events:[]});
+`);
+  let expire;
+  dom.window.setTimeout = callback => { expire = callback; return 1; };
+  dom.window.clearTimeout = () => {};
+  const pending = context.openInvoicePreview({id:'stalled',number:'INV-42',status:'draft'}, null);
+  expire();
+  await pending;
+  assert.match(document.getElementById('ip-pdf-state').textContent, /request timed out/);
+  assert.equal(document.getElementById('ip-pdf-state').hidden, false);
+  assert.equal(document.querySelector('#ip-pdf button').textContent, 'Retry preview');
   dom.window.close();
 });
 
@@ -865,6 +922,46 @@ test('invoice periods step across years and filter invoice dates, not work dates
   assert.equal(context.dash.from, '');
   assert.equal(context.dash.customer, '');
   assert.equal(context.dash.periodMode, 'all');
+  dom.window.close();
+});
+
+test('invoice filter menus select, dismiss and reset alongside their native state', () => {
+  const { dom, context, document } = makeDom('refreshInvoices = async () => {};');
+  document.getElementById('panel-invoices').hidden = false;
+  const customer = document.getElementById('inv-f-customer');
+  const option = document.createElement('option');
+  option.value = 'c1'; option.textContent = 'Example customer'; customer.appendChild(option);
+  context.wireInvoiceDashboard();
+  const button = document.getElementById('inv-f-customer-button');
+  const menu = document.getElementById('inv-f-customer-menu');
+  assert.equal(customer.hidden, true);
+  assert.equal(button.getAttribute('aria-haspopup'), 'listbox');
+  button.click();
+  assert.equal(menu.hidden, false);
+  assert.equal(button.getAttribute('aria-expanded'), 'true');
+  menu.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'End', bubbles: true }));
+  assert.equal(document.activeElement.id, 'inv-f-customer-option-1');
+  document.activeElement.click();
+  assert.equal(context.dash.customer, 'c1');
+  assert.equal(customer.value, 'c1');
+  assert.equal(menu.hidden, true);
+  assert.equal(document.activeElement, button);
+  assert.equal(button.textContent.trim(), 'Example customer');
+  button.click();
+  menu.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  assert.equal(menu.hidden, true);
+  button.click();
+  document.body.dispatchEvent(new dom.window.Event('pointerdown', { bubbles: true }));
+  assert.equal(menu.hidden, true);
+  document.getElementById('inv-clear').click();
+  assert.equal(button.textContent.trim(), 'Customer');
+  assert.equal(context.dash.customer, '');
+  assert.equal(customer.value, '');
+  const period = document.getElementById('inv-f-period-button');
+  period.click();
+  document.getElementById('inv-f-period-option-1').click();
+  assert.equal(context.dash.periodMode, 'month');
+  assert.equal(period.textContent.trim(), 'Month');
   dom.window.close();
 });
 

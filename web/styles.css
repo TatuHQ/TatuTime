@@ -662,6 +662,16 @@ dialog.p-modal::backdrop { background: transparent; }
 .pdf-toolbar, .pdf-actions { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem; margin-block: .5rem; }
 .pdf-toolbar select { width: auto; margin: 0; }
 .invoice-status-row { border-bottom: 1px solid var(--line); padding-block: .5rem; margin-bottom: .75rem; }
+#inv-filter-row { align-items: center; }
+#inv-clear { height: var(--control-height); margin: 0; padding-block: 0; display: inline-flex; align-items: center; }
+.invoice-filter-native[hidden] { display: none; }
+.invoice-filter-trigger { display: flex; align-items: center; gap: .5rem; width: 9.25rem; height: var(--control-height); padding: .3rem .6rem; margin: 0; text-align: left; }
+.invoice-filter-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.invoice-filter-trigger .p-icon--chevron-down { order: 2; margin: 0; }
+.invoice-filter-menu { position: fixed; inset: auto; margin: 0; padding: .25rem; overflow-y: auto; z-index: 100; background: var(--surface); color: var(--fg); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); }
+.invoice-filter-menu[hidden] { display: none; }
+.invoice-filter-option { display: block; width: 100%; margin: 0; padding: .5rem .65rem; border: 0; text-align: left; white-space: normal; overflow-wrap: anywhere; background: transparent; color: var(--fg); }
+.invoice-filter-option[aria-selected="true"], .invoice-filter-option:hover { background: var(--accent-soft); color: var(--brand-deep); }
 .invoice-period-nav { display: flex; align-items: center; gap: .5rem; min-width: 0; }
 .invoice-period-nav[hidden] { display: none; }
 .invoice-period-nav button { width: 2.75rem; height: 2.75rem; padding: .5rem; }

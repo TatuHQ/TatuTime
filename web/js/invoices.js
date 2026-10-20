@@ -9,7 +9,7 @@ import { $, announce, askConfirm, askPrompt, clearFormError, el, formatMoney, pa
 import { convertMinor, currencyCode, fetchRateQuote } from './fx.js';
 import { applyRoute, normaliseRoute } from './route.js';
 import { createSeqGuard } from './seq.js';
-import { renderPdfDocument } from './pdf.js';
+import { pdfDeadline, renderPdfDocument } from './pdf.js';
 import { customerName, state } from './state.js';
 import { MONTH_NAMES, invalidateLockCache } from './timesheet.js';
 
@@ -604,6 +604,104 @@ export const dash = {
   dateBasis: 'period',
 };
 
+export function initInvoiceDropdowns() {
+  let dismiss = null;
+  for (const [id, caption] of [['inv-f-customer', 'Customer'], ['inv-f-project', 'Project'], ['inv-f-period', 'Period']]) {
+    const select = $(id);
+    if (select.__filterSync) continue;
+    const label = el('span', { cls: 'invoice-filter-label' });
+    const trigger = el('button', {
+      type: 'button', cls: 'p-button invoice-filter-trigger', data: { icon: 'chevron-down' },
+      attrs: { id: `${id}-button`, 'aria-haspopup': 'listbox', 'aria-expanded': 'false', 'aria-controls': `${id}-menu` },
+    }, [label]);
+    const menu = el('div', { cls: 'invoice-filter-menu', attrs: {
+      id: `${id}-menu`, role: 'listbox', 'aria-label': caption, popover: 'auto', hidden: '',
+    } });
+    if (typeof menu.showPopover !== 'function') menu.removeAttribute('popover');
+    const close = (restore = false) => {
+      if (menu.matches(':popover-open')) menu.hidePopover();
+      menu.hidden = true;
+      trigger.setAttribute('aria-expanded', 'false');
+      if (dismiss === close) dismiss = null;
+      if (restore) trigger.focus({ preventScroll: true });
+    };
+    const position = () => {
+      if (menu.hidden) return;
+      const anchor = trigger.getBoundingClientRect();
+      if (anchor.bottom < 0 || anchor.top > innerHeight) { close(); return; }
+      const width = Math.min(Math.max(anchor.width, 192), innerWidth - 16);
+      menu.style.width = `${width}px`;
+      menu.style.left = `${Math.max(8, Math.min(anchor.left, innerWidth - width - 8))}px`;
+      const below = innerHeight - anchor.bottom - 8;
+      const above = anchor.top - 8;
+      const upwards = below < Math.min(menu.scrollHeight, 180) && above > below;
+      menu.style.maxHeight = `${Math.max(40, Math.min(320, upwards ? above : below))}px`;
+      menu.style.top = `${upwards ? anchor.top - menu.getBoundingClientRect().height - 4 : anchor.bottom + 4}px`;
+    };
+    const sync = () => {
+      const selected = select.selectedOptions[0];
+      label.textContent = !select.value && id !== 'inv-f-period' ? caption : selected?.textContent || caption;
+      trigger.title = `${caption}: ${selected?.textContent || caption}`;
+      trigger.setAttribute('aria-label', trigger.title);
+      trigger.disabled = select.disabled;
+    };
+    const open = () => {
+      dismiss?.();
+      menu.replaceChildren(...[...select.options].map((option, index) => el('button', {
+        type: 'button', cls: 'p-button invoice-filter-option', text: option.textContent,
+        attrs: { role: 'option', tabindex: '-1', 'aria-selected': String(option.selected), id: `${id}-option-${index}` },
+        on: { click: () => {
+          select.value = option.value;
+          select.dispatchEvent(new Event('change', { bubbles: true }));
+          sync();
+          close(true);
+        } },
+      })));
+      menu.hidden = false;
+      menu.showPopover?.();
+      dismiss = close;
+      trigger.setAttribute('aria-expanded', 'true');
+      position();
+      menu.querySelector('[aria-selected="true"]')?.focus({ preventScroll: true });
+    };
+    trigger.addEventListener('click', () => menu.hidden ? open() : close());
+    trigger.addEventListener('keydown', event => {
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); open(); }
+    });
+    menu.addEventListener('keydown', event => {
+      if (event.key === 'Escape') { event.preventDefault(); close(true); return; }
+      if (event.key === 'Tab') { close(true); return; }
+      const options = [...menu.querySelectorAll('[role="option"]')];
+      const current = options.indexOf(document.activeElement);
+      const next = nextInvoiceOption(event.key, current, options.length);
+      if (next !== null) { event.preventDefault(); options[next]?.focus(); }
+    });
+    menu.addEventListener('toggle', event => { if (event.newState === 'closed' && !menu.matches(':popover-open')) close(); });
+    document.addEventListener('pointerdown', event => {
+      if (!menu.hidden && !menu.contains(event.target) && !trigger.contains(event.target)) close();
+    });
+    window.addEventListener('resize', position);
+    window.addEventListener('scroll', position, true);
+    select.hidden = true;
+    select.classList.add('invoice-filter-native');
+    select.after(trigger);
+    document.body.appendChild(menu);
+    select.addEventListener('change', sync);
+    new MutationObserver(sync).observe(select, { childList: true, subtree: true });
+    select.__filterSync = sync;
+    sync();
+  }
+}
+
+function nextInvoiceOption(key, current, count) {
+  if (!count) return null;
+  if (key === 'ArrowDown') return (current + 1) % count;
+  if (key === 'ArrowUp') return (current - 1 + count) % count;
+  if (key === 'Home') return 0;
+  if (key === 'End') return count - 1;
+  return null;
+}
+
 export function setInvoicePeriod(mode, shift = 0) {
   dash.periodMode = mode;
   dash.dateBasis = 'issue';
@@ -625,6 +723,7 @@ export function setInvoicePeriod(mode, shift = 0) {
   $('inv-period-label').textContent = mode === 'year' ? String(year)
     : mode === 'quarter' ? `Q${Math.floor(month / 3) + 1} ${year}`
       : new Intl.DateTimeFormat('en', { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(anchor);
+  for (const id of ['inv-f-period', 'inv-f-customer', 'inv-f-project']) $(id).__filterSync?.();
 }
 
 // "Collectable right now": issued or partly paid — drives the Record-payment
@@ -1041,10 +1140,12 @@ async function renderPreviewPdf(inv) {
   state.hidden = false;
   state.textContent = 'Loading invoice PDF…';
   const id = inv.id;
+  const retry = el('button', { type: 'button', cls: 'p-button', text: 'Retry preview', on: { click: () => renderPreviewPdf(inv) } });
+  host.appendChild(retry);
   try {
-    const blob = await api.getBlob(`/invoices/${id}/pdf/preview`);
+    const blob = await pdfDeadline(api.getBlob(`/invoices/${id}/pdf/preview`), 15000, 'The PDF request timed out. Retry preview.');
     if (!previewRenderCurrent(seq, id)) return; // superseded by a newer selection
-    const bytes = new Uint8Array(await blob.arrayBuffer());
+    const bytes = new Uint8Array(await pdfDeadline(blob.arrayBuffer()));
     if (!isPdfBody(blob, bytes)) {
       state.textContent = `Preview unavailable — the server did not return a PDF (${blob.type || 'no content type'}).`;
       state.hidden = false;
@@ -1066,8 +1167,7 @@ async function renderPreviewPdf(inv) {
     previewPdfUrl = url;
     const fallback = el('a', { text: 'Open PDF', attrs: { href: url, target: '_blank', rel: 'noopener', id: 'ip-open-pdf' } });
     const viewer = el('div', { cls: 'pdf-viewer', attrs: { id: 'ip-frame', role: 'region', 'aria-label': `Invoice ${inv.number} PDF preview`, title: `Invoice ${inv.number} PDF preview` } });
-    const retry = el('button', { type: 'button', cls: 'p-button', text: 'Retry preview', on: { click: () => renderPreviewPdf(inv) } });
-    host.append(viewer, el('div', { cls: 'pdf-actions' }, [fallback, retry]));
+    host.replaceChildren(viewer, el('div', { cls: 'pdf-actions' }, [fallback, retry]));
     const dispose = await renderPdfDocument(viewer, bytes, () => previewRenderCurrent(seq, id));
     if (!previewRenderCurrent(seq, id)) { dispose(); return; }
     releasePdfDocument = dispose;

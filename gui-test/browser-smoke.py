@@ -2406,6 +2406,78 @@ class Gate:
             zoom(1, 1)
             self.marionette.call("WebDriver:SetWindowRect", original)
 
+    def pdf_worker_recovery_audit(self):
+        self.navigate("/invoices")
+        self.wait_script("document.documentElement.dataset.booted === 'ready' && !!document.querySelector('#invoice-table tbody button')",
+                         "silent-worker invoice fixture")
+        self.marionette.script("""
+            window.__originalPdfWorker = window.Worker;
+            window.Worker = class extends EventTarget { postMessage() {} terminate() {} };
+            [...document.querySelectorAll('#invoice-table tbody button')]
+                .find(button => button.textContent === 'Preview').click();
+            return true;
+        """)
+        try:
+            self.wait_script("!!document.querySelector('#ip-frame canvas') && document.getElementById('ip-pdf-state').hidden",
+                             "main-thread PDF recovery from a silent worker")
+            self.check("a silent PDF worker recovers to nonblank PDF pixels without endless loading",
+                       self.marionette.script("""
+                           const canvas = document.querySelector('#ip-frame canvas');
+                           const pixels = canvas.getContext('2d').getImageData(0,0,canvas.width,canvas.height).data;
+                           return !!globalThis.pdfjsWorker?.WorkerMessageHandler
+                               && pixels.some((value,index) => index % 4 !== 3 && value < 180);
+                       """))
+        finally:
+            self.marionette.script("window.Worker = window.__originalPdfWorker; delete window.__originalPdfWorker; return true;")
+        self.drain_console("silent PDF worker recovery")
+
+    def invoice_filter_audit(self):
+        original = self.marionette.call("WebDriver:GetWindowRect")
+        try:
+            self.navigate("/invoices")
+            self.wait_script("document.documentElement.dataset.booted === 'ready'", "invoice dropdowns")
+            for width in (1280, 375):
+                self.marionette.call("WebDriver:SetWindowRect", {"width": width, "height": 812})
+                for name in ("customer", "project", "period"):
+                    result = json.loads(self.marionette.script("""
+                        const id = %s;
+                        const button = document.getElementById(id + '-button');
+                        button.scrollIntoView({block:'center'}); button.click();
+                        const menu = document.getElementById(id + '-menu');
+                        const anchor = button.getBoundingClientRect();
+                        const bounds = menu.getBoundingClientRect();
+                        const result = {visible:menu.checkVisibility(), width:innerWidth,
+                            x:bounds.x, right:bounds.right, y:bounds.y, bottom:bounds.bottom,
+                            anchorX:anchor.x, anchorBottom:anchor.bottom,
+                            expanded:button.getAttribute('aria-expanded')};
+                        menu.dispatchEvent(new KeyboardEvent('keydown', {key:'Escape',bubbles:true,cancelable:true}));
+                        result.closed = menu.hidden && document.activeElement === button;
+                        return JSON.stringify(result);
+                    """ % json.dumps(f"inv-f-{name}")))
+                    self.check(f"{name} dropdown anchors to its filter at {width}px and Escape returns focus",
+                               result["visible"] and result["expanded"] == "true"
+                               and abs(result["y"] - result["anchorBottom"] - 4) <= 1
+                               and result["x"] >= 0 and result["right"] <= result["width"]
+                               and result["closed"], str(result))
+                aligned = json.loads(self.marionette.script("""
+                    const customer = document.getElementById('inv-f-customer-button').getBoundingClientRect();
+                    const project = document.getElementById('inv-f-project-button').getBoundingClientRect();
+                    const clear = document.getElementById('inv-clear').getBoundingClientRect();
+                    return JSON.stringify({customer:customer.height,project:project.height,clear:clear.height,
+                        sameRow:Math.abs(customer.y-clear.y)<=1});
+                """))
+                self.check(f"Clear all matches filter height at {width}px",
+                           abs(aligned["customer"] - aligned["clear"]) <= 1
+                           and (width < 1000 or aligned["sameRow"]), str(aligned))
+                if self.args.keep:
+                    self.marionette.script("document.getElementById('inv-f-period-button').click(); return true;")
+                    shot = self.screenshot()
+                    if shot:
+                        shutil.copyfile(shot, os.path.join(self.tmp, f"invoice-filter-{width}.png"))
+                    self.marionette.script("document.getElementById('inv-f-period-menu').hidePopover(); return true;")
+        finally:
+            self.marionette.call("WebDriver:SetWindowRect", original)
+
     def invoice_workspace_audit(self):
         original = self.marionette.call("WebDriver:GetWindowRect")
         self.marionette.call("WebDriver:SetWindowRect", {"width": 1280, "height": 900})
@@ -2530,7 +2602,9 @@ class Gate:
         self.responsive_audit()
         self.responsive_dialog_audit()
         self.responsive_zoom_audit()
+        self.invoice_filter_audit()
         self.invoice_workspace_audit()
+        self.pdf_worker_recovery_audit()
         if self.web_dir:
             self.dev_live_reload()
 

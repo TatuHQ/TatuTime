@@ -8,7 +8,7 @@ import { $, addDays, announce, clearFormError, decorateUbuntuButton, isoDate, mo
 import { ADD_CATEGORY_VALUE, addCategory, addExpenseCategory, fillCategorySelect, refreshCategories, refreshExpenses, refreshSubmissions, resetCategoryForm, resetExpenseForm, saveExpense, submitWeek } from './expenses.js';
 import { refreshExpenseConversion, resetExpenseConversion, showConverted } from './fx.js';
 import { addPaymentRail, cancelCustomerEdit, cancelProjectEdit, cancelTaskEdit, contactRow, fillParentCustomers, fillTaskParents, prefillProjectParent, refreshCustomerPickers, refreshCustomerTable, refreshCustomersView, refreshProjectTable, refreshProjectsView, refreshTaskTable, refreshTasksView, runReport, saveCustomer, saveProject, saveTask } from './hierarchy.js';
-import { closeDeliveryRecord, closeInvoicePreview, closeSendEmailDialog, confirmSendEmail, dash, dashApplyColumns, downloadInvoicePdf, ed, edCancel, edClose, edHasChanges, edLineRow, edLoadDefaults, edOpen, edRecalc, edSave, invoicePreview, markInvoiceSent, openEmailSettings, refreshInvoiceSummary, refreshInvoices, sendInvoiceEmail, setInvoicePeriod } from './invoices.js';
+import { closeDeliveryRecord, closeInvoicePreview, closeSendEmailDialog, confirmSendEmail, dash, dashApplyColumns, downloadInvoicePdf, ed, edCancel, edClose, edHasChanges, edLineRow, edLoadDefaults, edOpen, edRecalc, edSave, initInvoiceDropdowns, invoicePreview, markInvoiceSent, openEmailSettings, refreshInvoiceSummary, refreshInvoices, sendInvoiceEmail, setInvoicePeriod } from './invoices.js';
 import { markNotificationsRead, refreshNotifications } from './notifications.js';
 import { initReceiptPreview } from './receipt.js';
 import { applyRoute, initRouter, initSegTabs, initSettingsTabs, initTabs, normaliseRoute, refreshTimesheetView, segActiveId, showTimesheet } from './route.js';
@@ -104,6 +104,7 @@ export function wireDayAndCalendar() {
 
 // Invoice dashboard controls (#135/#189).
 export function wireInvoiceDashboard() {
+  initInvoiceDropdowns();
   $('inv-f-period').addEventListener('change', () => {
     setInvoicePeriod($('inv-f-period').value);
     refreshInvoices().catch?.(() => {});
@@ -142,6 +143,7 @@ export function wireInvoiceDashboard() {
     dash.customer = $('inv-f-customer').value;
     dash.project = '';
     $('inv-f-project').value = '';
+    $('inv-f-project').__filterSync?.();
     // #189: refreshInvoices chains refreshInvoiceSummary with the shared
     // payload — the old double call fired two renders and three GETs.
     refreshInvoices().catch?.(() => { });

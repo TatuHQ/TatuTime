@@ -71,6 +71,11 @@ plugin. Page and zoom controls, accessible page text, loading/errors, Retry and
 an Open PDF fallback remain available. No invoice is uploaded to an external
 viewer. Issued-download PDFs remain write-once archives; new rendering/layout
 changes never overwrite those files.
+If an embedded browser does not start its PDF worker promptly, the viewer uses
+PDF.js's local main-thread fallback. Network and rendering stages have deadlines;
+a stalled request reports a retryable error rather than loading indefinitely.
+Invoice filter option menus are anchored to their filter buttons, including when
+the row wraps on mobile; Escape dismisses a menu and returns focus to its filter.
 
 ### Issue
 
