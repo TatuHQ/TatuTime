@@ -75,6 +75,11 @@ plugin. Page and zoom controls, accessible page text, loading/errors, Retry and
 an Open PDF fallback remain available. No invoice is uploaded to an external
 viewer. Issued-download PDFs remain write-once archives; new rendering/layout
 changes never overwrite those files.
+New issued archives and customer email attachments have no preview watermark.
+For older archives carrying the application DRAFT/SENT/PAID stamp, email delivery
+uses an in-memory copy with only that known stamp removed; the archived file is
+not modified. Successful SMTP acceptance closes the recipient popup; validation
+or transport errors leave it open for correction.
 If an embedded browser does not start its PDF worker promptly, the viewer uses
 PDF.js's local main-thread fallback. Network and rendering stages have deadlines;
 a stalled request reports a retryable error rather than loading indefinitely.

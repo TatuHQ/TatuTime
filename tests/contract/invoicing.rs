@@ -514,6 +514,10 @@ async fn invoice_email_carries_the_archived_pdf_attachment() {
     assert_eq!(*name, format!("{}.pdf", issued["number"].as_str().unwrap()));
     assert_eq!(*bytes, pdf, "the attachment is the archived document");
     assert!(
+        !has_stamp(bytes, "DRAFT"),
+        "customer delivery must not be stamped draft"
+    );
+    assert!(
         msgs[0].text.contains("PDF document is attached"),
         "{}",
         msgs[0].text
@@ -525,6 +529,48 @@ async fn invoice_email_carries_the_archived_pdf_attachment() {
     let mime = tucano_time::email::build_mime(&msgs[0]).expect("the message builds");
     assert!(mime.contains("Content-Type: application/pdf"));
     assert!(mime.contains("base64"));
+}
+
+#[tokio::test]
+async fn legacy_draft_stamp_is_removed_only_from_the_delivery_copy() {
+    let (app, data) = app().await;
+    let (_, iid) = seed_issued_invoice(&app).await;
+    let (_, _, original) = raw_req(&app, "GET", &format!("/api/invoices/{iid}/pdf")).await;
+    let mut legacy = lopdf::Document::load_mem(&original).unwrap();
+    for page in legacy.get_pages().into_values() {
+        let mut stamp = lopdf::content::Content::decode(b"0.75 g\nBT\n/F2 60 Tf\n0.70710677 0.70710677 -0.70710677 0.70710677 100 300 Tm\n(DRAFT) Tj\nET\n0 g\n").unwrap();
+        stamp.operations.extend(
+            lopdf::content::Content::decode(&legacy.get_page_content(page))
+                .unwrap()
+                .operations,
+        );
+        legacy
+            .change_page_content(page, stamp.encode().unwrap())
+            .unwrap();
+    }
+    let mut archived = Vec::new();
+    legacy.save_to(&mut archived).unwrap();
+    let path = data
+        .path()
+        .join("data")
+        .join("invoices")
+        .join(format!("{iid}.pdf"));
+    std::fs::write(&path, &archived).unwrap();
+    assert!(has_stamp(&archived, "DRAFT"));
+    let (status, response) =
+        json_req(&app, "POST", &format!("/api/invoices/{iid}/email"), None).await;
+    assert_eq!(status, StatusCode::OK, "{response}");
+    let messages = app.email.messages();
+    let (_, attachment) = messages[0].attachment.as_ref().unwrap();
+    assert!(
+        !has_stamp(attachment, "DRAFT"),
+        "legacy DRAFT stamp must not reach the customer"
+    );
+    assert_eq!(
+        std::fs::read(path).unwrap(),
+        archived,
+        "issued archives must never be rewritten"
+    );
 }
 
 // ------------------------------------------------------------------ #138 ---
@@ -1743,8 +1789,19 @@ async fn invoice_pay_and_write_off_retain_the_status_change() {
 /// greppable-literal trick the org-profile test uses, since the layout emits
 /// one text-showing op per word and never compresses the content stream.
 fn has_stamp(bytes: &[u8], stamp: &str) -> bool {
-    let needle = format!("({stamp})");
-    bytes.windows(needle.len()).any(|w| w == needle.as_bytes())
+    let Ok(document) = lopdf::Document::load_mem(bytes) else {
+        return false;
+    };
+    document.get_pages().into_values().any(|page| {
+        lopdf::content::Content::decode(&document.get_page_content(page)).is_ok_and(|content| {
+            content.operations.iter().any(|operation| {
+                operation.operator == "Tj"
+                    && operation.operands.first().is_some_and(|operand| {
+                        operand.as_str().is_ok_and(|text| text == stamp.as_bytes())
+                    })
+            })
+        })
+    })
 }
 
 #[tokio::test]
@@ -1844,8 +1901,7 @@ async fn invoice_pdf_preview_tracks_the_watermark_stage() {
     let (_s3, _h3, p3) = raw_req(&app, "GET", &url).await;
     assert!(has_stamp(&p3, "PAID"), "the paid stamp is present");
 
-    // The archive never changed (write-once, byte-stable) and keeps its
-    // issue-time Draft stamp; the listing is one document, unaffected.
+    // The unstamped archive never changed; preview stages are display-only.
     let (_s4, _h4, archived_after) =
         raw_req(&app, "GET", &format!("/api/invoices/{iid}/pdf")).await;
     assert_eq!(
@@ -1853,8 +1909,8 @@ async fn invoice_pdf_preview_tracks_the_watermark_stage() {
         "the archive stays byte-stable"
     );
     assert!(
-        has_stamp(&archived_before, "DRAFT"),
-        "the archive keeps its issue-time stamp"
+        !has_stamp(&archived_before, "DRAFT"),
+        "an issued archive must not be stamped DRAFT"
     );
     let (_sl, list) = json_req(&app, "GET", "/api/invoices", None).await;
     assert_eq!(list["invoices"].as_array().unwrap().len(), 1);

@@ -15,5 +15,5 @@ mod layout;
 mod metrics;
 mod model;
 
-pub use content::render_invoice_pdf;
+pub use content::{render_invoice_pdf, without_delivery_watermark};
 pub use model::{Block, Doc, LineRow, Org, Span, doc_for, doc_for_labeled, parse_accent};

@@ -3,7 +3,7 @@ use super::{
     resolve_terms,
 };
 use crate::api::*;
-use crate::domain::{InvoiceTimelineEvent, InvoiceTimelineEventKind, InvoiceWatermarkStage};
+use crate::domain::{InvoiceTimelineEvent, InvoiceTimelineEventKind};
 
 /// `POST /invoices/preview` (#134): run the SAME generation as
 /// `POST /invoices` but without persisting — the staged wizard reviews exact
@@ -238,10 +238,7 @@ pub async fn issue_invoice(
     let mut doc =
         crate::pdf::doc_for_labeled(&snapshot, &customer, &org_for(&app)?, &template.labels);
     crate::template::apply_doc_content(&mut doc, &content);
-    // Subtask C: the archived PDF is generated at issue time, when the invoice
-    // has not yet been delivered, so its frozen watermark stage is `Draft`.
-    // The archive is write-once, so this stamp is never recomputed later.
-    doc.watermark = Some(InvoiceWatermarkStage::Draft);
+    doc.watermark = None;
     let pdf = crate::pdf::render_invoice_pdf(&doc);
     let issued = app
         .store

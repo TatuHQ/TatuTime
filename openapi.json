@@ -6199,7 +6199,7 @@
           "invoices"
         ],
         "summary": "Email an issued invoice to the customer's billing address, or to an explicit recipient list",
-        "description": "Admin only. The body is optional: without it (or with an empty `recipients` list) the invoice goes to the customer's single billing address. An explicit list is used in the given order, de-duplicated case-insensitively, validated before anything is sent (one '@', no control characters, at most 320 characters each, at most 10 recipients), and recorded on the invoice timeline. Drafts are refused with 409; a missing billing email with 422.",
+        "description": "Admin only. The body is optional: without it (or with an empty `recipients` list) the invoice goes to the customer's single billing address. An explicit list is used in the given order, de-duplicated case-insensitively, validated before anything is sent (one '@', no control characters, at most 320 characters each, at most 10 recipients), and recorded on the invoice timeline. Drafts are refused with 409; a missing billing email with 422. Customer attachments have no application preview watermark. New issued archives are unstamped; a legacy archive with the known application stamp yields an in-memory clean delivery copy without modifying the archived file. This does not change the stage-stamped preview endpoint.",
         "requestBody": {
           "required": false,
           "content": {

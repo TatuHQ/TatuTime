@@ -10,6 +10,73 @@ pub fn render_invoice_pdf(doc: &Doc) -> Vec<u8> {
     emit(&pages)
 }
 
+pub fn without_delivery_watermark(bytes: &[u8]) -> Result<Vec<u8>, &'static str> {
+    use lopdf::{Document, Object, content::Content};
+    let mut document = Document::load_mem(bytes).map_err(|_| "invoice PDF could not be read")?;
+    let number = |object: &Object| match object {
+        Object::Integer(value) => *value as f32,
+        Object::Real(value) => *value,
+        _ => f32::NAN,
+    };
+    let mut changed = false;
+    for page in document.get_pages().into_values() {
+        let bytes = document.get_page_content(page);
+        let mut content =
+            Content::decode(&bytes).map_err(|_| "invoice PDF content could not be read")?;
+        let ops = &content.operations;
+        if ops.len() < 7 {
+            continue;
+        }
+        let operators: Vec<_> = ops[..7].iter().map(|op| op.operator.as_str()).collect();
+        let text = ops[4]
+            .operands
+            .first()
+            .and_then(|value| value.as_str().ok());
+        let stamp = text.is_some_and(|value| {
+            [b"DRAFT".as_slice(), b"SENT".as_slice(), b"PAID".as_slice()].contains(&value)
+        });
+        let rotated = ops[3].operands.len() == 6
+            && [0.70710677, 0.70710677, -0.70710677, 0.70710677]
+                .iter()
+                .zip(&ops[3].operands)
+                .all(|(expected, actual)| (number(actual) - expected).abs() < 0.0001);
+        let known_font = ops[2].operands.len() == 2
+            && ops[2].operands[0].as_name().is_ok_and(|name| name == b"F2")
+            && number(&ops[2].operands[1]) == 60.0;
+        let known_ink = ops[0]
+            .operands
+            .first()
+            .is_some_and(|value| number(value) == WATERMARK_GREY)
+            && ops[6]
+                .operands
+                .first()
+                .is_some_and(|value| number(value) == 0.0);
+        if operators == ["g", "BT", "Tf", "Tm", "Tj", "ET", "g"]
+            && stamp
+            && rotated
+            && known_font
+            && known_ink
+        {
+            content.operations.drain(..7);
+            let data = content
+                .encode()
+                .map_err(|_| "invoice PDF delivery content could not be encoded")?;
+            document
+                .change_page_content(page, data)
+                .map_err(|_| "invoice PDF delivery page could not be prepared")?;
+            changed = true;
+        }
+    }
+    if !changed {
+        return Ok(bytes.to_vec());
+    }
+    let mut output = Vec::new();
+    document
+        .save_to(&mut output)
+        .map_err(|_| "invoice PDF delivery could not be prepared")?;
+    Ok(output)
+}
+
 /// Turn laid-out pages into a PDF 1.4 file. Object ids are fixed:
 /// 1 catalog, 2 page tree (carrying the shared /Resources), 3 resources,
 /// 4..7 fonts, 8+ page/content pairs. No /Info, no file ID — those carry
@@ -169,6 +236,62 @@ mod tests {
     use crate::domain::{Currency, Customer, Invoice, InvoiceLine, InvoiceStatus, LineKind};
     use crate::pdf::{Org, doc_for};
     use chrono::{TimeZone, Utc};
+
+    #[test]
+    fn delivery_removes_only_the_application_watermark() {
+        let invoice = sample_invoice();
+        let customer = customer();
+        let mut doc = doc_for(&invoice, &customer, &org());
+        doc.watermark = Some(crate::domain::InvoiceWatermarkStage::Draft);
+        doc.footer.push(super::super::model::Block::Paragraph(vec![
+            super::super::model::Span::text("DRAFT reference remains in normal text"),
+        ]));
+        let archived = render_invoice_pdf(&doc);
+        let clean = without_delivery_watermark(&archived).unwrap();
+        let document = lopdf::Document::load_mem(&clean).unwrap();
+        let text = document
+            .extract_text(&document.get_pages().keys().copied().collect::<Vec<_>>())
+            .unwrap();
+        assert!(
+            text.split_whitespace()
+                .collect::<String>()
+                .contains("DRAFTreferenceremainsinnormaltext")
+        );
+        let raw = document.get_page_content(*document.get_pages().values().next().unwrap());
+        let original = lopdf::Document::load_mem(&archived).unwrap();
+        let original_page =
+            original.get_page_content(*original.get_pages().values().next().unwrap());
+        let original_content = lopdf::content::Content::decode(&original_page).unwrap();
+        let expected = lopdf::content::Content {
+            operations: original_content
+                .operations
+                .into_iter()
+                .skip(7)
+                .collect::<Vec<_>>(),
+        }
+        .encode()
+        .unwrap();
+        let normalized = lopdf::content::Content::decode(&raw)
+            .unwrap()
+            .encode()
+            .unwrap();
+        assert_eq!(
+            normalized, expected,
+            "all non-watermark drawing operations must remain identical"
+        );
+        let operations = lopdf::content::Content::decode(&raw).unwrap().operations;
+        assert!(!operations.iter().any(|op| op.operator == "Tm" && op.operands.first().is_some_and(|value| matches!(value, lopdf::Object::Real(value) if (*value - 0.70710677).abs() < 0.0001))));
+        assert_ne!(archived, clean);
+        assert_eq!(without_delivery_watermark(&clean).unwrap(), clean);
+    }
+
+    #[test]
+    fn clean_delivery_keeps_unstamped_archive_bytes_identical() {
+        let doc = doc_for(&sample_invoice(), &customer(), &org());
+        let bytes = render_invoice_pdf(&doc);
+        assert_eq!(without_delivery_watermark(&bytes).unwrap(), bytes);
+        assert!(without_delivery_watermark(b"not a PDF").is_err());
+    }
 
     fn sample_invoice() -> Invoice {
         Invoice {
