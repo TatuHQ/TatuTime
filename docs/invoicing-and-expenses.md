@@ -18,6 +18,26 @@ An invoice moves through these statuses:
 
 ### Generate a draft
 
+Choose **New invoice** to open the shared draft workspace. Select the customer,
+then enter manual product/service lines or choose **Import tracked work** to
+select a work period, projects and expenses. Import is optional; it creates a
+tracked draft and opens that draft in the same editor for review. It does not
+append work to an existing invoice. Unsaved manual changes must be discarded
+explicitly before switching to import.
+
+The workspace supports PO reference, invoice date, optional due date/terms,
+subject and notes, as well as tax, discount, manual-line project links and manual
+row ordering. Source-backed time/expense lines remain read-only and must be
+retained exactly once. Currency cannot change once a draft contains tracked
+work. Save is explicit; **Save & preview** saves first and then renders the PDF.
+Cancel asks before discarding changes, and leaving the page warns about unsaved
+edits. Invoice numbers remain server-assigned.
+
+Subject and notes prefill from customer/template settings; blank explicit notes
+suppress default notes. **Use template and customer defaults** restores those
+fields and inherited terms. Explicit due dates take precedence and print without
+a potentially contradictory `(Net N)` suffix. All overrides are draft-only.
+
 A tracked-work invoice is generated from a period's **billable, not-yet-invoiced**
 entries and expenses:
 
@@ -37,6 +57,20 @@ entries and expenses:
 A manual invoice can also be created from fixed lines and catalog items. Manual
 amounts are recomputed on the server from quantity × unit price with integer
 math, and the document may apply a discount and VAT.
+
+### Browse and preview
+
+Open/All is on its own row, above customer/project/search filters, Clear all and
+the period selector. All time is the initial period; Month, Quarter and Year
+have previous/next navigation, and Custom range exposes from/to dates. Period
+filters use the invoice's document date, then its issue/creation date for older
+records. Importing tracked work uses work dates instead.
+
+Invoice previews use locally bundled PDF.js rather than a browser-specific PDF
+plugin. Page and zoom controls, accessible page text, loading/errors, Retry and
+an Open PDF fallback remain available. No invoice is uploaded to an external
+viewer. Issued-download PDFs remain write-once archives; new rendering/layout
+changes never overwrite those files.
 
 ### Issue
 

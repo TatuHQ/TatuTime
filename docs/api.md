@@ -58,6 +58,23 @@ record answers 404. Customers, projects, tasks and categories are shared
 reference data readable by any signed-in user. The complete route-to-tier table
 is `API_ROUTES` in [`src/lib.rs`](../src/lib.rs#L88).
 
+## Invoice Document Revision 0.1.48
+
+The existing invoice endpoints remain under `/api/invoices`. The closed
+`ManualInvoiceInput` and `InvoiceEditInput` schemas now explicitly accept an
+optional `document` object: `po_number`, `invoice_date`, `due_date`,
+`payment_terms`, `subject` and `notes`. `InvoiceEditInput` also accepts currency
+changes for wholly manual drafts. Omitted edit fields preserve stored values;
+null nested overrides restore inheritance, while an empty notes string suppresses
+default notes. Unknown nested fields, invalid dates/terms/template variables and
+oversized text are rejected before writes. Tracked lines cannot be removed,
+duplicated or changed. Non-draft updates remain 409.
+
+This is an additive pre-1.0 contract revision shipped in application 0.1.48,
+not a new URL version. Existing request bodies remain valid. Consumers that
+validate responses against a closed schema must use the matching checked-in
+OpenAPI revision before relying on the new optional `Invoice.document` field.
+
 ## CSRF header
 
 Mutating requests (`POST`, `PUT`, `DELETE`) must carry:
