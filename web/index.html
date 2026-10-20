@@ -585,8 +585,8 @@
            accessible label. -->
           <div class="ts-head">
             <div class="hierarchy-actions" role="group" aria-label="Invoice actions">
-              <button type="button" id="invoice-new" data-icon="plus" data-positive="1">Invoice</button>
-              <button type="button" id="manual-new" class="secondary" data-icon="plus">Manual Invoice</button>
+              <button type="button" id="invoice-new" data-icon="plus" data-positive="1">New invoice</button>
+              <button type="button" id="manual-new" class="secondary" data-icon="plus" hidden>Manual Invoice</button>
             </div>
           </div>
           <!-- #135: the draft/issued/paid status line that used to head the left-hand
@@ -634,7 +634,7 @@
              `aria-pressed` buttons (never a tablist): it is a filter state,
              not a view, so it wears the same underline control skin as the
              fields beside it. -->
-            <div id="inv-list-head" class="filter-row">
+            <div id="inv-list-head" class="invoice-status-row">
               <div class="filter-field">
                 <span class="sr-only" id="inv-status-label">Status</span>
                 <div class="seg" role="group" aria-labelledby="inv-status-label">
@@ -642,6 +642,8 @@
                   <button type="button" id="inv-tab-all" class="seg-btn" aria-pressed="false">All</button>
                 </div>
               </div>
+            </div>
+            <div id="inv-filter-row" class="filter-row">
               <div class="filter-field">
                 <label class="sr-only" for="invoice-search">Search invoices</label>
                 <input id="invoice-search" type="search" placeholder="Number, customer, note…" autocomplete="off">
@@ -658,11 +660,25 @@
                   <option value="">All projects</option>
                 </select>
               </div>
+              <button type="button" id="inv-clear" class="link" data-icon="close">Clear all</button>
               <div class="filter-field">
+                <label class="sr-only" for="inv-f-period">Invoice date period</label>
+                <select id="inv-f-period">
+                  <option value="all">All time</option><option value="month">Month</option>
+                  <option value="quarter">Quarter</option><option value="year">Year</option>
+                  <option value="custom">Custom range</option>
+                </select>
+              </div>
+              <nav class="invoice-period-nav" aria-label="Invoice date period" hidden>
+                <button type="button" id="inv-period-prev" class="p-button--base" aria-label="Previous invoice period" title="Previous invoice period"><i class="p-icon--chevron-left" aria-hidden="true"></i></button>
+                <span id="inv-period-label" role="status" aria-live="polite"></span>
+                <button type="button" id="inv-period-next" class="p-button--base" aria-label="Next invoice period" title="Next invoice period"><i class="p-icon--chevron-right" aria-hidden="true"></i></button>
+              </nav>
+              <div class="filter-field inv-custom-period" hidden>
                 <label class="sr-only" for="inv-f-from">Period from</label>
                 <input id="inv-f-from" type="date" title="Period from">
               </div>
-              <div class="filter-field">
+              <div class="filter-field inv-custom-period" hidden>
                 <label class="sr-only" for="inv-f-to">Period to</label>
                 <input id="inv-f-to" type="date" title="Period to">
               </div>
@@ -933,8 +949,16 @@
               <header class="p-modal__header">
                 <h2 class="p-modal__title" id="ed-title">Manual invoice</h2>
               </header>
-              <div class="p-form__group"><label class="p-form__label" for="ed-customer">Customer</label><select
-                  class="p-form__control" id="ed-customer"></select></div>
+              <div class="invoice-document-fields">
+                <div class="p-form__group"><label class="p-form__label" for="ed-number">Invoice number</label><input class="p-form__control" type="text" id="ed-number" readonly></div>
+                <div class="p-form__group"><label class="p-form__label" for="ed-customer">Invoice for</label><select class="p-form__control" id="ed-customer"></select></div>
+                <div class="p-form__group"><label class="p-form__label" for="ed-po">PO number</label><input class="p-form__control" type="text" id="ed-po" maxlength="120"></div>
+                <div class="p-form__group"><label class="p-form__label" for="ed-currency">Currency</label><input class="p-form__control" type="text" id="ed-currency" maxlength="3" pattern="[A-Z]{3}" value="EUR"></div>
+                <div class="p-form__group"><label class="p-form__label" for="ed-date">Issue date</label><input class="p-form__control" type="date" id="ed-date"></div>
+                <div class="p-form__group"><label class="p-form__label" for="ed-terms">Payment terms</label><select class="p-form__control" id="ed-terms"><option value="">Customer / template default</option><option value="upon_receipt">Upon receipt</option><option value="net_15">Net 15</option><option value="net_20">Net 20</option><option value="net_30">Net 30</option><option value="net_45">Net 45</option></select></div>
+                <div class="p-form__group"><label class="p-form__label" for="ed-due">Due date override</label><input class="p-form__control" type="date" id="ed-due"></div>
+              </div>
+              <div class="p-form__group"><label class="p-form__label" for="ed-subject">Subject</label><input class="p-form__control" type="text" id="ed-subject" maxlength="120"></div>
               <div class="table-scroll">
                 <table id="ed-lines">
                   <caption class="sr-only">Invoice lines</caption>
@@ -951,8 +975,8 @@
                   <tbody></tbody>
                 </table>
               </div>
-              <div class="buttons"><button type="button" id="ed-add" class="secondary" data-icon="plus">Add
-                  line</button></div>
+              <div class="buttons"><button type="button" id="ed-add" class="secondary" data-icon="plus">Add item</button>
+                <button type="button" id="ed-import" class="secondary" data-icon="history">Import tracked work</button></div>
               <div class="invoice-editor-adjustments">
                 <div class="p-form__group"><label class="p-form__label" for="ed-discount">Discount %</label><input
                     class="p-form__control" id="ed-discount" type="number" min="0" max="100" step="0.01" value="0"
@@ -962,11 +986,14 @@
                     inputmode="decimal"></div>
               </div>
               <dl id="ed-totals" class="ip-facts"></dl>
+              <div class="p-form__group"><label class="p-form__label" for="ed-notes">Notes</label><textarea class="p-form__control" id="ed-notes" rows="5" maxlength="4000"></textarea></div>
+              <button type="button" id="ed-defaults" class="link">Use template and customer defaults</button>
               <div class="p-form-validation is-error">
                 <p class="p-form-validation__message" id="ed-error" role="alert" hidden></p>
               </div>
               <footer class="buttons p-modal__footer">
                 <button type="button" id="ed-save" class="primary" data-positive="1">Save draft</button>
+                <button type="button" id="ed-preview" class="secondary" data-icon="file">Save &amp; preview</button>
                 <button type="button" id="ed-cancel" class="secondary">Cancel</button>
               </footer>
             </div>

@@ -224,6 +224,8 @@ pub fn validate_manual_lines(
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Invoice {
+    #[serde(default, skip_serializing_if = "InvoiceDocument::is_empty")]
+    pub document: InvoiceDocument,
     pub id: Uuid,
     pub number: String,
     pub customer_id: Uuid,
@@ -279,6 +281,29 @@ pub struct Invoice {
     /// fallback) and on legacy documents.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub terms: Option<PaymentTerms>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct InvoiceDocument {
+    #[serde(default)]
+    pub po_number: String,
+    #[serde(default)]
+    pub invoice_date: Option<NaiveDate>,
+    #[serde(default)]
+    pub due_date: Option<NaiveDate>,
+    #[serde(default)]
+    pub payment_terms: Option<crate::domain::PaymentTerms>,
+    #[serde(default)]
+    pub subject: Option<String>,
+    #[serde(default)]
+    pub notes: Option<String>,
+}
+
+impl InvoiceDocument {
+    pub fn is_empty(&self) -> bool {
+        self == &Self::default()
+    }
 }
 
 /// One retained entry of an invoice's activity timeline (Subtask A).
@@ -574,6 +599,7 @@ mod tests {
             discount_hundredths: 0,
             subject: String::new(),
             terms: None,
+            document: Default::default(),
         }
     }
 

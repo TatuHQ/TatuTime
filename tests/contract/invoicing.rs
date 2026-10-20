@@ -654,6 +654,65 @@ async fn manual_invoice_creation_computes_exact_totals() {
 }
 
 #[tokio::test]
+async fn invoice_document_overrides_round_trip_and_reject_without_persistence() {
+    let (app, _d) = app().await;
+    let customer = new_customer(&app, "Document overrides", "EUR", 6000).await;
+    let input = json!({"customer_id":customer["id"],
+        "document":{"po_number":"PO-42","invoice_date":"2026-09-30","due_date":"2026-10-30",
+                    "subject":"Consulting September","notes":"Payment instructions","payment_terms":{"kind":"net_30"}},
+        "lines":[{"description":"Consulting","item_kind":"service","quantity_hundredths":250,"unit_price_minor":6000}]});
+    let (status, invoice) = json_req(&app, "POST", "/api/invoices/manual", Some(input)).await;
+    assert_eq!(status, StatusCode::CREATED, "{invoice}");
+    assert_eq!(invoice["document"]["po_number"], "PO-42");
+    let path = format!("/api/invoices/{}", invoice["id"].as_str().unwrap());
+    for document in [
+        json!({"unknown":true}),
+        json!({"notes":"x".repeat(4001)}),
+        json!({"invoice_date":"2026-10-30","due_date":"2026-09-30"}),
+        json!({"invoice_date":"not-a-date"}),
+        json!({"subject":42}),
+        json!({"subject":"%not_a_document_variable%"}),
+        json!({"subject":"%payment_details%"}),
+        json!({"subject":"first\nsecond"}),
+        json!({"payment_terms":{"kind":"custom","days":9999}}),
+    ] {
+        let (status, _) = json_req(
+            &app,
+            "PUT",
+            &path,
+            Some(json!({"lines":invoice["lines"],"document":document})),
+        )
+        .await;
+        assert!(status.is_client_error());
+        let (_, stored) = json_req(&app, "GET", &path, None).await;
+        assert_eq!(stored, invoice, "invalid metadata persisted");
+    }
+    let (status, old_client) =
+        json_req(&app, "PUT", &path, Some(json!({"lines":invoice["lines"]}))).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        old_client["document"], invoice["document"],
+        "legacy payload clears overrides"
+    );
+    let (status, issued) = json_req(&app, "POST", &format!("{path}/issue"), None).await;
+    assert_eq!(status, StatusCode::OK, "{issued}");
+    assert_eq!(issued["subject"], "Consulting September");
+    assert_eq!(issued["due_date"], "2026-10-30");
+    assert!(
+        issued["terms"].is_null(),
+        "explicit date must not claim conflicting net terms"
+    );
+    let (status, _) = json_req(
+        &app,
+        "PUT",
+        &path,
+        Some(json!({"lines":invoice["lines"],"document":{"notes":"mutated"}})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+}
+
+#[tokio::test]
 async fn manual_invoice_validation_matrix_persists_nothing() {
     let (app, _d) = app().await;
     let c = new_customer(&app, "SHOP", "EUR", 6000).await;

@@ -135,10 +135,12 @@ pub(crate) fn content_for(
     customer: &crate::domain::Customer,
     template: &crate::domain::InvoiceTemplate,
 ) -> crate::template::DocContent {
-    let issue_day = invoice
-        .issued_at
-        .or(Some(invoice.created_at))
-        .map(|dt| dt.date_naive());
+    let issue_day = invoice.document.invoice_date.or_else(|| {
+        invoice
+            .issued_at
+            .or(Some(invoice.created_at))
+            .map(|dt| dt.date_naive())
+    });
     let vars = crate::template::vars_for(invoice, customer, issue_day);
     crate::template::doc_content(invoice, template, customer, &vars)
 }
@@ -175,6 +177,22 @@ pub(crate) fn render_pdf_with_stage(
     // reported. The title follows the same resolved value.
     let mut view = invoice.clone();
     view.subject = content.subject.clone().unwrap_or_default();
+    if view.status == crate::domain::InvoiceStatus::Draft {
+        view.due_date = Some(resolve_due_date(
+            invoice,
+            &customer,
+            &template,
+            app.clock.now(),
+        ));
+        view.terms = if invoice.document.due_date.is_some() {
+            None
+        } else {
+            invoice
+                .document
+                .payment_terms
+                .or_else(|| resolve_terms(&customer, &template))
+        };
+    }
     let mut doc = crate::pdf::doc_for_labeled(&view, &customer, &org_for(app)?, &template.labels);
     crate::template::apply_doc_content(&mut doc, &content);
     doc.watermark = Some(stage);
@@ -206,9 +224,18 @@ pub(crate) fn resolve_due_date(
     template: &crate::domain::InvoiceTemplate,
     now: chrono::DateTime<chrono::Utc>,
 ) -> chrono::NaiveDate {
-    let terms = resolve_terms(customer, template);
+    if let Some(due) = invoice.document.due_date {
+        return due;
+    }
+    let terms = invoice
+        .document
+        .payment_terms
+        .or_else(|| resolve_terms(customer, template));
     if let Some(days) = terms.as_ref().and_then(|t| t.fixed_days()) {
-        let from = now.date_naive();
+        let from = invoice
+            .document
+            .invoice_date
+            .unwrap_or_else(|| now.date_naive());
         return from
             .checked_add_days(chrono::Days::new(u64::from(days)))
             .unwrap_or(from);

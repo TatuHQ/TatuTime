@@ -1443,8 +1443,8 @@ class Gate:
             # 160 groups: those rows plus the composed fieldsets and the
             # Contacts row. Mirrors the shell census in
             # gui-test/forms.test.mjs:68, so the two suites cannot drift.
-            and counts["groups"] == 160 and counts["labels"] == 152
-            and counts["controls"] == 152
+            and counts["groups"] == 168 and counts["labels"] == 160
+            and counts["controls"] == 160
             # 57: the previous 55 plus the template footer and notes hints.
             and counts["help"] == 57
             # 28: the previous 27 plus the vault card's #vault-error.
@@ -2041,18 +2041,20 @@ class Gate:
         # The frame only exists once the app's own credentialed fetch of
         # /pdf/preview has resolved and the blob URL it minted is framed.
         self.wait_script(
-            "(function () { var f = document.getElementById('ip-frame');"
-            " return !!(f && /^blob:/.test(f.getAttribute('src'))); })()",
-            "the detail panel to frame the rendered PDF from a blob: URL",
+            "(function () { var f = document.querySelector('#ip-frame canvas');"
+            " return !!(f && f.width > 0 && document.getElementById('ip-pdf-state').hidden); })()",
+            "the detail panel to render PDF page pixels",
         )
         framed = json.loads(self.marionette.script(
             "var host = document.getElementById('ip-pdf');"
-            "var f = document.getElementById('ip-frame');"
+            "var f = document.querySelector('#ip-frame canvas');"
+            "var fallback = document.getElementById('ip-open-pdf');"
             "var t = document.querySelector('#ip-timeline li');"
             "var when = t ? t.querySelector('.ip-tl-when time') : null;"
             "return JSON.stringify({"
             " tag: f ? f.tagName : '',"
-            " src: f ? String(f.getAttribute('src')) : '',"
+            " src: fallback ? fallback.href : '',"
+            " ink: f ? Array.from(f.getContext('2d').getImageData(0,0,f.width,f.height).data).some((v,i) => i % 4 !== 3 && v < 180) : false,"
             " children: host ? host.querySelectorAll('*').length : -1,"
             " stateHidden: document.getElementById('ip-pdf-state').hidden,"
             " downloadHidden: document.getElementById('ip-download').hidden,"
@@ -2064,9 +2066,9 @@ class Gate:
             "});"
         ))
         self.check(
-            "the detail panel frames the rendered PDF from a blob: URL (#349)",
-            framed["tag"] == "IFRAME" and framed["src"].startswith("blob:")
-            and framed["children"] == 1 and framed["stateHidden"] and framed["downloadHidden"],
+            "the detail panel renders nonblank PDF pixels with an open-PDF fallback",
+            framed["tag"] == "CANVAS" and framed["src"].startswith("blob:")
+            and framed["ink"] and framed["stateHidden"] and framed["downloadHidden"],
             f"framed={framed}",
             info=f"frame src={framed['src'][:24]}...",
         )
@@ -2301,8 +2303,7 @@ class Gate:
             ("/projects", "project-new", "project-dialog"),
             ("/tasks", "task-new", "task-dialog"),
             ("/expenses", "expense-new", "expense-dialog"),
-            ("/invoices", "invoice-new", "invoice-wizard"),
-            ("/invoices", "manual-new", "invoice-editor"),
+            ("/invoices", "invoice-new", "invoice-editor"),
             ("/settings/users", "user-new", "user-dialog"),
         )
         original = self.marionette.call("WebDriver:GetWindowRect")
@@ -2405,6 +2406,87 @@ class Gate:
             zoom(1, 1)
             self.marionette.call("WebDriver:SetWindowRect", original)
 
+    def invoice_workspace_audit(self):
+        original = self.marionette.call("WebDriver:GetWindowRect")
+        self.marionette.call("WebDriver:SetWindowRect", {"width": 1280, "height": 900})
+        try:
+            self.navigate("/invoices")
+            self.wait_script("document.documentElement.dataset.booted === 'ready'", "invoice workspace boot")
+            self.marionette.script("document.getElementById('invoice-new').click(); return true;")
+            self.wait_script("document.getElementById('invoice-editor').open", "new invoice workspace")
+            self.check("New invoice enters one editor without a mandatory wizard",
+                       self.marionette.script("return !document.getElementById('invoice-wizard').open && document.getElementById('manual-new').hidden;"))
+            self.marionette.script("""
+                const set = (id, value) => {
+                    const node = document.getElementById(id); node.value = value;
+                    node.dispatchEvent(new Event('input', {bubbles:true}));
+                };
+                const customer = document.getElementById('ed-customer');
+                customer.value = [...customer.options].find(option => option.value).value;
+                customer.dispatchEvent(new Event('change', {bubbles:true}));
+                set('ed-po','PO-2026-009'); set('ed-date','2026-09-30');
+                set('ed-due','2026-10-30'); set('ed-subject','Consulting for September');
+                set('ed-notes','Payment instructions for this invoice only.');
+                const row = document.querySelector('#ed-lines tbody tr');
+                row.querySelector('input[type=text]').value = 'Implementation support';
+                row.querySelector('[aria-label="Product or service"]').value = 'service';
+                const numbers = row.querySelectorAll('input[type=number]');
+                numbers[0].value = '2.50'; numbers[1].value = '60.00';
+                numbers[1].dispatchEvent(new Event('input', {bubbles:true}));
+                return true;
+            """)
+            if self.args.keep:
+                shot = self.screenshot()
+                if shot:
+                    shutil.copyfile(shot, os.path.join(self.tmp, "invoice-workspace-desktop.png"))
+            self.marionette.script("document.getElementById('ed-preview').click(); return true;")
+            self.wait_script("!document.getElementById('invoice-editor').open && !!document.querySelector('#ip-frame canvas') && document.getElementById('ip-pdf-state').hidden",
+                             "saved invoice to render PDF pixels")
+            _, _, raw = self.http("GET", "/api/invoices", cookie=self.cookie)
+            invoice = next(item for item in json.loads(raw)["invoices"]
+                           if item.get("document", {}).get("po_number") == "PO-2026-009")
+            self.check("workspace saves exact manual money and document overrides",
+                       invoice["total_minor"] == 15000 and invoice["document"]["invoice_date"] == "2026-09-30"
+                       and invoice["document"]["due_date"] == "2026-10-30"
+                       and invoice["document"]["subject"] == "Consulting for September"
+                       and invoice["document"]["notes"] == "Payment instructions for this invoice only.",
+                       str(invoice.get("document")))
+            self.check("PDF preview includes the saved PO, subject and notes as accessible text",
+                       self.marionette.script("""
+                           const text = document.querySelector('#ip-frame .sr-only')?.textContent || '';
+                           return text.includes('PO-2026-009') && text.includes('Consulting for September')
+                               && text.includes('Payment instructions');
+                       """))
+            if self.args.keep:
+                self.marionette.script("document.getElementById('ip-pdf').scrollIntoView(); return true;")
+                shot = self.screenshot()
+                if shot:
+                    shutil.copyfile(shot, os.path.join(self.tmp, "invoice-document-reference.png"))
+            self.marionette.script("""
+                document.getElementById('ip-close').click();
+                const row = [...document.querySelectorAll('#invoice-table tbody tr')]
+                    .find(node => node.textContent.includes(%s));
+                [...row.querySelectorAll('button')].find(button => button.textContent === 'Edit').click();
+                return true;
+            """ % json.dumps(invoice["number"]))
+            self.wait_script("document.getElementById('invoice-editor').open", "stored draft editor")
+            self.check("reopening a draft preserves document fields and manual type",
+                       self.marionette.script("""
+                           return document.getElementById('ed-po').value === 'PO-2026-009'
+                               && document.getElementById('ed-notes').value.includes('this invoice only')
+                               && document.querySelector('#ed-lines [aria-label="Product or service"]').value === 'service';
+                       """))
+            self.marionette.script("document.getElementById('invoice-editor').close(); document.getElementById('invoice-new').click(); return true;")
+            self.wait_script("document.getElementById('invoice-editor').open", "new import workspace")
+            self.marionette.script("document.getElementById('ed-import').click(); return true;")
+            self.wait_script("document.getElementById('invoice-wizard').open", "optional tracked import")
+            self.check("optional tracked import skips the customer wizard step",
+                       self.marionette.script("return !document.getElementById('iw-step2').hidden && !document.getElementById('invoice-editor').open;"))
+            self.marionette.script("document.getElementById('iw-close').click(); return true;")
+            self.drain_console("invoice workspace")
+        finally:
+            self.marionette.call("WebDriver:SetWindowRect", original)
+
     def run(self):
         print("=== TucanoTime browser smoke gate (Firefox + Marionette) ===", flush=True)
         print(f"binary   : {self.binary}")
@@ -2448,6 +2530,7 @@ class Gate:
         self.responsive_audit()
         self.responsive_dialog_audit()
         self.responsive_zoom_audit()
+        self.invoice_workspace_audit()
         if self.web_dir:
             self.dev_live_reload()
 

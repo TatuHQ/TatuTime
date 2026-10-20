@@ -14,12 +14,14 @@ const app = loadAppSource();
 
 function makeDom(prelude = '', url = 'http://localhost/') {
   const dom = new JSDOM(html, { runScripts: 'outside-only', url });
+  dom.window.fetch = async () => ({ ok: true, status: 200, json: async () => ({}), text: async () => '{}' });
   dom.window.HTMLDialogElement.prototype.showModal = function () { this.open = true; };
   dom.window.HTMLDialogElement.prototype.close = function () { this.open = false; };
   // jsdom lays nothing out, so it has no scrollIntoView; the invoice detail
   // panel calls it when it opens (#349). Stub it exactly as gui.mjs does.
   if (!dom.window.Element.prototype.scrollIntoView) dom.window.Element.prototype.scrollIntoView = () => { };
   const exports = `${app}
+renderPdfDocument = async (host) => { host.textContent = 'Rendered invoice'; return () => {}; };
 ${prelude}
 window.bootTest = {
   dashRenderOverview, refreshInvoices, refreshCustomerPickers,
@@ -29,7 +31,7 @@ window.bootTest = {
   // #349 journeys: the invoice action row, the year stepper and the manual
   // editor are wired by the focused wire*() functions; expose them so a test
   // drives the same listeners the app registers at boot.
-  dash, refreshInvoiceSummary, wireInvoiceDashboard, wireWeekGrid,
+  dash, dashFilter, setInvoicePeriod, refreshInvoiceSummary, wireInvoiceDashboard, wireWeekGrid,
   iwInit, iwOpen, edOpen, edSave, edCancel, ed,
   peekLockCache: () => weekLockCache,
   liveText: () => document.getElementById('live-region').textContent,
@@ -609,9 +611,10 @@ api.get = async (path) => {
   assert.equal(document.getElementById('invoice-preview').hidden, false, 'the panel opens');
   const frame = document.getElementById('ip-frame');
   assert.ok(frame, 'the rendered PDF is framed');
-  assert.equal(frame.getAttribute('src'), 'blob:test-1', 'the frame shows the client-side blob URL');
-  assert.equal(document.getElementById('ip-pdf').children.length, 1,
-    'the preview region holds the frame and nothing else (#349)');
+  assert.equal(document.getElementById('ip-open-pdf').getAttribute('href'), 'blob:test-1', 'the PDF has an independent fallback');
+  assert.equal(frame.textContent, 'Rendered invoice');
+  assert.equal(document.getElementById('ip-pdf').children.length, 2,
+    'the preview region holds the renderer and fallback actions');
   assert.equal(document.getElementById('ip-pdf-state').hidden, true, 'no state line while the PDF shows');
   assert.equal(document.getElementById('ip-download').hidden, false,
     'an issued invoice can still download its archived PDF (#113)');
@@ -757,7 +760,7 @@ window.releaseFirst = () => releaseFirst();
   context.closeInvoicePreview();
   await context.openInvoicePreview(inv, null); // render 2, the same invoice
 
-  assert.equal(document.getElementById('ip-frame').getAttribute('src'), 'blob:render-1',
+  assert.equal(document.getElementById('ip-open-pdf').getAttribute('href'), 'blob:render-1',
     'the surviving frame is the newest render');
   dom.window.releaseFirst(); // render 1 resumes and finds itself superseded
   await superseded;
@@ -766,9 +769,9 @@ window.releaseFirst = () => releaseFirst();
     'each render minted exactly one URL');
   assert.deepEqual(revoked, ['blob:render-2'],
     "the superseded render's URL is revoked, not left pinned");
-  assert.equal(document.getElementById('ip-frame').getAttribute('src'), 'blob:render-1',
+  assert.equal(document.getElementById('ip-open-pdf').getAttribute('href'), 'blob:render-1',
     'the newer frame still displays after the stale render resolves');
-  assert.equal(document.querySelectorAll('#ip-pdf iframe').length, 1, 'one frame, never two');
+  assert.equal(document.querySelectorAll('#ip-frame').length, 1, 'one renderer, never two');
   context.closeInvoicePreview();
   assert.deepEqual([...revoked].sort(), ['blob:render-1', 'blob:render-2'],
     'every minted URL is revoked exactly once');
@@ -809,43 +812,59 @@ test('the timestamp helper is the requested "on Oct 1, 2026 at 11:26 AM" shape (
 // actually moving the year, and the unset-base-currency honesty for a mixed
 // set. Every assertion reads a real property of the rendered DOM.
 
-test('+ Invoice opens the tracked-work wizard as a modal at step 1 and + Manual Invoice opens the editor (#349)', () => {
-  const { dom, context, document } = makeDom();
+test('New invoice enters the workspace and tracked work is an optional import', async () => {
+  const { dom, context, document } = makeDom(`
+api.get = async path => path === '/admin/invoice-template' ? {template:{}}
+  : path === '/invoices' ? {invoices:[]}
+    : {projects:[],entries:[]};
+`);
   context.state.customers = [{ id: 'c1', name: 'Tucano Time', currency: 'EUR' }];
+  addCustomerOption(document, 'c1', 'Tucano Time');
+  document.getElementById('iw-customer').appendChild(document.getElementById('ed-customer').firstElementChild.cloneNode(true));
   context.iwInit();
   context.wireWeekGrid();
   const wizard = document.getElementById('invoice-wizard');
   const wizardOpen = () => wizard.open === true || wizard.hasAttribute('open');
-  assert.equal(wizardOpen(), false, 'the wizard dialog starts closed -- never open at boot');
-  assert.ok(wizard.classList.contains('p-modal'), 'the wizard is the p-modal overlay');
-  assert.equal(wizard.querySelector('h3'), null, 'the wizard no longer renders as the inline p-card');
+  const editor = document.getElementById('invoice-editor');
   document.getElementById('invoice-new').dispatchEvent(new dom.window.Event('click', { bubbles: true }));
-  assert.equal(wizardOpen(), true, '+ Invoice opens the wizard as a modal');
-  assert.ok(wizard.querySelector('.p-modal__dialog .p-modal__footer'),
-    'the wizard renders inside a p-modal__dialog with a footer');
-  assert.equal(document.getElementById('iw-step1').hidden, false, 'step 1 is shown');
-  assert.equal(document.getElementById('iw-step2').hidden, true, 'step 2 is still hidden');
-  assert.equal(document.getElementById('iw-step3').hidden, true, 'step 3 is still hidden');
-  assert.match(document.getElementById('iw-title').textContent, /^Create from tracked work \u2014 1 of 3:/);
-  // Closing the dialog discards nothing: the step is preserved, so re-pressing
-  // + Invoice resumes where the user left off (never a half-entered restart).
+  assert.equal(editor.open, true);
+  assert.equal(wizardOpen(), false, 'creation has no mandatory wizard');
+  assert.equal(document.getElementById('ed-title').textContent, 'New invoice');
+  assert.equal(document.getElementById('ed-lines').querySelectorAll('tbody tr').length, 1);
+  assert.equal(document.getElementById('manual-new').hidden, true, 'one visible creation entry point');
+  document.getElementById('ed-import').click();
+  await waitFor(wizardOpen, { message: 'optional tracked import' });
+  assert.equal(editor.open, false);
+  assert.equal(document.getElementById('iw-customer').value, 'c1');
+  assert.equal(document.getElementById('iw-step2').hidden, false, 'import starts with work selection');
   document.getElementById('iw-close').dispatchEvent(new dom.window.Event('click', { bubbles: true }));
-  assert.equal(wizardOpen(), false, 'Close dismisses the wizard dialog');
-  document.getElementById('invoice-new').dispatchEvent(new dom.window.Event('click', { bubbles: true }));
-  assert.equal(wizardOpen(), true, '+ Invoice reopens the wizard');
-  assert.equal(document.getElementById('iw-step1').hidden, false, 'the wizard step is preserved');
-  // The shared keydown Escape fallback (jsdom never fires `cancel`) is wired too.
+  context.iwOpen();
+  assert.equal(document.getElementById('iw-step2').hidden, false, 'import selection is preserved');
   wizard.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-  assert.equal(wizardOpen(), false, 'Escape closes the wizard dialog');
-  document.getElementById('invoice-new').dispatchEvent(new dom.window.Event('click', { bubbles: true }));
-  assert.equal(wizardOpen(), true, 'the wizard stays usable after Escape');
-  const dlg = document.getElementById('invoice-editor');
-  const isOpen = () => dlg.open === true || dlg.hasAttribute('open');
-  assert.equal(isOpen(), false, 'the editor starts closed');
-  document.getElementById('manual-new').dispatchEvent(new dom.window.Event('click', { bubbles: true }));
-  assert.equal(isOpen(), true, '+ Manual Invoice opens the manual editor modal');
-  assert.equal(document.getElementById('ed-title').textContent, 'Manual invoice');
-  assert.equal(document.getElementById('ed-lines').querySelectorAll('tbody tr').length, 1, 'one empty line row');
+  assert.equal(wizardOpen(), false);
+  dom.window.close();
+});
+
+test('invoice periods step across years and filter invoice dates, not work dates', () => {
+  const { dom, context, document } = makeDom();
+  context.dash.periodAnchor = '2026-12-15';
+  context.setInvoicePeriod('quarter');
+  assert.equal(context.dash.from, '2026-10-01');
+  assert.equal(context.dash.to, '2026-12-31');
+  context.setInvoicePeriod('quarter', 1);
+  assert.equal(context.dash.from, '2027-01-01');
+  assert.equal(context.dash.to, '2027-03-31');
+  const rows = context.dashFilter([
+    {number:'A',status:'draft',document:{invoice_date:'2027-02-01'},period_from:'2026-01-01',period_to:'2026-01-31'},
+    {number:'B',status:'draft',document:{invoice_date:'2026-02-01'},period_from:'2027-01-01',period_to:'2027-01-31'},
+  ]);
+  assert.deepEqual([...rows].map(row => row.number), ['A']);
+  context.wireInvoiceDashboard();
+  context.dash.customer = 'some-customer';
+  document.getElementById('inv-clear').click();
+  assert.equal(context.dash.from, '');
+  assert.equal(context.dash.customer, '');
+  assert.equal(context.dash.periodMode, 'all');
   dom.window.close();
 });
 
@@ -860,7 +879,7 @@ function addCustomerOption(document, id, label) {
 }
 
 test('the manual editor Cancel saves nothing and Save posts exactly one manual draft (#349/#143)', async () => {
-  const { dom, context, document } = makeDom('refreshInvoices = async () => {};');
+  const { dom, context, document } = makeDom('refreshInvoices = async () => {}; askConfirm = async () => true;');
   context.state.customers = [{ id: 'c1', name: 'Tucano Time', currency: 'EUR' }];
   context.wireWeekGrid();
   const posts = [];
@@ -881,6 +900,7 @@ test('the manual editor Cancel saves nothing and Save posts exactly one manual d
   document.getElementById('ed-lines').querySelector('tbody tr')
     .querySelector('input[type=text]').value = 'Should not persist';
   document.getElementById('ed-cancel').dispatchEvent(new dom.window.Event('click', { bubbles: true }));
+  await waitFor(() => !isOpen(), { message: 'confirmed draft cancellation' });
   assert.equal(isOpen(), false, 'Cancel closes the editor');
   assert.equal(posts.length, 0, 'Cancel issues no request at all');
   assert.match(context.liveText(), /cancelled/);

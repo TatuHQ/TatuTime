@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "build:ubuntu": "node build-ubuntu-assets.mjs",
+    "build:pdf": "node build-pdf-assets.mjs",
     "test": "node gui.mjs",
     "test:jsdom": "node --test *.test.mjs",
     "test:contrast": "node contrast.mjs"
@@ -13,6 +14,7 @@
   },
   "devDependencies": {
     "css-tree": "3.2.1",
+    "pdfjs-dist": "6.4.299",
     "sass": "1.105.1",
     "vanilla-framework": "4.59.0"
   }

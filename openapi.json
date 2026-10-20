@@ -1115,6 +1115,19 @@
         },
         "additionalProperties": false
       },
+      "InvoiceDocument": {
+        "type": "object",
+        "description": "Optional invoice document overrides (contract revision 0.1.48). Omitted/null overrides inherit existing customer/template defaults; empty notes explicitly suppress default notes. Old payloads remain valid. Issued documents cannot be edited.",
+        "additionalProperties": false,
+        "properties": {
+          "po_number": { "type": "string", "maxLength": 120 },
+          "invoice_date": { "type": ["string", "null"], "format": "date" },
+          "due_date": { "type": ["string", "null"], "format": "date" },
+          "payment_terms": { "oneOf": [{ "$ref": "#/components/schemas/PaymentTerms" }, { "type": "null" }] },
+          "subject": { "type": ["string", "null"], "maxLength": 120 },
+          "notes": { "type": ["string", "null"], "maxLength": 4000 }
+        }
+      },
       "Invoice": {
         "type": "object",
         "required": [
@@ -1130,6 +1143,7 @@
           "created_at"
         ],
         "properties": {
+          "document": { "$ref": "#/components/schemas/InvoiceDocument" },
           "id": {
             "type": "string",
             "format": "uuid"
@@ -2385,6 +2399,7 @@
           "lines"
         ],
         "properties": {
+          "document": { "$ref": "#/components/schemas/InvoiceDocument" },
           "customer_id": {
             "type": "string",
             "format": "uuid"
@@ -2540,6 +2555,8 @@
         ],
         "description": "Draft-only full replacement. Tracked lines must come back verbatim; manual amounts are recomputed server-side.",
         "properties": {
+          "document": { "$ref": "#/components/schemas/InvoiceDocument" },
+          "currency": { "$ref": "#/components/schemas/Currency" },
           "lines": {
             "type": "array",
             "minItems": 1,

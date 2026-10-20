@@ -18,6 +18,7 @@ import './js/api.js';
 import './js/dom.js';
 import './js/seq.js';
 import './js/state.js';
+import './js/pdf.js';
 import './js/route.js';
 import './js/calendar.js';
 import './js/timesheet.js';

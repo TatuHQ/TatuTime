@@ -4,7 +4,7 @@
 
 import { api, fetchAll } from './api.js';
 import { $, addDays, announce, askConfirm, askPrompt, clearFormError, el, formatMoney, isoDate, mondayOf, rowAction, showFormError, singleFlight, statusChip } from './dom.js';
-import { ed, parseHundredths, refreshInvoices } from './invoices.js';
+import { ed, edOpen, parseHundredths, refreshInvoices } from './invoices.js';
 import { customerName, state } from './state.js';
 
 // ------------------------------------------------ advanced billing gate ----
@@ -249,12 +249,13 @@ async function iwSaveBody() {
       include_expenses: $('iw-expenses').checked,
       project_codes: picks,
     });
-    announce(`Draft ${created.number} created from ${created.lines.length} line(s) — review, then Issue to lock and document it.`);
     iw.step = 1;
     iw.preview = null;
     iwShow();
     iwClose();
     await refreshInvoices();
+    edOpen(created);
+    announce(`Draft ${created.number} created from ${created.lines.length} line(s) — review, then Issue to lock and document it.`);
   } catch (err) {
     showFormError($('iw-error'), err);
   }

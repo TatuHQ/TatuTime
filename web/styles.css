@@ -472,7 +472,18 @@ dialog.p-modal::backdrop { background: transparent; }
 #entry-dialog .p-modal__dialog { max-width: 28rem; }
 #week-row-dialog .p-modal__dialog { max-width: 26rem; }
 #expense-dialog .p-modal__dialog { max-width: 36rem; }
-#invoice-editor .p-modal__dialog { max-width: 52rem; }
+#invoice-editor .p-modal__dialog { max-width: 80rem; }
+.invoice-document-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 2rem; }
+.invoice-document-fields > *, #ed-lines td { min-width: 0; }
+#ed-lines { min-width: 42rem; table-layout: fixed; }
+#ed-lines th:first-child { width: 45%; }
+#ed-lines th:nth-child(2) { width: 8rem; }
+#ed-lines input[type="text"], #ed-lines select { width: 100%; min-width: 0; }
+#ed-lines .actions-col { width: 8rem; }
+#ed-lines .actions-col button { padding: .25rem; }
+@media (width < 620px) {
+   .invoice-document-fields { grid-template-columns: minmax(0, 1fr); }
+}
 #expense-category-dialog .p-modal__dialog { max-width: 28rem; }
 #customer-dialog .p-modal__dialog { max-width: 38rem; }
 #project-dialog .p-modal__dialog, #task-dialog .p-modal__dialog { max-width: 32rem; }
@@ -648,6 +659,16 @@ dialog.p-modal::backdrop { background: transparent; }
    beneath it is a plain ordered list. The .ip-letter rule still paints the
    Get paid instructions (upstream #357). */
 .ip-pdf { margin: .4rem 0 .6rem; }
+.pdf-toolbar, .pdf-actions { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem; margin-block: .5rem; }
+.pdf-toolbar select { width: auto; margin: 0; }
+.invoice-status-row { border-bottom: 1px solid var(--line); padding-block: .5rem; margin-bottom: .75rem; }
+.invoice-period-nav { display: flex; align-items: center; gap: .5rem; min-width: 0; }
+.invoice-period-nav[hidden] { display: none; }
+.invoice-period-nav button { width: 2.75rem; height: 2.75rem; padding: .5rem; }
+.invoice-period-nav button i { margin: 0; }
+.pdf-pages { max-height: 80dvh; overflow: auto; background: #e5e5e5; padding: .25rem; }
+.pdf-pages canvas { display: block; background: white; }
+.pdf-pages:focus-visible { outline: 3px solid var(--focus); }
 .ip-pdf iframe { display: block; width: 100%; min-height: 60vh; border: 0; background: var(--surface); }
 .ip-letter { white-space: pre-line; color: var(--fg); margin: .3rem 0 .6rem; }
 .ip-history h3 { margin: 1rem 0 .3rem; font-size: 1rem; }

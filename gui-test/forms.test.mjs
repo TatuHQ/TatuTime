@@ -66,9 +66,9 @@ test('the shell ships the official form vocabulary and no bespoke class (#232 ph
     // fieldset and the ten Document label rows (each in its own grouped
     // fieldset) to the Settings split's 146 groups; the template notes row
     // added one more.
-    assert.equal(groups.length, 160, 'every former .field wrapper is a p-form__group');
-    assert.equal(document.querySelectorAll('.p-form__label').length, 152, 'one official label per field row');
-    assert.equal(document.querySelectorAll('.p-form__control').length, 152, 'one official control per field row');
+    assert.equal(groups.length, 168, 'every field wrapper is a p-form__group');
+    assert.equal(document.querySelectorAll('.p-form__label').length, 160, 'one official label per field row');
+    assert.equal(document.querySelectorAll('.p-form__control').length, 160, 'one official control per field row');
     // The previous 55 plus the template footer and notes placement hints.
     assert.equal(document.querySelectorAll('.p-form-help-text').length, 57, 'the hints became p-form-help-text');
     assert.equal(document.querySelectorAll('.p-form-validation__message').length, ERROR_IDS.length,
@@ -82,7 +82,7 @@ test('the shell ships the official form vocabulary and no bespoke class (#232 ph
     // horizontal/compact controls, not stacked form rows. 11 = the hierarchy
     // registers (1 projects + 2 tasks + 2 expenses) plus the six invoice filter
     // fields (status, search, customer, project, from, to).
-    assert.equal(document.querySelectorAll('.filter-field').length, 11, 'the compact filter controls stay app-owned');
+    assert.equal(document.querySelectorAll('.filter-field').length, 12, 'the compact filter controls stay app-owned');
     dom.window.close();
 });
 
@@ -114,7 +114,7 @@ test('every p-form__group pairs its label with its own control (#232 phase 2b)',
     }
     // 152: the Settings split's 141 plus the ten Document label rows (#354)
     // and the template notes row.
-    assert.equal(paired, 152, 'all 152 label/control pairs were verified');
+    assert.equal(paired, 160, 'all 160 label/control pairs were verified');
     assert.equal(composed.length, 8, 'eight composed rows have no label of their own');
     assert.equal(composed.filter((row) => row.tag === 'FIELDSET').length, 7, 'seven grouped fieldsets');
     assert.equal(composed.filter((row) => row.tag === 'DIV').length, 1, 'the Contacts row');
@@ -280,11 +280,11 @@ test('decoration is attribute-only and every rendered button states what it need
     // mentions `data-icon="plus"` is a comment node, not a button: the shell
     // ships 18 icon-bearing buttons, 13 of them plus.)
     const icons = [...document.querySelectorAll('button[data-icon]')];
-    assert.equal(icons.length, 18, 'every icon-bearing shell button states data-icon');
+    assert.equal(icons.length, 21, 'every icon-bearing shell button states data-icon');
     const vocab = {};
     for (const b of icons) vocab[b.dataset.icon] = (vocab[b.dataset.icon] || 0) + 1;
     // #354's Add payment rail is the newest plus.
-    assert.deepEqual(vocab, { plus: 13, copy: 2, play: 2, stop: 1 }, 'the shell icon vocabulary is pinned');
+    assert.deepEqual(vocab, { plus: 13, copy: 2, play: 2, stop: 1, close: 1, history: 1, file: 1 }, 'the shell icon vocabulary is pinned');
     // 36: the previous 35 plus the Email section's `Save email settings` submit.
     // The count is pinned so a new positive action updates this guard on
     // purpose: `+ Manual Invoice` is the secondary action and deliberately

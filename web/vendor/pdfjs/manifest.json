@@ -1,0 +1,8 @@
+{
+  "package": "pdfjs-dist",
+  "version": "6.4.299",
+  "sha256": {
+    "pdf.mjs": "dd13af821c9c3e1778653340d6539a1ba07bc56cba40073a4c727864cf0c232a",
+    "pdf.worker.mjs": "07ceb740d746e5d9012fcf9f27d5c7dea09f7d2f5e74f5c8109e5787551a2333"
+  }
+}

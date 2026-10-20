@@ -282,6 +282,7 @@ test('QA-01: every guarded create form refuses a second submit while the first i
         testCase.run(t);
         testCase.run(t);
 
+        await waitFor(() => t.posts().length > 0, { message: `${testCase.name}: first write after prefilling` });
         assert.equal(t.posts().length, 1, `${testCase.name}: a double submit must issue one write`);
         assert.ok(busy(button), `${testCase.name}: the save control is disabled and aria-busy`);
 

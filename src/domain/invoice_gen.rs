@@ -206,6 +206,7 @@ pub fn generate_invoice(
         discount_hundredths: 0,
         subject: String::new(),
         terms: None,
+        document: Default::default(),
     })
 }
 
@@ -343,6 +344,7 @@ mod tests {
             discount_hundredths: 0,
             subject: String::new(),
             terms: None,
+            document: Default::default(),
         }
     }
 

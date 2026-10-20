@@ -174,16 +174,18 @@ test('retainer and schedule registers render rows with mobile-card headings', as
 test('the invoice filter row uses the house primitive and ARIA toggle state (#F)', () => {
     const dom = new JSDOM(html, { url: 'http://localhost/' });
     const doc = dom.window.document;
-    const row = doc.getElementById('inv-list-head');
-    assert.ok(row.classList.contains('filter-row'), '#inv-list-head is the shared .filter-row');
+    const row = doc.getElementById('inv-filter-row');
+    const status = doc.getElementById('inv-list-head');
+    assert.ok(row.classList.contains('filter-row'), 'dropdowns use the shared .filter-row');
+    assert.equal(status.nextElementSibling, row, 'Open/All is above the dropdown row');
     const fields = [...row.querySelectorAll('.filter-field')];
-    assert.equal(fields.length, 6, 'status + five filter controls each sit in a .filter-field');
+    assert.equal(fields.length, 6, 'six filter controls each sit in a .filter-field');
     for (const id of ['invoice-search', 'inv-f-customer', 'inv-f-project', 'inv-f-from', 'inv-f-to']) {
         const control = doc.getElementById(id);
         assert.ok(control, `#${id} exists`);
         assert.ok(control.closest('.filter-field'), `#${id} is wrapped in its own field group`);
     }
-    const group = row.querySelector('.filter-field .seg');
+    const group = status.querySelector('.filter-field .seg');
     assert.ok(group, 'the status control sits in its own filter field');
     assert.equal(group.getAttribute('role'), 'group', 'a group, never a tablist');
     assert.equal(group.getAttribute('aria-labelledby'), 'inv-status-label',

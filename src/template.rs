@@ -490,15 +490,23 @@ pub fn doc_content(
 ) -> DocContent {
     let md = |src: &str| parse_markdown(&interpolate(src, vars));
     let mut notes = Vec::new();
-    if !template.notes.trim().is_empty() || !customer.invoice_notes.trim().is_empty() {
+    let override_notes = invoice.document.notes.as_deref();
+    if override_notes.is_some_and(|text| !text.trim().is_empty())
+        || (override_notes.is_none()
+            && (!template.notes.trim().is_empty() || !customer.invoice_notes.trim().is_empty()))
+    {
         notes.push(Block::Heading {
             level: 2,
             // Plain span: the layout bolds headings itself, and the email
             // HTML must read `<h2>Notes</h2>`, not a nested `<strong>`.
             spans: vec![Span::text(NOTES_HEADING)],
         });
-        notes.extend(md(&template.notes));
-        notes.extend(md(&customer.invoice_notes));
+        if let Some(text) = override_notes {
+            notes.extend(md(text));
+        } else {
+            notes.extend(md(&template.notes));
+            notes.extend(md(&customer.invoice_notes));
+        }
     }
     DocContent {
         body: md(&template.body),
@@ -526,6 +534,9 @@ fn resolve_subject(
     let snapshot = invoice.subject.trim();
     if !snapshot.is_empty() {
         return Some(snapshot.to_string());
+    }
+    if let Some(subject) = &invoice.document.subject {
+        return Some(interpolate(subject, vars));
     }
     let customer_subj = customer.invoice_subject.trim();
     if !customer_subj.is_empty() {
@@ -621,6 +632,7 @@ mod tests {
             discount_hundredths: 0,
             subject: String::new(),
             terms: None,
+            document: Default::default(),
         }
     }
 

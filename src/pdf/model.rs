@@ -359,9 +359,17 @@ pub fn doc_for_labeled(
         meta.push(kv(subject_label, subject.clone()));
     }
     meta.push(kv(invoice_id_label, invoice.number.clone()));
+    if !invoice.document.po_number.trim().is_empty() {
+        meta.push(kv("PO number", invoice.document.po_number.trim()));
+    }
     meta.push(kv(
         issue_label,
-        format_date(issue_day(invoice.created_at, invoice.issued_at)),
+        format_date(
+            invoice
+                .document
+                .invoice_date
+                .unwrap_or_else(|| issue_day(invoice.created_at, invoice.issued_at)),
+        ),
     ));
     if let Some(due) = invoice.due_date {
         // The suffix comes from the invoice's own snapshot: a legacy document
@@ -678,6 +686,7 @@ mod tests {
             discount_hundredths: 0,
             subject: String::new(),
             terms: None,
+            document: Default::default(),
         }
     }
 

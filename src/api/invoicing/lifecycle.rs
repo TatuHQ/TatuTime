@@ -212,7 +212,14 @@ pub async fn issue_invoice(
     let now = app.clock.now();
     // ONE terms resolution feeds both the due date and the frozen snapshot, so
     // the printed `(Net N)` can never disagree with `due_date`.
-    let terms = resolve_terms(&customer, &template);
+    let terms = if invoice.document.due_date.is_some() {
+        None
+    } else {
+        invoice
+            .document
+            .payment_terms
+            .or_else(|| resolve_terms(&customer, &template))
+    };
     let due = resolve_due_date(&invoice, &customer, &template, now);
     // Render against the to-be-issued snapshot: the PDF is the issue-time
     // document, and bytes are pure in this state (legacy re-renders match).

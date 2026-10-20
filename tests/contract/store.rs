@@ -427,6 +427,7 @@ mod storage_layout {
                 discount_hundredths: 0,
                 subject: String::new(),
                 terms: None,
+                document: Default::default(),
             })
             .unwrap();
 
