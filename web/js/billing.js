@@ -301,7 +301,6 @@ export async function refreshCatalog() {
           click: () => {
             $('item-id').value = it.id;
             $('item-name').value = it.name;
-            $('item-kind').value = it.kind;
             $('item-desc').value = it.description || '';
             $('item-price').value = (it.default_price_minor / 100).toFixed(2);
             $('item-currency').value = it.currency;
@@ -347,7 +346,6 @@ export async function refreshCatalog() {
     tbody.appendChild(
       el('tr', {}, [
         el('th', { attrs: { scope: 'row' }, text: it.name }),
-        el('td', { attrs: { 'data-heading': 'Type' }, text: it.kind }),
         el('td', { cls: 'num', attrs: { 'data-heading': 'Default price' }, text: `${it.currency} ${formatMoney(it.default_price_minor)}` }),
         el('td', { attrs: { 'data-heading': 'Status' } }, [statusChip(it.active ? 'active' : 'archived', it.active)]),
         el('td', { cls: 'actions-col', attrs: { 'data-heading': 'Actions' } }, actions),
@@ -372,7 +370,7 @@ async function saveCatalogItemBody() {
   const id = $('item-id').value;
   const body = {
     name: $('item-name').value.trim(),
-    kind: $('item-kind').value,
+    kind: catalogItems.find(item => item.id === id)?.kind || 'service',
     description: $('item-desc').value.trim(),
     default_price_minor: parseHundredths($('item-price').value) || 0,
     currency: $('item-currency').value.trim().toUpperCase() || null,

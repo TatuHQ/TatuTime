@@ -2485,7 +2485,7 @@ class Gate:
     def shared_dropdown_audit(self):
         original = self.marionette.call("WebDriver:GetWindowRect")
         cases = (
-            ("/settings/catalog", None, "item-kind"),
+            ("/settings/invoice-template", None, "template-terms"),
             ("/projects", None, "proj-filter-customer"),
             ("/tasks", None, "task-filter-project"),
             ("/settings/users", "user-new", "user-role"),
@@ -2541,7 +2541,6 @@ class Gate:
                        self.marionette.script("return !document.getElementById('invoice-wizard').open && document.getElementById('manual-new').hidden;"))
             menus = json.loads(self.marionette.script("""
                 const controls = [document.getElementById('ed-customer'), document.getElementById('ed-terms'),
-                    document.querySelector('#ed-lines [aria-label="Product or service"]'),
                     document.querySelector('#ed-lines [aria-label="Linked project"]')];
                 return JSON.stringify(controls.map(select => {
                     const button = select.__filterButton;
@@ -2573,7 +2572,6 @@ class Gate:
                 set('ed-notes','Payment instructions for this invoice only.');
                 const row = document.querySelector('#ed-lines tbody tr');
                 row.querySelector('input[type=text]').value = 'Implementation support';
-                row.querySelector('[aria-label="Product or service"]').value = 'service';
                 const numbers = row.querySelectorAll('input[type=number]');
                 numbers[0].value = '2.50'; numbers[1].value = '60.00';
                 numbers[1].dispatchEvent(new Event('input', {bubbles:true}));
@@ -2618,7 +2616,7 @@ class Gate:
                        self.marionette.script("""
                            return document.getElementById('ed-po').value === 'PO-2026-009'
                                && document.getElementById('ed-notes').value.includes('this invoice only')
-                               && document.querySelector('#ed-lines [aria-label="Product or service"]').value === 'service';
+                               && !document.querySelector('#ed-lines [aria-label="Product or service"]');
                        """))
             self.marionette.script("document.getElementById('invoice-editor').close(); document.getElementById('invoice-new').click(); return true;")
             self.wait_script("document.getElementById('invoice-editor').open", "new import workspace")
@@ -2630,6 +2628,38 @@ class Gate:
             self.drain_console("invoice workspace")
         finally:
             self.marionette.call("WebDriver:SetWindowRect", original)
+
+    def icon_actions_audit(self):
+        original = self.marionette.call("WebDriver:GetWindowRect")
+        seen = 0
+        try:
+            for width in (1280, 390):
+                self.marionette.call("WebDriver:SetWindowRect", {"width": width, "height": 900})
+                for path in ("/customers", "/timesheets/day", "/projects", "/tasks", "/invoices", "/expenses", "/settings/users"):
+                    self.navigate(path)
+                    self.wait_script("document.documentElement.dataset.booted === 'ready'", "icon action view")
+                    for theme in ("light", "dark"):
+                        result = json.loads(self.marionette.script("""
+                            document.documentElement.setAttribute('data-theme', %s);
+                            const buttons = [...document.querySelectorAll('td[data-icon-actions="1"] button')].filter(button => button.checkVisibility());
+                            const bad = buttons.flatMap(button => {
+                                const rect = button.getBoundingClientRect();
+                                const tooltip = document.getElementById(button.getAttribute('aria-describedby'));
+                                button.focus({preventScroll:true});
+                                const visible = tooltip && getComputedStyle(tooltip).display !== 'none';
+                                const label = button.getAttribute('aria-label');
+                                return rect.width < 44 || rect.height < 44 || !label || !visible
+                                    || !button.querySelector('i[aria-hidden="true"]')
+                                    || tooltip.textContent !== label ? [label || button.textContent] : [];
+                            });
+                            return JSON.stringify({count: buttons.length, bad});
+                        """ % json.dumps(theme)))
+                        seen += result["count"]
+                        self.check(f"icon action targets and tooltips: {path} {width}px {theme}",
+                                   not result["bad"], str(result))
+        finally:
+            self.marionette.call("WebDriver:SetWindowRect", original)
+        self.check("icon action audit exercised real rendered rows", seen > 0, str(seen))
 
     def run(self):
         print("=== TucanoTime browser smoke gate (Firefox + Marionette) ===", flush=True)
@@ -2677,6 +2707,7 @@ class Gate:
         self.invoice_filter_audit()
         self.shared_dropdown_audit()
         self.invoice_workspace_audit()
+        self.icon_actions_audit()
         self.pdf_worker_recovery_audit()
         if self.web_dir:
             self.dev_live_reload()

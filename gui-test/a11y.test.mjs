@@ -108,7 +108,7 @@ test('invoice-line inputs have accessible names (#191)', () => {
   document.body.appendChild(row);
   const named = [...row.querySelectorAll('input, select')]
     .map((n) => n.getAttribute('aria-label') || n.getAttribute('placeholder') || '');
-  for (const want of ['Line description', 'Quantity', 'Unit price', 'Product or service']) {
+  for (const want of ['Line description', 'Quantity', 'Unit price', 'Linked project']) {
     assert.ok(named.includes(want), `missing accessible name: ${want}`);
   }
   dom.window.close();

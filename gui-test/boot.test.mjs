@@ -1074,13 +1074,27 @@ test('the catalog preset is distinct from description and hidden without saved i
   preset.value = 'item1';
   preset.dispatchEvent(new dom.window.Event('change', {bubbles:true}));
   assert.equal(description.value, 'Consulting');
-  const kind = row.querySelector('[aria-label="Product or service"]');
-  assert.equal(kind.value, 'service');
-  assert.equal(kind.__filterButton.textContent.trim(), 'Service');
-  kind.__filterButton.click();
-  document.getElementById(`${kind.id}-menu`).dispatchEvent(new dom.window.KeyboardEvent('keydown', {key:'Escape',bubbles:true,cancelable:true}));
+  assert.equal(row.querySelector('[aria-label="Product or service"]'), null);
+  assert.equal(row.__read().item_kind, 'service', 'catalog metadata remains compatible without a visible type');
+  preset.__filterButton.click();
+  document.getElementById(`${preset.id}-menu`).dispatchEvent(new dom.window.KeyboardEvent('keydown', {key:'Escape',bubbles:true,cancelable:true}));
   assert.equal(document.getElementById('invoice-editor').open, true);
   assert.equal(document.getElementById('app-dialog').open, false, 'Escape only dismisses the option menu');
+  dom.window.close();
+});
+
+test('editing existing invoice items preserves legacy metadata without a type field', () => {
+  const { dom, context, document } = makeDom('api.get = async () => ({template:{},projects:[]});');
+  addCustomerOption(document, 'c1', 'Example');
+  context.edOpen({id:'draft1',number:'INV-42',status:'draft',customer_id:'c1',currency:'EUR',lines:[
+    {kind:'fixed',note:'Existing item',item_kind:'product',quantity_hundredths:100,unit_price_minor:5000,amount_minor:5000},
+  ]});
+  const row = document.querySelector('#ed-lines tbody tr');
+  assert.equal(row.__read().item_kind, 'product');
+  assert.equal(row.querySelector('[aria-label="Product or service"]'), null);
+  assert.equal(row.children.length, 5);
+  assert.equal(document.getElementById('invoice-new').textContent.trim(), 'Invoice');
+  assert.equal(document.getElementById('settings-tab-catalog').textContent.trim(), 'Catalog');
   dom.window.close();
 });
 

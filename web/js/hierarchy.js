@@ -36,11 +36,12 @@ export async function refreshCustomerTable() {
         el('td', { attrs: { 'data-heading': 'Status' } }, [
           statusChip(c.active ? 'Active' : 'Inactive', c.active),
         ]),
-        el('td', { cls: 'actions-col', attrs: { 'data-heading': 'Actions' } }, [
+        el('td', { cls: 'actions-col', data: { iconActions: '1' }, attrs: { 'data-heading': 'Actions' } }, [
           el('button', {
             cls: 'link',
             type: 'button',
             text: 'Projects',
+            data: { icon: 'menu' },
             on: { click: () => openProjectsFor(c.id) },
           }),
           el('button', {
@@ -81,6 +82,7 @@ export function startCustomerEdit(c) {
   $('customer-rate').value = (c.default_rate_minor / 100).toFixed(2);
   $('customer-active').checked = c.active;
   $('customer-email').value = c.email || '';
+  $('customer-invoice-prefix').value = c.invoice_prefix || '';
   // Invoice document fields (#116).
   const terms = c.payment_terms || null;
   $('customer-terms').value = terms ? terms.kind : '';
@@ -404,6 +406,7 @@ async function saveCustomerBody() {
     default_rate_minor: Math.round(Number($('customer-rate').value) * 100),
     active: $('customer-active').checked,
     email: $('customer-email').value.trim(),
+    invoice_prefix: $('customer-invoice-prefix').value.trim(),
     legal_id: $('customer-legal-id').value.trim(),
     payment_terms,
     invoice_subject: $('customer-subject').value.trim(),
@@ -536,11 +539,12 @@ export async function refreshProjectTable() {
         el('td', { attrs: { 'data-heading': 'Status' } }, [
           statusChip(p.active ? 'Active' : 'Inactive', p.active),
         ]),
-        el('td', { cls: 'actions-col', attrs: { 'data-heading': 'Actions' } }, [
+        el('td', { cls: 'actions-col', data: { iconActions: '1' }, attrs: { 'data-heading': 'Actions' } }, [
           el('button', {
             cls: 'link',
             type: 'button',
             text: 'Tasks',
+            data: { icon: 'copy' },
             on: { click: () => openTasksFor(cid, p.code) },
           }),
           el('button', {
@@ -763,7 +767,7 @@ export async function refreshTaskTable() {
         el('td', { attrs: { 'data-heading': 'Status' } }, [
           statusChip(t.active ? 'Active' : 'Inactive', t.active),
         ]),
-        el('td', { cls: 'actions-col', attrs: { 'data-heading': 'Actions' } }, [
+        el('td', { cls: 'actions-col', data: { iconActions: '1' }, attrs: { 'data-heading': 'Actions' } }, [
           el('button', {
             cls: 'link',
             type: 'button',

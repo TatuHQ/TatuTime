@@ -280,6 +280,22 @@ tbody tr:nth-child(odd) { background: var(--row-alt); }
 tfoot th, tfoot td { font-weight: 700; border-top: 2px solid var(--line); border-bottom: none; }
 td.num, th.num, .ws-total.num { text-align: right; font-variant-numeric: tabular-nums; }
 .actions-col { width: 9.5rem; }
+td[data-icon-actions="1"] { white-space: nowrap; overflow: visible; text-overflow: clip; }
+button.icon-action {
+   display: inline-flex;
+   align-items: center;
+   justify-content: center;
+   width: 44px;
+   height: 44px;
+   min-width: 44px;
+   min-height: 44px;
+   padding: 0;
+   margin: 0 4px 0 0;
+   vertical-align: middle;
+   text-decoration: none;
+}
+button.icon-action > [class*="p-icon--"] { margin: 0; width: 20px; height: 20px; flex-basis: 20px; }
+button.icon-action.is-tooltip-dismissed > .p-tooltip__message { display: none; }
 /* #232 increment 3: status/rate pills are the official Vanilla chip
    (`p-chip` + `p-chip__value`, built by `statusChip` in web/js/dom.js). The
    bespoke `.badge` skin is retired — `p-status-label` is deprecated upstream
@@ -476,8 +492,10 @@ dialog.p-modal::backdrop { background: transparent; }
 .invoice-document-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 2rem; }
 .invoice-document-fields > *, #ed-lines td { min-width: 0; }
 #ed-lines { min-width: 42rem; table-layout: fixed; }
-#ed-lines th:first-child { width: 45%; }
-#ed-lines th:nth-child(2) { width: 8rem; }
+#ed-lines th:first-child { width: auto; }
+#ed-lines th:nth-child(2) { width: 6.5rem; }
+#ed-lines th:nth-child(3) { width: 7.5rem; }
+#ed-lines th:nth-child(4) { width: 8rem; }
 #ed-lines input[type="text"], #ed-lines select { width: 100%; min-width: 0; }
 #invoice-editor .invoice-filter-trigger { width: 100%; min-width: 0; }
 #ed-lines .actions-col { width: 8rem; }

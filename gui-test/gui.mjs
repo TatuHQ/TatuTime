@@ -1377,12 +1377,11 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
   userSearch.value = '';
   userSearch.dispatchEvent(new window.Event('input', { bubbles: true }));
   window.document.getElementById('settings-tab-catalog').dispatchEvent(new window.Event('click', { bubbles: true }));
-  check('Products & services tab shows the catalog only',
+  check('Catalog tab shows the catalog only',
     window.document.getElementById('settings-tab-catalog').getAttribute('aria-selected') === 'true'
     && !window.document.getElementById('settings-panel-catalog').hidden
     && window.document.getElementById('settings-panel-invoice-template').hidden);
   window.document.getElementById('item-name').value = 'Site visit';
-  window.document.getElementById('item-kind').value = 'service';
   window.document.getElementById('item-desc').value = 'On-site engineering visit';
   window.document.getElementById('item-price').value = '120.00';
   window.document.getElementById('item-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
@@ -1453,20 +1452,19 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
     && !!edPanel.querySelector('.p-modal__footer #ed-save')
     && !!edPanel.querySelector('.p-modal__footer #ed-cancel')
     && edPanel.querySelectorAll('tbody tr').length === 1);
-  const fill = (row, desc, kind, qty, price) => {
+  const fill = (row, desc, qty, price) => {
     row.querySelector('input[type=text]').value = desc;
-    row.querySelector('select[aria-label="Product or service"]').value = kind;
     const nums = row.querySelectorAll('input[type=number]');
     nums[0].value = qty;
     nums[1].value = price;
     for (const elx of row.querySelectorAll('input, select')) elx.dispatchEvent(new window.Event('input', { bubbles: true }));
   };
-  fill(edPanel.querySelector('tbody tr'), 'Office seat', 'product', '2.50', '40.00');
+  fill(edPanel.querySelector('tbody tr'), 'Office seat', '2.50', '40.00');
   window.document.getElementById('ed-add').dispatchEvent(new window.Event('click', { bubbles: true }));
   await waitFor(() => edPanel.querySelectorAll('tbody tr').length === 2, {
     message: 'the editor to append a second line row',
   });
-  fill([...edPanel.querySelectorAll('tbody tr')][1], 'Setup service', 'service', '1.00', '50.00');
+  fill([...edPanel.querySelectorAll('tbody tr')][1], 'Setup service', '1.00', '50.00');
   window.document.getElementById('ed-discount').value = '10';
   window.document.getElementById('ed-discount').dispatchEvent(new window.Event('input', { bubbles: true }));
   window.document.getElementById('ed-tax').value = '21';

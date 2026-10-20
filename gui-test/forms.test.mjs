@@ -51,7 +51,7 @@ function setup() {
 window.f = {
   api, state, refreshCatalog, iwLoadProjects, fillSelect, $, decorateUbuntuButton,
   setPaymentRails, readPaymentRails, addPaymentRail, removePaymentRail, paymentRailRows,
-  validatePaymentRails, railHasContent, saveCustomer, showFormError,
+    validatePaymentRails, railHasContent, saveCustomer, showFormError, startCustomerEdit, cancelCustomerEdit,
 };`;
     dom.window.eval(`${app}\n${stub}`);
     return { dom, document: dom.window.document, f: dom.window.f };
@@ -428,5 +428,39 @@ test('payment-rail validation surfaces the API field path against the right inpu
         payload: { error: { code: 'validation_failed', fields: [{ field: 'payment_details.iban', message: 'must be 5-34 letters/digits' }] } },
     });
     assert.equal(document.getElementById('pay-iban').getAttribute('aria-invalid'), 'true');
+    dom.window.close();
+});
+
+test('customer invoice prefix is loaded, saved, cleared and reset between customers (#392)', async () => {
+    const { dom, document, f } = setup();
+    const saved = [];
+    f.api.get = async () => ({ customers: [] });
+    f.api.put = async (path, body) => { saved.push({ path, body }); return body; };
+    f.api.post = async (path, body) => { saved.push({ path, body }); return body; };
+    const customer = { id: 'c1', name: 'Prefix customer', currency: 'EUR', default_rate_minor: 100, active: true, invoice_prefix: 'MONKEY' };
+    const field = document.getElementById('customer-invoice-prefix');
+    f.startCustomerEdit(customer);
+    assert.equal(field.value, 'MONKEY');
+    field.value = 'CUST1';
+    await f.saveCustomer({ preventDefault() {} });
+    assert.equal(saved[0].path, '/customers/c1');
+    assert.equal(saved[0].body.invoice_prefix, 'CUST1');
+    assert.equal(field.value, '', 'closing the saved form resets the prefix');
+    f.startCustomerEdit(customer);
+    field.value = '';
+    await f.saveCustomer({ preventDefault() {} });
+    assert.equal(saved[1].body.invoice_prefix, '', 'an empty field explicitly clears the prefix');
+    const legacy = { ...customer };
+    delete legacy.invoice_prefix;
+    f.startCustomerEdit(legacy);
+    assert.equal(field.value, '', 'legacy customers have no custom prefix');
+    f.cancelCustomerEdit();
+    document.getElementById('customer-name').value = 'New customer';
+    document.getElementById('customer-currency').value = 'EUR';
+    document.getElementById('customer-rate').value = '1';
+    field.value = 'CUST2';
+    await f.saveCustomer({ preventDefault() {} });
+    assert.equal(saved[2].path, '/customers');
+    assert.equal(saved[2].body.invoice_prefix, 'CUST2');
     dom.window.close();
 });

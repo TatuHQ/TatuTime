@@ -175,7 +175,7 @@ async function refreshDayBody() {
         // and destructive page-level actions). Invoiced rows have none: the
         // record is frozen for good, so the cell carries the lock and its
         // invoice instead.
-        el('td', { cls: 'actions-col' }, locked
+        el('td', { cls: 'actions-col', data: { iconActions: '1' } }, locked
           ? [inv
               ? rowAction('link', inv.number, () => focusInvoice(inv.id),
                   `Invoiced on ${inv.number} — locked; activate to open the invoice`, 'lock-locked')

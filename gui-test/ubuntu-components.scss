@@ -27,6 +27,11 @@ $increase-font-size-on-larger-screens: false;
 @include vf-p-icon-comments;
 @include vf-p-icon-file;
 @include vf-p-icon-success;
+@include vf-p-icon-credit-card;
+@include vf-p-icon-gift;
+@include vf-p-icon-email;
+@include vf-p-icon-show;
+@include vf-p-tooltips;
 
 // #191 stage 1: extend the pinned vendor build with the official component
 // patterns the GUI currently re-implements by hand (tables, cards, chips,

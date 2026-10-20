@@ -9,6 +9,7 @@
 // then throws "can't access lexical declaration '$' before initialization".
 
 export const $ = (id) => document.getElementById(id);
+let actionTooltipSequence = 0;
 
 // ---------------------------------------------------------------- helpers --
 //
@@ -37,6 +38,25 @@ export function el(tag, opts = {}, children = []) {
     for (const [evt, fn] of Object.entries(opts.on)) node.addEventListener(evt, fn);
   }
   for (const child of [].concat(children)) if (child) node.appendChild(child);
+  if (opts.data?.iconActions === '1') {
+    for (const button of node.querySelectorAll('button[data-icon]')) {
+      const label = button.textContent.trim();
+      const id = `action-tooltip-${++actionTooltipSequence}`;
+      button.classList.add('icon-action', 'p-tooltip--top-right');
+      button.setAttribute('aria-label', label);
+      button.setAttribute('aria-describedby', id);
+      if (!button.title) button.title = label;
+      button.replaceChildren(ubuntuIcon(button.dataset.icon), el('span', {
+        cls: 'p-tooltip__message', text: label, attrs: { id, role: 'tooltip' },
+      }));
+      button.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') button.classList.add('is-tooltip-dismissed');
+      });
+      for (const event of ['blur', 'pointerenter', 'focus']) {
+        button.addEventListener(event, () => button.classList.remove('is-tooltip-dismissed'));
+      }
+    }
+  }
   if (tag === 'button') decorateUbuntuButton(node);
   return node;
 }

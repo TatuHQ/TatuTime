@@ -87,10 +87,10 @@
           <div class="nav-group" role="presentation">
             <span class="nav-label">Billing</span>
             <div class="p-tabs__item"><button class="p-tabs__link" role="tab" id="tab-invoices"
-                aria-controls="panel-invoices" aria-selected="false" tabindex="-1"><i class="p-icon--copy"
+              aria-controls="panel-invoices" aria-selected="false" tabindex="-1"><i class="p-icon--credit-card"
                   aria-hidden="true"></i>Invoices</button></div>
             <div class="p-tabs__item"><button class="p-tabs__link" role="tab" id="tab-expenses"
-                aria-controls="panel-expenses" aria-selected="false" tabindex="-1"><i class="p-icon--file"
+              aria-controls="panel-expenses" aria-selected="false" tabindex="-1"><i class="p-icon--gift"
                   aria-hidden="true"></i>Expenses</button></div>
           </div>
           <!-- More tools is a disclosure, collapsed by default: the secondary
@@ -585,7 +585,7 @@
            accessible label. -->
           <div class="ts-head">
             <div class="hierarchy-actions" role="group" aria-label="Invoice actions">
-              <button type="button" id="invoice-new" data-icon="plus" data-positive="1">New invoice</button>
+              <button type="button" id="invoice-new" data-icon="plus" data-positive="1">Invoice</button>
               <button type="button" id="manual-new" class="secondary" data-icon="plus" hidden>Manual Invoice</button>
             </div>
           </div>
@@ -948,7 +948,6 @@
                   <thead>
                     <tr>
                       <th scope="col">Description</th>
-                      <th scope="col">Type</th>
                       <th scope="col">Qty</th>
                       <th scope="col">Unit price</th>
                       <th scope="col" class="num">Amount</th>
@@ -1244,8 +1243,7 @@
                   id="settings-tab-invoice-template" aria-controls="settings-panel-invoice-template"
                   aria-selected="false" tabindex="-1">Invoice template</button></div>
               <div class="p-tabs__item"><button type="button" class="p-tabs__link" role="tab" id="settings-tab-catalog"
-                  aria-controls="settings-panel-catalog" aria-selected="false" tabindex="-1">Products &amp;
-                  services</button></div>
+                  aria-controls="settings-panel-catalog" aria-selected="false" tabindex="-1">Catalog</button></div>
               <div class="p-tabs__item"><button type="button" class="p-tabs__link" role="tab" id="settings-tab-expenses"
                   aria-controls="settings-panel-expenses" aria-selected="false" tabindex="-1">Expense
                   categories</button></div>
@@ -1770,23 +1768,18 @@
           <section id="settings-panel-catalog" class="settings-panel" role="tabpanel"
             aria-labelledby="settings-tab-catalog" tabindex="0" hidden>
             <div class="ts-head">
-              <h2>Products &amp; services</h2>
+              <h2>Catalog</h2>
             </div>
             <form id="item-form" class="p-card">
               <div class="p-card__header">
                 <h2>Catalog item</h2>
               </div>
               <div class="p-card__content">
-                <p class="p-form-help-text">Reusable manual-invoice line types: name, type, default unit price.
+                <p class="p-form-help-text">Reusable invoice items: name, description, default unit price.
                   Archiving hides an item from new picks without touching history.</p>
                 <input type="hidden" id="item-id">
                 <div class="p-form__group"><label class="p-form__label" for="item-name">Name</label><input type="text"
                     class="p-form__control" id="item-name" maxlength="120" required autocomplete="off"></div>
-                <div class="p-form__group"><label class="p-form__label" for="item-kind">Type</label><select
-                    class="p-form__control" id="item-kind">
-                    <option value="service">Service</option>
-                    <option value="product">Product</option>
-                  </select></div>
                 <div class="p-form__group"><label class="p-form__label" for="item-desc">Description</label><textarea
                     class="p-form__control" id="item-desc" maxlength="500" rows="2"></textarea></div>
                 <div class="p-form__group"><label class="p-form__label" for="item-price">Default unit
@@ -1808,11 +1801,10 @@
               <div class="p-card__content">
                 <div class="table-scroll">
                   <table id="item-table" class="p-table--mobile-card">
-                    <caption class="sr-only">Catalog item types</caption>
+                    <caption class="sr-only">Catalog items</caption>
                     <thead>
                       <tr>
                         <th scope="col">Name</th>
-                        <th scope="col">Type</th>
                         <th scope="col" class="num">Default price</th>
                         <th scope="col">Status</th>
                         <th scope="col" class="actions-col">Actions</th>
@@ -2105,6 +2097,7 @@
         <div class="p-form__group"><label class="p-form__label" for="customer-email">Billing email (optional, for
             invoice delivery)</label><input class="p-form__control" id="customer-email" type="email" maxlength="200"
             autocomplete="off"></div>
+        <div class="p-form__group"><label class="p-form__label" for="customer-invoice-prefix">Invoice prefix (optional)</label><input class="p-form__control" id="customer-invoice-prefix" type="text" maxlength="21" placeholder="CUST1" autocapitalize="characters" autocomplete="off" title="CUST1 produces CUST1-001; leave empty for INV-0001"></div>
         <details class="customer-extra-details">
           <summary>Billing and invoice defaults</summary>
           <fieldset class="p-form__group">

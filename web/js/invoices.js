@@ -50,39 +50,39 @@ async function refreshInvoicesBody() {
     if (inv.status === 'draft') {
       actions.push(
         action('link', 'Edit', () => api.get(`/invoices/${inv.id}`).then(edOpen, (e) => announce(e.message)),
-          'Edit the draft lines and percentages'),
-        action('link', 'Issue', () => issueInvoice(inv)),
-        action('danger', 'Delete', () => removeInvoice(inv.id)),
+          'Edit the draft lines and percentages', 'edit'),
+        action('link', 'Issue', () => issueInvoice(inv), 'Issue invoice', 'credit-card'),
+        action('danger', 'Delete', () => removeInvoice(inv.id), 'Delete invoice', 'delete'),
       );
     } else if (open) {
       actions.push(
         action('link', 'Record payment', () => recordPayment(inv, balance),
-          'Record a full or partial payment (partly paid keeps the rest open)'),
+          'Record a full or partial payment (partly paid keeps the rest open)', 'credit-card'),
 
         action('link', 'PDF', () => downloadInvoicePdf(inv.id, inv.number),
-          'Download the archived invoice PDF'),
+          'Download the archived invoice PDF', 'file'),
         action('link', 'Email', (evt) => emailInvoice(inv, evt.currentTarget),
-          'Choose recipients and send this invoice (PDF attached)'),
+          'Choose recipients and send this invoice (PDF attached)', 'email'),
         action('link', 'Email copy', () => emailInvoiceCopy(inv.id),
-          'Send a PDF copy to another address, e.g. the accountant'),
+          'Send a PDF copy to another address, e.g. the accountant', 'copy'),
         action('danger', 'Write off', () => writeOffInvoice(inv, balance),
-          'Forgive the remaining balance (final; excluded from outstanding)'),
+          'Forgive the remaining balance (final; excluded from outstanding)', 'stop'),
       );
     } else if (inv.status === 'paid') {
       actions.push(
         action('link', 'PDF', () => downloadInvoicePdf(inv.id, inv.number),
-          'Download the archived invoice PDF'),
+          'Download the archived invoice PDF', 'file'),
         action('link', 'Email', (evt) => emailInvoice(inv, evt.currentTarget),
-          'Choose recipients and send this invoice (PDF attached)'),
+          'Choose recipients and send this invoice (PDF attached)', 'email'),
         action('link', 'Email copy', () => emailInvoiceCopy(inv.id),
-          'Send a PDF copy to another address, e.g. the accountant'),
+          'Send a PDF copy to another address, e.g. the accountant', 'copy'),
       );
     }
     // #133: selecting the row (its Preview button, a click anywhere on the
     // row, or Enter with the row focused) opens the live document preview.
     actions.unshift(
       action('link', 'Preview', (evt) => openInvoicePreview(inv, evt.currentTarget),
-        'Preview this invoice document'),
+        'Preview this invoice document', 'show'),
     );
     // The frozen subject (#354): snapshot at issue, display only. It rides
     // under the invoice number as a quiet subtitle, never as a new column and
@@ -118,7 +118,7 @@ async function refreshInvoicesBody() {
           // ratified lifecycle vocabulary (#349) -- presentation only.
           statusChip(statusLabel(inv.status), open),
         ]),
-        el('td', { cls: 'actions-col' }, actions),
+        el('td', { cls: 'actions-col', data: { iconActions: '1' } }, actions),
       ]),
     );
   }
@@ -1367,11 +1367,7 @@ export function edTotals(subtotal, taxH, discH) {
 export function edLineRow(line = null) {
   const desc = el('input', { attrs: { type: 'text', maxlength: 500, placeholder: 'Description', 'aria-label': 'Line description', value: line ? line.note : '' } });
   const itemSel = el('select', { data: { catalog: '1' }, attrs: { 'aria-label': 'Saved catalog item' } });
-  const kind = el('select', { attrs: { 'aria-label': 'Product or service' } }, [
-    el('option', { attrs: { value: 'product', selected: !line || line.item_kind !== 'service' ? '' : null }, text: 'Product' }),
-    el('option', { attrs: { value: 'service' }, text: 'Service' }),
-  ]);
-  if (line && line.item_kind === 'service') kind.value = 'service';
+  let legacyKind = line?.item_kind || 'service';
   const qty = el('input', {
     cls: 'num',
     attrs: {
@@ -1399,7 +1395,6 @@ export function edLineRow(line = null) {
   updateProjects();
   const row = el('tr', {}, [
     el('td', {}, [itemSel, desc, project]),
-    el('td', {}, [kind]),
     el('td', {}, [qty]),
     el('td', {}, [price]),
     amount,
@@ -1415,7 +1410,7 @@ export function edLineRow(line = null) {
     return {
       description: desc.value.trim(),
       project_code: project.value || null,
-      item_kind: kind.value,
+      item_kind: legacyKind,
       quantity_hundredths: q,
       unit_price_minor: p,
       amount_minor: Number.isFinite(q) && Number.isFinite(p) ? edAmount(q, p) : NaN,
@@ -1434,14 +1429,13 @@ export function edLineRow(line = null) {
   };
   row.__updateProjects = updateProjects;
   row.__attachItemSelect();
-  initInvoiceDropdowns([[itemSel, 'Catalog item'], [kind, 'Type'], [project, 'Linked project']]);
+  initInvoiceDropdowns([[itemSel, 'Catalog item'], [project, 'Linked project']]);
   itemSel.addEventListener('change', () => {
     const it = catalogItems.find((x) => x.id === itemSel.value);
     if (!it) return;
     // Prefill only — every field stays editable (#147).
     if (!desc.value.trim()) desc.value = it.description || it.name;
-    kind.value = it.kind;
-    kind.__filterSync?.();
+    legacyKind = it.kind || 'service';
     if (!Number(price.value)) price.value = (it.default_price_minor / 100).toFixed(2);
     edRecalc();
   });
@@ -1450,14 +1444,13 @@ export function edLineRow(line = null) {
     const r = read();
     amount.textContent = Number.isFinite(r.amount_minor) ? formatMoney(r.amount_minor) : '—';
   };
-  for (const inp of [desc, kind, qty, price]) inp.addEventListener('input', edRecalc);
+  for (const inp of [desc, qty, price]) inp.addEventListener('input', edRecalc);
   return row;
 }
 
 export function edTrackedRow(line) {
   return el('tr', {}, [
     el('td', { text: line.note || (line.project_code || '') }),
-    el('td', { text: 'tracked' }),
     el('td', { cls: 'num', text: line.hours ? (line.hours / 100).toFixed(2) : '1.00' }),
     el('td', { cls: 'num', text: line.rate_minor != null ? formatMoney(line.rate_minor) : formatMoney(line.amount_minor) }),
     el('td', { cls: 'num', text: formatMoney(line.amount_minor) }),

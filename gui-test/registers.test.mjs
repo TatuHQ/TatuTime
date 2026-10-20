@@ -20,7 +20,7 @@ const CARD_REGISTERS = {
     'user-table': ['Name', 'Email', 'Role', 'Status', 'Rates', 'Actions'],
     'submission-table': ['Week', 'Entries', 'State', 'Comment', 'Actions'],
     'secret-table': ['Key', 'Value', 'Actions'],
-    'item-table': ['Name', 'Type', 'Default price', 'Status', 'Actions'],
+    'item-table': ['Name', 'Default price', 'Status', 'Actions'],
     'config-table': ['Setting', 'Value', 'Source', 'Applies'],
     'template-vars': ['Variable', 'Example'],
     'audit-table': ['Time', 'Event', 'Subject'],
@@ -46,7 +46,7 @@ function setup() {
     dom.window.HTMLDialogElement.prototype.close = function () { this.open = false; };
     const stub = `
 window.reg = {
-  api, state, renderUsers, refreshSubmissions, refreshCatalog,
+    api, state, renderUsers, refreshSubmissions, refreshCatalog, saveCatalogItem, refreshCustomerTable,
   refreshSchedules, refreshRetainers,
   setUsers: (list) => { managedUsers = list; },
 };`;
@@ -97,6 +97,41 @@ test('user register renders the same rows with mobile-card headings', () => {
     dom.window.close();
 });
 
+test('icon actions retain accessible names, official tooltips and keyboard dismissal (#393)', async () => {
+    const { dom, document, reg } = setup();
+    reg.setUsers([{ id: 'u1', name: 'Ada', email: 'ada@example.test', role: 'admin', active: true, default_rate_minor: 0, cost_rate_minor: 0 }]);
+    reg.renderUsers();
+    const buttons = [...document.querySelectorAll('#user-table td[data-icon-actions="1"] button')];
+    assert.deepEqual(buttons.map(button => button.getAttribute('aria-label')), ['Edit', 'Deactivate', 'Change password', 'Delete']);
+    for (const button of buttons) {
+        assert.ok(button.classList.contains('icon-action'));
+        assert.ok(button.classList.contains('p-tooltip--top-right'));
+        assert.ok(button.title);
+        assert.ok(button.querySelector(`i.p-icon--${button.dataset.icon}[aria-hidden="true"]`));
+        assert.equal([...button.childNodes].some(node => node.nodeType === 3 && node.textContent.trim()), false, 'no visible text node remains');
+        const tooltip = document.getElementById(button.getAttribute('aria-describedby'));
+        assert.equal(tooltip.getAttribute('role'), 'tooltip');
+        assert.equal(tooltip.textContent, button.getAttribute('aria-label'));
+        button.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape' }));
+        assert.ok(button.classList.contains('is-tooltip-dismissed'));
+        button.dispatchEvent(new dom.window.FocusEvent('focus'));
+        assert.equal(button.classList.contains('is-tooltip-dismissed'), false);
+    }
+    buttons[0].click();
+    assert.equal(document.getElementById('user-id').value, 'u1', 'the original edit handler remains functional');
+    reg.state.customers = [{ id: 'c1', name: 'Customer', currency: 'EUR', default_rate_minor: 0, active: true }];
+    await reg.refreshCustomerTable();
+    const project = document.querySelector('#customer-table button[aria-label="Projects"]');
+    assert.equal(project.dataset.icon, 'menu');
+    assert.equal(document.querySelector('#tab-invoices i').className, 'p-icon--credit-card');
+    assert.equal(document.querySelector('#tab-expenses i').className, 'p-icon--gift');
+    const css = readFileSync(new URL('../web/styles.css', import.meta.url), 'utf8');
+    assert.match(css, /button\.icon-action\s*\{[^}]*min-width:\s*44px;[^}]*min-height:\s*44px;/);
+    const vendor = readFileSync(new URL('../web/vendor/ubuntu/components.css', import.meta.url), 'utf8');
+    for (const token of ['.p-icon--credit-card', '.p-icon--gift', '.p-icon--email', '.p-icon--show', '.p-tooltip__message']) assert.ok(vendor.includes(token));
+    dom.window.close();
+});
+
 test('submission register renders rows with mobile-card headings', async () => {
     const { dom, document, reg } = setup();
     reg.api.get = async (path) => (path === '/submissions'
@@ -128,9 +163,26 @@ test('catalog register renders rows with mobile-card headings', async () => {
     await reg.refreshCatalog();
     const rows = document.querySelectorAll('#item-table tbody tr');
     assert.equal(rows.length, 1);
-    assert.equal(rows[0].querySelector('td[data-heading="Type"]').textContent, 'service');
+    assert.equal(rows[0].querySelector('td[data-heading="Type"]'), null);
     assert.equal(rows[0].querySelector('td[data-heading="Default price"]').textContent, 'EUR 125.00');
     assert.equal(document.getElementById('item-table').hidden, false);
+    dom.window.close();
+});
+
+test('catalog edits preserve legacy kind without offering a product/service control', async () => {
+    const { dom, document, reg } = setup();
+    const existing = {id:'legacy1',name:'Existing item',kind:'product',description:'Keep me',default_price_minor:5000,currency:'EUR',active:true};
+    reg.api.get = async () => ({item_types:[existing]});
+    let saved;
+    reg.api.put = async (path, body) => { saved = {path,body}; return existing; };
+    await reg.refreshCatalog();
+    document.querySelector('#item-table tbody button').click();
+    document.getElementById('item-name').value = 'Updated item';
+    await reg.saveCatalogItem({preventDefault(){}});
+    assert.equal(saved.path, '/admin/item-types/legacy1');
+    assert.equal(saved.body.kind, 'product');
+    assert.equal(saved.body.name, 'Updated item');
+    assert.equal(document.getElementById('item-kind'), null);
     dom.window.close();
 });
 

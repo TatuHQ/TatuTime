@@ -321,7 +321,7 @@ test('Settings lists the seven focused tabs in order for an admin', () => {
     assert.deepEqual(tabs(document).map((tab) => tab.id), ROUTES.map(([, tab]) => tab));
     assert.deepEqual(
         tabs(document).map(collapsedText),
-        ['Users', 'Company', 'Invoice template', 'Products & services', 'Expense categories', 'Email', 'Security & runtime'],
+        ['Users', 'Company', 'Invoice template', 'Catalog', 'Expense categories', 'Email', 'Security & runtime'],
     );
     for (const [tab, panelId] of ROUTES.map(([, tab, panel]) => [tab, panel])) {
         const panel = document.getElementById(panelId);
