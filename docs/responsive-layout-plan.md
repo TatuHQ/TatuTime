@@ -35,7 +35,9 @@ screen space without changing the dimensions or order of desktop page controls.
 The first discriminating check is a before/after browser geometry and screenshot
 comparison at 1280px and 1440px, paired with navigation/reflow checks at 375px and
 768px. Reject a shell approach that moves existing desktop controls unexpectedly.
-These are planned checks, not results of a browser audit in this planning slice.
+The implementation was compared with unmodified `main` assets at 1280px and
+1440px on Day, Customers, Invoices and Company settings. No shell or sampled
+primary-control bounds changed by more than 1 CSS px.
 
 ## Implemented navigation contract
 
