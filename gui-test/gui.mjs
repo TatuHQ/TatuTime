@@ -1570,6 +1570,10 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
   const wizardDraft = invsAfter.find((i) => i.total_minor === 28500 && i.status === 'draft');
   check('Save creates exactly one draft from the selection (#134)',
     invsAfter.length === invsBefore + 1 && !!wizardDraft && wizardDraft.lines.length === 2);
+  await waitFor(() => byId('live-region').textContent.includes(`Draft ${wizardDraft.number} created`)
+    && byId('live-region').textContent.includes('Issue'), {
+    message: 'the imported draft to finish opening in the editor and announce its identity',
+  });
   check('draft save announced without issuing (#134)',
     /Draft INV-\d+ created.*Issue/.test(window.document.getElementById('live-region').textContent));
   // the wizard closed and reset back to step 1
