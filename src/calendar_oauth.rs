@@ -329,8 +329,11 @@ pub fn exchange_code(
         .map_err(|_| CalendarError::Fetch)?;
     let text = res
         .body_mut()
+        .with_config()
+        .limit((crate::calendar::MAX_CALENDAR_RESPONSE_BYTES + 1) as u64)
         .read_to_string()
-        .map_err(|_| CalendarError::Fetch)?;
+        .map_err(|_| CalendarError::Fetch)
+        .and_then(crate::calendar::check_response_size)?;
     let v: Value = serde_json::from_str(&text).map_err(|_| CalendarError::Fetch)?;
     let access = v
         .get("access_token")
@@ -465,8 +468,11 @@ impl BearerFetch {
                 let status: u16 = r.status().as_u16();
                 let body = r
                     .body_mut()
+                    .with_config()
+                    .limit((crate::calendar::MAX_CALENDAR_RESPONSE_BYTES + 1) as u64)
                     .read_to_string()
-                    .map_err(|_| CalendarError::Fetch)?;
+                    .map_err(|_| CalendarError::Fetch)
+                    .and_then(crate::calendar::check_response_size)?;
                 Ok((status, body))
             }
             Err(ureq::Error::StatusCode(code)) => Ok((code, String::new())),
@@ -484,7 +490,9 @@ impl BearerFetch {
         };
         let form = format!(
             "grant_type=refresh_token&refresh_token={}&client_id={}&client_secret={}",
-            rt, cid, cs
+            urlencoded(rt),
+            urlencoded(cid),
+            urlencoded(cs)
         );
         let Ok(mut res) = ureq::post(self.token_endpoint())
             .header("content-type", "application/x-www-form-urlencoded")
@@ -492,7 +500,14 @@ impl BearerFetch {
         else {
             return false;
         };
-        let Ok(text) = res.body_mut().read_to_string() else {
+        let Ok(text) = res
+            .body_mut()
+            .with_config()
+            .limit((crate::calendar::MAX_CALENDAR_RESPONSE_BYTES + 1) as u64)
+            .read_to_string()
+            .map_err(|_| CalendarError::Fetch)
+            .and_then(crate::calendar::check_response_size)
+        else {
             return false;
         };
         match serde_json::from_str::<Value>(&text) {
@@ -608,6 +623,50 @@ mod tests {
         assert_eq!(
             urlencoded("https://x.test/cb?a=1"),
             "https%3A%2F%2Fx.test%2Fcb%3Fa%3D1"
+        );
+    }
+
+    #[test]
+    fn bearer_fetch_sends_the_access_token() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = Vec::new();
+            let mut chunk = [0; 1024];
+            loop {
+                let n = stream.read(&mut chunk).unwrap();
+                request.extend_from_slice(&chunk[..n]);
+                if n == 0 || request.windows(4).any(|w| w == b"\r\n\r\n") {
+                    break;
+                }
+            }
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}")
+                .unwrap();
+            String::from_utf8(request).unwrap()
+        });
+
+        let fetch = BearerFetch::new(
+            "google",
+            "fixture-token-not-secret".into(),
+            None,
+            None,
+            None,
+        );
+        let body = fetch
+            .get_json(&format!("http://{address}/calendar"))
+            .unwrap();
+        assert_eq!(body, serde_json::json!({}));
+        let request = server.join().unwrap();
+        assert!(
+            request
+                .to_ascii_lowercase()
+                .contains("authorization: bearer fixture-token-not-secret"),
+            "calendar requests must carry the configured OAuth bearer token"
         );
     }
 

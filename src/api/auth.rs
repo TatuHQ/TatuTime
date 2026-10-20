@@ -267,8 +267,9 @@ pub async fn sso_assertion(
                     "this account is deactivated",
                 ));
             }
-            // JIT group refresh: admins follow the mapped role on every login.
-            let admin_group = std::env::var("TUCANO_SSO_ADMIN_GROUP").unwrap_or_default();
+            // Resolve this the same way as JIT provisioning so injected env
+            // settings and config-file values govern every SSO login.
+            let admin_group = app.cfg().get_str("sso_admin_group", app.env.as_ref());
             let role = crate::sso::map_role(&identity.groups, &admin_group);
             if role != u.role && !admin_group.is_empty() {
                 let mut updated = u.clone();
@@ -288,9 +289,7 @@ pub async fn sso_assertion(
         None => {
             // Just-in-time provisioning (#19): the IdP is the password store,
             // so local login gets an unsusable random password.
-            let admin_group = app
-                .cfg()
-                .get_str("sso_admin_group", &crate::appconfig::process_env);
+            let admin_group = app.cfg().get_str("sso_admin_group", app.env.as_ref());
             let role = crate::sso::map_role(&identity.groups, &admin_group);
             let temp_password = Uuid::new_v4().to_string();
             new_user(
