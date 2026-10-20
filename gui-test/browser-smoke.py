@@ -1440,11 +1440,12 @@ class Gate:
             # 152/152: the Settings split's 139 plus the ten Document label
             # rows (#354), the Company legal id and its label row, and the
             # template notes row.
-            # 160 groups: those rows plus the composed fieldsets and the
-            # Contacts row. Mirrors the shell census in
-            # gui-test/forms.test.mjs:68, so the two suites cannot drift.
-            and counts["groups"] == 168 and counts["labels"] == 160
-            and counts["controls"] == 160
+            # 169 groups: those rows plus the composed fieldsets, the Contacts
+            # row and the Expense-categories dialog's name field. Mirrors the
+            # shell census in gui-test/forms.test.mjs:68, so the two suites
+            # cannot drift.
+            and counts["groups"] == 169 and counts["labels"] == 161
+            and counts["controls"] == 161
             # 57: the previous 55 plus the template footer and notes hints.
             and counts["help"] == 57
             # 28: the previous 27 plus the vault card's #vault-error.

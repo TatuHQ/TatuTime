@@ -5,7 +5,7 @@
 import { API_BASE, api } from './api.js';
 import { iw } from './billing.js';
 import { refreshPanel, switchTab } from './boot.js';
-import { $, announce, askAlert, askConfirm, clearFormError, el, fillSelect, formatMoney, panelRefresh, showFormError, singleFlight, statusChip } from './dom.js';
+import { $, announce, askAlert, askConfirm, clearFormError, el, fillSelect, formatMoney, iconActionsCell, panelRefresh, showFormError, singleFlight, statusChip } from './dom.js';
 import { ed } from './invoices.js';
 import { createSeqGuard } from './seq.js';
 import { customerName, fillCustomerSelect, fillProjectSelect, loadCustomers, loadProjects, state } from './state.js';
@@ -36,7 +36,7 @@ export async function refreshCustomerTable() {
         el('td', { attrs: { 'data-heading': 'Status' } }, [
           statusChip(c.active ? 'Active' : 'Inactive', c.active),
         ]),
-        el('td', { cls: 'actions-col', data: { iconActions: '1' }, attrs: { 'data-heading': 'Actions' } }, [
+        iconActionsCell([
           el('button', {
             cls: 'link',
             type: 'button',
@@ -539,7 +539,7 @@ export async function refreshProjectTable() {
         el('td', { attrs: { 'data-heading': 'Status' } }, [
           statusChip(p.active ? 'Active' : 'Inactive', p.active),
         ]),
-        el('td', { cls: 'actions-col', data: { iconActions: '1' }, attrs: { 'data-heading': 'Actions' } }, [
+        iconActionsCell([
           el('button', {
             cls: 'link',
             type: 'button',
@@ -767,7 +767,7 @@ export async function refreshTaskTable() {
         el('td', { attrs: { 'data-heading': 'Status' } }, [
           statusChip(t.active ? 'Active' : 'Inactive', t.active),
         ]),
-        el('td', { cls: 'actions-col', data: { iconActions: '1' }, attrs: { 'data-heading': 'Actions' } }, [
+        iconActionsCell([
           el('button', {
             cls: 'link',
             type: 'button',

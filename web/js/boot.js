@@ -5,7 +5,7 @@
 import { ADVANCED_BILLING_ENABLED, addRecurring, createRetainer, iw, iwClose, iwInit, iwLoadProjects, iwOpen, iwShow, refreshCatalog, refreshRetainers, refreshSchedules, saveCatalogItem } from './billing.js';
 import { calState, refreshTimeCal, shiftMonth } from './calendar.js';
 import { $, addDays, announce, clearFormError, decorateUbuntuButton, isoDate, mondayOf } from './dom.js';
-import { ADD_CATEGORY_VALUE, addCategory, addExpenseCategory, fillCategorySelect, refreshCategories, refreshExpenses, refreshSubmissions, resetCategoryForm, resetExpenseForm, saveExpense, submitWeek } from './expenses.js';
+import { ADD_CATEGORY_VALUE, addCategory, addExpenseCategory, closeCategoryDialog, fillCategorySelect, openCategoryDialog, refreshCategories, refreshExpenses, refreshSubmissions, resetExpenseForm, saveExpense, submitWeek } from './expenses.js';
 import { refreshExpenseConversion, resetExpenseConversion, showConverted } from './fx.js';
 import { addPaymentRail, cancelCustomerEdit, cancelProjectEdit, cancelTaskEdit, contactRow, fillParentCustomers, fillTaskParents, prefillProjectParent, refreshCustomerPickers, refreshCustomerTable, refreshCustomersView, refreshProjectTable, refreshProjectsView, refreshTaskTable, refreshTasksView, runReport, saveCustomer, saveProject, saveTask } from './hierarchy.js';
 import { closeDeliveryRecord, closeInvoicePreview, closeSendEmailDialog, confirmSendEmail, dash, downloadInvoicePdf, ed, edCancel, edClose, edHasChanges, edLineRow, edLoadDefaults, edOpen, edRecalc, edSave, initInvoiceDropdowns, invoicePreview, markInvoiceSent, openEmailSettings, refreshInvoiceSummary, refreshInvoices, sendInvoiceEmail, setInvoicePeriod } from './invoices.js';
@@ -108,12 +108,12 @@ export function wireInvoiceDashboard() {
   initInvoiceDropdowns();
   $('inv-f-period').addEventListener('change', () => {
     setInvoicePeriod($('inv-f-period').value);
-    refreshInvoices().catch?.(() => {});
+    refreshInvoices().catch?.(() => { });
   });
   for (const [id, shift] of [['inv-period-prev', -1], ['inv-period-next', 1]]) {
     $(id).addEventListener('click', () => {
       setInvoicePeriod(dash.periodMode, shift);
-      refreshInvoices().catch?.(() => {});
+      refreshInvoices().catch?.(() => { });
     });
   }
   // #135 dashboard controls
@@ -501,7 +501,8 @@ export function wireSetupPanels(today) {
   $('report-form').addEventListener('submit', runReport);
 
   $('category-form').addEventListener('submit', addCategory);
-  $('category-cancel').addEventListener('click', resetCategoryForm);
+  $('category-new').addEventListener('click', () => openCategoryDialog());
+  $('category-cancel').addEventListener('click', closeCategoryDialog);
   $('expense-new').addEventListener('click', async () => {
     $('expense-form').reset();
     resetExpenseForm(); // no id, no receipt, the create wording

@@ -5,7 +5,7 @@
 import { api } from './api.js';
 import { catalogItems } from './billing.js';
 import { startApp, switchTab } from './boot.js';
-import { $, announce, askConfirm, askPrompt, clearFormError, el, formatMoney, panelRefresh, rowAction, showFormError, singleFlight, statusChip } from './dom.js';
+import { $, announce, askConfirm, askPrompt, clearFormError, el, formatMoney, iconActionsCell, panelRefresh, rowAction, showFormError, singleFlight, statusChip } from './dom.js';
 import { convertMinor, currencyCode, fetchRateQuote } from './fx.js';
 import { applyRoute, normaliseRoute } from './route.js';
 import { createSeqGuard } from './seq.js';
@@ -62,20 +62,20 @@ async function refreshInvoicesBody() {
         action('link', 'PDF', () => downloadInvoicePdf(inv.id, inv.number),
           'Download the archived invoice PDF', 'file'),
         action('link', 'Email', (evt) => emailInvoice(inv, evt.currentTarget),
-          'Choose recipients and send this invoice (PDF attached)', 'email'),
+          'Choose recipients and send this invoice (PDF attached)', 'contact'),
         action('link', 'Email copy', () => emailInvoiceCopy(inv.id),
-          'Send a PDF copy to another address, e.g. the accountant', 'copy'),
+          'Send a PDF copy to another address, e.g. the accountant', 'email'),
         action('danger', 'Write off', () => writeOffInvoice(inv, balance),
-          'Forgive the remaining balance (final; excluded from outstanding)', 'stop'),
+          'Forgive the remaining balance (final; excluded from outstanding)', 'ignored'),
       );
     } else if (inv.status === 'paid') {
       actions.push(
         action('link', 'PDF', () => downloadInvoicePdf(inv.id, inv.number),
           'Download the archived invoice PDF', 'file'),
         action('link', 'Email', (evt) => emailInvoice(inv, evt.currentTarget),
-          'Choose recipients and send this invoice (PDF attached)', 'email'),
+          'Choose recipients and send this invoice (PDF attached)', 'contact'),
         action('link', 'Email copy', () => emailInvoiceCopy(inv.id),
-          'Send a PDF copy to another address, e.g. the accountant', 'copy'),
+          'Send a PDF copy to another address, e.g. the accountant', 'email'),
       );
     }
     // #133: selecting the row (its Preview button, a click anywhere on the
@@ -118,7 +118,7 @@ async function refreshInvoicesBody() {
           // ratified lifecycle vocabulary (#349) -- presentation only.
           statusChip(statusLabel(inv.status), open),
         ]),
-        el('td', { cls: 'actions-col', data: { iconActions: '1' } }, actions),
+        iconActionsCell(actions),
       ]),
     );
   }
