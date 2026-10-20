@@ -8,7 +8,7 @@ import { $, addDays, announce, clearFormError, decorateUbuntuButton, isoDate, mo
 import { ADD_CATEGORY_VALUE, addCategory, addExpenseCategory, fillCategorySelect, refreshCategories, refreshExpenses, refreshSubmissions, resetCategoryForm, resetExpenseForm, saveExpense, submitWeek } from './expenses.js';
 import { refreshExpenseConversion, resetExpenseConversion, showConverted } from './fx.js';
 import { addPaymentRail, cancelCustomerEdit, cancelProjectEdit, cancelTaskEdit, contactRow, fillParentCustomers, fillTaskParents, prefillProjectParent, refreshCustomerPickers, refreshCustomerTable, refreshCustomersView, refreshProjectTable, refreshProjectsView, refreshTaskTable, refreshTasksView, runReport, saveCustomer, saveProject, saveTask } from './hierarchy.js';
-import { closeDeliveryRecord, closeInvoicePreview, closeSendEmailDialog, confirmSendEmail, dash, dashApplyColumns, downloadInvoicePdf, ed, edCancel, edClose, edHasChanges, edLineRow, edLoadDefaults, edOpen, edRecalc, edSave, initInvoiceDropdowns, invoicePreview, markInvoiceSent, openEmailSettings, refreshInvoiceSummary, refreshInvoices, sendInvoiceEmail, setInvoicePeriod } from './invoices.js';
+import { closeDeliveryRecord, closeInvoicePreview, closeSendEmailDialog, confirmSendEmail, dash, downloadInvoicePdf, ed, edCancel, edClose, edHasChanges, edLineRow, edLoadDefaults, edOpen, edRecalc, edSave, initInvoiceDropdowns, invoicePreview, markInvoiceSent, openEmailSettings, refreshInvoiceSummary, refreshInvoices, sendInvoiceEmail, setInvoicePeriod } from './invoices.js';
 import { markNotificationsRead, refreshNotifications } from './notifications.js';
 import { initReceiptPreview } from './receipt.js';
 import { applyRoute, initRouter, initSegTabs, initSettingsTabs, initTabs, normaliseRoute, refreshTimesheetView, segActiveId, showTimesheet } from './route.js';
@@ -115,13 +115,6 @@ export function wireInvoiceDashboard() {
       refreshInvoices().catch?.(() => {});
     });
   }
-  $('inv-clear').addEventListener('click', () => {
-    for (const id of ['invoice-search', 'inv-f-customer', 'inv-f-project']) $(id).value = '';
-    dash.q = ''; dash.customer = ''; dash.project = '';
-    $('inv-f-period').value = 'all';
-    setInvoicePeriod('all');
-    refreshInvoices().catch?.(() => {});
-  });
   // #135 dashboard controls
   $('inv-tab-open').addEventListener('click', () => {
     dash.openOnly = true;
@@ -141,15 +134,8 @@ export function wireInvoiceDashboard() {
   });
   $('inv-f-customer').addEventListener('change', () => {
     dash.customer = $('inv-f-customer').value;
-    dash.project = '';
-    $('inv-f-project').value = '';
-    $('inv-f-project').__filterSync?.();
     // #189: refreshInvoices chains refreshInvoiceSummary with the shared
     // payload — the old double call fired two renders and three GETs.
-    refreshInvoices().catch?.(() => { });
-  });
-  $('inv-f-project').addEventListener('change', () => {
-    dash.project = $('inv-f-project').value;
     refreshInvoices().catch?.(() => { });
   });
   $('inv-f-from').addEventListener('change', () => {
@@ -160,9 +146,6 @@ export function wireInvoiceDashboard() {
     dash.to = $('inv-f-to').value;
     refreshInvoices().catch?.(() => { });
   });
-  for (const cb of document.querySelectorAll('.inv-col')) {
-    cb.addEventListener('change', dashApplyColumns);
-  }
   for (const btn of document.querySelectorAll('.p-table__sort-button')) {
     btn.addEventListener('click', () => {
       const col = btn.getAttribute('data-col');
@@ -372,13 +355,13 @@ export function wireWeekGrid() {
   });
   $('ed-cancel').addEventListener('click', edCancel);
   $('ed-preview').addEventListener('click', () => edSave(true));
-  $('ed-defaults').addEventListener('click', () => edLoadDefaults(true));
+  $('ed-defaults').addEventListener('click', () => { ed.defaultsPromise = edLoadDefaults(true); });
   $('ed-customer').addEventListener('change', () => {
     if (ed.id) return;
     const customer = state.customers.find(item => item.id === $('ed-customer').value);
     ed.currency = customer?.currency || 'EUR';
     $('ed-currency').value = ed.currency;
-    edLoadDefaults(false);
+    ed.defaultsPromise = edLoadDefaults(false);
     edRecalc();
   });
   window.addEventListener('beforeunload', event => {

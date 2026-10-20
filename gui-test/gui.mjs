@@ -1812,17 +1812,9 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
     custBtn.closest('th').getAttribute('aria-sort') === 'ascending'
     && totalBtn.closest('th').getAttribute('aria-sort') === 'none'
     && headerSorts().filter((a) => a === 'ascending' || a === 'descending').length === 1);
-  // column toggle
-  const colCb = window.document.querySelector('.inv-col[value="customer"]');
-  colCb.checked = false;
-  colCb.dispatchEvent(new window.Event('change', { bubbles: true }));
-  await waitFor(() => window.document.querySelector('#invoice-table tbody tr').children[1].hidden === true, {
-    message: 'the column toggle to hide the customer column',
-  });
-  check('column toggle hides the customer column (#135)',
-    window.document.querySelector('#invoice-table tbody tr').children[1].hidden === true);
-  colCb.checked = true;
-  colCb.dispatchEvent(new window.Event('change', { bubbles: true }));
+  check('invoice columns remain visible without a Columns control',
+    !window.document.querySelector('.cols-pop')
+    && [...window.document.querySelectorAll('#invoice-table th, #invoice-table td')].every(cell => !cell.hidden));
   // keyboard selection opens the #133 preview
   const kbRow = window.document.querySelector('#invoice-table tbody tr');
   kbRow.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));

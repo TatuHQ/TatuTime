@@ -179,8 +179,10 @@ test('the invoice filter row uses the house primitive and ARIA toggle state (#F)
     assert.ok(row.classList.contains('filter-row'), 'dropdowns use the shared .filter-row');
     assert.equal(status.nextElementSibling, row, 'Open/All is above the dropdown row');
     const fields = [...row.querySelectorAll('.filter-field')];
-    assert.equal(fields.length, 6, 'six filter controls each sit in a .filter-field');
-    for (const id of ['invoice-search', 'inv-f-customer', 'inv-f-project', 'inv-f-from', 'inv-f-to']) {
+    assert.equal(fields.length, 5, 'three filters and two custom date fields');
+    assert.deepEqual(fields.slice(0, 3).map(field => field.querySelector('input,select')?.id),
+        ['invoice-search', 'inv-f-customer', 'inv-f-period'], 'Number, Customer, Time matches the table order');
+    for (const id of ['invoice-search', 'inv-f-customer', 'inv-f-period', 'inv-f-from', 'inv-f-to']) {
         const control = doc.getElementById(id);
         assert.ok(control, `#${id} exists`);
         assert.ok(control.closest('.filter-field'), `#${id} is wrapped in its own field group`);
@@ -203,8 +205,8 @@ test('the invoice filter row uses the house primitive and ARIA toggle state (#F)
     }
     assert.equal(buttons.filter((button) => button.getAttribute('aria-pressed') === 'true').length, 1,
         'exactly one status is pressed');
-    const cols = row.querySelector('.cols-pop');
-    assert.ok(cols && cols.parentElement === row, 'the Columns disclosure is a direct row control');
-    assert.ok(cols.querySelector('.cols-pop__menu'), 'its menu is a separate positioned panel');
+    assert.equal(row.querySelector('.cols-pop'), null, 'there is no Columns control');
+    assert.equal(doc.getElementById('inv-clear'), null, 'there is no Clear all control');
+    assert.equal(doc.getElementById('inv-f-project'), null, 'only the requested three filters remain');
     dom.window.close();
 });

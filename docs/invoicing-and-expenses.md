@@ -34,8 +34,11 @@ Cancel asks before discarding changes, and leaving the page warns about unsaved
 edits. Invoice numbers remain server-assigned.
 
 Subject and notes prefill from customer/template settings; blank explicit notes
-suppress default notes. **Use template and customer defaults** restores those
-fields and inherited terms. Explicit due dates take precedence and print without
+suppress default notes. **Reset document defaults** restores those
+fields and inherited terms, with a visible restored/unchanged/error result. The
+catalog selector prefills a manual line from saved items; it is not the description
+field, and is hidden when no saved items exist. Editor dropdowns use anchored
+menus within the invoice dialog. Explicit due dates take precedence and print without
 a potentially contradictory `(Net N)` suffix. All overrides are draft-only.
 
 A tracked-work invoice is generated from a period's **billable, not-yet-invoiced**
@@ -60,8 +63,9 @@ math, and the document may apply a discount and VAT.
 
 ### Browse and preview
 
-Open/All is on its own row, above customer/project/search filters, Clear all and
-the period selector. All time is the initial period; Month, Quarter and Year
+Open/All is on its own row, above the filters in table order: Number, Customer,
+Time. There is no Clear all or Columns control; all table columns stay visible.
+All time is the initial period; Month, Quarter and Year
 have previous/next navigation, and Custom range exposes from/to dates. Period
 filters use the invoice's document date, then its issue/creation date for older
 records. Importing tracked work uses work dates instead.

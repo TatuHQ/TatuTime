@@ -479,6 +479,7 @@ dialog.p-modal::backdrop { background: transparent; }
 #ed-lines th:first-child { width: 45%; }
 #ed-lines th:nth-child(2) { width: 8rem; }
 #ed-lines input[type="text"], #ed-lines select { width: 100%; min-width: 0; }
+#invoice-editor .invoice-filter-trigger { width: 100%; min-width: 0; }
 #ed-lines .actions-col { width: 8rem; }
 #ed-lines .actions-col button { padding: .25rem; }
 @media (width < 620px) {
@@ -663,7 +664,6 @@ dialog.p-modal::backdrop { background: transparent; }
 .pdf-toolbar select { width: auto; margin: 0; }
 .invoice-status-row { border-bottom: 1px solid var(--line); padding-block: .5rem; margin-bottom: .75rem; }
 #inv-filter-row { align-items: center; }
-#inv-clear { height: var(--control-height); margin: 0; padding-block: 0; display: inline-flex; align-items: center; }
 .invoice-filter-native[hidden] { display: none; }
 .invoice-filter-trigger { display: flex; align-items: center; gap: .5rem; width: 9.25rem; height: var(--control-height); padding: .3rem .6rem; margin: 0; text-align: left; }
 .invoice-filter-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -928,10 +928,6 @@ html[data-advanced-billing="off"] #advanced-billing { display: none; }
 .seg .seg-btn[aria-pressed="true"] { background: var(--accent-soft); color: var(--brand-deep); box-shadow: inset 0 -3px 0 var(--accent); }
 /* The Columns disclosure is a control too. Absolute-position its menu so
    opening it cannot move the row's shared bottom edge. */
-.cols-pop { position: relative; }
-.cols-pop summary { cursor: pointer; display: inline-flex; align-items: center; height: var(--control-height); padding: 0 .75rem; border: 0; border-bottom: 1px solid var(--field-rule); border-radius: 0; background: var(--input-bg); color: var(--fg); list-style: none; }
-.cols-pop__menu { position: absolute; right: 0; top: calc(100% + .25rem); z-index: 20; min-width: 11rem; padding: .5rem .6rem; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); display: grid; gap: .3rem; }
-.cols-pop label { display: flex; gap: .4rem; align-items: center; font-weight: 400; }
 /* #232 phase 2d: the bespoke `.sort-th` skin is retired — the Invoices
    register uses Vanilla 4.59's real sortable pattern (aria-sort on the <th>
    plus `.p-table__sort-button`), which owns the cursor, hover ink and the

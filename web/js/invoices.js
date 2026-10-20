@@ -125,7 +125,6 @@ async function refreshInvoicesBody() {
   $('invoice-empty').textContent = (data.invoices || []).length && !invoices.length
     ? 'No invoices match the current filters.'
     : 'No invoices yet.';
-  dashApplyColumns(); // #135 column visibility
   if (invoicePreview) {
     const fresh = invoices.find((i) => i.id === invoicePreview.id);
     if (fresh) {
@@ -162,22 +161,6 @@ export async function refreshInvoiceSummary(preloaded) {
     const all = preloaded ?? (await api.get('/invoices')).invoices ?? [];
     if (all.length && !dash.currency) dash.currency = all.find((i) => i.status !== 'draft')?.currency || '';
     dashRenderOverview(all);
-    // project filter options follow the customer filter
-    const projSel = $('inv-f-project');
-    const keep = projSel.value;
-    projSel.textContent = '';
-    projSel.appendChild(el('option', { attrs: { value: '' }, text: 'All projects' }));
-    const seen = new Set();
-    for (const i of all) {
-      if (dash.customer && i.customer_id !== dash.customer) continue;
-      for (const l of i.lines || []) {
-        if (l.project_code && !seen.has(l.project_code)) {
-          seen.add(l.project_code);
-          projSel.appendChild(el('option', { attrs: { value: l.project_code }, text: l.project_code }));
-        }
-      }
-    }
-    if (keep) projSel.value = keep;
   } catch { /* overview is additive; table remains authoritative */ }
 }
 
@@ -604,10 +587,13 @@ export const dash = {
   dateBasis: 'period',
 };
 
-export function initInvoiceDropdowns() {
-  let dismiss = null;
-  for (const [id, caption] of [['inv-f-customer', 'Customer'], ['inv-f-project', 'Project'], ['inv-f-period', 'Period']]) {
-    const select = $(id);
+let dismissInvoiceMenu = null;
+let invoiceMenuId = 0;
+
+export function initInvoiceDropdowns(controls = [['inv-f-customer', 'Customer'], ['inv-f-period', 'Time']]) {
+  for (const [control, caption] of controls) {
+    const select = typeof control === 'string' ? $(control) : control;
+    const id = select.id || (select.id = `invoice-select-${++invoiceMenuId}`);
     if (select.__filterSync) continue;
     const label = el('span', { cls: 'invoice-filter-label' });
     const trigger = el('button', {
@@ -622,7 +608,10 @@ export function initInvoiceDropdowns() {
       if (menu.matches(':popover-open')) menu.hidePopover();
       menu.hidden = true;
       trigger.setAttribute('aria-expanded', 'false');
-      if (dismiss === close) dismiss = null;
+      if (dismissInvoiceMenu === close) dismissInvoiceMenu = null;
+      document.removeEventListener('pointerdown', outside);
+      window.removeEventListener('resize', position);
+      window.removeEventListener('scroll', position, true);
       if (restore) trigger.focus({ preventScroll: true });
     };
     const position = () => {
@@ -640,13 +629,15 @@ export function initInvoiceDropdowns() {
     };
     const sync = () => {
       const selected = select.selectedOptions[0];
-      label.textContent = !select.value && id !== 'inv-f-period' ? caption : selected?.textContent || caption;
+      const placeholder = id === 'inv-f-customer' || select.dataset.catalog === '1';
+      label.textContent = !select.value && placeholder ? caption : selected?.textContent || caption;
       trigger.title = `${caption}: ${selected?.textContent || caption}`;
       trigger.setAttribute('aria-label', trigger.title);
       trigger.disabled = select.disabled;
+      trigger.hidden = select.dataset.catalog === '1' && select.options.length < 2;
     };
     const open = () => {
-      dismiss?.();
+      dismissInvoiceMenu?.();
       menu.replaceChildren(...[...select.options].map((option, index) => el('button', {
         type: 'button', cls: 'p-button invoice-filter-option', text: option.textContent,
         attrs: { role: 'option', tabindex: '-1', 'aria-selected': String(option.selected), id: `${id}-option-${index}` },
@@ -659,7 +650,10 @@ export function initInvoiceDropdowns() {
       })));
       menu.hidden = false;
       menu.showPopover?.();
-      dismiss = close;
+      dismissInvoiceMenu = close;
+      document.addEventListener('pointerdown', outside);
+      window.addEventListener('resize', position);
+      window.addEventListener('scroll', position, true);
       trigger.setAttribute('aria-expanded', 'true');
       position();
       menu.querySelector('[aria-selected="true"]')?.focus({ preventScroll: true });
@@ -669,7 +663,7 @@ export function initInvoiceDropdowns() {
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); open(); }
     });
     menu.addEventListener('keydown', event => {
-      if (event.key === 'Escape') { event.preventDefault(); close(true); return; }
+      if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(true); return; }
       if (event.key === 'Tab') { close(true); return; }
       const options = [...menu.querySelectorAll('[role="option"]')];
       const current = options.indexOf(document.activeElement);
@@ -677,18 +671,19 @@ export function initInvoiceDropdowns() {
       if (next !== null) { event.preventDefault(); options[next]?.focus(); }
     });
     menu.addEventListener('toggle', event => { if (event.newState === 'closed' && !menu.matches(':popover-open')) close(); });
-    document.addEventListener('pointerdown', event => {
+    const outside = event => {
       if (!menu.hidden && !menu.contains(event.target) && !trigger.contains(event.target)) close();
-    });
-    window.addEventListener('resize', position);
-    window.addEventListener('scroll', position, true);
+    };
     select.hidden = true;
     select.classList.add('invoice-filter-native');
-    select.after(trigger);
-    document.body.appendChild(menu);
+    select.after(trigger, menu);
     select.addEventListener('change', sync);
     new MutationObserver(sync).observe(select, { childList: true, subtree: true });
     select.__filterSync = sync;
+    select.__filterButton = trigger;
+    for (const nativeLabel of select.labels || []) nativeLabel.addEventListener('click', event => {
+      event.preventDefault(); trigger.focus({ preventScroll: true });
+    });
     sync();
   }
 }
@@ -723,7 +718,7 @@ export function setInvoicePeriod(mode, shift = 0) {
   $('inv-period-label').textContent = mode === 'year' ? String(year)
     : mode === 'quarter' ? `Q${Math.floor(month / 3) + 1} ${year}`
       : new Intl.DateTimeFormat('en', { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(anchor);
-  for (const id of ['inv-f-period', 'inv-f-customer', 'inv-f-project']) $(id).__filterSync?.();
+  for (const id of ['inv-f-period', 'inv-f-customer']) $(id).__filterSync?.();
 }
 
 // "Collectable right now": issued or partly paid — drives the Record-payment
@@ -1034,19 +1029,6 @@ export function dashRenderOverview(invoices) {
       return drawConverted(byCur, codes, base, primary);
     })
     .catch(() => { });
-}
-
-export function dashApplyColumns() {
-  const on = new Set([...document.querySelectorAll('.inv-col:checked')].map((c) => c.value));
-  const table = $('invoice-table');
-  const idx = { customer: 1, period: 2, total: 3, balance: 4, status: 5 };
-  for (const [name, i] of Object.entries(idx)) {
-    const hide = !on.has(name);
-    table.querySelectorAll('tr').forEach((row) => {
-      const cell = row.children[i];
-      if (cell) cell.hidden = hide;
-    });
-  }
 }
 
 // ------------------------------------------- invoice detail panel (#349) --
@@ -1485,7 +1467,7 @@ export function edTotals(subtotal, taxH, discH) {
 
 export function edLineRow(line = null) {
   const desc = el('input', { attrs: { type: 'text', maxlength: 500, placeholder: 'Description', 'aria-label': 'Line description', value: line ? line.note : '' } });
-  const itemSel = el('select', { attrs: { 'aria-label': 'Catalog item type (prefills this line)' } });
+  const itemSel = el('select', { data: { catalog: '1' }, attrs: { 'aria-label': 'Saved catalog item' } });
   const kind = el('select', { attrs: { 'aria-label': 'Product or service' } }, [
     el('option', { attrs: { value: 'product', selected: !line || line.item_kind !== 'service' ? '' : null }, text: 'Product' }),
     el('option', { attrs: { value: 'service' }, text: 'Service' }),
@@ -1543,7 +1525,7 @@ export function edLineRow(line = null) {
   row.__attachItemSelect = () => {
     const keep = itemSel.value;
     itemSel.textContent = '';
-    itemSel.appendChild(el('option', { attrs: { value: '' }, text: '— custom —' }));
+    itemSel.appendChild(el('option', { attrs: { value: '' }, text: 'Custom item' }));
     for (const it of catalogItems.filter((x) => x.active)) {
       itemSel.appendChild(
         el('option', { attrs: { value: it.id }, text: `${it.name} (${it.currency} ${formatMoney(it.default_price_minor)})` }),
@@ -1553,12 +1535,14 @@ export function edLineRow(line = null) {
   };
   row.__updateProjects = updateProjects;
   row.__attachItemSelect();
+  initInvoiceDropdowns([[itemSel, 'Catalog item'], [kind, 'Type'], [project, 'Linked project']]);
   itemSel.addEventListener('change', () => {
     const it = catalogItems.find((x) => x.id === itemSel.value);
     if (!it) return;
     // Prefill only — every field stays editable (#147).
     if (!desc.value.trim()) desc.value = it.description || it.name;
     kind.value = it.kind;
+    kind.__filterSync?.();
     if (!Number(price.value)) price.value = (it.default_price_minor / 100).toFixed(2);
     edRecalc();
   });
@@ -1633,6 +1617,8 @@ export function edOpen(draft) {
   $('ed-currency').value = ed.currency;
   $('ed-currency').disabled = ed.tracked.length > 0;
   $('ed-import').hidden = Boolean(draft);
+  $('ed-defaults').disabled = !$('ed-customer').value;
+  $('ed-defaults-state').textContent = '';
   $('ed-subject').value = details.subject ?? '';
   $('ed-notes').value = details.notes ?? '';
   for (const id of ['ed-subject', 'ed-notes']) $(id).dataset.touched = '';
@@ -1643,15 +1629,19 @@ export function edOpen(draft) {
   const dlg = $('invoice-editor');
   if (typeof dlg.showModal === 'function') dlg.showModal();
   else dlg.setAttribute('open', '');
+  initInvoiceDropdowns([['ed-customer', 'Invoice for'], ['ed-terms', 'Payment terms']]);
+  $('ed-customer').__filterSync?.();
+  $('ed-terms').__filterSync?.();
   edRecalc();
   ed.initial = edFingerprint();
   ed.defaultsPromise = edLoadDefaults(false);
-  $(draft ? 'ed-po' : 'ed-customer').focus({ preventScroll: true });
+  (draft ? $('ed-po') : $('ed-customer').__filterButton).focus({ preventScroll: true });
   dlg.querySelector('.p-modal__dialog').scrollTop = 0;
   announce(draft ? `Editing draft ${draft.number}.` : 'Manual invoice editor open.');
 }
 
 export function edClose() {
+  dismissInvoiceMenu?.();
   ed.epoch = (ed.epoch || 0) + 1;
   ed.id = null;
   const dlg = $('invoice-editor');
@@ -1672,16 +1662,28 @@ export async function edLoadDefaults(force = false) {
   const customerId = $('ed-customer').value;
   const customer = state.customers.find(item => item.id === customerId);
   const draftId = ed.id;
+  $('ed-defaults').disabled = !customerId;
+  if (force && !customerId) {
+    $('ed-defaults-state').textContent = 'Select a customer first.';
+    return;
+  }
+  if (force) $('ed-defaults-state').textContent = 'Restoring defaults…';
   try {
     const [response, projects] = await Promise.all([
       api.get('/admin/invoice-template'),
-      customerId ? api.get(`/customers/${customerId}/projects`) : Promise.resolve({ projects: [] }),
+      customerId ? api.get(`/customers/${customerId}/projects`).catch(() => ({ projects: state.projectsByCustomer[customerId] || [] })) : Promise.resolve({ projects: [] }),
     ]);
     if (ed.epoch !== epoch || ed.id !== draftId || $('ed-customer').value !== customerId || !$('invoice-editor').open) return;
-    const pristine = edFingerprint() === ed.initial;
+    const beforeDefaults = edFingerprint();
+    const pristine = beforeDefaults === ed.initial;
     state.projectsByCustomer[customerId] = projects.projects || [];
     for (const row of $('ed-lines').querySelectorAll('tbody tr')) row.__updateProjects?.();
     const template = response.template || {};
+    const inheritedTerms = customer?.payment_terms || template.payment_terms;
+    const termsLabel = inheritedTerms?.kind === 'custom' ? `${inheritedTerms.days} days`
+      : inheritedTerms?.kind?.replace('net_', 'Net ').replace('upon_receipt', 'Upon receipt');
+    $('ed-terms').options[0].textContent = termsLabel ? `Default (${termsLabel})` : 'Customer / template default';
+    $('ed-terms').__filterSync?.();
     const defaults = {
       'ed-subject': customer?.invoice_subject || template.subject || '',
       'ed-notes': [template.notes, customer?.invoice_notes].filter(Boolean).join('\n\n'),
@@ -1695,9 +1697,15 @@ export async function edLoadDefaults(force = false) {
       ed.termsOverride = null;
       $('ed-terms').value = '';
       $('ed-due').value = '';
+      $('ed-terms').__filterSync?.();
+      $('ed-defaults-state').textContent = edFingerprint() === beforeDefaults ? 'Already using document defaults.' : 'Document defaults restored.';
     }
     if (pristine && !force) ed.initial = edFingerprint();
-  } catch (error) { announce(`Invoice defaults unavailable: ${error.message}`); }
+  } catch (error) {
+    if (ed.epoch !== epoch) return;
+    $('ed-defaults-state').textContent = `Defaults unavailable: ${error.message}`;
+    announce(`Invoice defaults unavailable: ${error.message}`);
+  }
 }
 
 // #349: Cancel is the explicit way out of the manual editor. The editor only

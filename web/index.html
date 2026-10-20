@@ -645,20 +645,17 @@
             </div>
             <div id="inv-filter-row" class="filter-row">
               <div class="filter-field">
+                <label class="sr-only" for="invoice-search">Invoice number</label>
+                <input id="invoice-search" type="search" placeholder="Number" autocomplete="off">
+              </div>
+              <div class="filter-field">
                 <label class="sr-only" for="inv-f-customer">Customer filter</label>
                 <select id="inv-f-customer">
                   <option value="">All customers</option>
                 </select>
               </div>
               <div class="filter-field">
-                <label class="sr-only" for="inv-f-project">Project filter</label>
-                <select id="inv-f-project">
-                  <option value="">All projects</option>
-                </select>
-              </div>
-              <button type="button" id="inv-clear" class="link" data-icon="close">Clear all</button>
-              <div class="filter-field">
-                <label class="sr-only" for="inv-f-period">Invoice date period</label>
+                <label class="sr-only" for="inv-f-period">Time filter</label>
                 <select id="inv-f-period">
                   <option value="all">All time</option><option value="month">Month</option>
                   <option value="quarter">Quarter</option><option value="year">Year</option>
@@ -678,20 +675,6 @@
                 <label class="sr-only" for="inv-f-to">Period to</label>
                 <input id="inv-f-to" type="date" title="Period to">
               </div>
-              <div class="filter-field">
-                <label class="sr-only" for="invoice-search">Search invoices</label>
-                <input id="invoice-search" type="search" placeholder="Number, customer, note…" autocomplete="off">
-              </div>
-              <details class="cols-pop">
-                <summary>Columns</summary>
-                <div class="cols-pop__menu">
-                  <label><input type="checkbox" class="inv-col" value="customer" checked> Customer</label>
-                  <label><input type="checkbox" class="inv-col" value="period" checked> Period</label>
-                  <label><input type="checkbox" class="inv-col" value="total" checked> Total</label>
-                  <label><input type="checkbox" class="inv-col" value="balance" checked> Balance</label>
-                  <label><input type="checkbox" class="inv-col" value="status" checked> Status</label>
-                </div>
-              </details>
             </div>
             <!-- #232 phase 2d: the sortable register uses Vanilla 4.59's real
            pattern — aria-sort on the <th> plus a .p-table__sort-button.
@@ -987,7 +970,8 @@
               </div>
               <dl id="ed-totals" class="ip-facts"></dl>
               <div class="p-form__group"><label class="p-form__label" for="ed-notes">Notes</label><textarea class="p-form__control" id="ed-notes" rows="5" maxlength="4000"></textarea></div>
-              <button type="button" id="ed-defaults" class="link">Use template and customer defaults</button>
+              <button type="button" id="ed-defaults" class="link">Reset document defaults</button>
+              <p id="ed-defaults-state" role="status" aria-live="polite"></p>
               <div class="p-form-validation is-error">
                 <p class="p-form-validation__message" id="ed-error" role="alert" hidden></p>
               </div>

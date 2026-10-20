@@ -2438,7 +2438,7 @@ class Gate:
             self.wait_script("document.documentElement.dataset.booted === 'ready'", "invoice dropdowns")
             for width in (1280, 375):
                 self.marionette.call("WebDriver:SetWindowRect", {"width": width, "height": 812})
-                for name in ("customer", "project", "period"):
+                for name in ("customer", "period"):
                     result = json.loads(self.marionette.script("""
                         const id = %s;
                         const button = document.getElementById(id + '-button');
@@ -2460,15 +2460,19 @@ class Gate:
                                and result["x"] >= 0 and result["right"] <= result["width"]
                                and result["closed"], str(result))
                 aligned = json.loads(self.marionette.script("""
+                    const number = document.getElementById('invoice-search').getBoundingClientRect();
                     const customer = document.getElementById('inv-f-customer-button').getBoundingClientRect();
-                    const project = document.getElementById('inv-f-project-button').getBoundingClientRect();
-                    const clear = document.getElementById('inv-clear').getBoundingClientRect();
-                    return JSON.stringify({customer:customer.height,project:project.height,clear:clear.height,
-                        sameRow:Math.abs(customer.y-clear.y)<=1});
+                    const time = document.getElementById('inv-f-period-button').getBoundingClientRect();
+                    return JSON.stringify({order:[...document.querySelectorAll('#invoice-search,#inv-f-customer-button,#inv-f-period-button')].map(node=>node.id),
+                        sameRow:Math.abs(number.y-customer.y)<=1 && Math.abs(customer.y-time.y)<=1,
+                        leftToRight:number.x<customer.x && customer.x<time.x,
+                        noExtras:!document.querySelector('#inv-clear,#inv-f-project,.cols-pop'),
+                        columnsVisible:[...document.querySelectorAll('#invoice-table th,#invoice-table td')].every(cell=>!cell.hidden)});
                 """))
-                self.check(f"Clear all matches filter height at {width}px",
-                           abs(aligned["customer"] - aligned["clear"]) <= 1
-                           and (width < 1000 or aligned["sameRow"]), str(aligned))
+                self.check(f"invoice filters follow Number, Customer, Time at {width}px without extra controls",
+                           aligned["order"] == ["invoice-search", "inv-f-customer-button", "inv-f-period-button"]
+                           and aligned["noExtras"] and aligned["columnsVisible"]
+                           and (width < 1000 or (aligned["sameRow"] and aligned["leftToRight"])), str(aligned))
                 if self.args.keep:
                     self.marionette.script("document.getElementById('inv-f-period-button').click(); return true;")
                     shot = self.screenshot()
@@ -2488,6 +2492,27 @@ class Gate:
             self.wait_script("document.getElementById('invoice-editor').open", "new invoice workspace")
             self.check("New invoice enters one editor without a mandatory wizard",
                        self.marionette.script("return !document.getElementById('invoice-wizard').open && document.getElementById('manual-new').hidden;"))
+            menus = json.loads(self.marionette.script("""
+                const controls = [document.getElementById('ed-customer'), document.getElementById('ed-terms'),
+                    document.querySelector('#ed-lines [aria-label="Product or service"]'),
+                    document.querySelector('#ed-lines [aria-label="Linked project"]')];
+                return JSON.stringify(controls.map(select => {
+                    const button = select.__filterButton;
+                    button.scrollIntoView({block:'center'}); button.click();
+                    const menu = document.getElementById(button.getAttribute('aria-controls'));
+                    const anchor = button.getBoundingClientRect(), bounds = menu.getBoundingClientRect();
+                    const result = {name:button.getAttribute('aria-label'),visible:menu.checkVisibility(),
+                        gap:Math.min(Math.abs(bounds.top-anchor.bottom-4),Math.abs(anchor.top-bounds.bottom-4)),
+                        contained:bounds.left>=0 && bounds.right<=innerWidth};
+                    menu.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));
+                    result.editorOpen=document.getElementById('invoice-editor').open;
+                    result.noConfirm=!document.getElementById('app-dialog').open;
+                    return result;
+                }));
+            """))
+            self.check("editor dropdowns stay anchored inside the modal and Escape only closes their menus",
+                       all(item["visible"] and item["gap"] <= 1 and item["contained"]
+                           and item["editorOpen"] and item["noConfirm"] for item in menus), str(menus))
             self.marionette.script("""
                 const set = (id, value) => {
                     const node = document.getElementById(id); node.value = value;

@@ -32,7 +32,7 @@ window.bootTest = {
   // editor are wired by the focused wire*() functions; expose them so a test
   // drives the same listeners the app registers at boot.
   dash, dashFilter, setInvoicePeriod, refreshInvoiceSummary, wireInvoiceDashboard, wireWeekGrid,
-  iwInit, iwOpen, edOpen, edSave, edCancel, ed,
+  iwInit, iwOpen, edOpen, edLoadDefaults, edSave, edCancel, ed, catalogItems,
   peekLockCache: () => weekLockCache,
   liveText: () => document.getElementById('live-region').textContent,
   api,
@@ -917,10 +917,9 @@ test('invoice periods step across years and filter invoice dates, not work dates
   ]);
   assert.deepEqual([...rows].map(row => row.number), ['A']);
   context.wireInvoiceDashboard();
-  context.dash.customer = 'some-customer';
-  document.getElementById('inv-clear').click();
+  document.getElementById('inv-f-period').value = 'all';
+  document.getElementById('inv-f-period').dispatchEvent(new dom.window.Event('change', { bubbles: true }));
   assert.equal(context.dash.from, '');
-  assert.equal(context.dash.customer, '');
   assert.equal(context.dash.periodMode, 'all');
   dom.window.close();
 });
@@ -953,7 +952,8 @@ test('invoice filter menus select, dismiss and reset alongside their native stat
   button.click();
   document.body.dispatchEvent(new dom.window.Event('pointerdown', { bubbles: true }));
   assert.equal(menu.hidden, true);
-  document.getElementById('inv-clear').click();
+  button.click();
+  document.getElementById('inv-f-customer-option-0').click();
   assert.equal(button.textContent.trim(), 'Customer');
   assert.equal(context.dash.customer, '');
   assert.equal(customer.value, '');
@@ -962,6 +962,8 @@ test('invoice filter menus select, dismiss and reset alongside their native stat
   document.getElementById('inv-f-period-option-1').click();
   assert.equal(context.dash.periodMode, 'month');
   assert.equal(period.textContent.trim(), 'Month');
+  assert.equal(document.getElementById('inv-clear'), null);
+  assert.equal(document.getElementById('inv-f-project'), null);
   dom.window.close();
 });
 
@@ -1022,6 +1024,63 @@ test('the manual editor Cancel saves nothing and Save posts exactly one manual d
   assert.equal(posts[0].body.lines[0].unit_price_minor, 1000, 'unit price in minor units');
   assert.equal(isOpen(), false, 'Save closes the editor');
   assert.match(context.liveText(), /Draft INV-0042 saved/);
+  dom.window.close();
+});
+
+test('document defaults restore customer/template content and report their result', async () => {
+  const { dom, context, document } = makeDom(`
+api.get = async path => path === '/admin/invoice-template'
+  ? {template:{subject:'Org subject',notes:'Org notes',payment_terms:{kind:'net_30'}}}
+  : {projects:[]};
+`);
+  context.state.customers = [{id:'c1',name:'Example',currency:'EUR',invoice_subject:'Customer subject',invoice_notes:'Customer notes'}];
+  addCustomerOption(document, 'c1', 'Example');
+  context.wireWeekGrid();
+  context.edOpen(null);
+  await context.edLoadDefaults();
+  document.getElementById('ed-subject').value = 'Edited subject';
+  document.getElementById('ed-notes').value = 'Edited notes';
+  document.getElementById('ed-terms').value = 'net_45';
+  document.getElementById('ed-due').value = '2027-01-01';
+  document.getElementById('ed-defaults').click();
+  await waitFor(() => document.getElementById('ed-defaults-state').textContent === 'Document defaults restored.', {message:'visible defaults reset'});
+  assert.equal(document.getElementById('ed-subject').value, 'Customer subject');
+  assert.equal(document.getElementById('ed-notes').value, 'Org notes\n\nCustomer notes');
+  assert.equal(document.getElementById('ed-due').value, '');
+  assert.equal(document.getElementById('ed-terms').value, '');
+  assert.equal(document.getElementById('ed-terms-button').textContent.trim(), 'Default (Net 30)');
+  document.getElementById('ed-defaults').click();
+  await waitFor(() => document.getElementById('ed-defaults-state').textContent === 'Already using document defaults.', {message:'unchanged defaults result'});
+  context.api.get = async () => { throw new Error('unavailable'); };
+  await context.edLoadDefaults(true);
+  assert.match(document.getElementById('ed-defaults-state').textContent, /Defaults unavailable/);
+  dom.window.close();
+});
+
+test('the catalog preset is distinct from description and hidden without saved items', async () => {
+  const { dom, context, document } = makeDom('api.get = async () => ({template:{},projects:[]});');
+  context.wireWeekGrid();
+  context.edOpen(null);
+  const preset = document.querySelector('#ed-lines [aria-label="Saved catalog item"]');
+  const description = document.querySelector('#ed-lines [aria-label="Line description"]');
+  assert.ok(description);
+  assert.equal(preset.options[0].textContent, 'Custom item');
+  assert.equal(preset.__filterButton.hidden, true);
+  context.catalogItems.push({id:'item1',active:true,name:'Consulting',kind:'service',currency:'EUR',default_price_minor:6000});
+  const row = document.querySelector('#ed-lines tbody tr');
+  row.__attachItemSelect();
+  preset.__filterSync();
+  assert.equal(preset.__filterButton.hidden, false);
+  preset.value = 'item1';
+  preset.dispatchEvent(new dom.window.Event('change', {bubbles:true}));
+  assert.equal(description.value, 'Consulting');
+  const kind = row.querySelector('[aria-label="Product or service"]');
+  assert.equal(kind.value, 'service');
+  assert.equal(kind.__filterButton.textContent.trim(), 'Service');
+  kind.__filterButton.click();
+  document.getElementById(`${kind.id}-menu`).dispatchEvent(new dom.window.KeyboardEvent('keydown', {key:'Escape',bubbles:true,cancelable:true}));
+  assert.equal(document.getElementById('invoice-editor').open, true);
+  assert.equal(document.getElementById('app-dialog').open, false, 'Escape only dismisses the option menu');
   dom.window.close();
 });
 
