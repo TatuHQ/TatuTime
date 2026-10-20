@@ -1,7 +1,7 @@
 # Responsive GUI delivery plan
 
 Tracking issue: [#376](https://github.com/TucanoTechnology/TucanoTime/issues/376).
-Status: planning only; no responsive interface changes have shipped in this slice.
+Status: implemented on `feature/responsive-layout-plan`; awaiting visual review and merge.
 The issue owns scope and completion; this document records implementation guidance.
 
 ## Goal and boundaries
@@ -37,19 +37,18 @@ comparison at 1280px and 1440px, paired with navigation/reflow checks at 375px a
 768px. Reject a shell approach that moves existing desktop controls unexpectedly.
 These are planned checks, not results of a browser audit in this planning slice.
 
-## Proposed navigation contract
+## Implemented navigation contract
 
 | Viewport width | Proposed behaviour | Acceptance constraint |
 | --- | --- | --- |
-| Below 620px | Compact brand/menu bar; closed-by-default overlay drawer | Main content gets the available width; opening the drawer does not reflow it |
-| 620px to below 1036px | Compact rail with explicit expand/pin control | Works with touch and keyboard, not hover alone; icon labels remain accessible |
+| Below 1036px | Heading/menu bar; closed-by-default native-dialog drawer | Main content gets the available width; opening the drawer does not reflow it; touch and keyboard do not depend on hover |
 | 1036px and wider | Expanded rail | Preserve existing 232px rail and desktop page geometry |
 
-This follows Vanilla's **application layout** defaults (620px and 1036px), not
-the ordinary navigation component's single 1036px menu threshold. Confirm the
-contract in R1/R2 before implementation. If the compact tablet rail compromises
-discoverability, propose a drawer through the tablet range for review rather
-than silently changing this contract.
+The implementation uses Vanilla's 1036px large breakpoint and extends the drawer
+through the tablet range. This deliberately replaces the originally proposed
+620-1035px compact icon rail: tablet users get explicit labelled destinations,
+without hover or a second pin/expand mode. It is an application-owned geometry
+adapter, not a claim that the full Vanilla application-layout mixin is installed.
 
 Use one navigation DOM and retain its existing tab/route contracts. A full
 `l-application` conversion is not a prerequisite: first check whether the pinned
@@ -137,4 +136,27 @@ First implementation tickets:
 For Figma work, duplicate both libraries and connect the assets library to icon
 instance swapping. This is a design handoff step, not a runtime dependency;
 the application continues using its locally vendored Vanilla icons. No Figma
-file has been created or connected as part of this planning change.
+file has been created or connected as part of this change.
+
+## Implementation and review
+
+The shared shell reuses the same sidebar node in a native modal drawer on narrow
+screens. Escape, backdrop/close, destination focus and breakpoint cleanup are
+covered by keyboard tests and the Firefox gate. Wide table regions have names,
+keyboard access and visible focus without measuring layout during boot.
+
+The only page geometry correction required by the route sweep was the existing
+320px timesheet date-row specificity conflict: narrow Day/Week/Calendar rows now
+span the whole grid and allow the date label to shrink/wrap. Existing Vanilla
+mobile-card registers, wrapping Settings tabs and form/dialog widths are retained.
+
+`gui-test/browser-smoke.py` checks all 15 visible routed views at 15 widths in
+both themes, with long-label fixtures and an occupied timesheet. It also opens
+nine primary dialogs at 320px on a short screen and checks actual 400% browser
+zoom and 200% text zoom. Pass `--keep` to retain desktop/mobile screenshots for
+review; failures retain screenshots and logs automatically. Existing RBAC,
+hidden-feature and business-flow suites remain required.
+
+Automated geometry checks are not maintainer sign-off or a physical-device test.
+Review the published branch locally in both themes, especially tablet touch,
+landscape, assistive technology and invoice/PDF workflows before merging #376.

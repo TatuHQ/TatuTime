@@ -7,6 +7,9 @@
 Responsive adaptation is tracked separately in the
 [responsive GUI delivery plan](responsive-layout-plan.md) (#376); it preserves
 the established desktop layout rather than repeating the component migration.
+The implemented shell keeps the 232px desktop rail and uses a native-dialog
+drawer below Vanilla's 1036px large breakpoint, retaining one navigation DOM and
+the existing Vanilla icons, tab semantics and routes.
 
 ## Findings
 
