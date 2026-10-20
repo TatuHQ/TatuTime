@@ -111,7 +111,16 @@ The runtime base is distroless: there is no shell, no package manager and no
 
 ## Health and logging
 
-- `GET /healthz` returns the liveness answer. The image `HEALTHCHECK` runs
+- `GET /healthz` returns the liveness answer plus the build identity:
+  `{"status":"ok","version":"0.1.45","build":"5309ec3"}`. The version is the
+  crate version in `Cargo.toml` (the release version), and the build is the
+  commit the binary was compiled from — seven characters, the same short sha
+  release tags use. The GUI footer renders both, and a probe that fails leaves
+  the plain `TucanoTime` branding rather than blocking the boot.
+- Image builds pass the commit as the `TUCANO_BUILD` build arg
+  (`docker build --build-arg TUCANO_BUILD=$(git rev-parse --short HEAD) .`);
+  CI does this automatically. The builder context has no `.git`, so without the
+  arg the binary reports `unknown`. The image `HEALTHCHECK` runs
   `tucano-time --health`, which probes `http://127.0.0.1:${TUCANO_PORT}/healthz`
   inside the container, so no `curl` or shell is needed.
 - `RUST_LOG` controls the tracing filter; the default is `info`.

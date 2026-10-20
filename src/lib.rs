@@ -12,6 +12,7 @@ pub mod audit;
 pub mod auth;
 pub mod backup;
 pub mod budgets;
+pub mod buildinfo;
 pub mod calendar;
 pub mod calendar_oauth;
 pub mod clock;

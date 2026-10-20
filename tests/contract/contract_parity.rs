@@ -18,6 +18,16 @@ async fn healthz_is_ok() {
     let (status, body) = json_req(&app, "GET", "/healthz", None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["status"], "ok");
+    // The liveness answer also names the running build, which the GUI footer
+    // renders: the crate version, and the commit the binary was compiled from
+    // (a non-empty label in every build, `unknown` included).
+    assert_eq!(body["version"], env!("CARGO_PKG_VERSION"));
+    assert!(
+        body["build"]
+            .as_str()
+            .is_some_and(|build| !build.trim().is_empty()),
+        "the health answer always names a build"
+    );
 }
 
 // ------------------------- mechanical router↔openapi.json drift check (#253) --

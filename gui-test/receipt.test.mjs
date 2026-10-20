@@ -15,10 +15,14 @@ const html = readFileSync(new URL('../web/index.html', import.meta.url), 'utf8')
 const app = loadAppSource();
 
 const RECEIPTS = [
-  { id: 'x1', date: '2026-10-01', customer_id: 'c1', amount_minor: 12500, currency: 'EUR',
-    billable: true, receipt_name: 'scan.png', receipt_b64: 'aGVsbG8=' },
-  { id: 'x2', date: '2026-10-02', customer_id: 'c1', amount_minor: 2000, currency: 'EUR',
-    billable: true, receipt_name: 'hollow.pdf', receipt_b64: '' },
+  {
+    id: 'x1', date: '2026-10-01', customer_id: 'c1', amount_minor: 12500, currency: 'EUR',
+    billable: true, receipt_name: 'scan.png', receipt_b64: 'aGVsbG8='
+  },
+  {
+    id: 'x2', date: '2026-10-02', customer_id: 'c1', amount_minor: 2000, currency: 'EUR',
+    billable: true, receipt_name: 'hollow.pdf', receipt_b64: ''
+  },
   { id: 'x3', date: '2026-10-03', customer_id: 'c1', amount_minor: 500, currency: 'EUR', billable: true },
 ];
 
@@ -54,7 +58,8 @@ api.get = async (path) => {
 };
 `);
   window.document.dispatchEvent(new window.Event('DOMContentLoaded', { bubbles: true }));
-  await waitFor(() => window.document.getElementById('version').textContent === 'TucanoTime', {
+  // The boot flag, not the footer copy: the footer names the reported build.
+  await waitFor(() => window.document.documentElement.dataset.booted === 'ready', {
     message: 'the app to finish booting',
   });
   return { dom, window, document: window.document, urls };
@@ -105,8 +110,10 @@ test('an image receipt previews from its own bytes, and closing releases them', 
 });
 
 test('a PDF receipt is framed from a blob URL the preview revokes when it closes (#CSP frame-src)', async (t) => {
-  const pdf = { id: 'p1', date: '2026-10-04', customer_id: 'c1', amount_minor: 900, currency: 'EUR',
-    billable: true, receipt_name: 'scan.pdf', receipt_b64: 'aGVsbG8=' };
+  const pdf = {
+    id: 'p1', date: '2026-10-04', customer_id: 'c1', amount_minor: 900, currency: 'EUR',
+    billable: true, receipt_name: 'scan.pdf', receipt_b64: 'aGVsbG8='
+  };
   const { window, document, urls } = harness(t, await setup([pdf]));
   await window.f.refreshExpenses();
   document.querySelector('#expense-table tbody td[data-heading="Receipt"] button')

@@ -681,7 +681,37 @@ export async function startApp() {
     refreshExpenses(),
     refreshSubmissions(),
     refreshSettings(),
+    // Footer stamp: concurrent with the panel fetches, so it costs no extra
+    // round-trip and is painted before the boot flag below.
+    paintBuildStamp(),
   ]);
-  $('version').textContent = 'TucanoTime';
+  // Boot sentinel (#265): the GUI tests (and any external smoke check) wait on
+  // this attribute rather than on footer copy, which now names a build.
+  document.documentElement.dataset.booted = 'ready';
+}
+
+/// The footer's build stamp: the running binary's crate version and the commit
+/// it was built from, both read from `/healthz` — the API is the only source,
+/// so the GUI can never hardcode a version and then lie about a server that was
+/// upgraded underneath it. The footer is cosmetic: a probe that fails (or a
+/// server too old to answer with a version) leaves the static `TucanoTime`
+/// branding in place instead of breaking the boot.
+async function paintBuildStamp() {
+  if (typeof fetch !== 'function') return; // jsdom harnesses stub the API, not fetch
+  try {
+    const res = await fetch('/healthz', { headers: {}, credentials: 'same-origin' });
+    if (!res.ok) return;
+    const info = await res.json();
+    if (typeof info !== 'object' || info === null) return;
+    if (typeof info.version !== 'string' || !info.version) return;
+    $('version').textContent = `TucanoTime v${info.version}`;
+    if (typeof info.build === 'string' && info.build) {
+      const build = $('build');
+      build.textContent = `· build ${info.build}`;
+      build.hidden = false;
+    }
+  } catch {
+    /* keep the static branding */
+  }
 }
 
