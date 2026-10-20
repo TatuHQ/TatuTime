@@ -209,6 +209,11 @@ fn type_mismatch_key(e: &serde_json::Error, body: &[u8]) -> Option<String> {
 /// plus `column - 1`.
 fn key_at(body: &[u8], line: usize, column: usize) -> Option<String> {
     let offset = byte_offset(body, line, column);
+    let offset = if matches!(body.get(offset + 1), Some(b'[' | b'{')) {
+        offset + 1
+    } else {
+        offset
+    };
     let mut i = 0;
     let mut found: Option<(usize, String)> = None;
     while i < body.len() && i <= offset {

@@ -140,6 +140,7 @@ pub(crate) fn sample_customer() -> crate::domain::Customer {
         }),
         invoice_notes: "Thank you for your business. Please quote the invoice number.".into(),
         invoice_subject: String::new(),
+        invoice_prefix: Default::default(),
         address: Some(Address {
             street: "12 Sample Street".into(),
             city: "Sampleville".into(),

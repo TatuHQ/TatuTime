@@ -19,7 +19,7 @@ An invoice moves through these statuses:
 ### Generate a draft
 
 Choose **New invoice** to open the shared draft workspace. Select the customer,
-then enter manual product/service lines or choose **Import tracked work** to
+then enter manual invoice items or choose **Import tracked work** to
 select a work period, projects and expenses. Import is optional; it creates a
 tracked draft and opens that draft in the same editor for review. It does not
 append work to an existing invoice. Unsaved manual changes must be discarded
@@ -30,8 +30,20 @@ subject and notes, as well as tax, discount, manual-line project links and manua
 row ordering. Source-backed time/expense lines remain read-only and must be
 retained exactly once. Currency cannot change once a draft contains tracked
 work. Save is explicit; **Save & preview** saves first and then renders the PDF.
+The Catalog and draft editor do not distinguish products from services. Legacy
+type metadata is retained internally for compatibility; no type selection is
+required and editing an existing item preserves its stored value.
 Cancel asks before discarding changes, and leaving the page warns about unsaved
-edits. Invoice numbers remain server-assigned.
+edits. Invoice numbers remain server-assigned at draft creation.
+
+Customers can set an optional **Invoice prefix** in their customer form. `CUST1`,
+`CUST2` and `MONKEY` produce independent sequences beginning `CUST1-001`,
+`CUST2-001` and `MONKEY-001`. Prefixes are uppercased; trailing hyphens are
+optional. Two customers with the same prefix share its sequence. Existing
+drafts and issued invoices keep their numbers when the prefix changes; changing
+back resumes that prefix's sequence. A blank prefix retains the original
+`INV-0001` format and global sequence. Deleting a draft never recycles its number.
+Prefixes allow up to 20 letters/digits/internal hyphens and cannot be `INV`.
 
 Subject and notes prefill from customer/template settings; blank explicit notes
 suppress default notes. **Reset document defaults** restores those
@@ -88,10 +100,13 @@ the row wraps on mobile; Escape dismisses a menu and returns focus to its filter
 
 ### Issue
 
+When no company name is configured, the fallback issuer name is `TucanoTime`.
+An explicit company profile or configured organisation name takes precedence.
+
 Issuing:
 
-- assigns the next sequential number (`INV-0001`, `INV-0002`, …) from the
-  number ledger under the writer lock;
+- retains the number allocated at draft creation under the writer lock,
+  from `invoices/.seq.json` (default) or `invoices/.seq.prefixes.json` (custom);
 - sets `issued_at`, calculates `due_date` from the customer's payment terms
   (falling back to the org template default, then the legacy
   net-14-from-period-to rule), and freezes the status;

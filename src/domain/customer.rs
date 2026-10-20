@@ -7,6 +7,8 @@ use uuid::Uuid;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Customer {
     pub id: Uuid,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub invoice_prefix: String,
     pub name: String,
     pub currency: Currency,
     pub default_rate_minor: u64,
@@ -722,6 +724,8 @@ impl LabelOverrides {
 #[serde(deny_unknown_fields)]
 pub struct CustomerInput {
     pub name: String,
+    #[serde(default)]
+    pub invoice_prefix: Option<String>,
     pub currency: Currency,
     pub default_rate_minor: u64,
     #[serde(default = "default_active")]
@@ -751,6 +755,14 @@ pub struct CustomerInput {
 
 pub fn validate_customer_input(input: &CustomerInput) -> Result<CustomerDraft, Vec<FieldError>> {
     let mut errors = Vec::new();
+    let invoice_prefix =
+        normalize_invoice_prefix(input.invoice_prefix.as_deref().unwrap_or_default());
+    if invoice_prefix.is_none() {
+        errors.push(FieldError::new(
+            "invoice_prefix",
+            "at most 20 letters, digits or internal hyphens; INV is reserved",
+        ));
+    }
     let name = validate_name(&input.name).map(str::to_owned);
     if name.is_none() {
         errors.push(FieldError::new("name", "required, at most 120 characters"));
@@ -816,6 +828,7 @@ pub fn validate_customer_input(input: &CustomerInput) -> Result<CustomerDraft, V
     if errors.is_empty() {
         Ok(CustomerDraft {
             name: name.unwrap(),
+            invoice_prefix: invoice_prefix.unwrap_or_default(),
             currency: input.currency.0.clone(),
             default_rate_minor: input.default_rate_minor,
             active: input.active,
@@ -881,6 +894,7 @@ pub fn validate_payment_terms(terms: Option<&PaymentTerms>, errors: &mut Vec<Fie
 #[derive(Debug)]
 pub struct CustomerDraft {
     pub name: String,
+    pub invoice_prefix: String,
     pub currency: String,
     pub default_rate_minor: u64,
     pub active: bool,
@@ -894,6 +908,30 @@ pub struct CustomerDraft {
     pub discount_hundredths: u16,
     pub payment_details: Option<PaymentDetails>,
     pub legal_id: String,
+}
+
+pub fn normalize_invoice_prefix(value: &str) -> Option<String> {
+    if value.chars().count() > 64 || value.chars().any(char::is_control) {
+        return None;
+    }
+    if value.trim().is_empty() {
+        return Some(String::new());
+    }
+    let prefix = value.trim().trim_end_matches('-').to_ascii_uppercase();
+    if prefix.is_empty()
+        || prefix.len() > 20
+        || prefix == "INV"
+        || !prefix
+            .bytes()
+            .all(|value| value.is_ascii_alphanumeric() || value == b'-')
+        || !prefix
+            .as_bytes()
+            .first()
+            .is_some_and(u8::is_ascii_alphanumeric)
+    {
+        return None;
+    }
+    Some(prefix)
 }
 
 #[cfg(test)]
@@ -910,6 +948,7 @@ mod tests {
             payment_terms: None,
             invoice_notes: String::new(),
             invoice_subject: String::new(),
+            invoice_prefix: Default::default(),
             address: None,
             contacts: vec![],
             tax_hundredths: 0,

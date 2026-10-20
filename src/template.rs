@@ -657,6 +657,7 @@ mod tests {
             payment_terms: None,
             invoice_notes: String::new(),
             invoice_subject: String::new(),
+            invoice_prefix: Default::default(),
             address: None,
             contacts: vec![],
             tax_hundredths: 0,
@@ -786,6 +787,7 @@ mod tests {
             payment_terms: None,
             invoice_notes: String::new(),
             invoice_subject: "%invoice_number% for %customer_name%".into(),
+            invoice_prefix: String::new(),
             address: None,
             contacts: vec![],
             tax_hundredths: 0,
@@ -806,6 +808,7 @@ mod tests {
         );
         let bare = Customer {
             invoice_subject: String::new(),
+            invoice_prefix: Default::default(),
             ..customer.clone()
         };
         assert_eq!(
@@ -856,6 +859,7 @@ mod tests {
             payment_terms: None,
             invoice_notes: String::new(),
             invoice_subject: String::new(),
+            invoice_prefix: Default::default(),
             address: None,
             contacts: vec![],
             tax_hundredths: 0,
@@ -888,6 +892,7 @@ mod tests {
             payment_terms: None,
             invoice_notes: "Thanks for the swift payment!".into(),
             invoice_subject: String::new(),
+            invoice_prefix: Default::default(),
             address: None,
             contacts: vec![],
             tax_hundredths: 0,

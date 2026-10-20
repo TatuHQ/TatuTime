@@ -287,6 +287,11 @@
           "email"
         ],
         "properties": {
+          "invoice_prefix": {
+            "type": "string",
+            "maxLength": 20,
+            "description": "Optional uppercase invoice prefix. Empty prefixes are omitted. Future drafts use PREFIX-001; existing numbers never change. Identical prefixes share a durable sequence. INV is reserved for default numbering."
+          },
           "id": {
             "type": "string",
             "format": "uuid"
@@ -389,6 +394,11 @@
           "default_rate_minor"
         ],
         "properties": {
+          "invoice_prefix": {
+            "type": ["string", "null"],
+            "maxLength": 64,
+            "description": "Optional invoice prefix: 1–20 ASCII letters/digits/internal hyphens after trimming spaces, removing trailing hyphens and uppercasing. Must begin with a letter/digit. Control characters and INV are rejected. Empty string clears the prefix; omission/null preserves it on PUT and uses default INV numbering on POST. Custom prefixes use PREFIX-001."
+          },
           "name": {
             "type": "string",
             "minLength": 1,

@@ -43,7 +43,12 @@ impl Org {
     #[must_use]
     pub fn resolve(profile: &crate::domain::OrgProfile, fallback_name: &str) -> Self {
         let name = if profile.name.trim().is_empty() {
-            fallback_name.to_string()
+            let fallback = fallback_name.trim();
+            if fallback.is_empty() {
+                "TucanoTime".to_string()
+            } else {
+                fallback.to_string()
+            }
         } else {
             profile.name.trim().to_string()
         };
@@ -623,6 +628,22 @@ fn line_row(line: &InvoiceLine, money: &impl Fn(u64) -> String) -> LineRow {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn company_name_fallback_is_tucanotime_without_overriding_configured_names() {
+        let mut profile = crate::domain::OrgProfile::default();
+        assert_eq!(Org::resolve(&profile, "").name, "TucanoTime");
+        assert_eq!(Org::resolve(&profile, "   ").name, "TucanoTime");
+        assert_eq!(
+            Org::resolve(&profile, "  Configured Company  ").name,
+            "Configured Company"
+        );
+        profile.name = " Profile Company ".into();
+        assert_eq!(
+            Org::resolve(&profile, "Configured Company").name,
+            "Profile Company"
+        );
+    }
     use crate::domain::{
         Address, Currency, Customer, InvoiceLine, InvoicePayment, InvoiceStatus, LineKind,
         PaymentDetails, PaymentRail, PaymentTerms, TermsKind,
@@ -701,6 +722,7 @@ mod tests {
             payment_terms: None,
             invoice_notes: String::new(),
             invoice_subject: String::new(),
+            invoice_prefix: Default::default(),
             address: None,
             contacts: vec![],
             tax_hundredths: 0,
