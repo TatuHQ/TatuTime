@@ -45,7 +45,8 @@ async function bootAt(url, source = html) {
     dom.window.HTMLDialogElement.prototype.showModal = function showModal() { this.open = true; };
     dom.window.HTMLDialogElement.prototype.close = function close() { this.open = false; };
     dom.window.eval(`${app}\n${bootStub}`);
-    await waitFor(() => dom.window.document.getElementById('version').textContent === 'TucanoTime', {
+    // The boot flag, not the footer copy: the footer names the reported build.
+    await waitFor(() => dom.window.document.documentElement.dataset.booted === 'ready', {
         message: 'the app to finish booting at ' + url,
     });
     return dom;

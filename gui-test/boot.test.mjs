@@ -199,17 +199,60 @@ api.post = async () => ({});
 `;
   const { dom, document } = makeDom(stub);
   // Wait for boot completion (the DOMContentLoaded handler is async): #265.
-  await waitFor(() => document.getElementById('version').textContent === 'TucanoTime', {
+  // The boot flag is the sentinel; the footer copy names a reported build.
+  await waitFor(() => document.documentElement.dataset.booted === 'ready', {
     message: 'the member boot to complete',
   });
-  assert.equal(
-    document.getElementById('version').textContent,
-    'TucanoTime',
+  assert.ok(
+    document.getElementById('version').textContent.startsWith('TucanoTime'),
     'startApp must run to completion for members',
   );
   assert.equal(document.getElementById('auth-overlay').hidden, true, 'member is signed in');
   const live = document.getElementById('live-region').textContent;
   assert.ok(!live.includes('Failed to start'), `no boot error announcement (got "${live}")`);
+  dom.window.close();
+});
+
+// The footer's build stamp: the GUI owns no version of its own, it asks the
+// running binary (/healthz) — so a page left open across an upgrade can never
+// claim a build the server is not running.
+const BOOT_STUB = `
+api.get = async (path) => {
+  if (path === '/auth/status') return { initialised: true };
+  if (path === '/auth/me') return { id: 'a1', name: 'Admin', email: 'a@x.test', role: 'admin' };
+  if (path === '/auth/sso/providers') return { providers: [] };
+  return { entries: [], customers: [], projects: [], submissions: [], expenses: [],
+           claims: [], notifications: [], categories: [], item_types: [], timer: null };
+};
+api.post = async () => ({});
+`;
+
+test('the footer names the running version and build from /healthz', async () => {
+  const { dom, document } = makeDom(BOOT_STUB);
+  // The probe is a root-route read, not an /api call, and it is the only source
+  // of the stamp: assert the URL so a regression to a hardcoded label shows.
+  dom.window.fetch = async (url) => {
+    assert.equal(url, '/healthz', 'the stamp probe goes to the root liveness route');
+    return { ok: true, json: async () => ({ status: 'ok', version: '9.9.9', build: 'abc1234' }) };
+  };
+  await waitFor(() => document.getElementById('build').textContent === '· build abc1234', {
+    message: 'the footer build stamp to paint',
+  });
+  assert.equal(document.getElementById('version').textContent, 'TucanoTime v9.9.9');
+  assert.equal(document.getElementById('build').hidden, false, 'the build suffix is shown');
+  assert.equal(document.documentElement.dataset.booted, 'ready', 'boot still completes');
+  dom.window.close();
+});
+
+test('a failed build probe leaves the plain TucanoTime branding', async () => {
+  const { dom, document } = makeDom(BOOT_STUB);
+  dom.window.fetch = async () => { throw new Error('offline'); };
+  await waitFor(() => document.documentElement.dataset.booted === 'ready', {
+    message: 'the boot to complete despite the probe failing',
+  });
+  assert.equal(document.getElementById('version').textContent, 'TucanoTime',
+    'the footer degrades to the static branding');
+  assert.equal(document.getElementById('build').hidden, true, 'no build suffix is invented');
   dom.window.close();
 });
 
@@ -516,7 +559,7 @@ api.get = async (path) => {
 api.post = async () => ({});
 `;
   const { dom, document } = makeDom(stub, 'http://localhost/timesheets/calendar');
-  await waitFor(() => document.getElementById('version').textContent === 'TucanoTime', {
+  await waitFor(() => document.documentElement.dataset.booted === 'ready', {
     message: 'the boot to complete on the Calendar deep link',
   });
   assert.equal(document.getElementById('ts-cal').getAttribute('aria-selected'), 'true',

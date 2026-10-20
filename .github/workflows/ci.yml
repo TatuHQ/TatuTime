@@ -136,6 +136,12 @@ jobs:
           push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # /healthz and the GUI footer name the commit the image was built
+          # from. The build context has no `.git`, so it must come in here;
+          # build.rs shortens the sha to the seven characters the release tag
+          # uses (`v<version>+<short-sha>`).
+          build-args: |
+            TUCANO_BUILD=${{ github.sha }}
 
   actionlint:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false

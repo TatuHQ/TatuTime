@@ -110,7 +110,8 @@ window.f = { api, state, refreshExpenses, refreshDay, MAX_PAGES };`);
     window.document.getElementById('day-date').value = DAY;
     // The fake must be in place before boot, so no request escapes to jsdom.
     window.document.dispatchEvent(new window.Event('DOMContentLoaded', { bubbles: true }));
-    await waitFor(() => window.document.getElementById('version').textContent === 'TucanoTime', {
+    // The boot flag, not the footer copy: the footer names the reported build.
+    await waitFor(() => window.document.documentElement.dataset.booted === 'ready', {
         message: 'the app to finish booting',
     });
     window.f.state.customers = [CUSTOMER];

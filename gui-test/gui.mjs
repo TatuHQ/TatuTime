@@ -106,7 +106,9 @@ async function settle(message = 'the UI to finish its outstanding work') {
 // Inject and run the real app, then fire DOMContentLoaded.
 window.eval(appJs);
 window.document.dispatchEvent(new window.Event('DOMContentLoaded', { bubbles: true }));
-await waitFor(() => byId('version').textContent === 'TucanoTime', {
+// The boot flag, not the footer copy: the footer names the build /healthz
+// reported (this harness talks to a live server).
+await waitFor(() => window.document.documentElement.dataset.booted === 'ready', {
   message: 'the app to finish booting after DOMContentLoaded',
 });
 
@@ -281,7 +283,7 @@ dom2.window.URL.createObjectURL = () => 'blob:jsdom-stub';
 dom2.window.URL.revokeObjectURL = () => { };
 dom2.window.eval(appJs);
 dom2.window.document.dispatchEvent(new window.Event('DOMContentLoaded', { bubbles: true }));
-await waitFor(() => dom2.window.document.getElementById('version').textContent === 'TucanoTime', {
+await waitFor(() => dom2.window.document.documentElement.dataset.booted === 'ready', {
   message: 'the second app instance to finish booting',
 });
 check('wizard never auto-opens again once a customer exists',

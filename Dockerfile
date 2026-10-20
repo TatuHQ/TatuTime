@@ -11,6 +11,12 @@ WORKDIR /build
 ENV CARGO_TERM_COLOR=never \
   CARGO_TARGET_DIR=/build/target
 
+# Build identity for /healthz and the GUI footer. The build context carries no
+# `.git`, so the commit cannot be read here: CI's image job passes it as a build
+# arg, and a bare `docker build` reports `unknown` rather than inventing one.
+ARG TUCANO_BUILD=unknown
+ENV TUCANO_BUILD=${TUCANO_BUILD}
+
 # Dependency layer (E6): compile the ~136 crates from the manifest + lockfile
 # alone, against empty stub sources. Nothing in this layer depends on `src/`,
 # `web/` or `openapi.json`, so a code or asset edit never recompiles a
@@ -30,6 +36,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
 # the release binary is the entire application — and a GUI-only edit only
 # rebuilds this last step.
 RUN rm -rf src
+COPY build.rs ./build.rs
 COPY src ./src
 COPY web ./web
 COPY openapi.json ./

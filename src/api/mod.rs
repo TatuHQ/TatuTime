@@ -739,7 +739,10 @@ pub async fn require_admin(
 }
 
 pub async fn healthz() -> impl IntoResponse {
-    Json(serde_json::json!({ "status": "ok" }))
+    // Liveness plus the build identity (version + commit): the GUI footer reads
+    // it instead of hardcoding a version, so a page can never claim a build the
+    // server is not running (`buildinfo`).
+    Json(crate::buildinfo::health())
 }
 
 // Re-exports keep the central route table in `lib.rs` and `crate::api::…`

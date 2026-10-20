@@ -34,10 +34,13 @@ async function bootAt(url) {
   dom.window.HTMLDialogElement.prototype.close = function close() { this.open = false; };
   dom.window.eval(`${app}\n${bootStub}`);
   // Wait for boot to complete (#265) instead of polling a fixed number of ticks.
-  await waitFor(() => dom.window.document.getElementById('version').textContent === 'TucanoTime', {
+  // The sentinel is the boot flag, not the footer copy: the footer now names the
+  // build the server reports, so the exact text is not a boot signal.
+  await waitFor(() => dom.window.document.documentElement.dataset.booted === 'ready', {
     message: 'the app to finish booting at ' + url,
   });
-  assert.ok(dom.window.document.getElementById('version').textContent, 'boot completed');
+  assert.ok(dom.window.document.getElementById('version').textContent.startsWith('TucanoTime'),
+    'boot completed');
   return dom;
 }
 

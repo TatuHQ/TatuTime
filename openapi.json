@@ -3745,10 +3745,20 @@
                   "properties": {
                     "status": {
                       "type": "string"
+                    },
+                    "version": {
+                      "type": "string",
+                      "description": "The running server's crate version (the release version in Cargo.toml)."
+                    },
+                    "build": {
+                      "type": "string",
+                      "description": "The commit the binary was built from (seven-character short sha), or `unknown` when the build could not name one."
                     }
                   },
                   "required": [
-                    "status"
+                    "status",
+                    "version",
+                    "build"
                   ],
                   "additionalProperties": false
                 }
