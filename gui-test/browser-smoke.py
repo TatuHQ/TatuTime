@@ -25,9 +25,9 @@ crate.  Firefox is found on PATH (`TUCANO_FIREFOX` overrides).
 Hermetic and safe
 -----------------
 The server runs on a free ephemeral port with a fresh `mktemp -d` data dir;
-the user's `data/` is never touched.  The server, Firefox and every temporary
-directory are removed on **every** exit path, including failure.  Nothing is
-left running.
+the user's `data/` is never touched. The server and Firefox are stopped on
+every exit path. Failed runs retain screenshots and logs; `--keep` also retains
+successful runs and responsive review screenshots. Nothing is left running.
 
 Usage
 -----
@@ -742,7 +742,7 @@ class Gate:
         self.firefox_log_path = os.path.join(self.tmp, "firefox.log")
         firefox_log = open(self.firefox_log_path, "wb")
         self.firefox_proc = subprocess.Popen(
-            [self.firefox, "--headless", "--no-remote", "--marionette",
+            [self.firefox, "--headless", "--no-remote", "--marionette", "--remote-allow-system-access",
              "-profile", self.profile, "about:blank"],
             stdout=firefox_log, stderr=subprocess.STDOUT,
             env=env, start_new_session=True,
@@ -1161,6 +1161,35 @@ class Gate:
         )
         if status != 201:
             raise RuntimeError(f"seeding an expense failed: HTTP {status} {raw[:200]!r}")
+
+    def seed_responsive_fixture(self):
+        csrf = {"x-csrf-protection": "1"}
+        status, _, raw = self.http(
+            "POST", "/api/customers",
+            {"name": "Responsive" + "LongCustomerName" * 6, "currency": "EUR",
+             "default_rate_minor": 12345678},
+            cookie=self.cookie, extra_headers=csrf,
+        )
+        if status != 201:
+            raise RuntimeError(f"seeding a long customer name failed: HTTP {status} {raw[:200]!r}")
+        cid = json.loads(raw)["id"]
+        status, _, raw = self.http(
+            "POST", f"/api/customers/{cid}/projects",
+            {"code": "RESPONSIVE", "name": "LongProjectName" * 7,
+             "currency": "EUR", "rate_minor": 12345678},
+            cookie=self.cookie, extra_headers=csrf,
+        )
+        if status != 201:
+            raise RuntimeError(f"seeding a long project name failed: HTTP {status} {raw[:200]!r}")
+        status, _, raw = self.http(
+            "POST", "/api/entries",
+            {"date": time.strftime("%Y-%m-%d"), "customer_id": cid,
+             "project_code": "RESPONSIVE", "hours": 1.25,
+             "note": "LongUnbrokenNote" * 12},
+            cookie=self.cookie, extra_headers=csrf,
+        )
+        if status != 201:
+            raise RuntimeError(f"seeding a responsive entry failed: HTTP {status} {raw[:200]!r}")
 
     def walk_views(self):
         for path, tab, panel, probe in VIEWS:
@@ -2110,7 +2139,7 @@ class Gate:
                 self.marionette.sock.close()
             except OSError:
                 pass
-        if not self.args.keep:
+        if not self.args.keep and not self.failed:
             shutil.rmtree(self.tmp, ignore_errors=True)
         else:
             print(f"[keep] artifacts left in {self.tmp}")
@@ -2128,6 +2157,253 @@ class Gate:
         except (RuntimeError, EOFError, OSError, ValueError):
             pass
         return None
+
+    def responsive_audit(self):
+        original = self.marionette.call("WebDriver:GetWindowRect")
+        self.marionette.call("Marionette:SetContext", {"value": "chrome"})
+        try:
+            self.marionette.script("""
+                document.documentElement.style.setProperty('min-width', '0px', 'important');
+                return true;
+            """)
+        finally:
+            self.marionette.call("Marionette:SetContext", {"value": "content"})
+        widths = (320, 375, 480, 619, 620, 621, 720, 721, 768, 1000,
+                  1035, 1036, 1037, 1280, 1440)
+        try:
+            for path, tab, panel, expression in VIEWS:
+                self.navigate(path)
+                self.wait_script(
+                    "document.documentElement.dataset.booted === 'ready'"
+                    f" && !document.getElementById({json.dumps(panel)}).hidden"
+                    f" && ({expression})", f"responsive fixture at {path}",
+                )
+                for theme in ("light", "dark"):
+                    self.marionette.script(
+                        f"document.querySelector('input[name=colour-mode][value={theme}]').click();"
+                        "return true;"
+                    )
+                    failures = []
+                    for width in widths:
+                        chrome = self.marionette.script("return outerWidth - innerWidth;")
+                        self.marionette.call("WebDriver:SetWindowRect", {
+                            "width": width + chrome, "height": 900,
+                        })
+                        self.wait_script(
+                            f"innerWidth === {width}"
+                            f" && document.getElementById('sidebar').parentElement.id === {'\"navigation-drawer\"' if width < 1036 else '\"\"'}",
+                            f"{width}px viewport and navigation layout",
+                        )
+                        self.marionette.script("""
+                            document.documentElement.dataset.responsiveFrame = '';
+                            requestAnimationFrame(() => requestAnimationFrame(() => {
+                                document.documentElement.dataset.responsiveFrame = 'ready';
+                            })); return true;
+                        """)
+                        self.wait_script("document.documentElement.dataset.responsiveFrame === 'ready'",
+                                         "responsive layout frames")
+                        result = json.loads(self.marionette.script("""
+                            const root = document.documentElement;
+                            const visible = node => node.checkVisibility()
+                                && node.getBoundingClientRect().width > 0;
+                            const outside = [...document.querySelectorAll('main *')]
+                                .filter(visible).filter(node => {
+                                    if (node.closest('.table-scroll, .invoice-table-scroll')) return false;
+                                    const rect = node.getBoundingClientRect();
+                                    return rect.right > root.clientWidth + 1 || rect.left < -1;
+                                }).slice(0, 8).map(node => node.id || node.className || node.tagName);
+                            return JSON.stringify({
+                                overflow: root.scrollWidth - root.clientWidth,
+                                outside,
+                                rail: document.getElementById('sidebar').getBoundingClientRect().width,
+                                menu: document.getElementById('navigation-open').checkVisibility(),
+                                duplicates: document.querySelectorAll('#tabs').length,
+                            });
+                        """))
+                        if (result["overflow"] > 1 or result["outside"]
+                                or result["duplicates"] != 1
+                                or result["menu"] != (width < 1036)
+                                or (width >= 1036 and abs(result["rail"] - 232) > 1)):
+                            failures.append({"width": width, **result})
+                            shot = self.screenshot()
+                            if shot:
+                                name = f"responsive-{path.strip('/').replace('/', '-')}-{theme}-{width}.png"
+                                shutil.copyfile(shot, os.path.join(self.tmp, name))
+                        elif self.args.keep and width in (375, 1280):
+                            shot = self.screenshot()
+                            if shot:
+                                name = f"responsive-{path.strip('/').replace('/', '-')}-{theme}-{width}.png"
+                                shutil.copyfile(shot, os.path.join(self.tmp, name))
+                    self.check(
+                        f"responsive {path} ({theme}): no page overflow, clipped content or desktop rail drift",
+                        not failures, json.dumps(failures),
+                    )
+            self.marionette.call("WebDriver:SetWindowRect", {"width": 375, "height": 700})
+            self.navigate("/customers")
+            self.wait_script(
+                "document.documentElement.dataset.booted === 'ready'"
+                " && !document.getElementById('panel-customers').hidden",
+                "mobile navigation fixture",
+            )
+            self.marionette.script("document.getElementById('navigation-open').click(); return true;")
+            state = json.loads(self.marionette.script("""
+                const drawer = document.getElementById('navigation-drawer');
+                return JSON.stringify({open: drawer.open, modal: drawer.matches(':modal'),
+                    focus: document.activeElement.id,
+                    expanded: document.getElementById('navigation-open').getAttribute('aria-expanded'),
+                    scrollLocked: getComputedStyle(document.body).overflow === 'hidden'});
+            """))
+            self.check("mobile navigation opens a modal with focus and scroll containment",
+                       state == {"open": True, "modal": True, "focus": "navigation-close",
+                                 "expanded": "true", "scrollLocked": True}, str(state))
+            if self.args.keep:
+                shot = self.screenshot()
+                if shot:
+                    shutil.copyfile(shot, os.path.join(self.tmp, "responsive-navigation-mobile.png"))
+            self.marionette.script("""
+                document.activeElement.dispatchEvent(new KeyboardEvent('keydown',
+                    {key: 'Escape', bubbles: true, cancelable: true})); return true;
+            """)
+            self.check("Escape closes mobile navigation and returns focus to the opener",
+                       self.marionette.script("""
+                           return !document.getElementById('navigation-drawer').open
+                               && document.activeElement.id === 'navigation-open'
+                               && getComputedStyle(document.body).overflow !== 'hidden';
+                       """))
+            self.marionette.script("""
+                document.getElementById('navigation-open').click();
+                document.getElementById('tab-projects').click(); return true;
+            """)
+            self.wait_script("document.activeElement.id === 'main'", "mobile destination focus")
+            self.check("mobile route selection closes the drawer and shows the destination",
+                       self.marionette.script("""
+                           return location.pathname === '/projects'
+                               && !document.getElementById('navigation-drawer').open
+                               && !document.getElementById('panel-projects').hidden;
+                       """))
+            self.marionette.script("document.getElementById('navigation-open').click(); return true;")
+            self.marionette.call("WebDriver:SetWindowRect", {"width": 1280, "height": 900})
+            self.wait_script("!document.getElementById('navigation-drawer').open", "desktop modal cleanup")
+            self.check("resizing an open drawer restores the desktop sidebar and visible focus",
+                       self.marionette.script("""
+                           return !!document.querySelector('.app > #sidebar')
+                               && document.activeElement.checkVisibility()
+                               && document.getElementById('navigation-open').getAttribute('aria-expanded') === 'false';
+                       """))
+        finally:
+            self.marionette.call("WebDriver:SetWindowRect", original)
+
+    def responsive_dialog_audit(self):
+        journeys = (
+            ("/timesheets/day", "day-add", "entry-dialog"),
+            ("/timesheets/week", "week-add-row", "week-row-dialog"),
+            ("/customers", "customer-new", "customer-dialog"),
+            ("/projects", "project-new", "project-dialog"),
+            ("/tasks", "task-new", "task-dialog"),
+            ("/expenses", "expense-new", "expense-dialog"),
+            ("/invoices", "invoice-new", "invoice-wizard"),
+            ("/invoices", "manual-new", "invoice-editor"),
+            ("/settings/users", "user-new", "user-dialog"),
+        )
+        original = self.marionette.call("WebDriver:GetWindowRect")
+        try:
+            self.marionette.call("WebDriver:SetWindowRect", {"width": 320, "height": 568})
+            for path, opener, dialog_id in journeys:
+                self.navigate(path)
+                self.wait_script(
+                    "document.documentElement.dataset.booted === 'ready'"
+                    f" && document.getElementById({json.dumps(opener)}).checkVisibility()",
+                    f"mobile form opener {opener}",
+                )
+                self.marionette.script(f"document.getElementById({json.dumps(opener)}).click(); return true;")
+                self.wait_script(f"document.getElementById({json.dumps(dialog_id)}).open",
+                                 f"mobile dialog {dialog_id}")
+                result = json.loads(self.marionette.script("""
+                    const dialog = document.getElementById(%s);
+                    const box = dialog.querySelector('.p-modal__dialog, .p-card');
+                    const rect = box.getBoundingClientRect();
+                    const outside = [...box.querySelectorAll('input, select, textarea, button, label')]
+                        .filter(node => node.checkVisibility() && !node.closest('.table-scroll'))
+                        .filter(node => {
+                            const bounds = node.getBoundingClientRect();
+                            return bounds.right > rect.right + 1 || bounds.left < rect.left - 1;
+                        }).map(node => node.id || node.textContent.trim().slice(0, 30));
+                    const close = [...box.querySelectorAll('button')].find(node =>
+                        /cancel|close/i.test(node.id) && node.checkVisibility());
+                    if (close) close.scrollIntoView({block: 'nearest'});
+                    const closeBounds = close?.getBoundingClientRect();
+                    return JSON.stringify({outside, width: rect.width,
+                        overflow: box.scrollWidth - box.clientWidth,
+                        closeReachable: !!closeBounds && closeBounds.top >= 0
+                            && closeBounds.bottom <= innerHeight + 1});
+                """ % json.dumps(dialog_id)))
+                ok = (not result["outside"] and result["overflow"] <= 1
+                      and result["width"] <= 320 and result["closeReachable"])
+                self.check(f"{dialog_id} fits a short 320px viewport with a reachable close action",
+                           ok, json.dumps(result))
+                if not ok:
+                    shot = self.screenshot()
+                    if shot:
+                        shutil.copyfile(shot, os.path.join(self.tmp, f"responsive-{dialog_id}.png"))
+                self.marionette.script(f"document.getElementById({json.dumps(dialog_id)}).close(); return true;")
+        finally:
+            self.marionette.call("WebDriver:SetWindowRect", original)
+
+    def responsive_zoom_audit(self):
+        def zoom(full, text):
+            self.marionette.call("Marionette:SetContext", {"value": "chrome"})
+            try:
+                self.marionette.script(
+                    f"gBrowser.selectedBrowser.browsingContext.fullZoom = {full};"
+                    f"gBrowser.selectedBrowser.browsingContext.textZoom = {text}; return true;"
+                )
+            finally:
+                self.marionette.call("Marionette:SetContext", {"value": "content"})
+
+        original = self.marionette.call("WebDriver:GetWindowRect")
+        self.marionette.call("WebDriver:SetWindowRect", {"width": 1280, "height": 900})
+        try:
+            for path, tab, panel, expression in VIEWS:
+                self.navigate(path)
+                self.wait_script(
+                    "document.documentElement.dataset.booted === 'ready'"
+                    f" && !document.getElementById({json.dumps(panel)}).hidden",
+                    f"zoom fixture at {path}",
+                )
+                for full, text, label in ((4, 1, "400% browser zoom"), (1, 2, "200% text zoom")):
+                    zoom(full, text)
+                    self.marionette.script("""
+                        document.documentElement.dataset.zoomFrame = '';
+                        requestAnimationFrame(() => requestAnimationFrame(() => {
+                            document.documentElement.dataset.zoomFrame = 'ready';
+                        })); return true;
+                    """)
+                    self.wait_script("document.documentElement.dataset.zoomFrame === 'ready'",
+                                     "zoom reflow")
+                    result = json.loads(self.marionette.script("""
+                        const root = document.documentElement;
+                        const controls = [...document.querySelectorAll('main input, main select, main button, main textarea')];
+                        return JSON.stringify({width: innerWidth,
+                            overflow: root.scrollWidth - root.clientWidth,
+                            outside: controls.filter(node => node.checkVisibility()
+                                && !node.closest('.table-scroll, .invoice-table-scroll'))
+                                .filter(node => {
+                                    const rect = node.getBoundingClientRect();
+                                    return rect.right > root.clientWidth + 1 || rect.left < -1;
+                                }).map(node => node.id)});
+                    """))
+                    ok = (result["overflow"] <= 1 and not result["outside"]
+                          and (full != 4 or result["width"] <= 320))
+                    self.check(f"{path} reflows at {label}", ok, json.dumps(result))
+                    if not ok:
+                        shot = self.screenshot()
+                        if shot:
+                            name = f"zoom-{path.strip('/').replace('/', '-')}-{full}-{text}.png"
+                            shutil.copyfile(shot, os.path.join(self.tmp, name))
+                    zoom(1, 1)
+        finally:
+            zoom(1, 1)
+            self.marionette.call("WebDriver:SetWindowRect", original)
 
     def run(self):
         print("=== TucanoTime browser smoke gate (Firefox + Marionette) ===", flush=True)
@@ -2168,6 +2444,10 @@ class Gate:
         self.expense_conversion_audit()
         self.invoice_sort_audit()
         self.invoice_preview_audit()
+        self.seed_responsive_fixture()
+        self.responsive_audit()
+        self.responsive_dialog_audit()
+        self.responsive_zoom_audit()
         if self.web_dir:
             self.dev_live_reload()
 
@@ -2310,6 +2590,7 @@ def main(argv=None):
         return 2
     except Exception as exc:  # harness-level: no Firefox, protocol error, HTTP 5xx…
         print(f"\nHARNESS ERROR: {type(exc).__name__}: {exc}", file=sys.stderr)
+        args.keep = True
         shot = None
         if gate.marionette is not None:
             shot = gate.screenshot()
