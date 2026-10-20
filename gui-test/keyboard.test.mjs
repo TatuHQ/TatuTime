@@ -18,22 +18,113 @@ const app = loadAppSource();
 // Wire the tab handlers without the network: every api call resolves, and
 // /auth/status has no `initialised`, so initAuth() returns falsy and startApp()
 // never runs to steal focus mid-test.
-function setup() {
+function setup(narrow = null) {
     const dom = new JSDOM(html, { runScripts: 'outside-only', url: 'http://localhost/' });
-    dom.window.HTMLDialogElement.prototype.showModal = function () { this.open = true; };
-    dom.window.HTMLDialogElement.prototype.close = function () { this.open = false; };
+    const changes = [];
+    const media = {
+        matches: narrow,
+        addEventListener: (type, listener) => changes.push(listener),
+        resize(matches) {
+            this.matches = matches;
+            changes.forEach((listener) => listener());
+        },
+    };
+    if (narrow !== null) dom.window.matchMedia = () => media;
+    dom.window.HTMLDialogElement.prototype.showModal = function () {
+        this.open = true;
+        this.querySelector('[autofocus]')?.focus();
+    };
+    dom.window.HTMLDialogElement.prototype.close = function () {
+        this.open = false;
+        this.dispatchEvent(new dom.window.Event('close'));
+    };
     const stub = `
-api.get = async () => ({});
+api.get = ${narrow === null ? 'async () => ({})' : '() => new Promise(() => {})'};
 api.post = async () => ({});
+initDialogFocusReturn();
 initTabs();         // vertical sidebar tablist (#tabs)
 initSettingsTabs(); // horizontal tablist (#settings-tabs)
 initSegTabs();      // horizontal Day|Week|Calendar strip (#ts-seg)
 window.kb = { nextTabIndex, TAB_ROUTES, DEFAULT_ROUTE, KNOWN_ROUTES };`;
     dom.window.eval(`${app}\n${stub}`);
-    return { dom, kb: dom.window.kb, document: dom.window.document };
+    return { dom, kb: dom.window.kb, document: dom.window.document, media };
 }
 
 const activeId = (document) => (document.activeElement ? document.activeElement.id : '');
+
+test('responsive navigation moves one sidebar into a closed native drawer', () => {
+    const { dom, document } = setup(true);
+    const drawer = document.getElementById('navigation-drawer');
+    assert.equal(document.querySelectorAll('#tabs').length, 1);
+    assert.equal(document.getElementById('sidebar').parentElement, drawer);
+    assert.equal(drawer.open, false);
+    document.getElementById('navigation-open').focus();
+    document.getElementById('navigation-open').click();
+    assert.equal(drawer.open, true);
+    assert.equal(document.getElementById('navigation-open').getAttribute('aria-expanded'), 'true');
+    assert.equal(activeId(document), 'navigation-close');
+    press(dom, 'Escape');
+    assert.equal(drawer.open, false);
+    assert.equal(document.getElementById('navigation-open').getAttribute('aria-expanded'), 'false');
+    assert.equal(activeId(document), 'navigation-open');
+    dom.window.close();
+});
+
+test('drawer selection closes navigation and focuses the destination', async () => {
+    const { dom, document } = setup(true);
+    document.getElementById('navigation-open').click();
+    document.getElementById('tab-customers').click();
+    await waitFor(() => activeId(document) === 'main', { message: 'destination focus' });
+    assert.equal(document.getElementById('navigation-drawer').open, false);
+    assert.equal(document.getElementById('tab-customers').getAttribute('aria-selected'), 'true');
+    assert.equal(document.getElementById('panel-customers').hidden, false);
+    dom.window.close();
+});
+
+test('resizing restores the same desktop sidebar and clears modal state', () => {
+    const { dom, document, media } = setup(true);
+    const sidebar = document.getElementById('sidebar');
+    document.getElementById('navigation-open').click();
+    media.resize(false);
+    assert.equal(document.querySelector('.app > .sidebar'), sidebar);
+    assert.equal(document.getElementById('navigation-drawer').open, false);
+    assert.equal(document.getElementById('navigation-open').getAttribute('aria-expanded'), 'false');
+    assert.equal(activeId(document), 'tab-timesheet');
+    media.resize(true);
+    assert.equal(sidebar.parentElement.id, 'navigation-drawer');
+    assert.equal(activeId(document), 'navigation-open');
+    assert.equal(document.querySelectorAll('#tabs').length, 1);
+    dom.window.close();
+});
+
+test('drawer close, backdrop and browser history dismiss navigation', () => {
+    const { dom, document } = setup(true);
+    const opener = document.getElementById('navigation-open');
+    const drawer = document.getElementById('navigation-drawer');
+    opener.click();
+    document.getElementById('navigation-close').click();
+    assert.equal(drawer.open, false);
+    opener.click();
+    drawer.dispatchEvent(new dom.window.MouseEvent('click', { clientX: 10, bubbles: true }));
+    assert.equal(drawer.open, false);
+    opener.click();
+    dom.window.dispatchEvent(new dom.window.PopStateEvent('popstate'));
+    assert.equal(drawer.open, false);
+    assert.equal(opener.getAttribute('aria-expanded'), 'false');
+    dom.window.close();
+});
+
+test('wide tables keep named keyboard-accessible scroll regions', () => {
+    const { dom, document } = setup();
+    const regions = [...document.querySelectorAll('.table-scroll, .invoice-table-scroll')];
+    assert.ok(regions.length > 10);
+    for (const region of regions) {
+        assert.equal(region.tabIndex, 0);
+        assert.equal(region.getAttribute('role'), 'region');
+        assert.ok(region.getAttribute('aria-label')?.trim());
+    }
+    dom.window.close();
+});
 
 // Dispatch the key on whatever currently holds focus — exactly what a keyboard
 // user does after a tab has moved focus with the roving tabindex.
