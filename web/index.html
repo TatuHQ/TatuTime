@@ -51,8 +51,12 @@
   </div>
 
   <div class="app">
-    <aside class="sidebar">
-      <div class="brand">TucanoTime</div>
+    <dialog id="navigation-drawer" class="navigation-drawer" aria-label="Application navigation" aria-modal="true"></dialog>
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-heading">
+        <div class="brand">TucanoTime</div>
+        <button type="button" id="navigation-close" class="p-button--base navigation-control" aria-label="Close navigation" title="Close navigation" autofocus><i class="p-icon--close" aria-hidden="true"></i></button>
+      </div>
       <nav aria-label="Sections">
         <!-- #232 increment 5: the rail is the official p-tabs__list markup
              (every tab wrapped in p-tabs__item, the button carrying
@@ -141,10 +145,11 @@
 
     <div class="content">
       <header class="masthead">
+        <button type="button" id="navigation-open" class="p-button--base navigation-control" aria-label="Open navigation" aria-controls="navigation-drawer" aria-expanded="false" title="Open navigation"><i class="p-icon--menu" aria-hidden="true"></i></button>
         <h1 id="page-title">Timesheet</h1>
       </header>
 
-      <main id="main">
+      <main id="main" tabindex="-1">
         <p class="sr-only" role="status" aria-live="polite" id="live-region"></p>
 
         <!-- TIMESHEETS (top-level section, #107): Day | Week as in-page segments -->

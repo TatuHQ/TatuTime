@@ -17,6 +17,7 @@ import { refreshDay, refreshWeek } from './timesheet.js';
 // focuses synchronously.
 function focusTab(tab) {
   if (!tab) return;
+  if (tab.closest('#navigation-drawer:not([open])')) return;
   // Keyboard navigation inside a tab strip must move focus immediately (the
   // next key event is dispatched from the newly focused tab); only a focus move
   // that starts outside the strip — the boot-time route selection — is deferred.
@@ -29,7 +30,8 @@ function focusTab(tab) {
   window.addEventListener('load', () => {
     // The user may have selected another view in the meantime: only move focus
     // onto the tab that is still selected.
-    if (tab.isConnected && tab.getAttribute('aria-selected') === 'true') {
+    if (tab.isConnected && tab.getAttribute('aria-selected') === 'true'
+      && !tab.closest('#navigation-drawer:not([open])')) {
       tab.focus({ preventScroll: true });
     }
   }, { once: true });
@@ -273,7 +275,73 @@ export function nextTabIndex(key, index, count, orientation) {
   return null;
 }
 
+export function initResponsiveNavigation() {
+  const drawer = $('navigation-drawer');
+  const sidebar = $('sidebar');
+  const opener = $('navigation-open');
+  if (!drawer || !sidebar || !opener || !window.matchMedia || drawer.dataset.navigationWired) return;
+  drawer.dataset.navigationWired = '1';
+  const narrow = window.matchMedia('(width < 1036px)');
+  const content = document.querySelector('.content');
+  const close = () => {
+    if (drawer.open) drawer.close();
+    opener.setAttribute('aria-expanded', 'false');
+  };
+  const sync = () => {
+    const focused = document.activeElement;
+    close();
+    if (narrow.matches) {
+      drawer.append(sidebar);
+      if (sidebar.contains(focused)) opener.focus({ preventScroll: true });
+    } else {
+      content.before(sidebar);
+      if (focused === opener || sidebar.contains(focused)) {
+        sidebar.querySelector('[role="tab"][aria-selected="true"]')?.focus({ preventScroll: true });
+      }
+    }
+  };
+  opener.addEventListener('click', () => {
+    if (!narrow.matches || drawer.open) return;
+    opener.focus({ preventScroll: true });
+    drawer.showModal();
+    opener.setAttribute('aria-expanded', 'true');
+  });
+  $('navigation-close').addEventListener('click', close);
+  drawer.addEventListener('close', () => opener.setAttribute('aria-expanded', String(drawer.open)));
+  drawer.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      close();
+    }
+  });
+  drawer.addEventListener('click', (event) => {
+    const bounds = drawer.getBoundingClientRect();
+    if (event.target === drawer && (event.clientX < bounds.left || event.clientX > bounds.right
+      || event.clientY < bounds.top || event.clientY > bounds.bottom)) close();
+  });
+  sidebar.addEventListener('click', (event) => {
+    if (!drawer.open) return;
+    const action = event.target.closest('[role="tab"], #wizard-open, #logout');
+    if (!action) return;
+    close();
+    if (action.matches('[role="tab"]')) {
+      queueMicrotask(() => $('main').focus({ preventScroll: true }));
+    }
+  }, true);
+  window.addEventListener('popstate', close);
+  narrow.addEventListener('change', sync);
+  sync();
+}
+
 export function initTabs() {
+  initResponsiveNavigation();
+  for (const region of document.querySelectorAll('.table-scroll, .invoice-table-scroll')) {
+    const table = region.querySelector('table');
+    region.tabIndex = 0;
+    region.setAttribute('role', 'region');
+    region.setAttribute('aria-label', table?.caption?.textContent.trim()
+      || table?.getAttribute('aria-label') || 'Scrollable table');
+  }
   const tabs = Array.from(document.querySelectorAll('#tabs [role="tab"]'));
   // A tab inside a collapsed disclosure is neither visible nor focusable, so the
   // roving focus must skip it: otherwise arrow keys move the user's focus onto

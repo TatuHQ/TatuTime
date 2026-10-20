@@ -4,6 +4,13 @@
 > component backlog behind the current GUI. The rollout order and per-page
 > tracking are in the [historical migration plan](ubuntu-migration-plan.md).
 
+Responsive adaptation is tracked separately in the
+[responsive GUI delivery plan](responsive-layout-plan.md) (#376); it preserves
+the established desktop layout rather than repeating the component migration.
+The implemented shell keeps the 232px desktop rail and uses a native-dialog
+drawer below Vanilla's 1036px large breakpoint, retaining one navigation DOM and
+the existing Vanilla icons, tab semantics and routes.
+
 ## Findings
 
 The existing UI used Ubuntu colour names but not the Ubuntu typeface. Small

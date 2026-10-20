@@ -151,6 +151,13 @@ test('every dialog adopts the official p-modal pattern with an accessible name (
   const dialogs = [...document.querySelectorAll('dialog')];
   assert.ok(dialogs.length >= 10, `expected the full dialog set, got ${dialogs.length}`);
   for (const dlg of dialogs) {
+    if (dlg.id === 'navigation-drawer') {
+      assert.ok(dlg.classList.contains('navigation-drawer'));
+      assert.equal(dlg.getAttribute('aria-label'), 'Application navigation');
+      assert.equal(dlg.getAttribute('aria-modal'), 'true');
+      assert.equal(document.getElementById('navigation-open').getAttribute('aria-controls'), dlg.id);
+      continue;
+    }
     assert.ok(dlg.classList.contains('p-modal'), `${dlg.id} is the p-modal overlay`);
     assert.equal(dlg.getAttribute('aria-modal'), 'true', `${dlg.id} is aria-modal`);
     const labelledby = dlg.getAttribute('aria-labelledby');
@@ -180,6 +187,12 @@ test('every dialog ships a visible cancel button (#141)', () => {
   const dialogs = [...document.querySelectorAll('dialog')];
   assert.ok(dialogs.length >= 10, `expected the full dialog set, got ${dialogs.length}`);
   for (const dlg of dialogs) {
+    if (dlg.id === 'navigation-drawer') {
+      const close = document.querySelector('#sidebar #navigation-close');
+      assert.ok(close && !close.hidden, 'the relocated sidebar carries the drawer close control');
+      assert.equal(close.getAttribute('aria-label'), 'Close navigation');
+      continue;
+    }
     // Close is the same affordance: a document preview says Close (the receipt
     // dialog), and the rule is a visible way out, not a particular word.
     const cancels = [...dlg.querySelectorAll('button')]

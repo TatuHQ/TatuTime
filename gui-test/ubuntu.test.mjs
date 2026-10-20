@@ -35,7 +35,14 @@ test('component stylesheet has no runtime remote asset dependency', () => {
 
 test('static official icons are decorative and icon-only controls have names', () => {
   const document = new JSDOM(readFileSync(new URL('../web/index.html', import.meta.url), 'utf8')).window.document;
+  const bundledIcons = new Set();
+  walk(parse(css), { visit: 'ClassSelector', enter(node) {
+    if (node.name.startsWith('p-icon--')) bundledIcons.add(node.name);
+  } });
   for (const icon of document.querySelectorAll('[class*="p-icon--"]')) {
+    for (const name of icon.classList) {
+      if (name.startsWith('p-icon--')) assert.ok(bundledIcons.has(name), `${name} exists in the compiled Vanilla bundle`);
+    }
     assert.equal(icon.getAttribute('aria-hidden'), 'true');
     const button = icon.closest('button');
     if (button && !button.textContent.trim()) assert.ok(button.getAttribute('aria-label') && button.title);
