@@ -177,20 +177,20 @@ async function refreshDayBody() {
         // invoice instead.
         el('td', { cls: 'actions-col', data: { iconActions: '1' } }, locked
           ? [inv
-              ? rowAction('link', inv.number, () => focusInvoice(inv.id),
-                  `Invoiced on ${inv.number} — locked; activate to open the invoice`, 'lock-locked')
-              : el('span', {
-                  cls: 'lock',
-                  attrs: {
-                    role: 'img',
-                    'aria-label': 'locked',
-                    title: e.imported?.origin.invoiced ? 'Invoiced in Harvest' : 'In a submitted week — editing is blocked until it is rejected or withdrawn',
-                  },
-                }, [ubuntuIcon('lock-locked')])]
+            ? rowAction('link', inv.number, () => focusInvoice(inv.id),
+              `Invoiced on ${inv.number} — locked; activate to open the invoice`, 'lock-locked')
+            : el('span', {
+              cls: 'lock',
+              attrs: {
+                role: 'img',
+                'aria-label': 'locked',
+                title: e.imported?.origin.invoiced ? 'Invoiced in Harvest' : 'In a submitted week — editing is blocked until it is rejected or withdrawn',
+              },
+            }, [ubuntuIcon('lock-locked')])]
           : [
-              rowAction('link', 'Edit', () => startEdit(e), undefined, 'edit'),
-              rowAction('danger', 'Delete', () => removeEntry(e), undefined, 'delete'),
-            ]),
+            rowAction('link', 'Edit', () => startEdit(e), undefined, 'edit'),
+            rowAction('danger', 'Delete', () => removeEntry(e), undefined, 'delete'),
+          ]),
       ],
     );
     tbody.appendChild(tr);
@@ -650,24 +650,24 @@ async function refreshWeekBody() {
           el('span', { text: fmtHM(weekTotal) }),
           anyLocked
             ? (() => {
-                // The row's first invoiced entry names the lock's target; a
-                // submitted-week-only row keeps the plain (unlinked) lock.
-                let ref = null;
-                for (const ids of Object.values(row.ids)) {
-                  for (const id of ids) {
-                    ref = locks.invoiced.get(id);
-                    if (ref) break;
-                  }
+              // The row's first invoiced entry names the lock's target; a
+              // submitted-week-only row keeps the plain (unlinked) lock.
+              let ref = null;
+              for (const ids of Object.values(row.ids)) {
+                for (const id of ids) {
+                  ref = locks.invoiced.get(id);
                   if (ref) break;
                 }
-                return ref
-                  ? rowAction('link', ref.number, () => focusInvoice(ref.id),
-                      `Invoiced on ${ref.number} — locked; activate to open the invoice`, 'lock-locked')
-                  : el('span', {
-                      cls: 'lock',
-                      attrs: { role: 'img', 'aria-label': 'locked', title: 'This row holds locked entries' },
-                    }, [ubuntuIcon('lock-locked')]);
-              })()
+                if (ref) break;
+              }
+              return ref
+                ? rowAction('link', ref.number, () => focusInvoice(ref.id),
+                  `Invoiced on ${ref.number} — locked; activate to open the invoice`, 'lock-locked')
+                : el('span', {
+                  cls: 'lock',
+                  attrs: { role: 'img', 'aria-label': 'locked', title: 'This row holds locked entries' },
+                }, [ubuntuIcon('lock-locked')]);
+            })()
             : null,
         ]),
       ],

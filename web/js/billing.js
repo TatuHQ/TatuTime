@@ -265,16 +265,16 @@ export function iwInit() {
   $('iw-back').addEventListener('click', () => {
     iw.step = Math.max(1, iw.step - 1);
     iwShow();
-    if (iw.step === 2) iwLoadProjects().catch?.(() => {});
+    if (iw.step === 2) iwLoadProjects().catch?.(() => { });
   });
-  $('iw-next').addEventListener('click', () => iwNext().catch?.(() => {}));
+  $('iw-next').addEventListener('click', () => iwNext().catch?.(() => { }));
   $('iw-save').addEventListener('click', iwSave);
   $('iw-preset').addEventListener('change', () => {
     iwPresetRange($('iw-preset').value);
-    iwLoadProjects().catch?.(() => {});
+    iwLoadProjects().catch?.(() => { });
   });
-  $('iw-from').addEventListener('change', () => iwLoadProjects().catch?.(() => {}));
-  $('iw-to').addEventListener('change', () => iwLoadProjects().catch?.(() => {}));
+  $('iw-from').addEventListener('change', () => iwLoadProjects().catch?.(() => { }));
+  $('iw-to').addEventListener('change', () => iwLoadProjects().catch?.(() => { }));
   $('iw-grouping').addEventListener('change', iwRenderReview);
   iwPresetRange('this-month');
   iwShow();
@@ -410,17 +410,25 @@ export async function refreshRetainers() {
   tbody.textContent = '';
   for (const r of rows) {
     const actions = [
-      el('button', { type: 'button', cls: 'link', text: 'History',
-        on: { click: () => retShow(r.id) } }),
+      el('button', {
+        type: 'button', cls: 'link', text: 'History',
+        on: { click: () => retShow(r.id) }
+      }),
     ];
     if (r.status === 'open') {
       actions.push(
-        el('button', { type: 'button', cls: 'link', text: 'Add funds',
-          on: { click: () => retAdd(r) } }),
-        el('button', { type: 'button', cls: 'link', text: 'Draw funds',
-          on: { click: () => retDraw(r) } }),
-        el('button', { type: 'button', cls: 'danger', text: 'Close',
-          on: { click: () => retClose(r) } }),
+        el('button', {
+          type: 'button', cls: 'link', text: 'Add funds',
+          on: { click: () => retAdd(r) }
+        }),
+        el('button', {
+          type: 'button', cls: 'link', text: 'Draw funds',
+          on: { click: () => retDraw(r) }
+        }),
+        el('button', {
+          type: 'button', cls: 'danger', text: 'Close',
+          on: { click: () => retClose(r) }
+        }),
       );
     }
     tbody.appendChild(
