@@ -1256,10 +1256,44 @@ mod tests {
     use super::*;
     use crate::auth::{Role, User};
     use crate::domain::{
-        CategoryChoice, CustomerChoice, ImportChoices, PersonChoice, ProjectChoice, ProjectCode,
-        TaskChoice,
+        CategoryChoice, CustomerChoice, ImportChoices, InvoiceChoice, PersonChoice, ProjectChoice,
+        ProjectCode, TaskChoice,
     };
     use serde_json::json;
+
+    fn invoice_zip(member: &str, pdf: &[u8]) -> Vec<u8> {
+        use std::io::{Cursor, Write as _};
+        let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        writer
+            .start_file(
+                member,
+                zip::write::SimpleFileOptions::default()
+                    .compression_method(zip::CompressionMethod::Stored),
+            )
+            .unwrap();
+        writer.write_all(pdf).unwrap();
+        writer.finish().unwrap().into_inner()
+    }
+
+    /// Make a directory unwritable and report whether the OS enforces it.
+    /// A root test run (or a filesystem that ignores modes) skips the fault
+    /// test instead of pretending the boundary was exercised.
+    #[cfg(unix)]
+    fn deny_writes(dir: &Path) -> bool {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::create_dir_all(dir).unwrap();
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o555)).unwrap();
+        let probe = dir.join(".probe");
+        let blocked = std::fs::write(&probe, b"x").is_err();
+        let _ = std::fs::remove_file(&probe);
+        blocked
+    }
+
+    #[cfg(unix)]
+    fn allow_writes(dir: &Path) {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
 
     const TIME_HEADER: &str = "Date,Client,Project,Project Code,Task,Notes,Hours,Billable?,Invoiced?,First Name,Last Name,Employee Id,Billable Rate,Billable Amount,Cost Rate,Cost Amount,Currency\n";
 
@@ -1607,5 +1641,127 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(journal.state, JournalState::RolledBack);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_failure_at_the_pdf_boundary_rolls_back_the_documents_and_retries_the_same_number() {
+        let (_dir, store, cid, uid, cat) = fixture();
+        let id = Uuid::new_v4();
+        let pdf = b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\n%%EOF\n";
+        let sha = hex(pdf);
+        let mut mapping = choices(cid, uid, cat);
+        mapping.invoices = vec![InvoiceChoice {
+            sha256: sha,
+            customer_id: Some(cid),
+            original_number: "INV-0050".into(),
+            currency: Some(Currency("EUR".into())),
+            invoice_date: chrono::NaiveDate::from_ymd_opt(2026, 1, 31),
+            period_from: chrono::NaiveDate::from_ymd_opt(2026, 1, 1),
+            period_to: chrono::NaiveDate::from_ymd_opt(2026, 1, 31),
+            total_minor: Some(20_000),
+            opening_paid_minor: 0,
+            status: Some(InvoiceStatus::Issued),
+            excluded: false,
+        }];
+        store.create_import_batch(batch(id, mapping)).unwrap();
+        store
+            .stage_import_source(
+                id,
+                ImportKind::Time,
+                "time.csv",
+                csv().as_bytes(),
+                Utc::now(),
+            )
+            .unwrap();
+        store
+            .stage_import_source(
+                id,
+                ImportKind::Invoices,
+                "invoices.zip",
+                &invoice_zip("invoices/INV-0050.pdf", pdf),
+                Utc::now(),
+            )
+            .unwrap();
+        let preview = store.import_preview(id).unwrap();
+        assert!(preview.ready, "{:?}", preview.issues);
+
+        if !deny_writes(&store.root.join("invoices")) {
+            eprintln!("skip: this filesystem/user does not enforce directory write modes");
+            allow_writes(&store.root.join("invoices"));
+            return;
+        }
+        let failed = store.commit_import(id, &preview.revision, Utc::now());
+        allow_writes(&store.root.join("invoices"));
+        assert!(failed.is_err(), "the PDF write boundary fails the commit");
+        assert_eq!(
+            store.get_import_batch(id).unwrap().unwrap().state,
+            ImportBatchState::Failed
+        );
+        let entry_id =
+            crate::domain::planned_time_id("harvest-account", &preview.time[0].source_key);
+        assert!(
+            store.get_entry(entry_id).unwrap().is_none(),
+            "the earlier entry write was rolled back"
+        );
+        assert!(store.find_invoice_by_number("INV-0050").unwrap().is_none());
+        let seq: Option<u64> = read_json(&store.root.join("invoices/.seq.json")).unwrap();
+        assert!(
+            seq.is_none_or(|value| value < 50),
+            "a failed import must not consume a number: {seq:?}"
+        );
+
+        // The same reviewed revision commits cleanly once the boundary is gone.
+        let outcome = store
+            .commit_import(id, &preview.revision, Utc::now())
+            .unwrap();
+        assert_eq!(outcome.invoices, vec!["INV-0050".to_string()]);
+        assert!(store.get_entry(entry_id).unwrap().is_some());
+        assert_eq!(store.list_invoices().unwrap().len(), 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_failure_at_the_document_boundary_keeps_pre_existing_data_and_retries() {
+        let (_dir, store, cid, uid, cat) = fixture();
+        let id = Uuid::new_v4();
+        store
+            .create_import_batch(batch(id, choices(cid, uid, cat)))
+            .unwrap();
+        store
+            .stage_import_source(
+                id,
+                ImportKind::Time,
+                "time.csv",
+                csv().as_bytes(),
+                Utc::now(),
+            )
+            .unwrap();
+        let preview = store.import_preview(id).unwrap();
+        assert!(preview.ready, "{:?}", preview.issues);
+
+        let day = store.day_dir(chrono::NaiveDate::from_ymd_opt(2026, 1, 5).unwrap());
+        if !deny_writes(&day) {
+            eprintln!("skip: this filesystem/user does not enforce directory write modes");
+            allow_writes(&day);
+            return;
+        }
+        let failed = store.commit_import(id, &preview.revision, Utc::now());
+        allow_writes(&day);
+        assert!(failed.is_err());
+        assert_eq!(
+            store.get_import_batch(id).unwrap().unwrap().state,
+            ImportBatchState::Failed
+        );
+        assert_eq!(store.list_customers().unwrap().len(), 1);
+        assert_eq!(store.list_projects(cid).unwrap().len(), 1);
+        assert_eq!(store.list_categories().unwrap().len(), 1);
+        assert!(store.list_all_entries().unwrap().is_empty());
+
+        let outcome = store
+            .commit_import(id, &preview.revision, Utc::now())
+            .unwrap();
+        assert_eq!(outcome.entries.len(), 1);
+        assert_eq!(store.list_all_entries().unwrap().len(), 1);
     }
 }

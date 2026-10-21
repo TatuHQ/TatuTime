@@ -107,6 +107,14 @@ Run the anonymized parser tests:
 cargo test --lib harvest::tests
 ```
 
+`cargo test --lib store::imports` covers journaling, rollback and two fault
+boundaries (document and original-PDF writes) on Unix: a failed commit removes
+only the batch-owned documents, preserves pre-existing data, restores the number
+ledger, leaves the batch retryable and reuses the same legal number.
+`cargo test --test contract imports` also proves batch history, staged sources,
+dedup authority and the external lock survive backup/restore, that a cold-archived
+imported row still reads by id, and that a locked external day refuses archival.
+
 An opt-in ignored test can validate private exports locally. Set
 `HARVEST_TIME_CSV` and `HARVEST_EXPENSE_CSV` to the two local file paths, then run:
 
@@ -161,6 +169,13 @@ from the member, and an externally billed row can be explicitly linked to an
 invoice PDF. One reconciliation table shows accepted/skipped totals per source
 and currency. The advanced JSON view remains available for operators but is no
 longer the primary control.
+
+An explicit row→invoice link is reconciled, never inferred: the invoice must be
+included in the same batch, the row must be externally billed, the row currency
+and customer must match the invoice, and the cumulative linked amounts may not
+exceed the reviewed invoice total. A linked row is still imported exactly once
+and keeps its permanent external-billed flag, so invoice generation excludes it;
+a contract test proves a linked row cannot be billed again.
 
 Preview rows and review issues are filterable and paged in the browser (25 per
 page) without recomputing the preview. A draft or failed batch can be discarded
