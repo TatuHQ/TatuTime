@@ -66,7 +66,7 @@ impl Store {
             .join("projects")
     }
 
-    fn project_path(&self, customer_id: Uuid, code: &str) -> PathBuf {
+    pub(super) fn project_path(&self, customer_id: Uuid, code: &str) -> PathBuf {
         self.projects_dir(customer_id).join(format!("{code}.json"))
     }
 
@@ -151,7 +151,7 @@ impl Store {
             .join("tasks")
     }
 
-    fn task_path(&self, customer_id: Uuid, project_code: &str, code: &str) -> PathBuf {
+    pub(super) fn task_path(&self, customer_id: Uuid, project_code: &str, code: &str) -> PathBuf {
         self.tasks_dir(customer_id, project_code)
             .join(format!("{code}.json"))
     }

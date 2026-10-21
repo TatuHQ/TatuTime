@@ -25,6 +25,7 @@ mod cold;
 mod customers;
 mod entries;
 mod expenses;
+mod imports;
 mod index;
 mod invoices;
 mod io;
@@ -36,6 +37,10 @@ mod users;
 use io::prune_tmp_files;
 
 pub use cold::{ArchiveRefusal, ArchiveReport, ArchivedDay, SkippedDay};
+pub use imports::{
+    IMPORTS_DIR, ImportBatch, ImportBatchState, ImportCommitOutcome, ImportFiles, ImportKind,
+    MAX_IMPORT_CSV_BYTES, MAX_IMPORT_ZIP_BYTES, StagedImportFile,
+};
 
 /// Hard cap on a range scan so a malformed or adversarial query cannot spin
 /// over the whole tree. 400 days covers a year plus buffer, and is counted
@@ -405,6 +410,10 @@ impl Store {
         {
             tracing::warn!(error = %e, "per-user index migration skipped; reads will rebuild lazily");
         }
+        // #401: an interrupted commit is rolled back before the server serves
+        // traffic. A recovery failure is a boot failure, never a silent
+        // half-imported financial history.
+        store.recover_import_journals()?;
         Ok(store)
     }
 
