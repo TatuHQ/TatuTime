@@ -173,7 +173,7 @@ pub enum PdfConfidence {
     Medium,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct PdfSuggestion {
     pub field: PdfField,
     /// The value exactly as it appears in the document, trimmed and bounded.
@@ -199,7 +199,7 @@ pub enum PdfInspectionStatus {
     ManualReview,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct PdfInspection {
     pub pages: usize,
     pub text_bytes: usize,
