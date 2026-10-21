@@ -186,6 +186,7 @@ pub async fn create_entry(
     ensure_entry_refs(&app.store, &draft)?;
     let now = app.clock.now();
     let entry = Entry {
+        imported: None,
         id: Uuid::new_v4(),
         date: draft.date,
         customer_id: draft.customer_id,
@@ -230,6 +231,7 @@ pub async fn update_entry(
     let draft = validate_entry_input(&input).map_err(ApiError::validation)?;
     ensure_entry_refs(&app.store, &draft)?;
     let updated = Entry {
+        imported: existing.imported.clone(),
         id,
         date: draft.date,
         customer_id: draft.customer_id,
@@ -243,6 +245,15 @@ pub async fn update_entry(
         created_at: existing.created_at,
         updated_at: app.clock.now(),
     };
+    if existing.imported.is_some()
+        && (existing.customer_id != updated.customer_id
+            || existing.project_code != updated.project_code
+            || existing.task_code != updated.task_code)
+    {
+        return Err(ApiError::conflict(
+            "imported billing references cannot be reassigned",
+        ));
+    }
     // Relocation across day folders is one store transaction (review B4):
     // half-applying it would double-count the entry in every report. #218: the
     // lock check runs INSIDE that transaction, so an issue_invoice landing

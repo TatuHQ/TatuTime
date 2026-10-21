@@ -210,6 +210,34 @@ pub fn build_router(state: AppState) -> Router {
             axum::routing::post(api::sync_invoice),
         )
         .route("/sync/accounting", get(api::sync_status))
+        // Harvest import (#400/#401/#402): admin-only staging, preview,
+        // journaled commit and history. Raw CSV/ZIP bodies only.
+        .route(
+            "/admin/imports/harvest",
+            get(api::list_import_batches).post(api::create_import_batch),
+        )
+        .route("/admin/imports/harvest/{id}", get(api::get_import_batch))
+        .route(
+            "/admin/imports/harvest/{id}/files/{kind}",
+            axum::routing::put(api::upload_import_source).get(api::download_import_source),
+        )
+        .route(
+            "/admin/imports/harvest/{id}/review",
+            axum::routing::put(api::review_import_batch),
+        )
+        .route(
+            "/admin/imports/harvest/{id}/preview",
+            axum::routing::post(api::preview_import_batch),
+        )
+        .route("/admin/imports/harvest/{id}/rows", get(api::import_rows))
+        .route(
+            "/admin/imports/harvest/{id}/commit",
+            axum::routing::post(api::commit_import_batch),
+        )
+        .route(
+            "/admin/imports/harvest/{id}/invoices/{sha}/pdf",
+            get(api::imported_invoice_pdf),
+        )
         // Invoice document templates (#116): org singleton + live preview.
         .route(
             "/admin/invoice-template",

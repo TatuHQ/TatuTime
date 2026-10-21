@@ -37,6 +37,7 @@ pub mod auth;
 pub mod entries_reports;
 pub mod expenses;
 pub mod fx;
+pub mod imports;
 pub mod invoicing;
 pub mod pagination;
 pub mod people;
@@ -385,6 +386,7 @@ impl AppState {
     ) -> Self {
         let store = Arc::new(store);
         let locks = Arc::new(crate::lock::CombinedLocks::new(vec![
+            Box::new(crate::lock::ImportLock::new(store.clone())),
             Box::new(crate::lock::InvoiceLock::new(store.clone())),
             Box::new(crate::lock::SubmissionLock::new(store.clone())),
             // #255/#190: reimbursement claims (#24) lock their expenses through
@@ -770,6 +772,12 @@ pub use self::expenses::{
     submit_claim, update_category, update_expense,
 };
 pub use self::fx::{FxQuery, fx_rate};
+pub use self::imports::{
+    CommitImportInput, CreateBatchInput, ImportPageQuery, RowsQuery, commit_import_batch,
+    create_import_batch, download_import_source, get_import_batch, import_rows,
+    imported_invoice_pdf, list_import_batches, preview_import_batch, review_import_batch,
+    upload_import_source,
+};
 pub use self::invoicing::{
     InvoiceEditInput, InvoiceInput, ManualInvoiceInput, PayInput, SyncInput, create_invoice,
     create_item_type, create_manual_invoice, delete_invoice, delete_item_type, get_invoice_handler,

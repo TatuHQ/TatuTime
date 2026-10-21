@@ -163,6 +163,7 @@ export const TAB_ROUTES = {
   'tab-reports': '/reports',
   'tab-settings': {
     'settings-tab-users': '/settings/users',
+    'settings-tab-import': '/settings/import',
     'settings-tab-company': '/settings/company',
     'settings-tab-invoice-template': '/settings/invoice-template',
     'settings-tab-catalog': '/settings/catalog',
@@ -241,6 +242,7 @@ export function applyRoute(route) {
       catalog: 'settings-tab-catalog',
       expenses: 'settings-tab-expenses',
       email: 'settings-tab-email',
+      import: 'settings-tab-import',
       security: 'settings-tab-security',
     }[sub || 'security'];
     const target = $(settingsId || 'settings-tab-security');

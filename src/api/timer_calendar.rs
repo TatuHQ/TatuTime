@@ -80,6 +80,7 @@ pub async fn stop_timer(State(app): State<AppState>, actor: AuthUser) -> ApiResu
         .ok_or_else(|| ApiError::not_found("timer"))?;
     let now = app.clock.now();
     let entry = Entry {
+        imported: None,
         id: Uuid::new_v4(),
         date: now.date_naive(),
         customer_id: timer.customer_id,

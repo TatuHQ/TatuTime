@@ -42,6 +42,8 @@ pub fn elapsed_hundredths(started_at: DateTime<Utc>, now: DateTime<Utc>) -> u32 
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Entry {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub imported: Option<super::ImportedTime>,
     pub id: Uuid,
     pub date: NaiveDate,
     pub customer_id: Uuid,
@@ -170,6 +172,7 @@ mod tests {
     #[test]
     fn effective_rate_precedence_person_project_customer_ignores_legacy_tasks() {
         let entry = Entry {
+            imported: None,
             id: Uuid::new_v4(),
             date: chrono::NaiveDate::from_ymd_opt(2026, 10, 2).unwrap(),
             customer_id: Uuid::new_v4(),

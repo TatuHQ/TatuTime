@@ -188,6 +188,7 @@ fn expense_from_draft(
     now: DateTime<Utc>,
 ) -> Expense {
     Expense {
+        imported: existing.and_then(|expense| expense.imported.clone()),
         id,
         date: draft.date,
         customer_id: draft.customer_id,
@@ -346,10 +347,12 @@ pub async fn create_submission(
         .checked_add_days(chrono::Days::new(6))
         .ok_or_else(|| ApiError::bad_request("invalid week"))?;
     let all = app.store.list_range(week_start, week_end)?;
-    // #218: one bulk snapshot instead of a full invoice+submission re-scan
-    // per entry (the per-entry entry_lock calls made a week submit
-    // O(entries x documents)); fail-closed semantics (#185) unchanged.
-    let locked = app.locks.locked_entries().map_err(|e| {
+    // #218: one bulk answer instead of a full invoice+submission re-scan per
+    // entry (the per-entry entry_lock calls made a week submit O(entries x
+    // documents)); #398: the import provider reads the week's own records, so
+    // this path never walks every entry in the deployment. Fail-closed
+    // semantics (#185) unchanged.
+    let locked = app.locks.locked_entries_of(&all).map_err(|e| {
         tracing::warn!(error = ?e.0, "lock state unavailable; refusing submit");
         ApiError::lock_unavailable()
     })?;

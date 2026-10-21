@@ -21,6 +21,8 @@ pub mod email;
 pub mod email_reminders;
 pub mod error;
 pub mod fx;
+pub mod harvest;
+pub mod harvest_invoices;
 pub mod lock;
 pub mod pdf;
 pub mod providers;
@@ -199,6 +201,36 @@ pub const API_ROUTES: &[(&str, &str, Tier)] = &[
     ("POST", "/api/invoices/{id}/email-copy", Tier::Admin),
     ("POST", "/api/invoices/{id}/sync", Tier::Admin),
     ("GET", "/api/sync/accounting", Tier::Admin),
+    ("GET", "/api/admin/imports/harvest", Tier::Admin),
+    ("POST", "/api/admin/imports/harvest", Tier::Admin),
+    ("GET", "/api/admin/imports/harvest/{id}", Tier::Admin),
+    (
+        "GET",
+        "/api/admin/imports/harvest/{id}/files/{kind}",
+        Tier::Admin,
+    ),
+    (
+        "PUT",
+        "/api/admin/imports/harvest/{id}/files/{kind}",
+        Tier::Admin,
+    ),
+    ("PUT", "/api/admin/imports/harvest/{id}/review", Tier::Admin),
+    (
+        "POST",
+        "/api/admin/imports/harvest/{id}/preview",
+        Tier::Admin,
+    ),
+    ("GET", "/api/admin/imports/harvest/{id}/rows", Tier::Admin),
+    (
+        "POST",
+        "/api/admin/imports/harvest/{id}/commit",
+        Tier::Admin,
+    ),
+    (
+        "GET",
+        "/api/admin/imports/harvest/{id}/invoices/{sha}/pdf",
+        Tier::Admin,
+    ),
     ("GET", "/api/admin/invoice-template", Tier::Admin),
     ("PUT", "/api/admin/invoice-template", Tier::Admin),
     ("POST", "/api/admin/invoice-template/preview", Tier::Admin),
@@ -284,6 +316,7 @@ const SPA_ROUTES: &[&str] = &[
     "/reports",
     "/settings",
     "/settings/users",
+    "/settings/import",
     "/settings/company",
     "/settings/invoice-template",
     "/settings/catalog",

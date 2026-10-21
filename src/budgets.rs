@@ -8,7 +8,7 @@ use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use crate::auth::User;
-use crate::domain::{Customer, Entry, Project, effective_rates};
+use crate::domain::{Customer, Entry, Project};
 use crate::scheduler::Job;
 use crate::store::Store;
 
@@ -67,8 +67,10 @@ pub fn burn_report(
                     let urate = e
                         .user_id
                         .and_then(|uid| user_by_id.get(&uid).map(|u| u.default_rate_minor));
-                    let (_, rate) = effective_rates(cust, Some(p), urate);
-                    burn_amt += e.hours.amount_minor(rate);
+                    let (currency, rate) = e.billing_rates(cust, Some(p), urate);
+                    if currency == p.currency {
+                        burn_amt = burn_amt.saturating_add(e.billing_amount_minor(rate));
+                    }
                 }
             }
         }
@@ -233,6 +235,7 @@ mod tests {
         let long_ago = Utc::now().date_naive() - chrono::Duration::days(800);
         store
             .put_entry(&Entry {
+                imported: None,
                 id: uuid::Uuid::new_v4(),
                 date: long_ago,
                 customer_id: cid,
@@ -280,6 +283,7 @@ mod tests {
             legal_id: String::new(),
         };
         let entries = vec![Entry {
+            imported: None,
             id: uuid::Uuid::new_v4(),
             date: NaiveDate::from_ymd_opt(2026, 10, 2).unwrap(),
             customer_id: cid,
@@ -326,6 +330,7 @@ mod tests {
             legal_id: String::new(),
         };
         let entries = vec![Entry {
+            imported: None,
             id: uuid::Uuid::new_v4(),
             date: NaiveDate::from_ymd_opt(2026, 10, 2).unwrap(),
             customer_id: cid,

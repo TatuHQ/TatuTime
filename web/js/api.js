@@ -102,6 +102,27 @@ export const api = {
       status: res.status,
     };
   },
+  // Raw-body PUT for the Harvest import sources (#402/#403): CSV/ZIP bytes,
+  // never base64 JSON. Same cookie + CSRF discipline and error mapping.
+  async upload(url, body, contentType) {
+    const res = await fetch(API_BASE + url, {
+      method: 'PUT',
+      headers: { 'X-CSRF-Protection': '1', 'Content-Type': contentType },
+      credentials: 'same-origin',
+      body,
+    });
+    const text = await res.text();
+    let data = null;
+    if (text) {
+      try {
+        data = JSON.parse(text);
+      } catch {
+        data = null;
+      }
+    }
+    if (!res.ok) throw requestFailure('PUT', url, res, data);
+    return data;
+  },
   get: (u) => api.request('GET', u),
   post: (u, b) => api.request('POST', u, b),
   put: (u, b) => api.request('PUT', u, b),

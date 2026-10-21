@@ -295,6 +295,7 @@ mod tests {
 
     fn sample_invoice() -> Invoice {
         Invoice {
+            imported: None,
             id: "11111111-1111-1111-1111-111111111111".parse().unwrap(),
             number: "INV-0001".into(),
             customer_id: "22222222-2222-2222-2222-222222222222".parse().unwrap(),

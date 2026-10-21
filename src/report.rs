@@ -11,7 +11,7 @@ use chrono::{Datelike, NaiveDate};
 use uuid::Uuid;
 
 use crate::auth::User;
-use crate::domain::{Customer, Entry, effective_rates};
+use crate::domain::{Customer, Entry};
 
 fn margin_minor(revenue: u64, cost: u64) -> i64 {
     if revenue >= cost {
@@ -161,7 +161,7 @@ pub fn summarise(
             continue; // dangling reference: excluded from totals, never fabricated.
         };
         let project = project_for(e);
-        let (currency, rate) = effective_rates(customer, project, user_rate(e));
+        let (currency, rate) = e.billing_rates(customer, project, user_rate(e));
         let label_customer = &customer.name;
         let (key, label) = group_key(e, kind, label_customer, &e.project_code.0, &user_name(e));
         let row = acc
@@ -172,7 +172,7 @@ pub fn summarise(
                 entries: 0,
             });
         row.hours += e.hours.0 as f64 / 100.0;
-        row.amount = row.amount.saturating_add(e.hours.amount_minor(rate));
+        row.amount = row.amount.saturating_add(e.billing_amount_minor(rate));
         row.entries += 1;
     }
 
@@ -269,6 +269,9 @@ pub fn summarise_profit(
     let mut rows: Vec<ProfitRow> = Vec::new();
     for c in customers {
         let entry_currency = |e: &Entry| -> String {
+            if let Some(imported) = &e.imported {
+                return imported.currency.0.clone();
+            }
             project_by_key
                 .get(&(e.customer_id, e.project_code.0.as_str()))
                 .map(|p| p.currency.0.clone())
@@ -294,7 +297,7 @@ pub fn summarise_profit(
         }
         if let Some(list) = entries_by_customer.get(&c.id) {
             for &en in list {
-                if !(en.billable && en.date >= from && en.date <= to) {
+                if !((en.billable || en.imported.is_some()) && en.date >= from && en.date <= to) {
                     continue;
                 }
                 let rate = en
@@ -302,7 +305,7 @@ pub fn summarise_profit(
                     .and_then(|uid| user_by_id.get(&uid).map(|u| u.cost_rate_minor))
                     .unwrap_or(0);
                 let e = ledger.entry(entry_currency(en)).or_default();
-                e.1 = e.1.saturating_add(en.hours.amount_minor(rate));
+                e.1 = e.1.saturating_add(en.imported_cost_minor(rate));
             }
         }
         for (currency, (revenue, cost)) in ledger {
@@ -533,9 +536,9 @@ pub fn export_csv(
             continue;
         };
         let project = project_for(e);
-        let (currency, rate) = effective_rates(customer, project, user_rate(e));
+        let (currency, rate) = e.billing_rates(customer, project, user_rate(e));
         let hours = e.hours.0 as f64 / 100.0;
-        let amount = e.hours.amount_minor(rate);
+        let amount = e.billing_amount_minor(rate);
         let fields = [
             e.date.format("%Y-%m-%d").to_string(),
             customer.name.clone(),

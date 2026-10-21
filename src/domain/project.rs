@@ -92,6 +92,9 @@ pub enum Source {
     Manual,
     Timer,
     CalendarImport,
+    /// Written only by the admin Harvest import commit (#401); ordinary
+    /// create/update payloads always set `Manual`.
+    HarvestImport,
 }
 
 #[derive(Debug, Clone, Deserialize)]

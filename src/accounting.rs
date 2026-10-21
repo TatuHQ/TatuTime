@@ -610,6 +610,7 @@ mod tests {
             legal_id: String::new(),
         };
         let inv = Invoice {
+            imported: None,
             id: Uuid::new_v4(),
             number: "INV-0042".into(),
             customer_id: customer.id,

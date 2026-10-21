@@ -66,11 +66,11 @@ test('the shell ships the official form vocabulary and no bespoke class (#232 ph
     // fieldset and the ten Document label rows (each in its own grouped
     // fieldset) to the Settings split's 146 groups; the template notes row
     // added one more, and the Expense-categories dialog one more.
-    assert.equal(groups.length, 169, 'every field wrapper is a p-form__group');
-    assert.equal(document.querySelectorAll('.p-form__label').length, 161, 'one official label per field row');
-    assert.equal(document.querySelectorAll('.p-form__control').length, 161, 'one official control per field row');
+    assert.equal(groups.length, 173, 'every field wrapper is a p-form__group');
+    assert.equal(document.querySelectorAll('.p-form__label').length, 165, 'one official label per field row');
+    assert.equal(document.querySelectorAll('.p-form__control').length, 165, 'one official control per field row');
     // The previous 55 plus the template footer and notes placement hints.
-    assert.equal(document.querySelectorAll('.p-form-help-text').length, 57, 'the hints became p-form-help-text');
+    assert.equal(document.querySelectorAll('.p-form-help-text').length, 64, 'the hints became p-form-help-text');
     assert.equal(document.querySelectorAll('.p-form-validation__message').length, ERROR_IDS.length,
         'every error message is the official validation message');
     assert.equal(document.querySelectorAll('.p-form-validation.is-error').length, ERROR_IDS.length,
@@ -114,7 +114,7 @@ test('every p-form__group pairs its label with its own control (#232 phase 2b)',
     }
     // 152: the Settings split's 141 plus the ten Document label rows (#354)
     // and the template notes row; the Expense-categories dialog adds one.
-    assert.equal(paired, 161, 'all 161 label/control pairs were verified');
+    assert.equal(paired, 165, 'all 165 label/control pairs were verified');
     assert.equal(composed.length, 8, 'eight composed rows have no label of their own');
     assert.equal(composed.filter((row) => row.tag === 'FIELDSET').length, 7, 'seven grouped fieldsets');
     assert.equal(composed.filter((row) => row.tag === 'DIV').length, 1, 'the Contacts row');
@@ -224,8 +224,8 @@ test('every error stays a role=alert validation message while hidden (#232 phase
     // #email-vault-notice and the vault card's #vault-warning are plain
     // role="alert" explanations (not form validation messages), so they are the
     // two extra alert nodes beyond ERROR_IDS.
-    assert.equal(document.querySelectorAll('[role="alert"]').length, ERROR_IDS.length + 2,
-        'the email vault notice and the vault warning are the only extra role=alert nodes');
+    assert.equal(document.querySelectorAll('[role="alert"]').length, ERROR_IDS.length + 3,
+        'the email vault notice, the vault warning and the import error are the extra role=alert nodes');
     dom.window.close();
 });
 
@@ -279,17 +279,17 @@ test('decoration is attribute-only and every rendered button states what it need
     // one of these counts drop and fails the guard. (The HTML comment that
     // mentions `data-icon="plus"` is a comment node, not a button.)
     const icons = [...document.querySelectorAll('button[data-icon]')];
-    assert.equal(icons.length, 21, 'every icon-bearing shell button states data-icon');
+    assert.equal(icons.length, 22, 'every icon-bearing shell button states data-icon');
     const vocab = {};
     for (const b of icons) vocab[b.dataset.icon] = (vocab[b.dataset.icon] || 0) + 1;
     // The newest plus is Settings → Expense categories' heading action.
-    assert.deepEqual(vocab, { plus: 14, copy: 2, play: 2, stop: 1, history: 1, file: 1 }, 'the shell icon vocabulary is pinned');
+    assert.deepEqual(vocab, { plus: 15, copy: 2, play: 2, stop: 1, history: 1, file: 1 }, 'the shell icon vocabulary is pinned');
     // 37: the previous 36 plus that same + Category heading action.
     // The count is pinned so a new positive action updates this guard on
     // purpose: `+ Manual Invoice` is the secondary action and deliberately
     // carries no data-positive, and each dialog's `Cancel`/`Close` is a plain
     // secondary button, so neither adds to it.
-    assert.equal(document.querySelectorAll('button[data-positive]').length, 37,
+    assert.equal(document.querySelectorAll('button[data-positive]').length, 39,
         'every positive shell button states data-positive');
 
     // The deleted label-mutation leaves no trace: no rendered label keeps a "+".

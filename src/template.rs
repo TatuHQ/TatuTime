@@ -606,6 +606,7 @@ mod tests {
     fn sample_invoice() -> Invoice {
         use crate::domain::{Currency, InvoiceStatus};
         Invoice {
+            imported: None,
             id: uuid::Uuid::new_v4(),
             number: "INV-0007".into(),
             customer_id: uuid::Uuid::new_v4(),

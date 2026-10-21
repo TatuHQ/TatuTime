@@ -76,14 +76,16 @@ the `v0.1.8` release notes is no longer needed.
   `customers/<id>/projects/<CODE>/tasks/<TASK>.json` (optional task tier, #38),
   `entries/<YYYY-MM-DD>/<id>.json`, `invoices/<id>.json`, `users/<id>.json`,
   `categories/<id>.json`, `expenses/<id>.json`, `submissions/<id>.json`,
-  plus `audit.log` (#52), `revoked.json` (#45), `scheduler.json` (#61),
+  the admin-only `imports/<id>.json` + `imports/<id>/{time.csv,expenses.csv,invoices.zip}`,
+  `plus audit.log` (#52), `revoked.json` (#45), `scheduler.json` (#61),
   `secrets.bin` (#77, AES-256-GCM encrypted) and the auto-created `vault.key`
   (master key, 0600), `config.json` + `session.key`
   (#94), `.server.lock` (single-instance guard), the `retainers/`, `claims/`,
   `schedules/`, `timers/`, `items/` and `notifications/` doc folders,
   `sync/accounting.json` (#33), archived
   `invoices/<id>.pdf` (#113), `invoices/.seq.json` (number ledger, B3),
-  `invoices/.timeline.<id>.json` (#349 per-invoice timeline sidecar) and
+  `invoices/.timeline.<id>.json` (#349 per-invoice timeline sidecar),
+  `imports/.journal.<id>.json` (#401 write-ahead import journal) and
   the `*.idx.*` side indexes (D3): `invoices/.idx.numbers.json`,
   `users/.idx.emails.json`, the #335 per-user read indexes
   `entries/.idx.users.json` + `expenses/.idx.users.json`, and the #350 cold id
@@ -123,17 +125,22 @@ the `v0.1.8` release notes is no longer needed.
   only way back to editable is before issue: drafts lock nothing and can be
   deleted; the GUI reflects this by hiding the actions of invoiced rows and
   showing a lock that links to the invoice), `SubmissionLock` (entries in a
-  submitted/approved week, #16) and `ClaimLock` (expenses on a
+  submitted/approved week, #16), `ClaimLock` (expenses on a
   submitted/approved reimbursement claim, #24 — the #190 follow-up, no longer
-  a direct scan in `api::expenses`). Reads are never blocked. If the lock
+  a direct scan in `api::expenses`) and `ImportLock` (#398: entries/expenses
+  whose import provenance marks them invoiced in the source system; permanent,
+  and independent of any local invoice). Reads are never blocked. If the lock
   state cannot be verified the write is refused fail-closed with 503
   `lock_unavailable` (#185) — never allowed because the check was
-  inconclusive. All three providers answer from one memoized
-  `store::LockSnapshot` keyed on the source collections' directory mtimes
-  (#255): a per-record check no longer re-reads every invoice/submission/claim
-  document, a changed directory stamp forces a single re-scan (so the set can
-  never go stale behind an atomic tmp+rename write), and a scan failure is
-  never cached.
+  inconclusive. The invoice, submission and claim providers answer from one
+  memoized `store::LockSnapshot` keyed on the source collections' directory
+  mtimes (#255): a per-record check no longer re-reads
+  every invoice/submission/claim document, a changed directory stamp forces a
+  single re-scan (so the set can never go stale behind an atomic tmp+rename
+  write), and a scan failure is never cached. `ImportLock` reads the
+  provenance carried by the record itself; the submission path answers from
+  the week's already-loaded records (`EntryLock::locked_entries_of`), so
+  submitting a week never scans the whole entry tree.
 - Every payload is validated against the contract before any write
   (`deny_unknown_fields` + `domain::validate_*`); no partial persistence.
   Errors use the single JSON shape in `openapi.json`; responses never expose
@@ -147,7 +154,7 @@ the `v0.1.8` release notes is no longer needed.
   calendar`, `/customers`, `/projects`, `/tasks`, `/invoices`, `/expenses`,
   `/approvals`, `/reports`, `/settings/security`, `/settings/users`,
   `/settings/company`, `/settings/invoice-template`, `/settings/catalog`,
-  `/settings/expenses`, `/settings/email`). `spa_page` (lib.rs) is the
+  `/settings/expenses`, `/settings/email`, `/settings/import`). `spa_page` (lib.rs) is the
   case-insensitive allowlist serving
   `index.html`; unknown paths keep the JSON 404. `TAB_ROUTES`/`DEFAULT_ROUTE`
   in `web/js/route.js` mirror that list; `tests::route_parity` fails the build if the two drift (#264).

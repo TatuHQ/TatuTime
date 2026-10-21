@@ -191,6 +191,7 @@ pub async fn create_manual_invoice(
     let totals =
         crate::domain::invoice_totals(subtotal, input.tax_hundredths, input.discount_hundredths);
     let draft = Invoice {
+        imported: None,
         document: input.document,
         id: Uuid::new_v4(),
         number: String::new(),
