@@ -206,23 +206,78 @@ function ensureCategory(sourceCategory) {
     return choice;
 }
 
+function pdfSuggestions(row) {
+    const found = new Map();
+    for (const suggestion of row?.suggestions?.suggestions || []) {
+        if (!found.has(suggestion.field)) found.set(suggestion.field, suggestion);
+    }
+    return found;
+}
+
+function pdfText(found, field) {
+    return found.get(field)?.value ?? '';
+}
+
+function pdfAmount(found, field) {
+    return found.get(field)?.amount_minor ?? null;
+}
+
+// The import follows the document, not a guess: the printed total is the
+// Subtotal (or Total/Amount due when the exporter prints no subtotal row), the
+// Payments credit is the amount already settled, and payments equal to the
+// total mean `paid` while anything else means `issued`.
+function invoiceDefaults(row) {
+    const found = pdfSuggestions(row);
+    const total = pdfAmount(found, 'total') ?? pdfAmount(found, 'subtotal') ?? pdfAmount(found, 'amount_due');
+    const payments = pdfAmount(found, 'payments');
+    const status = pdfText(found, 'status')
+        || (total == null ? null : (payments != null && payments === total ? 'paid' : 'issued'));
+    const customerName = pdfText(found, 'customer');
+    const customer = customerName
+        ? options.customers.find((entry) => entry.name.trim().toLowerCase() === customerName.trim().toLowerCase())
+        : null;
+    return {
+        customerId: customer?.id ?? null,
+        customerName,
+        originalNumber: pdfText(found, 'invoice_number'),
+        currency: pdfText(found, 'currency'),
+        invoiceDate: pdfText(found, 'invoice_date') || null,
+        total,
+        payments,
+        status,
+        openingPaid: status === 'paid' && payments != null ? payments : 0,
+    };
+}
+
 function ensureInvoice(row) {
+    const defaults = invoiceDefaults(row);
     let choice = draft.invoices.find((entry) => entry.sha256 === row.pdf_sha256);
     if (!choice) {
         choice = {
             sha256: row.pdf_sha256,
-            customer_id: row.customer_id || null,
-            original_number: row.original_number || '',
-            currency: row.currency || '',
-            invoice_date: row.invoice_date || null,
+            customer_id: row.customer_id || defaults.customerId,
+            original_number: row.original_number || defaults.originalNumber,
+            currency: row.currency || defaults.currency,
+            invoice_date: row.invoice_date || defaults.invoiceDate,
             period_from: row.period_from || null,
             period_to: row.period_to || null,
-            total_minor: row.total_minor ?? null,
-            opening_paid_minor: row.opening_paid_minor || 0,
-            status: row.status || null,
+            total_minor: row.total_minor ?? defaults.total,
+            opening_paid_minor: row.opening_paid_minor || defaults.openingPaid,
+            status: row.status || defaults.status,
             excluded: false,
         };
         draft.invoices.push(choice);
+    } else {
+        // A mapping saved before the PDF pass (or by an earlier build) can hold
+        // blank fields: fill only the ones still empty, never overwrite a
+        // reviewed value.
+        if (!choice.original_number && defaults.originalNumber) choice.original_number = defaults.originalNumber;
+        if (choice.customer_id == null && defaults.customerId) choice.customer_id = defaults.customerId;
+        if (!choice.currency && defaults.currency) choice.currency = defaults.currency;
+        if (!choice.invoice_date && defaults.invoiceDate) choice.invoice_date = defaults.invoiceDate;
+        if (choice.total_minor == null && defaults.total != null) choice.total_minor = defaults.total;
+        if ((choice.opening_paid_minor ?? 0) === 0 && defaults.openingPaid) choice.opening_paid_minor = defaults.openingPaid;
+        if (!choice.status && defaults.status) choice.status = defaults.status;
     }
     return choice;
 }
@@ -404,6 +459,7 @@ function renderMapping(preview) {
         const card = el('div', { cls: 'import-invoice-list' });
         for (const row of preview.invoices) {
             const choice = ensureInvoice(row);
+            const defaults = invoiceDefaults(row);
             const pdf = el('a', {
                 attrs: {
                     href: `${BASE}/${currentBatch.id}/invoices/${row.pdf_sha256}/pdf`,
@@ -414,23 +470,26 @@ function renderMapping(preview) {
             card.appendChild(el('fieldset', { cls: 'import-invoice-card' }, [
                 el('legend', { text: row.original_name }),
                 el('div', { cls: 'import-invoice-grid' }, [
-                    el('div', {}, [labelFor(`import-inv-number-${row.pdf_sha256}`, 'Legal number'),
+                    el('div', {}, [labelFor(`import-inv-number-${row.pdf_sha256}`, 'Invoice ID'),
                     textControl(`import-inv-number-${row.pdf_sha256}`, choice.original_number, (value) => { choice.original_number = value; })]),
-                    el('div', {}, [labelFor(`import-inv-customer-${row.pdf_sha256}`, 'Customer'),
+                    el('div', {}, [labelFor(`import-inv-customer-${row.pdf_sha256}`, 'Invoice for'),
                     selectControl(`import-inv-customer-${row.pdf_sha256}`, choice.customer_id || '',
                         [['', 'Select customer…'], ...options.customers.map((customer) => [customer.id, customer.name])],
-                        (value) => { choice.customer_id = value || null; })]),
+                        (value) => { choice.customer_id = value || null; }),
+                    ...(defaults.customerName
+                        ? [el('p', { cls: 'p-form-help-text', text: `PDF: ${defaults.customerName}` })]
+                        : [])]),
                     el('div', {}, [labelFor(`import-inv-currency-${row.pdf_sha256}`, 'Currency'),
                     textControl(`import-inv-currency-${row.pdf_sha256}`, choice.currency || '', (value) => { choice.currency = value; })]),
-                    el('div', {}, [labelFor(`import-inv-date-${row.pdf_sha256}`, 'Invoice date'),
+                    el('div', {}, [labelFor(`import-inv-date-${row.pdf_sha256}`, 'Issue date'),
                     textControl(`import-inv-date-${row.pdf_sha256}`, choice.invoice_date || '', (value) => { choice.invoice_date = value || null; }, 'date')]),
                     el('div', {}, [labelFor(`import-inv-from-${row.pdf_sha256}`, 'Period from'),
                     textControl(`import-inv-from-${row.pdf_sha256}`, choice.period_from || '', (value) => { choice.period_from = value || null; }, 'date')]),
                     el('div', {}, [labelFor(`import-inv-to-${row.pdf_sha256}`, 'Period to'),
                     textControl(`import-inv-to-${row.pdf_sha256}`, choice.period_to || '', (value) => { choice.period_to = value || null; }, 'date')]),
-                    el('div', {}, [labelFor(`import-inv-total-${row.pdf_sha256}`, 'Total'),
+                    el('div', {}, [labelFor(`import-inv-total-${row.pdf_sha256}`, 'Subtotal'),
                     moneyInput(`import-inv-total-${row.pdf_sha256}`, choice.total_minor, (value) => { choice.total_minor = value; })]),
-                    el('div', {}, [labelFor(`import-inv-paid-${row.pdf_sha256}`, 'Opening paid'),
+                    el('div', {}, [labelFor(`import-inv-paid-${row.pdf_sha256}`, 'Payments'),
                     moneyInput(`import-inv-paid-${row.pdf_sha256}`, choice.opening_paid_minor, (value) => { choice.opening_paid_minor = value ?? 0; })]),
                     el('div', {}, [labelFor(`import-inv-status-${row.pdf_sha256}`, 'Status'),
                     selectControl(`import-inv-status-${row.pdf_sha256}`, choice.status || '',
@@ -674,7 +733,7 @@ function renderPreview(preview) {
             el('td', { attrs: { 'data-heading': 'Accepted' }, text: `${row.accepted_count} · ${formatMoney(row.accepted_minor)}` }),
             el('td', { attrs: { 'data-heading': 'Skipped' }, text: `${row.skipped_count} · ${formatMoney(row.skipped_minor)}` }),
             el('td', { attrs: { 'data-heading': 'Cost' }, text: formatMoney(row.cost_minor) }),
-            el('td', { attrs: { 'data-heading': 'Opening paid' }, text: formatMoney(row.opening_paid_minor) }),
+            el('td', { attrs: { 'data-heading': 'Payments' }, text: formatMoney(row.opening_paid_minor) }),
         ]));
     }
     renderRows();
@@ -696,7 +755,15 @@ async function previewBatch() {
     try {
         $('import-choices').value = JSON.stringify(draft, null, 2);
         renderBatch(await api.put(`${BASE}/${id}/review`, draft));
+        const sent = JSON.stringify(draft);
         renderPreview(await api.post(`${BASE}/${id}/preview`));
+        // Rendering the mapping fills defaults from the PDF suggestions (and
+        // from the preview's own source rows). Persist them and recompute once
+        // so a single Preview click also reflects the prefilled invoice cards.
+        if (JSON.stringify(draft) !== sent) {
+            renderBatch(await api.put(`${BASE}/${id}/review`, draft));
+            renderPreview(await api.post(`${BASE}/${id}/preview`));
+        }
         announce('Preview computed.');
     } catch (err) {
         showError(err);

@@ -146,6 +146,46 @@ test('mapping controls are built from source values and link the original PDF', 
     dom.window.close();
 });
 
+test('invoice cards take their values and labels from the PDF suggestions', async () => {
+    const withSuggestions = preview(false);
+    withSuggestions.invoices[0] = {
+        ...withSuggestions.invoices[0],
+        customer_id: null, original_number: '', currency: null, invoice_date: null,
+        period_from: null, period_to: null, total_minor: null, opening_paid_minor: 0, status: null,
+        suggestions: {
+            pages: 1, text_bytes: 10, text_truncated: false, status: 'suggestions', reason: null,
+            suggestions: [
+                { field: 'customer', value: 'Acme', amount_minor: null, page: 1, evidence: 'Invoice for Acme', confidence: 'low' },
+                { field: 'invoice_number', value: '1', amount_minor: null, page: 1, evidence: 'Invoice ID 1', confidence: 'medium' },
+                { field: 'currency', value: 'EUR', amount_minor: null, page: 1, evidence: 'Subtotal EUR 5,760.00', confidence: 'low' },
+                { field: 'invoice_date', value: '2025-02-01', amount_minor: null, page: 1, evidence: 'Issue date 01/02/2025', confidence: 'medium' },
+                { field: 'subtotal', value: 'EUR 5,760.00', amount_minor: 576000, page: 1, evidence: 'Subtotal EUR 5,760.00', confidence: 'medium' },
+                { field: 'payments', value: 'EUR -5,760.00', amount_minor: 576000, page: 1, evidence: 'Payments EUR -5,760.00', confidence: 'medium' },
+                { field: 'status', value: 'paid', amount_minor: null, page: 1, evidence: 'Payments compared with Subtotal', confidence: 'medium' },
+            ],
+        },
+    };
+    const { dom } = await harness({ ready: false, previewBody: withSuggestions });
+    await dom.window.openBatch(batch().id);
+    await waitFor(() => dom.window.document.getElementById(`import-inv-total-${SHA}`), {
+        message: 'the prefilled invoice card',
+    });
+    const document = dom.window.document;
+    assert.equal(document.getElementById(`import-inv-number-${SHA}`).value, '1');
+    assert.equal(document.getElementById(`import-inv-customer-${SHA}`).value, 'c1');
+    assert.equal(document.getElementById(`import-inv-currency-${SHA}`).value, 'EUR');
+    assert.equal(document.getElementById(`import-inv-date-${SHA}`).value, '2025-02-01');
+    assert.equal(document.getElementById(`import-inv-total-${SHA}`).value, '5760.00');
+    assert.equal(document.getElementById(`import-inv-paid-${SHA}`).value, '5760.00');
+    assert.equal(document.getElementById(`import-inv-status-${SHA}`).value, 'paid');
+    const mapping = document.getElementById('import-mapping');
+    for (const label of ['Invoice ID', 'Invoice for', 'Issue date', 'Subtotal', 'Payments']) {
+        assert.match(mapping.textContent, new RegExp(label));
+    }
+    assert.match(mapping.textContent, /PDF: Acme/);
+    dom.window.close();
+});
+
 test('double confirm issues one commit request', async () => {
     const { dom, calls } = await harness({ ready: true });
     await dom.window.openBatch(batch().id);

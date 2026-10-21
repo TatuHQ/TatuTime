@@ -46,10 +46,18 @@ produces **suggestions only**:
 - At most 50 pages, 1 MiB of decompressed page content per page and 256 KiB of
   collected text; the text budget is reported as `text_truncated` rather than
   silently overrun.
-- Suggestions are drawn only from labelled lines in the document's own text
-  (`Invoice Number:`, `Invoice Date:`, `Bill To:`, `Currency:`, `Total:`,
-  `Amount Due:`). Amounts are integer minor units with correct grouping; dates
-  must be unambiguous ISO `YYYY-MM-DD` values.
+- Suggestions are drawn only from labelled lines in the document's own text,
+  in either the `Label: value` shape or the shape the Harvest exporter emits,
+  where the label is alone on its extracted line and the value is the next
+  non-empty line (`Invoice for`, `Invoice ID`, `Issue date`, `Subtotal`,
+  `Payments`, `Amount due`). Amounts are integer minor units with correct
+  grouping, a currency token or symbol before or after the number, and a
+  leading sign or parentheses for credits. Dates are ISO `YYYY-MM-DD` or the
+  document's `DD/MM/YYYY`, normalised to ISO for the review field.
+- `Payments` is a credit in the document; its suggestion is the positive amount
+  already settled. A derived `Status` suggestion says `paid` when that amount
+  equals the printed total and `issued` otherwise (including when no payments
+  row exists). Customer names are taken from `Invoice for`.
 - Each suggestion carries the 1-based source page, the source line as
   `evidence`, and a confidence. Nothing is inferred from the filename, and the
   original PDF stays authoritative.
@@ -163,12 +171,13 @@ traffic. `imports/` is admin-only and never exposed to member routes.
 The Settings workspace builds labelled mapping tables from the preview's
 original source values: people, customers, projects, tasks and expense
 categories can be mapped to existing records or created explicitly, while each
-invoice gets a review card with its legal number, customer, currency, dates,
-period, total, opening paid amount and status. Original PDFs are linked directly
-from the member, and an externally billed row can be explicitly linked to an
-invoice PDF. One reconciliation table shows accepted/skipped totals per source
-and currency. The advanced JSON view remains available for operators but is no
-longer the primary control.
+invoice gets a review card labelled like the source document (`Invoice ID`,
+`Invoice for`, `Issue date`, `Subtotal`, `Payments`) and prefilled from the PDF
+suggestions, while the period remains an explicitly reviewed value. Original
+PDFs are linked directly from the member, and an externally billed row can be
+explicitly linked to an invoice PDF. One reconciliation table shows
+accepted/skipped totals per source and currency. The advanced JSON view remains
+available for operators but is no longer the primary control.
 
 An explicit row→invoice link is reconciled, never inferred: the invoice must be
 included in the same batch, the row must be externally billed, the row currency
