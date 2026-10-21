@@ -550,20 +550,52 @@ impl Store {
         }
         for choice in &batch.choices.projects {
             if let crate::domain::ProjectChoice::Create {
+                source_client,
+                source_project,
+                source_code,
                 customer_id,
-                code,
                 name,
                 currency,
                 rate_minor,
                 ..
             } = choice
             {
-                let path = self.project_path(*customer_id, &code.0);
+                // The planner derives the safe code and, when the customer is
+                // created in the same batch, the planned customer id. Reuse
+                // those planned values so the commit writes exactly what the
+                // reviewed preview showed.
+                let planned_code = preview
+                    .time
+                    .iter()
+                    .find(|row| {
+                        row.source_client == *source_client
+                            && row.source_project == *source_project
+                            && row.source_code == *source_code
+                    })
+                    .and_then(|row| row.project_code.clone())
+                    .or_else(|| {
+                        preview
+                            .expenses
+                            .iter()
+                            .find(|row| {
+                                row.source_client == *source_client
+                                    && row.source_project == *source_project
+                                    && row.source_code == *source_code
+                            })
+                            .and_then(|row| row.project_code.clone())
+                    });
+                let Some(planned_code) = planned_code else {
+                    continue;
+                };
+                let customer_id = customer_id
+                    .unwrap_or_else(|| crate::domain::planned_customer_id(source_client));
+                let code = ProjectCode(planned_code);
+                let path = self.project_path(customer_id, &code.0);
                 if path.exists() {
                     continue;
                 }
                 let project = Project {
-                    customer_id: *customer_id,
+                    customer_id,
                     code: code.clone(),
                     name: name.clone(),
                     currency: currency.clone(),
@@ -578,28 +610,43 @@ impl Store {
                     serde_json::to_value(&project)
                         .map_err(|error| StoreError::Io(error.to_string()))?,
                 ));
-                project_keys.push(format!("{}/{code}", customer_id, code = code.0));
+                project_keys.push(format!("{customer_id}/{}", code.0));
             }
         }
         // A task choice is created under the first planned time row that uses
         // it; a task with no included row creates nothing.
+        let mut task_key_set: HashSet<String> = HashSet::new();
         for choice in &batch.choices.tasks {
-            if let crate::domain::TaskChoice::Create { code, name, .. } = choice
+            if let crate::domain::TaskChoice::Create {
+                source_task, name, ..
+            } = choice
                 && let Some(row) = preview.time.iter().find(|row| {
                     row.decision == ImportDecision::New
-                        && row.task_code.as_deref() == Some(code.0.as_str())
+                        && row.source_task == *source_task
+                        && row.task_code.is_some()
                 })
-                && let (Some(customer_id), Some(project_code)) =
-                    (row.customer_id, row.project_code.as_deref())
+                && let (Some(customer_id), Some(project_code), Some(task_code)) = (
+                    row.customer_id,
+                    row.project_code.as_deref(),
+                    row.task_code.as_deref(),
+                )
             {
+                let code = ProjectCode(task_code.to_string());
                 let path = self.task_path(customer_id, project_code, &code.0);
                 if path.exists() {
                     continue;
                 }
+                let key = format!("{customer_id}/{project_code}/{}", code.0);
+                if !task_key_set.insert(key.clone()) {
+                    return Err(StoreError::Conflict(
+                        "two new source tasks resolve to the same code; review the task mappings"
+                            .into(),
+                    ));
+                }
                 let task = Task {
                     customer_id,
                     project_code: ProjectCode(project_code.to_string()),
-                    code: code.clone(),
+                    code,
                     name: name.clone(),
                     active: true,
                 };
@@ -609,10 +656,7 @@ impl Store {
                     serde_json::to_value(&task)
                         .map_err(|error| StoreError::Io(error.to_string()))?,
                 ));
-                task_keys.push(format!(
-                    "{customer_id}/{project_code}/{code}",
-                    code = code.0
-                ));
+                task_keys.push(key);
             }
         }
         for choice in &batch.choices.categories {
