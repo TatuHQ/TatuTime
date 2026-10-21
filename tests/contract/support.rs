@@ -303,6 +303,30 @@ pub(crate) async fn sized_json_req(
 
 /// Authenticated request that keeps the **raw response bytes and headers** —
 /// needed for the binary PDF download (#113), where the body is not JSON.
+/// Authenticated raw-body request (import CSV/ZIP uploads). Returns the status
+/// and the JSON body when the response is JSON.
+pub(crate) async fn body_req(
+    client: &Client,
+    method: &str,
+    uri: &str,
+    content_type: &str,
+    body: Vec<u8>,
+) -> (StatusCode, Value) {
+    let req = Request::builder()
+        .method(method)
+        .uri(uri)
+        .header(header::COOKIE, &client.cookie)
+        .header("x-csrf-protection", "1")
+        .header(header::CONTENT_TYPE, content_type)
+        .body(Body::from(body))
+        .unwrap();
+    let res = client.router.clone().oneshot(req).await.expect("oneshot");
+    let status = res.status();
+    let bytes = res.into_body().collect().await.expect("body").to_bytes();
+    let value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
+    (status, value)
+}
+
 pub(crate) async fn raw_req(
     client: &Client,
     method: &str,

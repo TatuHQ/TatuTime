@@ -35,7 +35,7 @@ use crate::harvest_invoices::{PdfInspection, PdfInspectionStatus};
 /// second customer/project/task/category or a second imported record.
 const IMPORT_ID_NAMESPACE: Uuid = Uuid::from_u128(0x7c5a91e2_3b404d1f_9a6e2f0d_8b1c4e77);
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ImportChoices {
     /// Source person (`First Last` + employee id) -> existing user.
@@ -1044,11 +1044,7 @@ pub fn plan(
             let hours = row
                 .hours_hundredths
                 .filter(|hours| *hours > 0)
-                .and_then(|h| {
-                    u32::try_from(h)
-                        .ok()
-                        .filter(|h| *h <= Hours::MAX)
-                });
+                .and_then(|h| u32::try_from(h).ok().filter(|h| *h <= Hours::MAX));
             if hours.is_none() {
                 issues.push(issue(
                     "time",

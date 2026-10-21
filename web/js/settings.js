@@ -5,6 +5,7 @@
 import { api } from './api.js';
 import { showAuth } from './auth.js';
 import { refreshCatalog } from './billing.js';
+import { refreshImports } from './imports.js';
 import { $, announce, askConfirm, clearFormError, el, fillSelect, formatMoney, iconActionsCell, showFormError, singleFlight, statusChip } from './dom.js';
 import { state } from './state.js';
 
@@ -224,6 +225,7 @@ export async function refreshSettings() {
   // in-flight request, so `refreshSecrets` joins it (it needs the vault state to
   // decide whether the CRUD is usable) instead of issuing a second GET.
   await Promise.all([
+    refreshImports(),
     refreshVault(),
     refreshUsers(),
     refreshSecrets(),

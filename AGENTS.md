@@ -76,14 +76,16 @@ the `v0.1.8` release notes is no longer needed.
   `customers/<id>/projects/<CODE>/tasks/<TASK>.json` (optional task tier, #38),
   `entries/<YYYY-MM-DD>/<id>.json`, `invoices/<id>.json`, `users/<id>.json`,
   `categories/<id>.json`, `expenses/<id>.json`, `submissions/<id>.json`,
-  plus `audit.log` (#52), `revoked.json` (#45), `scheduler.json` (#61),
+  the admin-only `imports/<id>.json` + `imports/<id>/{time.csv,expenses.csv,invoices.zip}`,
+  `plus audit.log` (#52), `revoked.json` (#45), `scheduler.json` (#61),
   `secrets.bin` (#77, AES-256-GCM encrypted) and the auto-created `vault.key`
   (master key, 0600), `config.json` + `session.key`
   (#94), `.server.lock` (single-instance guard), the `retainers/`, `claims/`,
   `schedules/`, `timers/`, `items/` and `notifications/` doc folders,
   `sync/accounting.json` (#33), archived
   `invoices/<id>.pdf` (#113), `invoices/.seq.json` (number ledger, B3),
-  `invoices/.timeline.<id>.json` (#349 per-invoice timeline sidecar) and
+  `invoices/.timeline.<id>.json` (#349 per-invoice timeline sidecar),
+  `imports/.journal.<id>.json` (#401 write-ahead import journal) and
   the `*.idx.*` side indexes (D3): `invoices/.idx.numbers.json`,
   `users/.idx.emails.json`, the #335 per-user read indexes
   `entries/.idx.users.json` + `expenses/.idx.users.json`, and the #350 cold id
@@ -152,7 +154,7 @@ the `v0.1.8` release notes is no longer needed.
   calendar`, `/customers`, `/projects`, `/tasks`, `/invoices`, `/expenses`,
   `/approvals`, `/reports`, `/settings/security`, `/settings/users`,
   `/settings/company`, `/settings/invoice-template`, `/settings/catalog`,
-  `/settings/expenses`, `/settings/email`). `spa_page` (lib.rs) is the
+  `/settings/expenses`, `/settings/email`, `/settings/import`). `spa_page` (lib.rs) is the
   case-insensitive allowlist serving
   `index.html`; unknown paths keep the JSON 404. `TAB_ROUTES`/`DEFAULT_ROUTE`
   in `web/js/route.js` mirror that list; `tests::route_parity` fails the build if the two drift (#264).

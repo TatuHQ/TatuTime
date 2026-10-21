@@ -284,6 +284,15 @@ impl Entity for ExpenseClaim {
     }
 }
 
+/// Admin Harvest import batches (#401): `imports/<id>.json`, with their raw
+/// sources in the sibling `imports/<id>/` folder (dot-file journal beside them).
+impl Entity for ImportBatch {
+    const DIR: &'static str = IMPORTS_DIR;
+    fn id(&self) -> String {
+        self.id.to_string()
+    }
+}
+
 impl Entity for RecurringSchedule {
     const DIR: &'static str = "schedules";
     fn id(&self) -> String {
@@ -342,6 +351,7 @@ pub const DOC_COLLECTIONS: &[&str] = &[
     RecurringSchedule::DIR,
     crate::retainer::Retainer::DIR,
     crate::domain::ItemType::DIR,
+    ImportBatch::DIR,
     Timer::DIR,
     ENTRIES_DIR,
     NOTIFICATIONS_DIR,

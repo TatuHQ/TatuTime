@@ -64,6 +64,9 @@
     },
     {
       "name": "reference"
+    },
+    {
+      "name": "imports"
     }
   ],
   "components": {
@@ -368,7 +371,7 @@
             "description": "Default discount, same encoding."
           },
           "payment_details": {
-            "description": "Company payment details configured for this customer — the \"Get paid\" answer: rendered in the GUI panel, mailed as \"How to pay\", printed on documents. Absent when unset; settlement stays manual.",
+            "description": "Company payment details configured for this customer \u2014 the \"Get paid\" answer: rendered in the GUI panel, mailed as \"How to pay\", printed on documents. Absent when unset; settlement stays manual.",
             "oneOf": [
               {
                 "$ref": "#/components/schemas/PaymentDetails"
@@ -395,9 +398,12 @@
         ],
         "properties": {
           "invoice_prefix": {
-            "type": ["string", "null"],
+            "type": [
+              "string",
+              "null"
+            ],
             "maxLength": 64,
-            "description": "Optional invoice prefix: 1–20 ASCII letters/digits/internal hyphens after trimming spaces, removing trailing hyphens and uppercasing. Must begin with a letter/digit. Control characters and INV are rejected. Empty string clears the prefix; omission/null preserves it on PUT and uses default INV numbering on POST. Custom prefixes use PREFIX-001."
+            "description": "Optional invoice prefix: 1\u201320 ASCII letters/digits/internal hyphens after trimming spaces, removing trailing hyphens and uppercasing. Must begin with a letter/digit. Control characters and INV are rejected. Empty string clears the prefix; omission/null preserves it on PUT and uses default INV numbering on POST. Custom prefixes use PREFIX-001."
           },
           "name": {
             "type": "string",
@@ -472,7 +478,7 @@
             "description": "Default discount, same encoding."
           },
           "payment_details": {
-            "description": "Company payment details configured for this customer — the \"Get paid\" answer: rendered in the GUI panel, mailed as \"How to pay\", printed on documents. Absent when unset; settlement stays manual.",
+            "description": "Company payment details configured for this customer \u2014 the \"Get paid\" answer: rendered in the GUI panel, mailed as \"How to pay\", printed on documents. Absent when unset; settlement stays manual.",
             "oneOf": [
               {
                 "$ref": "#/components/schemas/PaymentDetails"
@@ -641,37 +647,103 @@
         "additionalProperties": false
       },
       "ImportOrigin": {
-        "type": "object", "additionalProperties": false,
-        "required": ["provider", "namespace", "batch_id", "source_key", "invoiced"],
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "provider",
+          "namespace",
+          "batch_id",
+          "source_key",
+          "invoiced"
+        ],
         "properties": {
-          "provider": { "type": "string", "enum": ["harvest"] },
-          "namespace": { "type": "string" },
-          "batch_id": { "type": "string", "format": "uuid" },
-          "source_key": { "type": "string" },
-          "invoiced": { "type": "boolean" }
+          "provider": {
+            "type": "string",
+            "enum": [
+              "harvest"
+            ]
+          },
+          "namespace": {
+            "type": "string"
+          },
+          "batch_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "source_key": {
+            "type": "string"
+          },
+          "invoiced": {
+            "type": "boolean"
+          }
         }
       },
       "ImportedTime": {
-        "type": "object", "additionalProperties": false,
-        "required": ["origin", "currency", "rate_minor", "cost_rate_minor", "source_hours", "amount_minor", "cost_amount_minor"],
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "origin",
+          "currency",
+          "rate_minor",
+          "cost_rate_minor",
+          "source_hours",
+          "amount_minor",
+          "cost_amount_minor"
+        ],
         "properties": {
-          "origin": { "$ref": "#/components/schemas/ImportOrigin" },
-          "currency": { "$ref": "#/components/schemas/Currency" },
-          "rate_minor": { "type": "integer", "minimum": 0 },
-          "cost_rate_minor": { "type": "integer", "minimum": 0 },
-          "source_hours": { "type": "number", "minimum": 0.01, "maximum": 24 },
-          "amount_minor": { "type": "integer", "minimum": 0 },
-          "cost_amount_minor": { "type": "integer", "minimum": 0 }
+          "origin": {
+            "$ref": "#/components/schemas/ImportOrigin"
+          },
+          "currency": {
+            "$ref": "#/components/schemas/Currency"
+          },
+          "rate_minor": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "cost_rate_minor": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "source_hours": {
+            "type": "number",
+            "minimum": 0.01,
+            "maximum": 24
+          },
+          "amount_minor": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "cost_amount_minor": {
+            "type": "integer",
+            "minimum": 0
+          }
         }
       },
       "ImportedInvoice": {
-        "type": "object", "additionalProperties": false,
-        "required": ["origin", "original_number", "pdf_sha256", "opening_paid_minor"],
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "origin",
+          "original_number",
+          "pdf_sha256",
+          "opening_paid_minor"
+        ],
         "properties": {
-          "origin": { "$ref": "#/components/schemas/ImportOrigin" },
-          "original_number": { "type": "string" },
-          "pdf_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
-          "opening_paid_minor": { "type": "integer", "minimum": 0 }
+          "origin": {
+            "$ref": "#/components/schemas/ImportOrigin"
+          },
+          "original_number": {
+            "type": "string"
+          },
+          "pdf_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "opening_paid_minor": {
+            "type": "integer",
+            "minimum": 0
+          }
         }
       },
       "Entry": {
@@ -689,7 +761,10 @@
           "updated_at"
         ],
         "properties": {
-          "imported": { "$ref": "#/components/schemas/ImportedTime", "readOnly": true },
+          "imported": {
+            "$ref": "#/components/schemas/ImportedTime",
+            "readOnly": true
+          },
           "id": {
             "type": "string",
             "format": "uuid"
@@ -1165,12 +1240,48 @@
         "description": "Optional invoice document overrides (contract revision 0.1.48). Omitted/null overrides inherit existing customer/template defaults; empty notes explicitly suppress default notes. Old payloads remain valid. Issued documents cannot be edited.",
         "additionalProperties": false,
         "properties": {
-          "po_number": { "type": "string", "maxLength": 120 },
-          "invoice_date": { "type": ["string", "null"], "format": "date" },
-          "due_date": { "type": ["string", "null"], "format": "date" },
-          "payment_terms": { "oneOf": [{ "$ref": "#/components/schemas/PaymentTerms" }, { "type": "null" }] },
-          "subject": { "type": ["string", "null"], "maxLength": 120 },
-          "notes": { "type": ["string", "null"], "maxLength": 4000 }
+          "po_number": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "invoice_date": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date"
+          },
+          "due_date": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date"
+          },
+          "payment_terms": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PaymentTerms"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "subject": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 120
+          },
+          "notes": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 4000
+          }
         }
       },
       "Invoice": {
@@ -1188,8 +1299,13 @@
           "created_at"
         ],
         "properties": {
-          "imported": { "$ref": "#/components/schemas/ImportedInvoice", "readOnly": true },
-          "document": { "$ref": "#/components/schemas/InvoiceDocument" },
+          "imported": {
+            "$ref": "#/components/schemas/ImportedInvoice",
+            "readOnly": true
+          },
+          "document": {
+            "$ref": "#/components/schemas/InvoiceDocument"
+          },
           "id": {
             "type": "string",
             "format": "uuid"
@@ -1453,7 +1569,10 @@
           "updated_at"
         ],
         "properties": {
-          "imported": { "$ref": "#/components/schemas/ImportOrigin", "readOnly": true },
+          "imported": {
+            "$ref": "#/components/schemas/ImportOrigin",
+            "readOnly": true
+          },
           "id": {
             "type": "string",
             "format": "uuid"
@@ -2187,7 +2306,7 @@
       },
       "PaymentDetails": {
         "type": "object",
-        "description": "The company's payment details as configured for one customer (Get-paid panel, invoice emails, %payment_details%). Every part is optional free text; an all-blank block never persists. No provider integration exists by design — the client pays in on these details and settlement is recorded manually.",
+        "description": "The company's payment details as configured for one customer (Get-paid panel, invoice emails, %payment_details%). Every part is optional free text; an all-blank block never persists. No provider integration exists by design \u2014 the client pays in on these details and settlement is recorded manually.",
         "properties": {
           "bank_name": {
             "type": "string",
@@ -2227,7 +2346,7 @@
             "items": {
               "$ref": "#/components/schemas/PaymentRail"
             },
-            "description": "Structured currency-specific rails for multi-currency billing. The flat fields above stay authoritative for the single-rail case; nothing is migrated. Display data only — no payment provider is involved."
+            "description": "Structured currency-specific rails for multi-currency billing. The flat fields above stay authoritative for the single-rail case; nothing is migrated. Display data only \u2014 no payment provider is involved."
           }
         },
         "additionalProperties": false
@@ -2446,7 +2565,9 @@
           "lines"
         ],
         "properties": {
-          "document": { "$ref": "#/components/schemas/InvoiceDocument" },
+          "document": {
+            "$ref": "#/components/schemas/InvoiceDocument"
+          },
           "customer_id": {
             "type": "string",
             "format": "uuid"
@@ -2602,8 +2723,12 @@
         ],
         "description": "Draft-only full replacement. Tracked lines must come back verbatim; manual amounts are recomputed server-side.",
         "properties": {
-          "document": { "$ref": "#/components/schemas/InvoiceDocument" },
-          "currency": { "$ref": "#/components/schemas/Currency" },
+          "document": {
+            "$ref": "#/components/schemas/InvoiceDocument"
+          },
+          "currency": {
+            "$ref": "#/components/schemas/Currency"
+          },
           "lines": {
             "type": "array",
             "minItems": 1,
@@ -2690,7 +2815,7 @@
           "payment_heading": {
             "type": "string",
             "maxLength": 40,
-            "description": "Heading of the generated payment block (default `Payment details`). Renames the block; it does not add free text — use the template `notes` field for that."
+            "description": "Heading of the generated payment block (default `Payment details`). Renames the block; it does not add free text \u2014 use the template `notes` field for that."
           },
           "item_type": {
             "type": "string",
@@ -3013,6 +3138,358 @@
           }
         },
         "additionalProperties": false
+      },
+      "ImportBatchInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "namespace": {
+            "type": "string",
+            "maxLength": 64,
+            "pattern": "^[a-z0-9_-]+$"
+          }
+        }
+      },
+      "ImportCommitInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "revision"
+        ],
+        "properties": {
+          "revision": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          }
+        }
+      },
+      "ImportFile": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "sha256",
+          "bytes",
+          "uploaded_at"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "bytes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "uploaded_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ImportFiles": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "time": {
+            "$ref": "#/components/schemas/ImportFile"
+          },
+          "expenses": {
+            "$ref": "#/components/schemas/ImportFile"
+          },
+          "invoices": {
+            "$ref": "#/components/schemas/ImportFile"
+          }
+        }
+      },
+      "ImportChoiceList": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "ImportChoices": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "users": {
+            "$ref": "#/components/schemas/ImportChoiceList"
+          },
+          "customers": {
+            "$ref": "#/components/schemas/ImportChoiceList"
+          },
+          "projects": {
+            "$ref": "#/components/schemas/ImportChoiceList"
+          },
+          "tasks": {
+            "$ref": "#/components/schemas/ImportChoiceList"
+          },
+          "categories": {
+            "$ref": "#/components/schemas/ImportChoiceList"
+          },
+          "invoices": {
+            "$ref": "#/components/schemas/ImportChoiceList"
+          },
+          "excluded": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "invoice_links": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "source_key",
+                "invoice_sha256"
+              ],
+              "properties": {
+                "source_key": {
+                  "type": "string"
+                },
+                "invoice_sha256": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "ImportCommitOutcome": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "committed_at",
+          "revision",
+          "entries",
+          "expenses",
+          "invoices",
+          "customers",
+          "projects",
+          "tasks",
+          "categories"
+        ],
+        "properties": {
+          "committed_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "revision": {
+            "type": "string"
+          },
+          "entries": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "expenses": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "invoices": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "customers": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "projects": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "tasks": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "categories": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        }
+      },
+      "ImportBatch": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "namespace",
+          "state",
+          "created_at",
+          "updated_at",
+          "files",
+          "choices"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "namespace": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "reviewed",
+              "committed",
+              "failed"
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "files": {
+            "$ref": "#/components/schemas/ImportFiles"
+          },
+          "choices": {
+            "$ref": "#/components/schemas/ImportChoices"
+          },
+          "preview_revision": {
+            "type": "string"
+          },
+          "commit": {
+            "$ref": "#/components/schemas/ImportCommitOutcome"
+          },
+          "error": {
+            "type": "string"
+          }
+        }
+      },
+      "ImportReconciliation": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "source",
+          "currency",
+          "accepted_count",
+          "accepted_minor",
+          "cost_minor",
+          "skipped_count",
+          "skipped_minor",
+          "opening_paid_minor"
+        ],
+        "properties": {
+          "source": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "accepted_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "accepted_minor": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "cost_minor": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "skipped_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "skipped_minor": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "opening_paid_minor": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "ImportPreview": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "revision",
+          "ready",
+          "blocking",
+          "time",
+          "expenses",
+          "invoices",
+          "totals",
+          "issues"
+        ],
+        "properties": {
+          "revision": {
+            "type": "string"
+          },
+          "ready": {
+            "type": "boolean"
+          },
+          "blocking": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "time": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "expenses": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "invoices": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "totals": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ImportReconciliation"
+            }
+          },
+          "issues": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          }
+        }
       }
     },
     "responses": {
@@ -3252,7 +3729,7 @@
           "maximum": 1000,
           "default": 200
         },
-        "description": "Page size. Between 1 and 1000; anything else — including a larger value — is refused with 422 naming `limit`, never clamped, so a truncated page can never be mistaken for the whole set. The default is 200."
+        "description": "Page size. Between 1 and 1000; anything else \u2014 including a larger value \u2014 is refused with 422 naming `limit`, never clamped, so a truncated page can never be mistaken for the whole set. The default is 200."
       },
       "CursorParam": {
         "name": "cursor",
@@ -3261,7 +3738,7 @@
         "schema": {
           "type": "string"
         },
-        "description": "Opaque keyset cursor. Send back the previous page's `next_cursor` verbatim to continue the walk; never parse or construct one — its contents are an implementation detail. A value this service did not issue is refused with 422 naming `cursor`, never treated as a fresh first page."
+        "description": "Opaque keyset cursor. Send back the previous page's `next_cursor` verbatim to continue the walk; never parse or construct one \u2014 its contents are an implementation detail. A value this service did not issue is refused with 422 naming `cursor`, never treated as a fresh first page."
       }
     }
   },
@@ -4552,7 +5029,7 @@
           "entries"
         ],
         "summary": "List entries for a day or an inclusive date range",
-        "description": "Exactly one form: ?date=YYYY-MM-DD or ?from=...&to=... (span at most 400 inclusive days). Paged: the rows walk the total order `(date, id)` ascending, a response holds at most `limit` of them, and `next_cursor` is the opaque key of the page that follows — `null` when the page ended the set. Follow the cursor to see every row exactly once.",
+        "description": "Exactly one form: ?date=YYYY-MM-DD or ?from=...&to=... (span at most 400 inclusive days). Paged: the rows walk the total order `(date, id)` ascending, a response holds at most `limit` of them, and `next_cursor` is the opaque key of the page that follows \u2014 `null` when the page ended the set. Follow the cursor to see every row exactly once.",
         "parameters": [
           {
             "$ref": "#/components/parameters/DateParam"
@@ -7054,7 +7531,7 @@
           "expenses"
         ],
         "summary": "List expenses (optional customer_id / from / to filters)",
-        "description": "Paged: the rows walk the total order `(date, id)` descending — newest first, the order the register displays — a response holds at most `limit` of them, and `next_cursor` is the opaque key of the page that follows, `null` when the page ended the set. Follow the cursor to see every row exactly once.",
+        "description": "Paged: the rows walk the total order `(date, id)` descending \u2014 newest first, the order the register displays \u2014 a response holds at most `limit` of them, and `next_cursor` is the opaque key of the page that follows, `null` when the page ended the set. Follow the cursor to see every row exactly once.",
         "parameters": [
           {
             "name": "customer_id",
@@ -7217,7 +7694,7 @@
           "expenses"
         ],
         "summary": "Full replacement of an expense",
-        "description": "An edit replaces the record the way the entries PUT does: a field the payload omits is cleared. The record keeps its id, its author and its creation time, and `updated_at` moves. An expense frozen by an issued invoice (any non-draft status — invoiced records are permanent) or by a submitted/approved claim is refused with 409, and an unverifiable lock state with 503.",
+        "description": "An edit replaces the record the way the entries PUT does: a field the payload omits is cleared. The record keeps its id, its author and its creation time, and `updated_at` moves. An expense frozen by an issued invoice (any non-draft status \u2014 invoiced records are permanent) or by a submitted/approved claim is refused with 409, and an unverifiable lock state with 503.",
         "requestBody": {
           "required": true,
           "content": {
@@ -7879,7 +8356,7 @@
           "admin"
         ],
         "summary": "Disable the credential vault and delete the generated key (admin only)",
-        "description": "Requires `{ \"confirm\": true }`. Refused with vault_in_use while any secret is stored, and with vault_managed_externally when the lifecycle is operator-managed (`TUCANO_VAULT_ENABLED` or an env key/env key file). On success `vault_enabled=false` is persisted first, the disabled state is installed, and the managed vault.key is then deleted best-effort — a persistence failure returns 500 and leaves both the slot and the key untouched.",
+        "description": "Requires `{ \"confirm\": true }`. Refused with vault_in_use while any secret is stored, and with vault_managed_externally when the lifecycle is operator-managed (`TUCANO_VAULT_ENABLED` or an env key/env key file). On success `vault_enabled=false` is persisted first, the disabled state is installed, and the managed vault.key is then deleted best-effort \u2014 a persistence failure returns 500 and leaves both the slot and the key untouched.",
         "parameters": [
           {
             "$ref": "#/components/parameters/CsrfProtection"
@@ -9737,6 +10214,690 @@
           },
           "413": {
             "$ref": "#/components/responses/PayloadTooLarge"
+          }
+        }
+      }
+    },
+    "/api/admin/imports/harvest": {
+      "get": {
+        "operationId": "listHarvestImports",
+        "x-admin-only": true,
+        "tags": [
+          "imports"
+        ],
+        "summary": "Paginated Harvest import history, newest first",
+        "parameters": [
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Import history.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "total",
+                    "offset",
+                    "limit",
+                    "items"
+                  ],
+                  "properties": {
+                    "total": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "offset": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "limit": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ImportBatch"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createHarvestImport",
+        "x-admin-only": true,
+        "tags": [
+          "imports"
+        ],
+        "summary": "Create a draft Harvest import batch",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportBatchInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created batch.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportBatch"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Locked"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ]
+      }
+    },
+    "/api/admin/imports/harvest/{id}": {
+      "get": {
+        "operationId": "getHarvestImport",
+        "x-admin-only": true,
+        "tags": [
+          "imports"
+        ],
+        "summary": "One import batch, mapping and outcome",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Batch.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportBatch"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/api/admin/imports/harvest/{id}/files/{kind}": {
+      "put": {
+        "operationId": "uploadHarvestImportSource",
+        "x-admin-only": true,
+        "tags": [
+          "imports"
+        ],
+        "summary": "Stage or replace exactly one validated source",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "time",
+                "expenses",
+                "invoices"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "text/csv": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            },
+            "application/zip": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Replaced source.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportBatch"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "First source staged.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportBatch"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Locked"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      },
+      "get": {
+        "operationId": "downloadHarvestImportSource",
+        "x-admin-only": true,
+        "tags": [
+          "imports"
+        ],
+        "summary": "Download the staged source for review",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "time",
+                "expenses",
+                "invoices"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Source bytes.",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/api/admin/imports/harvest/{id}/review": {
+      "put": {
+        "operationId": "reviewHarvestImport",
+        "x-admin-only": true,
+        "tags": [
+          "imports"
+        ],
+        "summary": "Replace reviewed mappings, corrections and exclusions",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportChoices"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated batch.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportBatch"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Locked"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/api/admin/imports/harvest/{id}/preview": {
+      "post": {
+        "operationId": "previewHarvestImport",
+        "x-admin-only": true,
+        "tags": [
+          "imports"
+        ],
+        "summary": "Recompute the validated preview and its revision",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Preview.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportPreview"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Locked"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/api/admin/imports/harvest/{id}/rows": {
+      "get": {
+        "operationId": "harvestImportRows",
+        "x-admin-only": true,
+        "tags": [
+          "imports"
+        ],
+        "summary": "Paginated preview rows and issues",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            }
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "time",
+                "expense",
+                "invoice"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Preview rows.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "revision",
+                    "ready",
+                    "blocking",
+                    "totals",
+                    "issues",
+                    "total",
+                    "offset",
+                    "limit",
+                    "items"
+                  ],
+                  "properties": {
+                    "revision": {
+                      "type": "string"
+                    },
+                    "ready": {
+                      "type": "boolean"
+                    },
+                    "blocking": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "totals": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ImportReconciliation"
+                      }
+                    },
+                    "issues": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": true
+                      }
+                    },
+                    "total": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "offset": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "limit": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": true
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/api/admin/imports/harvest/{id}/commit": {
+      "post": {
+        "operationId": "commitHarvestImport",
+        "x-admin-only": true,
+        "tags": [
+          "imports"
+        ],
+        "summary": "Commit an exact ready preview",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportCommitInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Journaled outcome.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportCommitOutcome"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Locked"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/api/admin/imports/harvest/{id}/invoices/{sha}/pdf": {
+      "get": {
+        "operationId": "harvestImportInvoicePdf",
+        "x-admin-only": true,
+        "tags": [
+          "imports"
+        ],
+        "summary": "Original archived invoice PDF from the staged ZIP",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "sha",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Original PDF.",
+            "content": {
+              "application/pdf": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           }
         }
       }

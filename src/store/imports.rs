@@ -78,6 +78,15 @@ pub struct ImportFiles {
 }
 
 impl ImportFiles {
+    #[must_use]
+    pub fn contains(&self, kind: ImportKind) -> bool {
+        match kind {
+            ImportKind::Time => self.time.is_some(),
+            ImportKind::Expenses => self.expenses.is_some(),
+            ImportKind::Invoices => self.invoices.is_some(),
+        }
+    }
+
     fn set(&mut self, kind: ImportKind, file: StagedImportFile) {
         match kind {
             ImportKind::Time => self.time = Some(file),

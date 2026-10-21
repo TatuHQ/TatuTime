@@ -311,17 +311,18 @@ const ROUTES = [
     ['/settings/catalog', 'settings-tab-catalog', 'settings-panel-catalog'],
     ['/settings/expenses', 'settings-tab-expenses', 'settings-panel-expenses'],
     ['/settings/email', 'settings-tab-email', 'settings-panel-email'],
+    ['/settings/import', 'settings-tab-import', 'settings-panel-import'],
     ['/settings/security', 'settings-tab-security', 'settings-panel-security'],
 ];
 
 // ------------------------------------------------------------- tab order ----
 
-test('Settings lists the seven focused tabs in order for an admin', () => {
+test('Settings lists the eight focused tabs in order for an admin', () => {
     const { dom, document } = setup();
     assert.deepEqual(tabs(document).map((tab) => tab.id), ROUTES.map(([, tab]) => tab));
     assert.deepEqual(
         tabs(document).map(collapsedText),
-        ['Users', 'Company', 'Invoice template', 'Catalog', 'Expense categories', 'Email', 'Security & runtime'],
+        ['Users', 'Company', 'Invoice template', 'Catalog', 'Expense categories', 'Email', 'Harvest import', 'Security & runtime'],
     );
     for (const [tab, panelId] of ROUTES.map(([, tab, panel]) => [tab, panel])) {
         const panel = document.getElementById(panelId);

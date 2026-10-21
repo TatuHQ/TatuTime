@@ -1,11 +1,10 @@
 # Harvest import implementation status
 
 Harvest import is being developed under #394. The CSV parser (#395), protected
-financial-history foundation (#398) and bounded ZIP container reader plus
-best-effort PDF metadata suggestions (#399) are implemented. There is no upload
-endpoint, Import settings page or data commit operation yet. Successful parsing
-is not an import: mapping, reviewed metadata, duplicate handling and journaled
-persistence remain required.
+financial-history foundation (#398), bounded ZIP/PDF inspection (#399), unified
+preview planner (#400), journaled commit (#401), admin API (#402) and the
+`/settings/import` workflow (#403) are implemented. #404 is the remaining
+end-to-end verification ticket.
 
 ## Financial-history foundation
 
@@ -119,12 +118,40 @@ It reads the files without copying them or printing source row values; only
 counts and field-level issues are reported. Never add real exports to Git or
 upload them to issue trackers.
 
+## Preview, API and commit
+
+`domain::import_plan::plan` builds one deterministic preview from any
+combination of the three sources. Source identity is
+`provider:namespace:<canonical row hash>:<occurrence>` (invoice identity is the
+exact PDF SHA-256), so overlapping exports collide and legitimate identical
+rows keep distinct occurrences. Every reference is an explicit reviewed
+mapping; unresolved references, ambiguous corrections, invoice
+number/hash conflicts and missing financial/status fields are blocking issues.
+The revision hash covers the parsed sources and the reviewed choices; commit
+rejects a stale revision.
+
+Admin-only routes live under `/api/admin/imports/harvest`:
+
+- `POST /` creates a batch; `GET /` lists history; `GET /{id}` returns one batch.
+- `PUT|GET /{id}/files/{time|expenses|invoices}` stages/downloads exactly one
+  validated source (1 MiB CSV, 5 MiB ZIP).
+- `PUT /{id}/review` replaces the reviewed mapping; `POST /{id}/preview`
+  recomputes the plan; `GET /{id}/rows` paginates rows, decisions and issues.
+- `POST /{id}/commit` requires the exact ready revision.
+- `GET /{id}/invoices/{sha256}/pdf` returns the original archived member.
+- `GET /settings/import` is the admin GUI workspace.
+
+A commit re-parses the staged sources and rebuilds the preview **inside the
+store writer lock**. It journals every path in `imports/.journal.<id>.json`
+before the first write, uses deterministic ids (a retry returns the same
+records), writes original PDFs byte-for-byte, and advances only the matching
+`INV-`/known-prefix high-water mark. A failure removes exactly the journaled
+paths; `Store::open` rolls back an interrupted `Prepared` journal before serving
+traffic. `imports/` is admin-only and never exposed to member routes.
+
 ## Remaining delivery
 
-1. Explicit user/reference mapping with reconciliation previews, building on the
-   PDF suggestions (#400).
-2. Idempotent import history, duplicate review and journaled commit/recovery (#401).
-3. Admin batch/source/review/commit API (#402).
-4. Accessible Settings > Import workflow for time, expenses and invoices (#403).
-5. Contract, storage failure/recovery and browser verification (#404) before importing
-   any real financial records.
+1. End-to-end verification (#404): synthetic three-source fixtures, fault and
+   restart recovery, backup/restore, browser gates and private-sample confirmation.
+2. Any documented follow-ups found by #404 (for example a killable PDF worker if a
+   real sample defeats the bounded parser).
