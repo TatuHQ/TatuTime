@@ -469,6 +469,96 @@ async fn competing_commits_return_one_outcome_and_never_alter_history() {
 
 const EXPENSE_SOURCE_HEADER: &str = "Date,Client,Project,Project Code,Category,Notes,Amount,Units,Billable,Invoiced?,Approved?,First name,Last name,Employee Id,Currency\n";
 
+/// The Settings workspace's "create everything" pass, end to end: the customer
+/// is created in the same batch, so the project choice omits its `customer_id`,
+/// and the task choice carries the raw source name as its code.
+#[tokio::test]
+async fn create_all_gui_mappings_commit_the_planned_customer_project_and_task() {
+    let (app, _d) = app().await;
+    let base = "/api/admin/imports/harvest";
+    let (_, me) = json_req(&app, "GET", "/api/auth/me", None).await;
+    let uid = me["id"].clone();
+    let id = new_import_batch(&app).await;
+    let time = format!(
+        "{IMPORT_TIME_HEADER}2026-01-05,Acme,Website,WEB,Design,Work,2.00,Yes,No,Ada,Lovelace,E1,65.00,130.00,50.00,100.00,EUR\n"
+    );
+    let (status, _) = body_req(
+        &app,
+        "PUT",
+        &format!("{base}/{id}/files/time"),
+        "text/csv",
+        time.into_bytes(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let choices = json!({
+        "users": [{"person":"Ada Lovelace","employee_id":"E1","user_id":uid,"skip":false}],
+        "customers": [{
+            "action":"create","source_client":"Acme","name":"Acme",
+            "currency":"EUR","default_rate_minor":0
+        }],
+        "projects": [{
+            "action":"create","source_client":"Acme","source_project":"Website",
+            "source_code":"WEB","customer_id":null,"code":"WEB",
+            "name":"Website","currency":"EUR","rate_minor":0
+        }],
+        "tasks": [{"action":"create","source_task":"Design","code":"Design","name":"Design"}],
+        "categories": [], "invoices": [], "excluded": [], "invoice_links": []
+    });
+    let (status, batch) =
+        json_req(&app, "PUT", &format!("{base}/{id}/review"), Some(choices)).await;
+    assert_eq!(status, StatusCode::OK, "{batch}");
+    let (status, preview) = json_req(&app, "POST", &format!("{base}/{id}/preview"), None).await;
+    assert_eq!(status, StatusCode::OK, "{preview}");
+    assert_eq!(preview["ready"], true, "{preview}");
+    let (status, outcome) = json_req(
+        &app,
+        "POST",
+        &format!("{base}/{id}/commit"),
+        Some(json!({"revision": preview["revision"]})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{outcome}");
+    assert_eq!(outcome["customers"].as_array().unwrap().len(), 1);
+    assert_eq!(outcome["projects"].as_array().unwrap().len(), 1);
+    assert_eq!(outcome["tasks"].as_array().unwrap().len(), 1);
+
+    let cid = outcome["customers"][0].as_str().unwrap();
+    let (status, customers) = json_req(&app, "GET", "/api/customers", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let customer = customers["customers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|customer| customer["id"] == cid)
+        .expect("created customer");
+    assert_eq!(customer["name"], "Acme");
+    let (status, projects) =
+        json_req(&app, "GET", &format!("/api/customers/{cid}/projects"), None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(projects["projects"][0]["code"], "WEB");
+    let (status, tasks) = json_req(
+        &app,
+        "GET",
+        &format!("/api/customers/{cid}/projects/WEB/tasks"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(tasks["tasks"][0]["code"], "DESIGN");
+    let (status, entries) = json_req(
+        &app,
+        "GET",
+        "/api/entries?from=2026-01-05&to=2026-01-05",
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(entries["entries"][0]["customer_id"], cid);
+    assert_eq!(entries["entries"][0]["project_code"], "WEB");
+    assert_eq!(entries["entries"][0]["task_code"], "DESIGN");
+}
+
 /// #401: batch history, staged sources, dedup authority and the external lock
 /// survive backup/restore; a cold-archived imported row still reads by id and
 /// stays in the lifetime scan, while a locked external row refuses relocation.

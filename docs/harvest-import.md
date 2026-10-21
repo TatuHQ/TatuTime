@@ -177,6 +177,13 @@ exceed the reviewed invoice total. A linked row is still imported exactly once
 and keeps its permanent external-billed flag, so invoice generation excludes it;
 a contract test proves a linked row cannot be billed again.
 
+Creating references in one pass works from the same review: a "create" project
+choice may omit `customer_id`, in which case it inherits the reviewed customer
+mapping (including a customer created in that batch), and the raw source
+code/name is normalised into a collision-safe project code scoped to that
+customer. A "create" task choice accepts the raw source name and derives its
+safe code the same way.
+
 Preview rows and review issues are filterable and paged in the browser (25 per
 page) without recomputing the preview. A draft or failed batch can be discarded
 after one explicit confirmation; a committed batch offers no discard. The

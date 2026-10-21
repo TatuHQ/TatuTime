@@ -109,10 +109,16 @@ pub enum ProjectChoice {
         source_project: String,
         #[serde(default)]
         source_code: String,
-        customer_id: Uuid,
-        code: ProjectCode,
+        /// Omitted by the GUI when the customer is created in the same pass;
+        /// the planner then inherits the reviewed customer mapping's id.
+        #[serde(default)]
+        customer_id: Option<Uuid>,
+        /// Raw reviewed code; normalised into a collision-safe `ProjectCode`.
+        #[serde(default)]
+        code: String,
         name: String,
         currency: Currency,
+        #[serde(default)]
         rate_minor: u64,
     },
     /// Explicitly drop the project (expense rows only; time needs a project).
@@ -133,7 +139,9 @@ pub enum TaskChoice {
     },
     Create {
         source_task: String,
-        code: ProjectCode,
+        /// Raw reviewed code; normalised into a collision-safe `ProjectCode`.
+        #[serde(default)]
+        code: String,
         name: String,
     },
     Skip {
@@ -587,7 +595,7 @@ fn reviewed_project(
     source: &str,
     record: Option<usize>,
     required: bool,
-    taken: &mut BTreeSet<String>,
+    taken: &mut BTreeMap<Uuid, BTreeSet<String>>,
 ) -> Option<String> {
     match choice {
         Some(ProjectChoice::Existing {
@@ -627,9 +635,10 @@ fn reviewed_project(
         Some(ProjectChoice::Create {
             customer_id: mapped,
             code,
+            name,
             ..
         }) => {
-            if *mapped != customer_id {
+            if mapped.is_some_and(|mapped| mapped != customer_id) {
                 issues.push(issue(
                     source,
                     record,
@@ -639,10 +648,18 @@ fn reviewed_project(
                     "the new project must belong to the mapped customer",
                     true,
                 ));
-                None
-            } else if projects
+                return None;
+            }
+            // The GUI sends the source code (or an empty string) plus the
+            // reviewed name; prefer the source code and fall back to the name,
+            // deriving a safe code instead of rejecting raw text. Project codes
+            // are scoped to their customer, so only that customer's codes are
+            // taken.
+            let taken = taken.entry(customer_id).or_default();
+            let code = ProjectCode(suggest_code(code, name, taken));
+            if projects
                 .iter()
-                .any(|p| p.customer_id == customer_id && p.code == *code)
+                .any(|p| p.customer_id == customer_id && p.code == code)
             {
                 issues.push(issue(
                     source,
@@ -656,7 +673,7 @@ fn reviewed_project(
                 None
             } else {
                 taken.insert(code.0.clone());
-                Some(code.0.clone())
+                Some(code.0)
             }
         }
         Some(ProjectChoice::Skip { .. }) if !required => None,
@@ -725,26 +742,21 @@ fn reviewed_task(
             }
             Some(code.0.clone())
         }
-        Some(TaskChoice::Create { code, .. }) => {
-            if let (Some(customer_id), Some(project_code)) = (customer_id, project_code)
-                && tasks.iter().any(|task| {
-                    task.customer_id == customer_id
-                        && task.project_code.0 == project_code
-                        && task.code == *code
-                })
-            {
-                issues.push(issue(
-                    source,
-                    record,
-                    None,
-                    None,
-                    "task",
-                    "a task with this code already exists on the project",
-                    true,
-                ));
-                return None;
-            }
-            Some(code.0.clone())
+        Some(TaskChoice::Create { code, name, .. }) => {
+            // Derive a safe code from the reviewed name, avoiding the tasks
+            // that already exist on this project. Raw GUI text never has to be
+            // a valid ProjectCode before the request reaches the planner.
+            let existing: BTreeSet<String> = match (customer_id, project_code) {
+                (Some(customer_id), Some(project_code)) => tasks
+                    .iter()
+                    .filter(|task| {
+                        task.customer_id == customer_id && task.project_code.0 == project_code
+                    })
+                    .map(|task| task.code.0.clone())
+                    .collect(),
+                _ => BTreeSet::new(),
+            };
+            Some(suggest_code(name, code, &existing))
         }
         Some(TaskChoice::Skip { .. }) => None,
         None => {
@@ -912,8 +924,13 @@ pub fn plan(
         .map(|link| (link.source_key.as_str(), link.invoice_sha256.as_str()))
         .collect::<HashMap<_, _>>();
 
-    let mut taken_codes: BTreeSet<String> =
-        view.projects.iter().map(|p| p.code.0.clone()).collect();
+    let mut taken_codes: BTreeMap<Uuid, BTreeSet<String>> = BTreeMap::new();
+    for project in view.projects {
+        taken_codes
+            .entry(project.customer_id)
+            .or_default()
+            .insert(project.code.0.clone());
+    }
 
     // Existing provenance, keyed by provider + namespace + source key. Batch id
     // is deliberately excluded: overlapping exports must collide.
@@ -2414,6 +2431,45 @@ mod tests {
             invoice_sha256: sha.into(),
         }];
         choices
+    }
+
+    #[test]
+    fn gui_create_choices_inherit_the_planned_customer_and_derive_safe_codes() {
+        let f = fixture();
+        let time = time_report(&[
+            "2026-01-05,Acme,Website,WEB,Design,Work,2.00,Yes,No,Ada,Lovelace,E1,65.00,130.00,50.00,100.00,EUR",
+        ]);
+        // Exactly the shape the Settings workspace sends: the customer is
+        // created in the same pass, so the project create carries a null
+        // customer_id, and the task code is the raw source task name.
+        let choices: ImportChoices = serde_json::from_value(json!({
+            "users": [{"person":"Ada Lovelace","employee_id":"E1","user_id":f.uid,"skip":false}],
+            "customers": [{
+                "action":"create","source_client":"Acme","name":"Acme",
+                "currency":"EUR","default_rate_minor":0
+            }],
+            "projects": [{
+                "action":"create","source_client":"Acme","source_project":"Website",
+                "source_code":"WEB","customer_id":null,"code":"WEB",
+                "name":"Website","currency":"EUR","rate_minor":0
+            }],
+            "tasks": [{"action":"create","source_task":"Design","code":"Design","name":"Design"}],
+            "categories": [], "invoices": [], "excluded": [], "invoice_links": []
+        }))
+        .unwrap();
+        let preview = plan_with(&f, Some(&time), None, &[], &choices, &[], &[]);
+        assert!(preview.ready, "{:?}", preview.issues);
+        assert_eq!(
+            preview.time[0].customer_id,
+            Some(planned_customer_id("Acme")),
+            "the project inherits the planned customer"
+        );
+        assert_eq!(preview.time[0].project_code.as_deref(), Some("WEB"));
+        assert_eq!(
+            preview.time[0].task_code.as_deref(),
+            Some("DESIGN"),
+            "the raw task name becomes a safe code"
+        );
     }
 
     #[test]
