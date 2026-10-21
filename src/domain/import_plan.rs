@@ -1687,13 +1687,18 @@ pub fn plan(
         });
     }
 
-    // A reviewed link must point at a real invoice in this batch and an
-    // externally billed row; it can never make a row billable again.
+    // A reviewed link must point at a real, included invoice in this batch and
+    // an externally billed row. The row's currency and customer must agree with
+    // the invoice and the linked rows may not exceed its total. Link checks are
+    // reconciliation only: they never make a row billable again, so a linked
+    // row stays in the skipped (external billed) side of the totals.
+    let mut linked_totals: BTreeMap<&str, u64> = BTreeMap::new();
+    let mut over_total_reported: BTreeSet<&str> = BTreeSet::new();
     for link in &choices.invoice_links {
-        if !invoice_candidates
+        let Some(invoice) = invoice_rows
             .iter()
-            .any(|candidate| candidate.sha256 == link.invoice_sha256)
-        {
+            .find(|row| row.pdf_sha256 == link.invoice_sha256)
+        else {
             global_issues.push(issue(
                 "invoice",
                 None,
@@ -1703,23 +1708,114 @@ pub fn plan(
                 "a reviewed row link points at an invoice outside this batch",
                 true,
             ));
+            continue;
+        };
+        if invoice.decision == ImportDecision::Excluded {
+            global_issues.push(issue(
+                "invoice",
+                None,
+                None,
+                Some(&invoice.original_name),
+                "invoice_links",
+                "a reviewed row link points at an excluded invoice",
+                true,
+            ));
         }
-        let linked = time_rows
+        let source = time_rows
             .iter()
-            .any(|row| row.source_key == link.source_key && row.invoiced)
-            || expense_rows
-                .iter()
-                .any(|row| row.source_key == link.source_key && row.invoiced);
-        if !linked {
+            .find(|row| row.source_key == link.source_key)
+            .map(|row| {
+                (
+                    row.record,
+                    row.line,
+                    row.invoiced,
+                    row.currency.as_deref(),
+                    row.customer_id,
+                    row.amount_minor,
+                )
+            })
+            .or_else(|| {
+                expense_rows
+                    .iter()
+                    .find(|row| row.source_key == link.source_key)
+                    .map(|row| {
+                        (
+                            row.record,
+                            row.line,
+                            row.invoiced,
+                            row.currency.as_deref(),
+                            row.customer_id,
+                            row.amount_minor,
+                        )
+                    })
+            });
+        let Some((record, line, invoiced, currency, customer_id, amount)) = source else {
             global_issues.push(issue(
                 "invoice",
                 None,
                 None,
                 None,
                 "invoice_links",
+                "a reviewed row link points at a row outside this batch",
+                true,
+            ));
+            continue;
+        };
+        if !invoiced {
+            global_issues.push(issue(
+                "invoice",
+                Some(record),
+                Some(line),
+                None,
+                "invoice_links",
                 "only externally billed rows may be linked to an imported invoice",
                 true,
             ));
+            continue;
+        }
+        if let (Some(row_currency), Some(invoice_currency)) =
+            (currency, invoice.currency.as_deref())
+            && row_currency != invoice_currency
+        {
+            global_issues.push(issue(
+                "invoice",
+                Some(record),
+                Some(line),
+                None,
+                "invoice_links",
+                "the linked row currency differs from the invoice currency",
+                true,
+            ));
+        }
+        if let (Some(row_customer), Some(invoice_customer)) = (customer_id, invoice.customer_id)
+            && row_customer != invoice_customer
+        {
+            global_issues.push(issue(
+                "invoice",
+                Some(record),
+                Some(line),
+                None,
+                "invoice_links",
+                "the linked row customer differs from the invoice customer",
+                true,
+            ));
+        }
+        if let (Some(amount), Some(total)) = (amount, invoice.total_minor) {
+            let sum = linked_totals
+                .entry(link.invoice_sha256.as_str())
+                .or_default();
+            *sum = sum.saturating_add(amount);
+            if *sum > total && over_total_reported.insert(link.invoice_sha256.as_str()) {
+                global_issues.push(issue(
+                    "invoice",
+                    None,
+                    None,
+                    Some(&invoice.original_name),
+                    "invoice_links",
+                    "the reviewed row links exceed the invoice total",
+                    true,
+                ));
+            }
         }
     }
 
@@ -2299,6 +2395,121 @@ mod tests {
                 .issues
                 .iter()
                 .any(|issue| issue.field == "task" && issue.blocking)
+        );
+    }
+
+    fn invoiced_time_row(currency: &str) -> Report {
+        time_report(&[&format!(
+            "2026-01-05,Acme,Website,WEB,Design,Work,2.00,Yes,Yes,Ada,Lovelace,E1,65.00,130.00,50.00,100.00,{currency}"
+        )])
+    }
+
+    fn link_choices(f: &Fixture, sha: &str, source_key: &str) -> ImportChoices {
+        let mut choices = ImportChoices {
+            invoices: vec![invoice_choice(f, sha)],
+            ..choices(f)
+        };
+        choices.invoice_links = vec![RowInvoiceLink {
+            source_key: source_key.into(),
+            invoice_sha256: sha.into(),
+        }];
+        choices
+    }
+
+    #[test]
+    fn explicit_links_reconcile_the_invoice_total_without_rebilling_the_row() {
+        let f = fixture();
+        let time = invoiced_time_row("EUR");
+        let baseline = plan_with(&f, Some(&time), None, &[], &choices(&f), &[], &[]);
+        let source_key = baseline.time[0].source_key.clone();
+        let sha = "a".repeat(64);
+        let mut mapping = link_choices(&f, &sha, &source_key);
+
+        // The reviewed invoice total (100.00) is below the linked row (130.00):
+        // the link is a reconciliation conflict, not an acceptance.
+        let preview = plan_with(&f, Some(&time), None, &[candidate()], &mapping, &[], &[]);
+        assert!(!preview.ready);
+        assert!(
+            preview.issues.iter().any(|issue| {
+                issue.field == "invoice_links"
+                    && issue.blocking
+                    && issue.message.contains("exceed the invoice total")
+            }),
+            "{:?}",
+            preview.issues
+        );
+        let totals = preview
+            .totals
+            .iter()
+            .find(|row| row.source == "time" && row.currency == "EUR")
+            .unwrap();
+        // The external row is imported exactly once; the association is not a
+        // second acceptance and the row keeps its permanent external billing
+        // flag, so invoice generation can never bill it again.
+        assert_eq!(totals.accepted_count, 1);
+        assert_eq!(totals.accepted_minor, 13_000);
+        assert!(preview.time[0].invoiced);
+        assert_eq!(
+            preview.time[0].invoice_sha256.as_deref(),
+            Some(sha.as_str()),
+            "the reviewed association stays on the preview row"
+        );
+
+        // A total that covers the linked row reconciles and unblocks the commit.
+        mapping.invoices[0].total_minor = Some(20_000);
+        let preview = plan_with(&f, Some(&time), None, &[candidate()], &mapping, &[], &[]);
+        assert!(preview.ready, "{:?}", preview.issues);
+        let totals = preview
+            .totals
+            .iter()
+            .find(|row| row.source == "time" && row.currency == "EUR")
+            .unwrap();
+        assert_eq!(totals.accepted_count, 1);
+        assert_eq!(totals.accepted_minor, 13_000);
+        assert!(preview.time[0].invoiced);
+    }
+
+    #[test]
+    fn explicit_links_reject_currency_and_customer_mismatches() {
+        let sha = "a".repeat(64);
+
+        let f = fixture();
+        let dollars = invoiced_time_row("USD");
+        let baseline = plan_with(&f, Some(&dollars), None, &[], &choices(&f), &[], &[]);
+        let mut mapping = link_choices(&f, &sha, &baseline.time[0].source_key);
+        mapping.invoices[0].total_minor = Some(20_000);
+        let preview = plan_with(&f, Some(&dollars), None, &[candidate()], &mapping, &[], &[]);
+        assert!(!preview.ready);
+        assert!(
+            preview.issues.iter().any(|issue| {
+                issue.field == "invoice_links" && issue.message.contains("currency differs")
+            }),
+            "{:?}",
+            preview.issues
+        );
+
+        let mut f = fixture();
+        let other = Uuid::new_v4();
+        f.customers.push(
+            serde_json::from_value(json!({
+                "id": other, "name": "Other", "currency": "EUR",
+                "default_rate_minor": 6000, "active": true, "email": ""
+            }))
+            .unwrap(),
+        );
+        let euros = invoiced_time_row("EUR");
+        let baseline = plan_with(&f, Some(&euros), None, &[], &choices(&f), &[], &[]);
+        let mut mapping = link_choices(&f, &sha, &baseline.time[0].source_key);
+        mapping.invoices[0].customer_id = Some(other);
+        mapping.invoices[0].total_minor = Some(20_000);
+        let preview = plan_with(&f, Some(&euros), None, &[candidate()], &mapping, &[], &[]);
+        assert!(!preview.ready);
+        assert!(
+            preview.issues.iter().any(|issue| {
+                issue.field == "invoice_links" && issue.message.contains("customer differs")
+            }),
+            "{:?}",
+            preview.issues
         );
     }
 

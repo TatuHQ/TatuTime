@@ -1,8 +1,10 @@
 use crate::support::*;
 use axum::http::StatusCode;
 use serde_json::json;
+use std::sync::Arc;
 use tucano_time::domain::{Currency, Hours, ImportOrigin, ImportProvider, ImportedTime};
-use tucano_time::store::Store;
+use tucano_time::lock::{EntryLock, ImportLock};
+use tucano_time::store::{ImportBatchState, ImportKind, Store};
 use uuid::Uuid;
 
 #[tokio::test]
@@ -464,6 +466,242 @@ async fn competing_commits_return_one_outcome_and_never_alter_history() {
 // ------------------------------------------------ three-source import (#404) --
 
 const EXPENSE_SOURCE_HEADER: &str = "Date,Client,Project,Project Code,Category,Notes,Amount,Units,Billable,Invoiced?,Approved?,First name,Last name,Employee Id,Currency\n";
+
+/// #401: batch history, staged sources, dedup authority and the external lock
+/// survive backup/restore; a cold-archived imported row still reads by id and
+/// stays in the lifetime scan, while a locked external row refuses relocation.
+#[tokio::test]
+async fn import_history_sources_dedup_and_locks_survive_backup_restore_and_archival() {
+    let (app, dir) = app().await;
+    let base = "/api/admin/imports/harvest";
+    let choices = import_fixture(&app).await;
+    let id = new_import_batch(&app).await;
+    let time = format!(
+        "{IMPORT_TIME_HEADER}\
+2026-01-05,Acme,Website,WEB,Design,Work,2.00,Yes,Yes,Ada,Lovelace,E1,65.00,130.00,50.00,100.00,EUR\n\
+2026-01-06,Acme,Website,WEB,Design,More work,1.00,Yes,No,Ada,Lovelace,E1,65.00,65.00,50.00,50.00,EUR\n"
+    )
+    .into_bytes();
+    let (status, _) = body_req(
+        &app,
+        "PUT",
+        &format!("{base}/{id}/files/time"),
+        "text/csv",
+        time.clone(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    json_req(&app, "PUT", &format!("{base}/{id}/review"), Some(choices)).await;
+    let (status, preview) = json_req(&app, "POST", &format!("{base}/{id}/preview"), None).await;
+    assert_eq!(status, StatusCode::OK, "{preview}");
+    let (status, outcome) = json_req(
+        &app,
+        "POST",
+        &format!("{base}/{id}/commit"),
+        Some(json!({"revision": preview["revision"]})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{outcome}");
+    let entry_ids: Vec<Uuid> = outcome["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|value| Uuid::parse_str(value.as_str().unwrap()).unwrap())
+        .collect();
+    assert_eq!(entry_ids.len(), 2);
+
+    let backup = dir.path().join("durability.tar.gz");
+    tucano_time::backup::create(&dir.path().join("data"), &backup).unwrap();
+    let restored_dir = tempfile::tempdir().unwrap();
+    let restored_root = restored_dir.path().join("data");
+    tucano_time::backup::restore(&backup, &restored_root, false).unwrap();
+    let store = Arc::new(Store::open(&restored_root).unwrap());
+    let batch_id = Uuid::parse_str(&id).unwrap();
+
+    let batches = store.list_import_batches().unwrap();
+    assert_eq!(batches.len(), 1, "batch history survives the backup");
+    assert_eq!(batches[0].id, batch_id);
+    assert_eq!(batches[0].state, ImportBatchState::Committed);
+    assert_eq!(
+        batches[0].commit.as_ref().unwrap().entries,
+        entry_ids,
+        "the committed outcome survives the backup"
+    );
+    assert_eq!(
+        store
+            .read_import_source(batch_id, ImportKind::Time)
+            .unwrap()
+            .unwrap(),
+        time,
+        "the staged original source survives byte-for-byte"
+    );
+
+    let invoiced = entry_ids
+        .iter()
+        .map(|id| store.get_entry(*id).unwrap().unwrap())
+        .find(|entry| entry.externally_invoiced())
+        .expect("the external row");
+    let unbilled = entry_ids
+        .iter()
+        .map(|id| store.get_entry(*id).unwrap().unwrap())
+        .find(|entry| !entry.externally_invoiced())
+        .expect("the unbilled row");
+    let locks = ImportLock::new(store.clone());
+    assert_eq!(
+        locks.entry_lock(invoiced.id).unwrap(),
+        Some(tucano_time::lock::LockReason::Imported),
+        "the external lock survives restore"
+    );
+    assert_eq!(locks.entry_lock(unbilled.id).unwrap(), None);
+
+    // Dedup authority is the stored provenance, not an in-memory index.
+    let replanned = store.import_preview(batch_id).unwrap();
+    assert_eq!(replanned.time.len(), 2);
+    assert!(
+        replanned
+            .time
+            .iter()
+            .all(|row| row.decision == tucano_time::domain::ImportDecision::Duplicate),
+        "{:?}",
+        replanned.time
+    );
+    assert!(!replanned.ready);
+
+    // The cold archive relocates the unbilled day but refuses the locked one.
+    let cutoff = chrono::NaiveDate::from_ymd_opt(2026, 1, 7).unwrap();
+    let report = store.archive_entries_before(cutoff, false, &locks).unwrap();
+    assert_eq!(report.days.len(), 1, "{report:?}");
+    assert_eq!(report.days[0].day, "2026-01-06");
+    assert_eq!(report.skipped.len(), 1, "{report:?}");
+    assert_eq!(report.skipped[0].day, "2026-01-05");
+    assert_eq!(
+        report.skipped[0].reason,
+        tucano_time::store::ArchiveRefusal::Locked
+    );
+    assert_eq!(
+        store.get_entry(unbilled.id).unwrap().unwrap().id,
+        unbilled.id,
+        "a relocated imported row still reads by id"
+    );
+    assert_eq!(
+        store.get_entry(invoiced.id).unwrap().unwrap().id,
+        invoiced.id
+    );
+    assert_eq!(store.list_all_entries().unwrap().len(), 2);
+}
+
+/// #400: an explicitly linked row is imported once and remains permanently
+/// externally billed, so the invoice builder can never include it again.
+#[tokio::test]
+async fn linked_external_rows_are_never_billed_again() {
+    use sha2::{Digest, Sha256};
+    let (app, _d) = app().await;
+    let base = "/api/admin/imports/harvest";
+    let mut choices = import_fixture(&app).await;
+    let cid = choices["customers"][0]["customer_id"].clone();
+    let pdf = b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\n%%EOF\n";
+    let sha = Sha256::digest(pdf)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    choices["invoices"] = json!([{
+        "sha256": sha,
+        "customer_id": cid,
+        "original_number": "H-2",
+        "currency": "EUR",
+        "invoice_date": "2026-01-31",
+        "period_from": "2026-01-01",
+        "period_to": "2026-01-31",
+        "total_minor": 20000,
+        "opening_paid_minor": 0,
+        "status": "issued",
+        "excluded": false
+    }]);
+    let id = new_import_batch(&app).await;
+    let invoiced_row = "2026-01-05,Acme,Website,WEB,Design,Work,2.00,Yes,Yes,Ada,Lovelace,E1,65.00,130.00,50.00,100.00,EUR";
+    for (kind, content_type, bytes) in [
+        (
+            "time",
+            "text/csv",
+            format!("{IMPORT_TIME_HEADER}{invoiced_row}").into_bytes(),
+        ),
+        (
+            "invoices",
+            "application/zip",
+            invoice_zip_named("invoices/H-2.pdf"),
+        ),
+    ] {
+        let (status, _) = body_req(
+            &app,
+            "PUT",
+            &format!("{base}/{id}/files/{kind}"),
+            content_type,
+            bytes,
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{kind}");
+    }
+    json_req(
+        &app,
+        "PUT",
+        &format!("{base}/{id}/review"),
+        Some(choices.clone()),
+    )
+    .await;
+    let (status, preview) = json_req(&app, "POST", &format!("{base}/{id}/preview"), None).await;
+    assert_eq!(status, StatusCode::OK, "{preview}");
+    assert_eq!(preview["ready"], true, "{preview}");
+    let (status, rows) =
+        json_req(&app, "GET", &format!("{base}/{id}/rows?source=time"), None).await;
+    assert_eq!(status, StatusCode::OK);
+    let source_key = rows["items"][0]["row"]["source_key"]
+        .as_str()
+        .expect("time row source key")
+        .to_string();
+
+    let mut linked = choices;
+    linked["invoice_links"] = json!([{
+        "source_key": source_key,
+        "invoice_sha256": sha
+    }]);
+    let (status, batch) = json_req(&app, "PUT", &format!("{base}/{id}/review"), Some(linked)).await;
+    assert_eq!(status, StatusCode::OK, "{batch}");
+    let (status, preview) = json_req(&app, "POST", &format!("{base}/{id}/preview"), None).await;
+    assert_eq!(status, StatusCode::OK, "{preview}");
+    assert_eq!(preview["ready"], true, "{preview}");
+    let (status, outcome) = json_req(
+        &app,
+        "POST",
+        &format!("{base}/{id}/commit"),
+        Some(json!({"revision": preview["revision"]})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{outcome}");
+
+    let (status, error) = json_req(
+        &app,
+        "POST",
+        "/api/invoices",
+        Some(json!({
+            "customer_id": cid,
+            "from": "2026-01-05",
+            "to": "2026-01-05",
+            "include_expenses": false
+        })),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::CONFLICT,
+        "the linked external row is not billable again: {error}"
+    );
+    assert!(
+        error["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("no billable")),
+        "{error}"
+    );
+}
 
 fn invoice_zip_named(member: &str) -> Vec<u8> {
     use std::io::{Cursor, Write as _};
