@@ -74,7 +74,9 @@ allowed hours changes recompute amounts using the imported rates. Imported
 invoices carry a reviewed opening paid amount separately from later payment
 ledger events. Original imported PDFs are integrity-checked and never regenerated
 or altered for preview or delivery. A missing/corrupt original fails closed.
-The import upload/commit workflow is not yet exposed by this foundation.
+The admin-only import workflow is exposed under `/api/admin/imports/harvest`
+(create, raw source upload, review, preview, rows and exact-revision commit);
+see [`harvest-import.md`](harvest-import.md).
 
 ## Contract Revision 0.1.48
 

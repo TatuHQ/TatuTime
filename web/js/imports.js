@@ -245,6 +245,11 @@ export function wireImports() {
     if (wired || !$('import-new')) return;
     wired = true;
     $('import-new').addEventListener('click', newBatch);
+    // Entering the Import subtab must load its history; refreshSettings only runs
+    // when the top-level Settings tab is activated.
+    $('settings-tab-import').addEventListener('click', () => {
+        refreshImports();
+    });
     $('import-time-upload').addEventListener('click', () => upload('time'));
     $('import-expenses-upload').addEventListener('click', () => upload('expenses'));
     $('import-invoices-upload').addEventListener('click', () => upload('invoices'));

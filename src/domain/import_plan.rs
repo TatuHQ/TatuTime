@@ -676,8 +676,12 @@ fn reviewed_project(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn reviewed_task(
     choice: Option<&TaskChoice>,
+    tasks: &[Task],
+    customer_id: Option<Uuid>,
+    project_code: Option<&str>,
     source_task: &str,
     issues: &mut Vec<PlanIssue>,
     source: &str,
@@ -687,8 +691,49 @@ fn reviewed_task(
         return None;
     }
     match choice {
-        Some(TaskChoice::Existing { code, .. }) => Some(code.0.clone()),
-        Some(TaskChoice::Create { code, .. }) => Some(code.0.clone()),
+        Some(TaskChoice::Existing { code, .. }) => {
+            if let (Some(customer_id), Some(project_code)) = (customer_id, project_code) {
+                let exists = tasks.iter().any(|task| {
+                    task.customer_id == customer_id
+                        && task.project_code.0 == project_code
+                        && task.code == *code
+                });
+                if !exists {
+                    issues.push(issue(
+                        source,
+                        record,
+                        None,
+                        None,
+                        "task",
+                        "the mapped task does not exist on this project",
+                        true,
+                    ));
+                    return None;
+                }
+            }
+            Some(code.0.clone())
+        }
+        Some(TaskChoice::Create { code, .. }) => {
+            if let (Some(customer_id), Some(project_code)) = (customer_id, project_code)
+                && tasks.iter().any(|task| {
+                    task.customer_id == customer_id
+                        && task.project_code.0 == project_code
+                        && task.code == *code
+                })
+            {
+                issues.push(issue(
+                    source,
+                    record,
+                    None,
+                    None,
+                    "task",
+                    "a task with this code already exists on the project",
+                    true,
+                ));
+                return None;
+            }
+            Some(code.0.clone())
+        }
         Some(TaskChoice::Skip { .. }) => None,
         None => {
             issues.push(issue(
@@ -1002,16 +1047,32 @@ pub fn plan(
                     "no user mapping was reviewed for this person",
                     true,
                 ));
-            } else if person.is_some_and(|choice| !choice.skip && choice.user_id.is_none()) {
-                issues.push(issue(
-                    "time",
-                    Some(row.record),
-                    Some(row.line),
-                    None,
-                    "person",
-                    "the person mapping is unresolved",
-                    true,
-                ));
+            } else if let Some(choice) = person
+                && !choice.skip
+            {
+                match choice.user_id {
+                    None => issues.push(issue(
+                        "time",
+                        Some(row.record),
+                        Some(row.line),
+                        None,
+                        "person",
+                        "the person mapping is unresolved",
+                        true,
+                    )),
+                    Some(user_id) if !view.users.iter().any(|(known, _)| *known == user_id) => {
+                        issues.push(issue(
+                            "time",
+                            Some(row.record),
+                            Some(row.line),
+                            None,
+                            "person",
+                            "the mapped user no longer exists",
+                            true,
+                        ));
+                    }
+                    Some(_) => {}
+                }
             }
             let customer_id = reviewed_customer(
                 customer_choices.get(&customer_key(&row.client)).copied(),
@@ -1036,6 +1097,9 @@ pub fn plan(
             });
             let task_code = reviewed_task(
                 task_choices.get(&task_key(&row.task)).copied(),
+                view.tasks,
+                customer_id,
+                project_code.as_deref(),
                 &row.task,
                 &mut issues,
                 "time",
@@ -1185,16 +1249,32 @@ pub fn plan(
                     "no user mapping was reviewed for this person",
                     true,
                 ));
-            } else if person.is_some_and(|choice| !choice.skip && choice.user_id.is_none()) {
-                issues.push(issue(
-                    "expense",
-                    Some(row.record),
-                    Some(row.line),
-                    None,
-                    "person",
-                    "the person mapping is unresolved",
-                    true,
-                ));
+            } else if let Some(choice) = person
+                && !choice.skip
+            {
+                match choice.user_id {
+                    None => issues.push(issue(
+                        "expense",
+                        Some(row.record),
+                        Some(row.line),
+                        None,
+                        "person",
+                        "the person mapping is unresolved",
+                        true,
+                    )),
+                    Some(user_id) if !view.users.iter().any(|(known, _)| *known == user_id) => {
+                        issues.push(issue(
+                            "expense",
+                            Some(row.record),
+                            Some(row.line),
+                            None,
+                            "person",
+                            "the mapped user no longer exists",
+                            true,
+                        ));
+                    }
+                    Some(_) => {}
+                }
             }
             let customer_id = reviewed_customer(
                 customer_choices.get(&customer_key(&row.client)).copied(),
@@ -2146,6 +2226,38 @@ mod tests {
         let second = plan_with(&f, Some(&time), None, &[], &changed, &[], &[]);
         assert_ne!(first.revision, second.revision);
         assert_eq!(second.time[0].decision, ImportDecision::Excluded);
+    }
+
+    #[test]
+    fn mapped_user_and_task_must_exist_under_the_project() {
+        let f = fixture();
+        let time = time_report(&[
+            "2026-01-05,Acme,Website,WEB,Design,Work,2.00,Yes,No,Ada,Lovelace,E1,65.00,130.00,50.00,100.00,EUR",
+        ]);
+        let mut invalid_user = choices(&f);
+        invalid_user.users[0].user_id = Some(Uuid::new_v4());
+        let preview = plan_with(&f, Some(&time), None, &[], &invalid_user, &[], &[]);
+        assert!(!preview.ready);
+        assert!(
+            preview.time[0]
+                .issues
+                .iter()
+                .any(|issue| issue.field == "person" && issue.blocking)
+        );
+
+        let mut wrong_task = choices(&f);
+        wrong_task.tasks = vec![TaskChoice::Existing {
+            source_task: "Design".into(),
+            code: ProjectCode("OTHER".into()),
+        }];
+        let preview = plan_with(&f, Some(&time), None, &[], &wrong_task, &[], &[]);
+        assert!(!preview.ready);
+        assert!(
+            preview.time[0]
+                .issues
+                .iter()
+                .any(|issue| issue.field == "task" && issue.blocking)
+        );
     }
 
     #[test]

@@ -504,7 +504,9 @@ async function refreshWeekBody() {
   for (const entry of entries) if (entry.imported?.origin.invoiced) locked.add(entry.id);
   // Columns whose day carries invoiced time wear the lock (permanent freeze).
   const invoicedDates = new Set(
-    entries.filter((e) => locks.invoiced.has(e.id)).map((e) => e.date),
+    entries
+      .filter((e) => locks.invoiced.has(e.id) || e.imported?.origin.invoiced)
+      .map((e) => e.date),
   );
   if (seq !== weekState.seq) return; // a newer render superseded this one
 

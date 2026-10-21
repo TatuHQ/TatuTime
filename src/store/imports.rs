@@ -78,6 +78,14 @@ pub struct ImportFiles {
 }
 
 impl ImportFiles {
+    fn get(&self, kind: ImportKind) -> &Option<StagedImportFile> {
+        match kind {
+            ImportKind::Time => &self.time,
+            ImportKind::Expenses => &self.expenses,
+            ImportKind::Invoices => &self.invoices,
+        }
+    }
+
     #[must_use]
     pub fn contains(&self, kind: ImportKind) -> bool {
         match kind {
@@ -144,10 +152,22 @@ enum JournalState {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+struct JournalFile {
+    path: String,
+    /// Previous bytes of a sidecar; `None` means it did not exist.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    bytes: Option<Vec<u8>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct ImportJournal {
     batch_id: Uuid,
     state: JournalState,
     created: Vec<String>,
+    /// Sidecars the commit mutates (invoice/entry/expense indexes and number
+    /// ledgers), captured before the first write and restored on rollback.
+    #[serde(default)]
+    sidecars: Vec<JournalFile>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     outcome: Option<ImportCommitOutcome>,
 }
@@ -279,13 +299,35 @@ impl Store {
         id: Uuid,
         kind: ImportKind,
     ) -> Result<Option<Vec<u8>>, StoreError> {
+        let batch = self.get_import_batch(id)?.ok_or(StoreError::NotFound)?;
+        let expected = batch.files.get(kind);
         let path = self.import_source_path(id, kind);
         match std::fs::read(&path) {
             Ok(bytes) if bytes.len() > kind.limit() => Err(StoreError::Conflict(
                 "staged import source exceeds its limit".into(),
             )),
-            Ok(bytes) => Ok(Some(bytes)),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Ok(bytes) => {
+                let Some(metadata) = expected else {
+                    return Err(StoreError::Conflict(
+                        "a staged source exists without batch metadata".into(),
+                    ));
+                };
+                if bytes.len() as u64 != metadata.bytes || hex(&bytes) != metadata.sha256 {
+                    return Err(StoreError::Conflict(
+                        "the staged source no longer matches its recorded hash".into(),
+                    ));
+                }
+                Ok(Some(bytes))
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                if expected.is_some() {
+                    Err(StoreError::Conflict(
+                        "the staged source is missing from the batch".into(),
+                    ))
+                } else {
+                    Ok(None)
+                }
+            }
             Err(error) => Err(error.into()),
         }
     }
@@ -808,17 +850,19 @@ impl Store {
             });
         }
 
-        if !taken.is_empty() {
+        if !new_invoices.is_empty() {
             self.ensure_capacity::<Invoice>()?;
         }
         if !new_expenses.is_empty() {
             self.ensure_capacity::<Expense>()?;
         }
 
+        let sidecars = self.capture_import_sidecars()?;
         let journal = ImportJournal {
             batch_id: batch.id,
             state: JournalState::Prepared,
             created: created.clone(),
+            sidecars,
             outcome: None,
         };
         std::fs::create_dir_all(self.imports_dir())?;
@@ -892,19 +936,88 @@ impl Store {
                 Ok(outcome)
             }
             Err(error) => {
-                for path in created.iter().rev() {
-                    let _ = std::fs::remove_file(self.root.join(path));
-                }
-                let mut rolled_back = journal;
-                rolled_back.state = JournalState::RolledBack;
-                let _ = write_json(&self.import_journal_path(batch.id), &rolled_back);
+                let cleanup = self.rollback_import_journal(&journal);
                 batch.state = ImportBatchState::Failed;
-                batch.error = Some(error.to_string());
+                batch.error = Some(match &cleanup {
+                    Ok(()) => error.to_string(),
+                    Err(cleanup) => format!("{error}; rollback incomplete: {cleanup}"),
+                });
                 batch.updated_at = now;
                 let _ = write_json(&self.import_batch_path(batch.id), &batch);
-                Err(error)
+                match cleanup {
+                    Ok(()) => Err(error),
+                    // The journal stays Prepared so boot recovery retries it.
+                    Err(cleanup) => Err(StoreError::Io(format!(
+                        "{error}; rollback incomplete: {cleanup}"
+                    ))),
+                }
             }
         }
+    }
+
+    /// Sidecars the commit mutates. Their previous bytes are journaled and
+    /// restored on rollback, so an index cannot point at a removed record and
+    /// a retry cannot observe an advanced number ledger.
+    fn import_sidecar_paths(&self) -> Vec<PathBuf> {
+        [
+            "invoices/.seq.json",
+            "invoices/.seq.prefixes.json",
+            "invoices/.idx.numbers.json",
+            "entries/.idx.users.json",
+            "expenses/.idx.users.json",
+        ]
+        .into_iter()
+        .map(|relative| self.root.join(relative))
+        .collect()
+    }
+
+    fn capture_import_sidecars(&self) -> Result<Vec<JournalFile>, StoreError> {
+        self.import_sidecar_paths()
+            .into_iter()
+            .map(|path| {
+                let bytes = match std::fs::read(&path) {
+                    Ok(bytes) => Some(bytes),
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+                    Err(error) => return Err(error.into()),
+                };
+                Ok(JournalFile {
+                    path: relative(&self.root, &path),
+                    bytes,
+                })
+            })
+            .collect()
+    }
+
+    fn restore_import_sidecars(&self, sidecars: &[JournalFile]) -> Result<(), StoreError> {
+        for sidecar in sidecars {
+            let path = self.root.join(&sidecar.path);
+            match &sidecar.bytes {
+                Some(bytes) => write_bytes_atomic(&path, bytes)?,
+                None => match std::fs::remove_file(&path) {
+                    Ok(()) => {}
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(error) => return Err(error.into()),
+                },
+            }
+        }
+        Ok(())
+    }
+
+    /// Remove every journaled document, restore the sidecars, then mark the
+    /// journal rolled back. On any cleanup failure the journal stays
+    /// `Prepared`, so boot recovery can retry it.
+    fn rollback_import_journal(&self, journal: &ImportJournal) -> Result<(), StoreError> {
+        for created in journal.created.iter().rev() {
+            match std::fs::remove_file(self.root.join(created)) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error.into()),
+            }
+        }
+        self.restore_import_sidecars(&journal.sidecars)?;
+        let mut rolled_back = journal.clone();
+        rolled_back.state = JournalState::RolledBack;
+        write_json(&self.import_journal_path(journal.batch_id), &rolled_back)
     }
 
     /// Advance the local ledger when an imported legal number uses local
@@ -955,23 +1068,45 @@ impl Store {
             let Some(mut journal) = read_json::<ImportJournal>(&path)? else {
                 continue;
             };
-            if journal.state != JournalState::Prepared {
-                continue;
+            match journal.state {
+                JournalState::Prepared => {
+                    // A cleanup failure propagates: boot must fail closed rather
+                    // than serve a partially imported store.
+                    self.rollback_import_journal(&journal)?;
+                    if let Some(mut batch) = self.get_import_batch(journal.batch_id)?
+                        && batch.state != ImportBatchState::Committed
+                    {
+                        batch.state = ImportBatchState::Failed;
+                        batch.error =
+                            Some("an interrupted commit was rolled back; retry the import".into());
+                        write_json(&self.import_batch_path(batch.id), &batch)?;
+                    }
+                    recovered += 1;
+                }
+                JournalState::Committed => {
+                    // Crash between the journal commit and the batch update:
+                    // finalize the batch from the journaled outcome so a retry
+                    // returns the same ids instead of seeing them as stale.
+                    let Some(outcome) = &journal.outcome else {
+                        return Err(StoreError::Conflict(
+                            "a committed import journal has no outcome".into(),
+                        ));
+                    };
+                    if let Some(mut batch) = self.get_import_batch(journal.batch_id)?
+                        && batch.state != ImportBatchState::Committed
+                    {
+                        batch.state = ImportBatchState::Committed;
+                        batch.preview_revision = Some(outcome.revision.clone());
+                        batch.commit = Some(outcome.clone());
+                        batch.updated_at = outcome.committed_at;
+                        batch.error = None;
+                        write_json(&self.import_batch_path(batch.id), &batch)?;
+                        recovered += 1;
+                    }
+                    let _ = &mut journal;
+                }
+                JournalState::RolledBack => {}
             }
-            for created in journal.created.iter().rev() {
-                let _ = std::fs::remove_file(self.root.join(created));
-            }
-            journal.state = JournalState::RolledBack;
-            write_json(&path, &journal)?;
-            if let Some(mut batch) = self.get_import_batch(journal.batch_id)?
-                && batch.state != ImportBatchState::Committed
-            {
-                batch.state = ImportBatchState::Failed;
-                batch.error =
-                    Some("an interrupted commit was rolled back; retry the import".into());
-                write_json(&self.import_batch_path(batch.id), &batch)?;
-            }
-            recovered += 1;
         }
         Ok(recovered)
     }
@@ -1266,6 +1401,7 @@ mod tests {
                 batch_id: id,
                 state: JournalState::Prepared,
                 created: vec!["customers/orphan.json".into()],
+                sidecars: Vec::new(),
                 outcome: None,
             },
         )
@@ -1276,6 +1412,104 @@ mod tests {
             !orphan.exists(),
             "a prepared journal is rolled back on boot"
         );
+        let journal: ImportJournal = read_json(&reopened.import_journal_path(id))
+            .unwrap()
+            .unwrap();
+        assert_eq!(journal.state, JournalState::RolledBack);
+    }
+
+    #[test]
+    fn staged_source_tampering_fails_closed() {
+        let (_dir, store, cid, uid, cat) = fixture();
+        let id = Uuid::new_v4();
+        store
+            .create_import_batch(batch(id, choices(cid, uid, cat)))
+            .unwrap();
+        store
+            .stage_import_source(
+                id,
+                ImportKind::Time,
+                "time.csv",
+                csv().as_bytes(),
+                Utc::now(),
+            )
+            .unwrap();
+        std::fs::write(
+            store.import_source_path(id, ImportKind::Time),
+            b"Date,Client\n2026-01-05,Changed\n",
+        )
+        .unwrap();
+        assert!(store.import_preview(id).is_err());
+        assert!(
+            store
+                .commit_import(id, &"0".repeat(64), Utc::now())
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn boot_finalizes_a_committed_journal_after_a_crash_before_the_batch_write() {
+        let (dir, store, cid, uid, cat) = fixture();
+        let id = Uuid::new_v4();
+        store
+            .create_import_batch(batch(id, choices(cid, uid, cat)))
+            .unwrap();
+        store
+            .stage_import_source(
+                id,
+                ImportKind::Time,
+                "time.csv",
+                csv().as_bytes(),
+                Utc::now(),
+            )
+            .unwrap();
+        let preview = store.import_preview(id).unwrap();
+        let outcome = store
+            .commit_import(id, &preview.revision, Utc::now())
+            .unwrap();
+        // Simulate the crash window: the committed journal is durable but the
+        // batch still looks like a draft.
+        let mut batch = store.get_import_batch(id).unwrap().unwrap();
+        batch.state = ImportBatchState::Draft;
+        batch.commit = None;
+        batch.preview_revision = None;
+        write_json(&store.import_batch_path(id), &batch).unwrap();
+        drop(store);
+        let reopened = Store::open(dir.path().join("data")).unwrap();
+        let batch = reopened.get_import_batch(id).unwrap().unwrap();
+        assert_eq!(batch.state, ImportBatchState::Committed);
+        assert_eq!(
+            batch.commit.as_ref().unwrap().entries,
+            outcome.entries,
+            "recovery must preserve the journaled ids"
+        );
+    }
+
+    #[test]
+    fn rollback_restores_the_number_ledger_sidecar() {
+        let (dir, store, _cid, _uid, _cat) = fixture();
+        let id = Uuid::new_v4();
+        let seq = dir.path().join("data/invoices/.seq.json");
+        std::fs::create_dir_all(seq.parent().unwrap()).unwrap();
+        write_json(&seq, &7_u64).unwrap();
+        let sidecars = store.capture_import_sidecars().unwrap();
+        write_json(&seq, &99_u64).unwrap();
+        std::fs::create_dir_all(store.imports_dir()).unwrap();
+        write_json(
+            &store.import_journal_path(id),
+            &ImportJournal {
+                batch_id: id,
+                state: JournalState::Prepared,
+                created: Vec::new(),
+                sidecars,
+                outcome: None,
+            },
+        )
+        .unwrap();
+        drop(store);
+        let reopened = Store::open(dir.path().join("data")).unwrap();
+        let restored: u64 = read_json(&seq).unwrap().unwrap();
+        assert_eq!(restored, 7, "rollback restores the previous ledger value");
         let journal: ImportJournal = read_json(&reopened.import_journal_path(id))
             .unwrap()
             .unwrap();
