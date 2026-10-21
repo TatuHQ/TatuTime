@@ -133,6 +133,9 @@ rejects a stale revision.
 Admin-only routes live under `/api/admin/imports/harvest`:
 
 - `POST /` creates a batch; `GET /` lists history; `GET /{id}` returns one batch.
+- `DELETE /{id}` discards a batch that never committed, including every staged
+  source and any unfinished journal. A committed batch is financial history and
+  answers `409`; its records are never removed by the import workspace.
 - `PUT|GET /{id}/files/{time|expenses|invoices}` stages/downloads exactly one
   validated source (1 MiB CSV, 5 MiB ZIP).
 - `PUT /{id}/review` replaces the reviewed mapping; `POST /{id}/preview`
@@ -149,9 +152,44 @@ records), writes original PDFs byte-for-byte, and advances only the matching
 paths; `Store::open` rolls back an interrupted `Prepared` journal before serving
 traffic. `imports/` is admin-only and never exposed to member routes.
 
+The Settings workspace builds labelled mapping tables from the preview's
+original source values: people, customers, projects, tasks and expense
+categories can be mapped to existing records or created explicitly, while each
+invoice gets a review card with its legal number, customer, currency, dates,
+period, total, opening paid amount and status. Original PDFs are linked directly
+from the member, and an externally billed row can be explicitly linked to an
+invoice PDF. One reconciliation table shows accepted/skipped totals per source
+and currency. The advanced JSON view remains available for operators but is no
+longer the primary control.
+
+Preview rows and review issues are filterable and paged in the browser (25 per
+page) without recomputing the preview. A draft or failed batch can be discarded
+after one explicit confirmation; a committed batch offers no discard. The
+invoice register marks a native invoice that came from an import, and its
+detail panel says that the original archived PDF, not a regeneration, is shown.
+Externally billed time and expenses without a linked local invoice show a
+non-clickable "Invoiced in Harvest" lock: there is no broken invoice link to
+follow.
+
+## Private-sample verification
+
+The real supplied exports stay outside the repository and CI. Point the opt-in
+contract test at their folder; it reads them in memory, uses no network and
+prints only counts and SHA-256 hashes:
+
+```sh
+TUCANOTIME_HARVEST_SAMPLES=/path/to/private/exports \
+  cargo test --locked --test contract imports::supplied_private_exports_parse_only_when_explicitly_enabled -- --nocapture
+```
+
+Run it only after the owner of the data confirms local use. Without the variable
+the test prints a skip and touches nothing. Never commit the exports, their
+extracted PDFs or any derived private row values.
+
 ## Remaining delivery
 
-1. End-to-end verification (#404): synthetic three-source fixtures, fault and
-   restart recovery, backup/restore, browser gates and private-sample confirmation.
-2. Any documented follow-ups found by #404 (for example a killable PDF worker if a
-   real sample defeats the bounded parser).
+1. Browser-only cases not covered by the synthetic three-source contract test
+   (time + expenses + original invoice PDF, including backup/restore hash
+   equality) or the import-specific jsdom suite.
+2. Any documented follow-ups found while exercising the private samples (for
+   example a killable PDF worker if a real sample defeats the bounded parser).

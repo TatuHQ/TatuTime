@@ -75,8 +75,9 @@ invoices carry a reviewed opening paid amount separately from later payment
 ledger events. Original imported PDFs are integrity-checked and never regenerated
 or altered for preview or delivery. A missing/corrupt original fails closed.
 The admin-only import workflow is exposed under `/api/admin/imports/harvest`
-(create, raw source upload, review, preview, rows and exact-revision commit);
-see [`harvest-import.md`](harvest-import.md).
+(create, raw source upload, review, preview, rows, exact-revision commit and
+discard of a non-committed batch); see
+[`harvest-import.md`](harvest-import.md).
 
 ## Contract Revision 0.1.48
 

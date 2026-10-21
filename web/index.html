@@ -1439,17 +1439,18 @@
                 <h2>Review</h2>
               </div>
               <div class="p-card__content">
-                <p class="p-form-help-text">Approved mapping/corrections (JSON). Every reference is explicit; nothing is
-                  guessed from names, filenames or amounts. <code>GET rows</code> lists the unresolved source
-                  records and their issues.</p>
-                <div class="p-form__group">
-                  <label class="p-form__label" for="import-choices">Mapping</label>
+                <p class="p-form-help-text">Every reference is explicit; nothing is guessed from names, filenames or
+                  amounts. Choose an existing record or create a reviewed one, then recompute the preview.</p>
+                <div id="import-mapping" class="import-mapping"></div>
+                <div class="p-form__group" id="import-json-group" hidden>
+                  <label class="p-form__label" for="import-choices">Advanced mapping JSON</label>
                   <textarea class="p-form__control" id="import-choices" rows="10" spellcheck="false"></textarea>
                 </div>
                 <div class="buttons">
                   <button type="button" id="import-save">Save mapping</button>
                   <button type="button" id="import-preview">Preview</button>
                   <button type="button" id="import-commit" data-positive="1" disabled>Commit</button>
+                  <button type="button" id="import-discard" class="p-button--negative">Discard batch</button>
                 </div>
                 <p id="import-ready" class="p-form-help-text" role="status" aria-live="polite"></p>
                 <p class="p-form-help-text" id="import-error" role="alert" hidden></p>
@@ -1460,6 +1461,23 @@
                 <h2>Preview</h2>
               </div>
               <div class="p-card__content">
+                <div class="bar">
+                  <div><label for="import-row-filter">Rows</label>
+                    <select id="import-row-filter">
+                      <option value="all">All rows</option>
+                      <option value="issues">Rows with issues</option>
+                      <option value="blocking">Rows with blocking issues</option>
+                      <option value="accepted">Accepted (new or correction)</option>
+                      <option value="skipped">Skipped (duplicate, excluded or conflict)</option>
+                    </select>
+                  </div>
+                  <div><label for="import-issue-filter">Issues</label>
+                    <select id="import-issue-filter">
+                      <option value="all">All issues</option>
+                      <option value="blocking">Blocking only</option>
+                    </select>
+                  </div>
+                </div>
                 <div class="table-wrap">
                   <table id="import-totals">
                     <caption>Reconciliation by source and currency</caption>
@@ -1490,6 +1508,31 @@
                     </thead>
                     <tbody></tbody>
                   </table>
+                </div>
+                <div class="import-pager">
+                  <button type="button" id="import-row-prev">Previous rows</button>
+                  <button type="button" id="import-row-next">Next rows</button>
+                  <span id="import-row-page" class="import-page-status" role="status" aria-live="polite"></span>
+                </div>
+                <div class="table-wrap">
+                  <table id="import-issue-list">
+                    <caption>Review issues</caption>
+                    <thead>
+                      <tr>
+                        <th scope="col">Source</th>
+                        <th scope="col">Record</th>
+                        <th scope="col">Field</th>
+                        <th scope="col">Message</th>
+                        <th scope="col">Blocking</th>
+                      </tr>
+                    </thead>
+                    <tbody></tbody>
+                  </table>
+                </div>
+                <div class="import-pager">
+                  <button type="button" id="import-issue-prev">Previous issues</button>
+                  <button type="button" id="import-issue-next">Next issues</button>
+                  <span id="import-issue-page" class="import-page-status" role="status" aria-live="polite"></span>
                 </div>
                 <p id="import-issues" class="p-form-help-text" role="status" aria-live="polite"></p>
               </div>
