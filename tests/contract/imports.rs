@@ -479,8 +479,12 @@ async fn create_all_gui_mappings_commit_the_planned_customer_project_and_task() 
     let (_, me) = json_req(&app, "GET", "/api/auth/me", None).await;
     let uid = me["id"].clone();
     let id = new_import_batch(&app).await;
+    // Two rows on the same reviewed source project: they must resolve to the
+    // one created project, not to a fresh collision-suffixed code per row.
     let time = format!(
-        "{IMPORT_TIME_HEADER}2026-01-05,Acme,Website,WEB,Design,Work,2.00,Yes,No,Ada,Lovelace,E1,65.00,130.00,50.00,100.00,EUR\n"
+        "{IMPORT_TIME_HEADER}\
+2026-01-05,Acme,Website,WEB,Design,Work,2.00,Yes,No,Ada,Lovelace,E1,65.00,130.00,50.00,100.00,EUR\n\
+2026-01-06,Acme,Website,WEB,Design,More work,1.00,Yes,No,Ada,Lovelace,E1,65.00,65.00,50.00,50.00,EUR\n"
     );
     let (status, _) = body_req(
         &app,
@@ -549,14 +553,21 @@ async fn create_all_gui_mappings_commit_the_planned_customer_project_and_task() 
     let (status, entries) = json_req(
         &app,
         "GET",
-        "/api/entries?from=2026-01-05&to=2026-01-05",
+        "/api/entries?from=2026-01-05&to=2026-01-06",
         None,
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(entries["entries"][0]["customer_id"], cid);
-    assert_eq!(entries["entries"][0]["project_code"], "WEB");
-    assert_eq!(entries["entries"][0]["task_code"], "DESIGN");
+    let entries = entries["entries"].as_array().unwrap();
+    assert_eq!(entries.len(), 2, "both source rows are imported");
+    for entry in entries {
+        assert_eq!(entry["customer_id"], cid);
+        assert_eq!(
+            entry["project_code"], "WEB",
+            "every row of one source project uses its one created project"
+        );
+        assert_eq!(entry["task_code"], "DESIGN");
+    }
 }
 
 /// #401: batch history, staged sources, dedup authority and the external lock
