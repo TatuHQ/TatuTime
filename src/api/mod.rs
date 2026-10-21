@@ -774,9 +774,9 @@ pub use self::expenses::{
 pub use self::fx::{FxQuery, fx_rate};
 pub use self::imports::{
     CommitImportInput, CreateBatchInput, ImportPageQuery, RowsQuery, commit_import_batch,
-    create_import_batch, download_import_source, get_import_batch, import_rows,
-    imported_invoice_pdf, list_import_batches, preview_import_batch, review_import_batch,
-    upload_import_source,
+    create_import_batch, delete_import_batch, download_import_source, get_import_batch,
+    import_rows, imported_invoice_pdf, list_import_batches, preview_import_batch,
+    review_import_batch, upload_import_source,
 };
 pub use self::invoicing::{
     InvoiceEditInput, InvoiceInput, ManualInvoiceInput, PayInput, SyncInput, create_invoice,

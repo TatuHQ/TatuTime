@@ -130,6 +130,17 @@ pub async fn get_import_batch(State(app): State<AppState>, Path(id): Path<Uuid>)
     Ok(Json(batch(&app, id).await?).into_response())
 }
 
+/// `DELETE /api/admin/imports/harvest/{id}` — discard a batch that never
+/// committed, including every staged source. A committed batch is financial
+/// history and answers 409; delete its records through their own lifecycle.
+pub async fn delete_import_batch(State(app): State<AppState>, Path(id): Path<Uuid>) -> ApiResult {
+    store_blocking("import batch discard", &app.store, move |s| {
+        s.delete_import_batch(id)
+    })
+    .await?;
+    Ok(StatusCode::NO_CONTENT.into_response())
+}
+
 /// `PUT /api/admin/imports/harvest/{id}/files/{kind}` — stage/replace one
 /// source. The structural parser runs before the old file is replaced.
 pub async fn upload_import_source(

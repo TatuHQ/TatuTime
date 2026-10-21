@@ -183,6 +183,21 @@ fn relative(root: &Path, path: &Path) -> String {
         .into_owned()
 }
 
+/// Remove a staged path if it exists; a missing path is already the desired
+/// state, so discarding a partially-staged or twice-discarded batch is safe.
+fn remove_staged_path(path: &Path, directory: bool) -> Result<(), StoreError> {
+    let outcome = if directory {
+        std::fs::remove_dir_all(path)
+    } else {
+        std::fs::remove_file(path)
+    };
+    match outcome {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.into()),
+    }
+}
+
 impl Store {
     fn imports_dir(&self) -> PathBuf {
         self.root.join(IMPORTS_DIR)
@@ -219,6 +234,41 @@ impl Store {
         }
         std::fs::create_dir_all(self.imports_dir())?;
         write_json(&self.import_batch_path(batch.id), &batch)
+    }
+
+    /// Discard a batch that never committed: its staged sources, its document
+    /// and any journal. A committed batch is financial history and refuses;
+    /// delete completed imports only through the ordinary invoice/entry/expense
+    /// lifecycle, never through the import workspace.
+    pub fn delete_import_batch(&self, id: Uuid) -> Result<(), StoreError> {
+        let _guard = self.write_lock()?;
+        let batch = self.get_import_batch(id)?.ok_or(StoreError::NotFound)?;
+        if batch.state == ImportBatchState::Committed {
+            return Err(StoreError::Conflict(
+                "a committed import batch is financial history and cannot be discarded".into(),
+            ));
+        }
+        if let Some(journal) = read_json::<ImportJournal>(&self.import_journal_path(id))? {
+            match journal.state {
+                // The documents exist even if the batch write never happened:
+                // this is committed history, not a draft.
+                JournalState::Committed => {
+                    return Err(StoreError::Conflict(
+                        "a committed import batch is financial history and cannot be discarded"
+                            .into(),
+                    ));
+                }
+                // Retry a rollback whose first attempt failed. If it fails
+                // again the journal stays Prepared and nothing is deleted, so
+                // boot recovery can still finish it.
+                JournalState::Prepared => self.rollback_import_journal(&journal)?,
+                JournalState::RolledBack => {}
+            }
+        }
+        remove_staged_path(&self.imports_dir().join(id.to_string()), true)?;
+        remove_staged_path(&self.import_batch_path(id), false)?;
+        remove_staged_path(&self.import_journal_path(id), false)?;
+        Ok(())
     }
 
     /// Replace the reviewed mapping. Any source change or mapping change
@@ -1483,6 +1533,49 @@ mod tests {
             outcome.entries,
             "recovery must preserve the journaled ids"
         );
+    }
+
+    #[test]
+    fn discarding_a_batch_rolls_back_a_prepared_journal_and_removes_its_sources() {
+        let (dir, store, cid, uid, cat) = fixture();
+        let id = Uuid::new_v4();
+        store
+            .create_import_batch(batch(id, choices(cid, uid, cat)))
+            .unwrap();
+        store
+            .stage_import_source(
+                id,
+                ImportKind::Time,
+                "time.csv",
+                csv().as_bytes(),
+                Utc::now(),
+            )
+            .unwrap();
+        let orphan = dir.path().join("data/customers/orphan.json");
+        std::fs::write(&orphan, b"{}").unwrap();
+        write_json(
+            &store.import_journal_path(id),
+            &ImportJournal {
+                batch_id: id,
+                state: JournalState::Prepared,
+                created: vec!["customers/orphan.json".into()],
+                sidecars: Vec::new(),
+                outcome: None,
+            },
+        )
+        .unwrap();
+
+        store.delete_import_batch(id).unwrap();
+        assert!(
+            !orphan.exists(),
+            "a discard rolls back an unfinished commit before deleting"
+        );
+        assert!(store.get_import_batch(id).unwrap().is_none());
+        assert!(
+            !store.imports_dir().join(id.to_string()).exists(),
+            "staged sources are removed with the batch"
+        );
+        assert!(!store.import_journal_path(id).exists());
     }
 
     #[test]

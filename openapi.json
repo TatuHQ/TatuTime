@@ -10385,6 +10385,45 @@
             "$ref": "#/components/responses/Forbidden"
           }
         }
+      },
+      "delete": {
+        "operationId": "deleteHarvestImport",
+        "x-admin-only": true,
+        "tags": [
+          "imports"
+        ],
+        "summary": "Discard a batch that never committed",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Batch and every staged source discarded."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/CsrfForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          }
+        }
       }
     },
     "/api/admin/imports/harvest/{id}/files/{kind}": {

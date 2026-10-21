@@ -216,7 +216,10 @@ pub fn build_router(state: AppState) -> Router {
             "/admin/imports/harvest",
             get(api::list_import_batches).post(api::create_import_batch),
         )
-        .route("/admin/imports/harvest/{id}", get(api::get_import_batch))
+        .route(
+            "/admin/imports/harvest/{id}",
+            get(api::get_import_batch).delete(api::delete_import_batch),
+        )
         .route(
             "/admin/imports/harvest/{id}/files/{kind}",
             axum::routing::put(api::upload_import_source).get(api::download_import_source),

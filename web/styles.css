@@ -1007,3 +1007,9 @@ html[data-advanced-billing="off"] #advanced-billing { display: none; }
   gap: .6rem; }
 .import-row-link { display: flex; gap: .4rem; align-items: center; }
 .import-row-link select { min-width: 8rem; }
+
+.import-pager { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem;
+  margin: .5rem 0 1rem; }
+.import-pager button { min-height: 2.75rem; }
+.import-pager .import-page-status { margin: 0; }
+.inv-imported { display: inline-block; margin-left: .4rem; }

@@ -330,23 +330,178 @@ async fn import_api_previews_commits_retries_and_rejects_stale_revision() {
     assert!(rows["blocking"].as_u64().unwrap() > 0);
 }
 
+#[tokio::test]
+async fn import_api_discards_uncommitted_batches_and_keeps_committed_history() {
+    let (app, _d) = app().await;
+    let base = "/api/admin/imports/harvest";
+    let id = new_import_batch(&app).await;
+    let files = format!("{base}/{id}/files/time");
+    let time = format!("{IMPORT_TIME_HEADER}{IMPORT_ROW}").into_bytes();
+    let (status, _) = body_req(&app, "PUT", &files, "text/csv", time).await;
+    assert_eq!(status, StatusCode::CREATED);
+
+    // A discard removes the batch, its staged source and its history entry.
+    let (status, _) = json_req(&app, "DELETE", &format!("{base}/{id}"), None).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, _) = json_req(&app, "GET", &format!("{base}/{id}"), None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _, _) = raw_req(&app, "GET", &files).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, history) = json_req(&app, "GET", base, None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(history["total"], 0, "{history}");
+    // Discarding a missing batch is a plain 404, not a second success.
+    let (status, _) = json_req(&app, "DELETE", &format!("{base}/{id}"), None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // A committed batch is financial history: 409, and every record survives.
+    let choices = import_fixture(&app).await;
+    let committed = new_import_batch(&app).await;
+    body_req(
+        &app,
+        "PUT",
+        &format!("{base}/{committed}/files/time"),
+        "text/csv",
+        format!("{IMPORT_TIME_HEADER}{IMPORT_ROW}").into_bytes(),
+    )
+    .await;
+    json_req(
+        &app,
+        "PUT",
+        &format!("{base}/{committed}/review"),
+        Some(choices),
+    )
+    .await;
+    let (status, preview) =
+        json_req(&app, "POST", &format!("{base}/{committed}/preview"), None).await;
+    assert_eq!(status, StatusCode::OK, "{preview}");
+    let revision = preview["revision"].as_str().unwrap();
+    let (status, _) = json_req(
+        &app,
+        "POST",
+        &format!("{base}/{committed}/commit"),
+        Some(json!({"revision":revision})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = json_req(&app, "DELETE", &format!("{base}/{committed}"), None).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    let (status, batch) = json_req(&app, "GET", &format!("{base}/{committed}"), None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(batch["state"], "committed", "{batch}");
+    let (status, entries) = json_req(
+        &app,
+        "GET",
+        "/api/entries?from=2026-01-05&to=2026-01-05",
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(entries["entries"].as_array().unwrap().len(), 1, "{entries}");
+}
+
+#[tokio::test]
+async fn competing_commits_return_one_outcome_and_never_alter_history() {
+    let (app, _d) = app().await;
+    let base = "/api/admin/imports/harvest";
+    let choices = import_fixture(&app).await;
+    let id = new_import_batch(&app).await;
+    body_req(
+        &app,
+        "PUT",
+        &format!("{base}/{id}/files/time"),
+        "text/csv",
+        format!("{IMPORT_TIME_HEADER}{IMPORT_ROW}").into_bytes(),
+    )
+    .await;
+    json_req(&app, "PUT", &format!("{base}/{id}/review"), Some(choices)).await;
+    let (status, preview) = json_req(&app, "POST", &format!("{base}/{id}/preview"), None).await;
+    assert_eq!(status, StatusCode::OK, "{preview}");
+    let revision = preview["revision"].as_str().unwrap().to_string();
+    let commit = format!("{base}/{id}/commit");
+    let body = json!({"revision": revision});
+
+    // Two confirmations race on the same revision: the store serializes them
+    // and the second returns the first outcome instead of a second record.
+    let (first, second) = tokio::join!(
+        json_req(&app, "POST", &commit, Some(body.clone())),
+        json_req(&app, "POST", &commit, Some(body.clone())),
+    );
+    assert_eq!(first.0, StatusCode::OK, "{}", first.1);
+    assert_eq!(second.0, StatusCode::OK, "{}", second.1);
+    assert_eq!(first.1["entries"], second.1["entries"]);
+    assert_eq!(first.1["invoices"], second.1["invoices"]);
+    let (status, entries) = json_req(
+        &app,
+        "GET",
+        "/api/entries?from=2026-01-05&to=2026-01-05",
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(entries["entries"].as_array().unwrap().len(), 1, "{entries}");
+
+    // A competitor holding a different revision is refused and leaves the
+    // committed financial history untouched.
+    let (status, _) = json_req(
+        &app,
+        "POST",
+        &commit,
+        Some(json!({"revision": format!("{revision}-competing")})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    let (_, entries) = json_req(
+        &app,
+        "GET",
+        "/api/entries?from=2026-01-05&to=2026-01-05",
+        None,
+    )
+    .await;
+    assert_eq!(entries["entries"].as_array().unwrap().len(), 1, "{entries}");
+}
+
 // ------------------------------------------------ three-source import (#404) --
 
 const EXPENSE_SOURCE_HEADER: &str = "Date,Client,Project,Project Code,Category,Notes,Amount,Units,Billable,Invoiced?,Approved?,First name,Last name,Employee Id,Currency\n";
 
-fn invoice_zip() -> Vec<u8> {
+fn invoice_zip_named(member: &str) -> Vec<u8> {
     use std::io::{Cursor, Write as _};
     let pdf = b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\n%%EOF\n";
     let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
     writer
         .start_file(
-            "invoices/H-1.pdf",
+            member,
             zip::write::SimpleFileOptions::default()
                 .compression_method(zip::CompressionMethod::Stored),
         )
         .unwrap();
     writer.write_all(pdf).unwrap();
     writer.finish().unwrap().into_inner()
+}
+
+fn invoice_zip() -> Vec<u8> {
+    invoice_zip_named("invoices/H-1.pdf")
+}
+
+async fn manual_draft(client: &Client, cid: &serde_json::Value) -> serde_json::Value {
+    let (status, invoice) = json_req(
+        client,
+        "POST",
+        "/api/invoices/manual",
+        Some(json!({
+            "customer_id": cid,
+            "lines": [{
+                "description": "Work",
+                "quantity_hundredths": 100,
+                "unit_price_minor": 10000,
+                "item_kind": "service"
+            }]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{invoice}");
+    invoice
 }
 
 #[tokio::test]
@@ -449,5 +604,127 @@ async fn time_expenses_and_original_invoice_pdf_commit_together() {
             .unwrap(),
         pdf,
         "backup/restore preserves the original PDF bytes"
+    );
+}
+
+#[tokio::test]
+async fn imported_legal_numbers_raise_the_local_high_water_across_restart_and_deleted_drafts() {
+    use sha2::{Digest, Sha256};
+    let (app, dir) = app().await;
+    let base = "/api/admin/imports/harvest";
+    let mut choices = import_fixture(&app).await;
+    let cid = choices["customers"][0]["customer_id"].clone();
+    let pdf = b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\n%%EOF\n";
+    let sha = Sha256::digest(pdf)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    choices["invoices"] = json!([{
+        "sha256": sha,
+        "customer_id": cid,
+        "original_number": "INV-0042",
+        "currency": "EUR",
+        "invoice_date": "2026-01-31",
+        "period_from": "2026-01-01",
+        "period_to": "2026-01-31",
+        "total_minor": 10000,
+        "opening_paid_minor": 0,
+        "status": "issued",
+        "excluded": false
+    }]);
+    let id = new_import_batch(&app).await;
+    let (status, _) = body_req(
+        &app,
+        "PUT",
+        &format!("{base}/{id}/files/invoices"),
+        "application/zip",
+        invoice_zip_named("invoices/INV-0042.pdf"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    json_req(&app, "PUT", &format!("{base}/{id}/review"), Some(choices)).await;
+    let (status, preview) = json_req(&app, "POST", &format!("{base}/{id}/preview"), None).await;
+    assert_eq!(status, StatusCode::OK, "{preview}");
+    let (status, outcome) = json_req(
+        &app,
+        "POST",
+        &format!("{base}/{id}/commit"),
+        Some(json!({"revision": preview["revision"]})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{outcome}");
+    assert_eq!(outcome["invoices"], json!(["INV-0042"]));
+
+    // The imported legal number is preserved, and the next local draft continues
+    // after it rather than reusing 0043 or restarting at 0001.
+    let first = manual_draft(&app, &cid).await;
+    assert_eq!(first["number"], "INV-0043", "{first}");
+    let (status, _) = json_req(
+        &app,
+        "DELETE",
+        &format!("/api/invoices/{}", first["id"].as_str().unwrap()),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let second = manual_draft(&app, &cid).await;
+    assert_eq!(
+        second["number"], "INV-0044",
+        "a deleted draft never frees its number"
+    );
+
+    // A restart reads the durable ledger back, so the high-water mark survives.
+    let restarted = Client::new(Store::open(dir.path().join("data")).unwrap(), None).await;
+    let third = manual_draft(&restarted, &cid).await;
+    assert_eq!(third["number"], "INV-0045", "{third}");
+}
+
+/// #404: the real supplied exports are private and never live in the repo or
+/// CI. An operator exercises them locally by naming their folder; the test
+/// retains only counts and SHA-256 hashes in its output, never a row, an
+/// amount or PDF text.
+#[test]
+fn supplied_private_exports_parse_only_when_explicitly_enabled() {
+    use sha2::{Digest, Sha256};
+    let Ok(folder) = std::env::var("TUCANOTIME_HARVEST_SAMPLES") else {
+        eprintln!(
+            "skip: set TUCANOTIME_HARVEST_SAMPLES to the folder holding the private Harvest exports"
+        );
+        return;
+    };
+    let dir = std::path::PathBuf::from(folder);
+    let read = |name: &str| {
+        std::fs::read(dir.join(name)).unwrap_or_else(|error| panic!("{name}: {error}"))
+    };
+    let time = read("harvest_time_report.csv");
+    let expenses = read("harvest_expense_report.csv");
+    let invoices = read("harvest_invoice_pack.zip");
+    let time_report = tucano_time::harvest::parse(tucano_time::harvest::ReportKind::Time, &time)
+        .unwrap_or_else(|issues| panic!("time export has {} issue(s)", issues.len()));
+    let expense_report =
+        tucano_time::harvest::parse(tucano_time::harvest::ReportKind::Expense, &expenses)
+            .unwrap_or_else(|issues| panic!("expense export has {} issue(s)", issues.len()));
+    let sources = tucano_time::harvest_invoices::inspect_invoice_zip(&invoices)
+        .unwrap_or_else(|error| panic!("invoice pack: {}", error.message));
+    assert!(!time_report.rows.is_empty(), "the time export has rows");
+    assert!(
+        !expense_report.rows.is_empty(),
+        "the expense export has rows"
+    );
+    assert!(!sources.is_empty(), "the invoice pack has PDFs");
+    for (name, bytes) in [
+        ("time", &time),
+        ("expenses", &expenses),
+        ("invoices", &invoices),
+    ] {
+        let digest = Sha256::digest(bytes);
+        let hex: String = digest.iter().map(|byte| format!("{byte:02x}")).collect();
+        eprintln!("{name}: {} bytes, sha256 {hex}", bytes.len());
+    }
+    eprintln!(
+        "time rows: {}, expense rows: {}, invoice PDFs: {}",
+        time_report.rows.len(),
+        expense_report.rows.len(),
+        sources.len()
     );
 }

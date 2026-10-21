@@ -7,15 +7,20 @@
 // route.
 
 import { api } from './api.js';
-import { $, announce, clearFormError, el, formatMoney, showFormError, statusChip } from './dom.js';
+import { $, announce, askConfirm, clearFormError, el, formatMoney, showFormError, statusChip } from './dom.js';
 
 const BASE = '/admin/imports/harvest';
+const PAGE_SIZE = 25;
 let currentBatch = null;
 let currentPreview = null;
 let draft = null;
 let options = { users: [], customers: [], categories: [], projects: [], tasks: [] };
 let optionsLoaded = false;
 let committing = false;
+let rowFilter = 'all';
+let rowPage = 0;
+let issueFilter = 'all';
+let issuePage = 0;
 
 function panelVisible() {
     const panel = $('settings-panel-import');
@@ -62,7 +67,7 @@ function renderBatch(batch) {
     $('import-choices').value = JSON.stringify(draft, null, 2);
     const committed = batch.state === 'committed';
     for (const id of ['import-time-upload', 'import-expenses-upload', 'import-invoices-upload',
-        'import-save', 'import-preview']) {
+        'import-save', 'import-preview', 'import-discard']) {
         $(id).disabled = committed;
     }
     if (committed) {
@@ -475,7 +480,7 @@ export async function newBatch() {
         await loadOptions();
         const batch = await api.post(BASE, { namespace: 'harvest' });
         renderBatch(batch);
-        currentPreview = null;
+        resetPreview();
         $('import-mapping').textContent = '';
         $('import-ready').textContent = 'Draft created. Upload at least one source.';
         await refreshImports();
@@ -486,7 +491,7 @@ export async function newBatch() {
 
 export async function openBatch(id) {
     clearError();
-    currentPreview = null;
+    resetPreview();
     $('import-commit').disabled = true;
     try {
         await loadOptions();
@@ -563,8 +568,103 @@ function linkRow(preview, sourceKey, invoiced) {
     return el('div', { cls: 'import-row-link' }, [select, button]);
 }
 
+function rowMatches(row, filter) {
+    const issues = row.issues || [];
+    if (filter === 'issues') return issues.length > 0;
+    if (filter === 'blocking') return issues.some((issue) => issue.blocking);
+    if (filter === 'accepted') return row.decision === 'new' || row.decision === 'correction';
+    if (filter === 'skipped') return ['duplicate', 'excluded', 'conflict'].includes(row.decision);
+    return true;
+}
+
+function issueMatches(issue, filter) {
+    return filter === 'blocking' ? issue.blocking === true : true;
+}
+
+function clampPage(page, total) {
+    const last = Math.max(0, Math.ceil(total / PAGE_SIZE) - 1);
+    return Math.min(page, last);
+}
+
+function pageLabel(elementId, page, total, noun) {
+    const target = $(elementId);
+    if (!target) return;
+    if (!total) {
+        target.textContent = `No ${noun} match this filter.`;
+        return;
+    }
+    const start = page * PAGE_SIZE + 1;
+    const end = Math.min(start + PAGE_SIZE - 1, total);
+    target.textContent = `${noun[0].toUpperCase()}${noun.slice(1)} ${start}–${end} of ${total}.`;
+}
+
+function previewRows() {
+    const rows = [];
+    for (const row of currentPreview?.time || []) rows.push({ source: 'time', row });
+    for (const row of currentPreview?.expenses || []) rows.push({ source: 'expense', row });
+    for (const row of currentPreview?.invoices || []) rows.push({ source: 'invoice', row });
+    return rows;
+}
+
+function renderRows() {
+    const filtered = previewRows().filter(({ row }) => rowMatches(row, rowFilter));
+    rowPage = clampPage(rowPage, filtered.length);
+    const tbody = $('import-rows').querySelector('tbody');
+    tbody.textContent = '';
+    const start = rowPage * PAGE_SIZE;
+    for (const { source, row } of filtered.slice(start, start + PAGE_SIZE)) {
+        const amount = row.amount_minor ?? row.total_minor;
+        const issues = (row.issues || []).length;
+        const link = source === 'invoice' ? el('a', {
+            attrs: {
+                href: `${BASE}/${currentBatch.id}/invoices/${row.pdf_sha256}/pdf`,
+                target: '_blank', rel: 'noopener',
+            },
+            text: 'PDF',
+        }) : linkRow(currentPreview, row.source_key, row.invoiced);
+        tbody.appendChild(el('tr', {}, [
+            el('th', { attrs: { scope: 'row' }, text: source }),
+            el('td', { attrs: { 'data-heading': 'Record' }, text: `${row.record ?? row.original_name ?? row.source_key}` }),
+            el('td', { attrs: { 'data-heading': 'Decision' } }, [statusChip(row.decision)]),
+            el('td', { attrs: { 'data-heading': 'Amount' }, text: amount === undefined ? '' : formatMoney(amount) }),
+            el('td', { attrs: { 'data-heading': 'Issues' }, text: String(issues) }),
+            el('td', { attrs: { 'data-heading': 'Link' } }, [link]),
+        ]));
+    }
+    pageLabel('import-row-page', rowPage, filtered.length, 'rows');
+    $('import-row-prev').disabled = rowPage === 0;
+    $('import-row-next').disabled = start + PAGE_SIZE >= filtered.length;
+}
+
+function renderIssues() {
+    const filtered = (currentPreview?.issues || []).filter((issue) => issueMatches(issue, issueFilter));
+    issuePage = clampPage(issuePage, filtered.length);
+    const tbody = $('import-issue-list').querySelector('tbody');
+    tbody.textContent = '';
+    const start = issuePage * PAGE_SIZE;
+    for (const issue of filtered.slice(start, start + PAGE_SIZE)) {
+        const where = issue.record === undefined
+            ? (issue.member || '—')
+            : `${issue.record}${issue.line === undefined ? '' : ` · line ${issue.line}`}`;
+        tbody.appendChild(el('tr', {}, [
+            el('th', { attrs: { scope: 'row' }, text: issue.source }),
+            el('td', { attrs: { 'data-heading': 'Record' }, text: where }),
+            el('td', { attrs: { 'data-heading': 'Field' }, text: issue.field }),
+            el('td', { attrs: { 'data-heading': 'Message' }, text: issue.message }),
+            el('td', { attrs: { 'data-heading': 'Blocking' }, text: issue.blocking ? 'yes' : 'no' }),
+        ]));
+    }
+    pageLabel('import-issue-page', issuePage, filtered.length, 'issues');
+    $('import-issue-prev').disabled = issuePage === 0;
+    $('import-issue-next').disabled = start + PAGE_SIZE >= filtered.length;
+}
+
 function renderPreview(preview) {
     currentPreview = preview;
+    rowPage = 0;
+    issuePage = 0;
+    $('import-row-filter').value = rowFilter;
+    $('import-issue-filter').value = issueFilter;
     const tbody = $('import-totals').querySelector('tbody');
     tbody.textContent = '';
     for (const row of preview.totals || []) {
@@ -577,30 +677,8 @@ function renderPreview(preview) {
             el('td', { attrs: { 'data-heading': 'Opening paid' }, text: formatMoney(row.opening_paid_minor) }),
         ]));
     }
-    const rows = $('import-rows').querySelector('tbody');
-    rows.textContent = '';
-    const append = (source, row) => {
-        const amount = row.amount_minor ?? row.total_minor;
-        const issues = (row.issues || []).length;
-        const link = source === 'invoice' ? el('a', {
-            attrs: {
-                href: `${BASE}/${currentBatch.id}/invoices/${row.pdf_sha256}/pdf`,
-                target: '_blank', rel: 'noopener',
-            },
-            text: 'PDF',
-        }) : linkRow(preview, row.source_key, row.invoiced);
-        rows.appendChild(el('tr', {}, [
-            el('th', { attrs: { scope: 'row' }, text: source }),
-            el('td', { attrs: { 'data-heading': 'Record' }, text: `${row.record ?? row.original_name ?? row.source_key}` }),
-            el('td', { attrs: { 'data-heading': 'Decision' } }, [statusChip(row.decision)]),
-            el('td', { attrs: { 'data-heading': 'Amount' }, text: amount === undefined ? '' : formatMoney(amount) }),
-            el('td', { attrs: { 'data-heading': 'Issues' }, text: String(issues) }),
-            el('td', { attrs: { 'data-heading': 'Link' } }, [link]),
-        ]));
-    };
-    for (const row of preview.time || []) append('time', row);
-    for (const row of preview.expenses || []) append('expense', row);
-    for (const row of preview.invoices || []) append('invoice', row);
+    renderRows();
+    renderIssues();
     $('import-issues').textContent = preview.blocking
         ? `${preview.blocking} blocking issue(s); commit stays disabled.`
         : 'No blocking issues.';
@@ -625,6 +703,16 @@ async function previewBatch() {
     }
 }
 
+function resetPreview() {
+    currentPreview = null;
+    $('import-totals').querySelector('tbody').textContent = '';
+    $('import-rows').querySelector('tbody').textContent = '';
+    $('import-issue-list').querySelector('tbody').textContent = '';
+    $('import-row-page').textContent = '';
+    $('import-issue-page').textContent = '';
+    $('import-issues').textContent = '';
+}
+
 async function commitBatch() {
     const id = batchId();
     if (!id || !currentPreview?.ready || committing) return;
@@ -647,6 +735,37 @@ async function commitBatch() {
     }
 }
 
+async function discardBatch() {
+    const id = batchId();
+    if (!id) return;
+    if (currentBatch?.state === 'committed') {
+        announce('A committed import is financial history and cannot be discarded.');
+        return;
+    }
+    if (!(await askConfirm(
+        'Discard this batch and every staged source? Records already committed by an import are never removed.',
+        'Discard batch',
+    ))) return;
+    clearError();
+    try {
+        await api.del(`${BASE}/${id}`);
+        currentBatch = null;
+        draft = null;
+        resetPreview();
+        $('import-batch-label').textContent = '';
+        $('import-mapping').textContent = '';
+        $('import-choices').value = '';
+        $('import-ready').textContent = 'Batch discarded. Upload sources into a new batch.';
+        $('import-commit').disabled = true;
+        $('import-status').textContent = 'Batch discarded.';
+        announce('Import batch discarded.');
+        await refreshImports();
+    } catch (err) {
+        showError(err);
+        await refreshImports();
+    }
+}
+
 let wired = false;
 
 export function wireImports() {
@@ -662,4 +781,31 @@ export function wireImports() {
     $('import-save').addEventListener('click', saveMapping);
     $('import-preview').addEventListener('click', previewBatch);
     $('import-commit').addEventListener('click', commitBatch);
+    $('import-discard').addEventListener('click', discardBatch);
+    $('import-row-filter').addEventListener('change', (event) => {
+        rowFilter = event.target.value;
+        rowPage = 0;
+        renderRows();
+    });
+    $('import-issue-filter').addEventListener('change', (event) => {
+        issueFilter = event.target.value;
+        issuePage = 0;
+        renderIssues();
+    });
+    $('import-row-prev').addEventListener('click', () => {
+        rowPage = Math.max(0, rowPage - 1);
+        renderRows();
+    });
+    $('import-row-next').addEventListener('click', () => {
+        rowPage += 1;
+        renderRows();
+    });
+    $('import-issue-prev').addEventListener('click', () => {
+        issuePage = Math.max(0, issuePage - 1);
+        renderIssues();
+    });
+    $('import-issue-next').addEventListener('click', () => {
+        issuePage += 1;
+        renderIssues();
+    });
 }

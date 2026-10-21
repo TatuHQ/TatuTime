@@ -117,6 +117,17 @@ async function refreshInvoicesBody() {
           // while draft, paid and written off stay neutral. The label is the
           // ratified lifecycle vocabulary (#349) -- presentation only.
           statusChip(statusLabel(inv.status), open),
+          // #403: an imported invoice keeps its reviewed native status and says
+          // where it came from. The archived original is the authoritative
+          // document; the PDF action downloads those exact bytes.
+          inv.imported
+            ? el('span', {
+              cls: 'inv-imported',
+              attrs: {
+                title: `Imported from Harvest as ${inv.imported.original_number}; the archived original PDF is authoritative`,
+              },
+            }, [statusChip('Harvest import')])
+            : null,
         ]),
         iconActionsCell(actions),
       ]),
@@ -1176,6 +1187,12 @@ export async function openInvoicePreview(inv, opener) {
   documentNote.textContent = draft
     ? 'This draft follows the current invoice template and customer settings; its subject, terms and due date are frozen when you issue it.'
     : 'Subject, payment terms and due date are fixed at issue — later template or customer changes do not alter this invoice.';
+  // #403: an imported invoice is a reviewed native record whose document is
+  // the original archived PDF, not a regeneration. Say so next to the frame.
+  if (inv.imported) {
+    documentNote.textContent +=
+      ` Imported from Harvest as ${inv.imported.original_number}; the original archived PDF is shown and downloaded unchanged.`;
+  }
   // ---- Get paid: the collect-payment box on the invoice. No hosted
   // checkout exists by design, so this shows the customer's own payment
   // details, what has been settled and when, and offers manual
