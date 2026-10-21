@@ -123,17 +123,22 @@ the `v0.1.8` release notes is no longer needed.
   only way back to editable is before issue: drafts lock nothing and can be
   deleted; the GUI reflects this by hiding the actions of invoiced rows and
   showing a lock that links to the invoice), `SubmissionLock` (entries in a
-  submitted/approved week, #16) and `ClaimLock` (expenses on a
+  submitted/approved week, #16), `ClaimLock` (expenses on a
   submitted/approved reimbursement claim, #24 — the #190 follow-up, no longer
-  a direct scan in `api::expenses`). Reads are never blocked. If the lock
+  a direct scan in `api::expenses`) and `ImportLock` (#398: entries/expenses
+  whose import provenance marks them invoiced in the source system; permanent,
+  and independent of any local invoice). Reads are never blocked. If the lock
   state cannot be verified the write is refused fail-closed with 503
   `lock_unavailable` (#185) — never allowed because the check was
-  inconclusive. All three providers answer from one memoized
-  `store::LockSnapshot` keyed on the source collections' directory mtimes
-  (#255): a per-record check no longer re-reads every invoice/submission/claim
-  document, a changed directory stamp forces a single re-scan (so the set can
-  never go stale behind an atomic tmp+rename write), and a scan failure is
-  never cached.
+  inconclusive. The invoice, submission and claim providers answer from one
+  memoized `store::LockSnapshot` keyed on the source collections' directory
+  mtimes (#255): a per-record check no longer re-reads
+  every invoice/submission/claim document, a changed directory stamp forces a
+  single re-scan (so the set can never go stale behind an atomic tmp+rename
+  write), and a scan failure is never cached. `ImportLock` reads the
+  provenance carried by the record itself; the submission path answers from
+  the week's already-loaded records (`EntryLock::locked_entries_of`), so
+  submitting a week never scans the whole entry tree.
 - Every payload is validated against the contract before any write
   (`deny_unknown_fields` + `domain::validate_*`); no partial persistence.
   Errors use the single JSON shape in `openapi.json`; responses never expose

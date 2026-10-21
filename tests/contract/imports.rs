@@ -118,3 +118,56 @@ async fn imported_invoice_preview_and_download_preserve_original_bytes_and_fail_
         "a missing original must not be regenerated"
     );
 }
+
+/// #398/#218: a submitted week omits externally invoiced history, answered from
+/// the week's own records rather than a scan of every entry in the deployment.
+#[tokio::test]
+async fn submission_skips_externally_invoiced_entries() {
+    let (app, dir) = app().await;
+    let customer = new_customer(&app, "Example", "EUR", 6000).await;
+    let cid = customer["id"].as_str().unwrap();
+    new_project(&app, cid, "P1", json!({"name":"Work"})).await;
+    let body = entry_body(cid, "P1", json!(2), "2026-01-05");
+    let (status, first) = json_req(&app, "POST", "/api/entries", Some(body.clone())).await;
+    assert_eq!(status, StatusCode::CREATED, "{first}");
+    let (status, second) = json_req(&app, "POST", "/api/entries", Some(body)).await;
+    assert_eq!(status, StatusCode::CREATED, "{second}");
+    let first_id = Uuid::parse_str(first["id"].as_str().unwrap()).unwrap();
+    let second_id = Uuid::parse_str(second["id"].as_str().unwrap()).unwrap();
+
+    let store = Store::open(dir.path().join("data")).unwrap();
+    let mut entry = store.get_entry(first_id).unwrap().unwrap();
+    entry.imported = Some(ImportedTime {
+        origin: ImportOrigin {
+            provider: ImportProvider::Harvest,
+            namespace: "test".into(),
+            batch_id: Uuid::new_v4(),
+            source_key: "row:1".into(),
+            invoiced: true,
+        },
+        currency: Currency("EUR".into()),
+        rate_minor: 6000,
+        cost_rate_minor: 0,
+        source_hours: Hours(200),
+        amount_minor: 12000,
+        cost_amount_minor: 0,
+    });
+    store.put_entry(&entry).unwrap();
+
+    let (status, submission) = json_req(
+        &app,
+        "POST",
+        "/api/submissions",
+        Some(json!({"week_start":"2026-01-05"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{submission}");
+    let submitted: Vec<Uuid> = submission["entry_ids"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|id| Uuid::parse_str(id.as_str().unwrap()).unwrap())
+        .collect();
+    assert_eq!(submitted, vec![second_id], "{submission}");
+    assert!(!submitted.contains(&first_id));
+}

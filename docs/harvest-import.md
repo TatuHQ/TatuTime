@@ -1,10 +1,11 @@
 # Harvest import implementation status
 
 Harvest import is being developed under #394. The CSV parser (#395), protected
-financial-history foundation (#398) and bounded ZIP container reader (#399)
-are implemented. There is no upload endpoint, Import settings page or data
-commit operation yet. Successful parsing is not an import: mapping, reviewed
-metadata, duplicate handling and journaled persistence remain required.
+financial-history foundation (#398) and bounded ZIP container reader plus
+best-effort PDF metadata suggestions (#399) are implemented. There is no upload
+endpoint, Import settings page or data commit operation yet. Successful parsing
+is not an import: mapping, reviewed metadata, duplicate handling and journaled
+persistence remain required.
 
 ## Financial-history foundation
 
@@ -33,13 +34,38 @@ Limits are 5 MiB compressed, 1,000 archive entries, 500 PDFs, 8 MiB per PDF,
 50 MiB actual expanded bytes and a maximum 200:1 compression ratio. Actual
 decompressed sizes and CRC errors are checked, not only declared sizes.
 
-This is container validation only. The PDF signature/end marker is checked,
-but bounded PDF object/text parsing, extraction suggestions and manual metadata
-review are still required by #399. No invoice status, recipient, legal invoice
-number or service period is inferred from an archive filename.
+This is container validation only: the PDF signature/end marker is checked but
+does not prove a well-formed document. No invoice status, recipient, legal
+invoice number or service period is inferred from an archive filename.
 
-Run the ZIP tests with `cargo test --lib harvest_invoices::tests`. To inspect a
-private sample without extraction, set `HARVEST_INVOICE_ZIP` and run the ignored
+## Bounded PDF metadata suggestions
+
+`harvest_invoices::inspect_invoice_text(&InvoiceSource)` parses the member's
+bytes with lopdf and returns `PdfInspection`. It is strictly best-effort and
+produces **suggestions only**:
+
+- At most 50 pages, 1 MiB of decompressed page content per page and 256 KiB of
+  collected text; the text budget is reported as `text_truncated` rather than
+  silently overrun.
+- Suggestions are drawn only from labelled lines in the document's own text
+  (`Invoice Number:`, `Invoice Date:`, `Bill To:`, `Currency:`, `Total:`,
+  `Amount Due:`). Amounts are integer minor units with correct grouping; dates
+  must be unambiguous ISO `YYYY-MM-DD` values.
+- Each suggestion carries the 1-based source page, the source line as
+  `evidence`, and a confidence. Nothing is inferred from the filename, and the
+  original PDF stays authoritative.
+- Encrypted documents, unparseable structure, more than 50 pages, undecodable
+  page content, scanned documents (no extractable text) and documents with no
+  recognisable metadata all return `ManualReview` or `NoText` with a blocking
+  reason. There is no OCR and no outbound/cloud call.
+
+A suggestion never commits metadata. #400 still has to map the customer, review
+the legal number, currency, dates and totals, reconcile lines and decide
+exclusions before any record may be written (#401).
+
+Run the ZIP and PDF tests with `cargo test --lib harvest_invoices::tests`. To
+inspect a private sample without extraction, set `HARVEST_INVOICE_ZIP` and run
+the ignored
 `harvest_invoices::tests::private_invoice_archive_is_inspected_without_extraction`
 test. Only counts are printed; real invoices must not become tracked fixtures.
 
@@ -95,8 +121,8 @@ upload them to issue trackers.
 
 ## Remaining delivery
 
-1. Bounded PDF metadata inspection and explicit user/reference mapping with
-   reconciliation previews (#399, #400).
+1. Explicit user/reference mapping with reconciliation previews, building on the
+   PDF suggestions (#400).
 2. Idempotent import history, duplicate review and journaled commit/recovery (#401).
 3. Admin batch/source/review/commit API (#402).
 4. Accessible Settings > Import workflow for time, expenses and invoices (#403).

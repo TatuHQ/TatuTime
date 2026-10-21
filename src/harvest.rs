@@ -77,7 +77,10 @@ fn header(value: &str) -> String {
     value.trim().trim_end_matches('?').to_ascii_lowercase()
 }
 
-fn decimal(value: &str, grouped: bool) -> Option<i64> {
+/// Exact decimal parsing shared with the invoice-PDF inspector: at most two
+/// fractional digits, integer minor units only, never a float. `grouped`
+/// accepts correctly placed thousands separators (`1,234.56`).
+pub(crate) fn decimal(value: &str, grouped: bool) -> Option<i64> {
     let value = value.trim();
     let (negative, value) = match value.strip_prefix('-') {
         Some(value) => (true, value),

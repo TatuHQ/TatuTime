@@ -1,11 +1,14 @@
 //! Entry/expense-lock port: one seam answers "is this record frozen, and why?".
 //!
-//! Invoices (#8), timesheet submissions (#16) and reimbursement claims (#24) are
-//! lock providers; the entry edit/delete and expense delete handlers consult this
-//! seam, so a record cannot be changed through any route once locked.
-//! `CombinedLocks` composes the providers (first lock wins) and all three answer
-//! from one memoized `store::LockSnapshot` (#255), so a per-record check never
-//! re-reads every document. `NoLocks` locks nothing.
+//! Invoices (#8), timesheet submissions (#16), reimbursement claims (#24) and
+//! imported external history (#398) are lock providers; the entry edit/delete and
+//! expense delete handlers consult this seam, so a record cannot be changed
+//! through any route once locked. `CombinedLocks` composes the providers (first
+//! lock wins). The invoice/submission/claim providers answer from one memoized
+//! `store::LockSnapshot` (#255), so a per-record check never re-reads every
+//! document; the import provider reads the provenance carried by the record it
+//! is asked about (or, in bulk, by the candidates the caller already holds).
+//! `NoLocks` locks nothing.
 
 use uuid::Uuid;
 
@@ -67,9 +70,10 @@ impl LockReason {
 #[derive(Debug)]
 pub struct LockUnavailable(pub String);
 
-/// One entry's frozen state, plus one pass over every frozen entry. The providers
-/// (invoices #8, submissions #16, claims #24) answer from one memoized snapshot
-/// (#255); reads are never blocked — only a write to a frozen record is refused.
+/// One entry's frozen state, plus one pass over every frozen entry. The
+/// invoice/submission/claim providers answer from one memoized snapshot (#255);
+/// the import provider reads the record's own provenance (#398). Reads are never
+/// blocked — only a write to a frozen record is refused.
 ///
 /// ```rust
 /// match lock.entry_lock(id) {
@@ -85,10 +89,26 @@ pub trait EntryLock: Send + Sync {
     fn entry_lock(&self, entry_id: Uuid) -> Result<Option<LockReason>, LockUnavailable>;
 
     /// Every locked entry id in **one** pass (#218). Callers that ask about
-    /// many entries per request (submission creation) must not drive
-    /// `entry_lock` per id — the providers answer from one snapshot (#255).
+    /// many entries per request must not drive `entry_lock` per id.
     /// Implementations must agree with `entry_lock` (covered by a unit test).
     fn locked_entries(&self) -> Result<std::collections::HashSet<Uuid>, LockUnavailable>;
+
+    /// Bulk answer for a caller that already holds the candidate entries (the
+    /// submission path). Providers whose frozen state is carried by the record
+    /// itself — import provenance (#398) — answer from memory instead of
+    /// re-reading the whole collection; the others intersect their one-pass set
+    /// (#255). Implementations must agree with `entry_lock` for every candidate.
+    fn locked_entries_of(
+        &self,
+        entries: &[crate::domain::Entry],
+    ) -> Result<std::collections::HashSet<Uuid>, LockUnavailable> {
+        let bulk = self.locked_entries()?;
+        Ok(entries
+            .iter()
+            .filter(|entry| bulk.contains(&entry.id))
+            .map(|entry| entry.id)
+            .collect())
+    }
 
     /// The expense counterpart (#255): `Ok(Some(reason))` freezes an expense
     /// delete the way `entry_lock` freezes an entry, `Ok(None)` is provably
@@ -143,6 +163,16 @@ impl EntryLock for CombinedLocks {
         let mut all = std::collections::HashSet::new();
         for provider in &self.providers {
             all.extend(provider.locked_entries()?);
+        }
+        Ok(all)
+    }
+    fn locked_entries_of(
+        &self,
+        entries: &[crate::domain::Entry],
+    ) -> Result<std::collections::HashSet<Uuid>, LockUnavailable> {
+        let mut all = std::collections::HashSet::new();
+        for provider in &self.providers {
+            all.extend(provider.locked_entries_of(entries)?);
         }
         Ok(all)
     }
@@ -205,6 +235,19 @@ impl EntryLock for ImportLock {
                     .map(|_| LockReason::Imported)
             })
             .map_err(|error| LockUnavailable(error.to_string()))
+    }
+
+    /// The submission path already holds the week's entries: provenance is on
+    /// the record, so this answer is free and never scans the collection.
+    fn locked_entries_of(
+        &self,
+        entries: &[crate::domain::Entry],
+    ) -> Result<std::collections::HashSet<Uuid>, LockUnavailable> {
+        Ok(entries
+            .iter()
+            .filter(|entry| entry.externally_invoiced())
+            .map(|entry| entry.id)
+            .collect())
     }
 
     fn locked_entries(&self) -> Result<std::collections::HashSet<Uuid>, LockUnavailable> {
@@ -571,5 +614,89 @@ mod bulk_tests {
         );
         assert!(bulk2.contains(&e_partly) && bulk2.contains(&e_sub));
         assert!(bulk_x2.contains(&x_claim));
+    }
+
+    /// #398: imported, externally invoiced records are frozen by the record's
+    /// own provenance, independent of any local invoice. Both the per-record and
+    /// bulk answers must agree, and clearing provenance (only a direct store
+    /// write can) releases the lock.
+    #[test]
+    fn import_lock_freezes_external_records_in_bulk_and_per_record() {
+        use crate::domain::{ImportOrigin, ImportProvider, ImportedTime};
+        let dir = tempfile::tempdir().unwrap();
+        let store =
+            std::sync::Arc::new(crate::store::Store::open(dir.path().join("data")).unwrap());
+        let origin = |invoiced| ImportOrigin {
+            provider: ImportProvider::Harvest,
+            namespace: "test".into(),
+            batch_id: Uuid::new_v4(),
+            source_key: "row:1".into(),
+            invoiced,
+        };
+        let mut imported_entry = entry_ref(Uuid::new_v4());
+        imported_entry.imported = Some(ImportedTime {
+            origin: origin(true),
+            currency: Currency("USD".into()),
+            rate_minor: 6500,
+            cost_rate_minor: 0,
+            source_hours: Hours(100),
+            amount_minor: 6500,
+            cost_amount_minor: 0,
+        });
+        store.put_entry(&imported_entry).unwrap();
+        let free_entry = entry_ref(Uuid::new_v4());
+        store.put_entry(&free_entry).unwrap();
+        let mut imported_expense: crate::domain::Expense =
+            serde_json::from_value(serde_json::json!({
+                "id": Uuid::new_v4(),
+                "date": "2026-10-02",
+                "customer_id": Uuid::new_v4(),
+                "amount_minor": 1200,
+                "currency": "EUR",
+                "billable": true,
+                "created_at": "2026-10-02T00:00:00Z",
+                "updated_at": "2026-10-02T00:00:00Z"
+            }))
+            .unwrap();
+        imported_expense.imported = Some(origin(true));
+        store.put_expense(&imported_expense).unwrap();
+        let mut free_expense = imported_expense.clone();
+        free_expense.id = Uuid::new_v4();
+        free_expense.imported = None;
+        store.put_expense(&free_expense).unwrap();
+
+        let lock = ImportLock::new(store.clone());
+        assert_eq!(
+            lock.entry_lock(imported_entry.id).unwrap(),
+            Some(LockReason::Imported)
+        );
+        assert_eq!(lock.entry_lock(free_entry.id).unwrap(), None);
+        let mut bulk = lock.locked_entries().unwrap();
+        assert!(bulk.remove(&imported_entry.id));
+        assert!(bulk.is_empty(), "{bulk:?}");
+        let combined = CombinedLocks::new(vec![Box::new(ImportLock::new(store.clone()))]);
+        let week = [imported_entry.clone(), free_entry.clone()];
+        assert_eq!(
+            combined.locked_entries_of(&week).unwrap(),
+            std::collections::HashSet::from([imported_entry.id]),
+            "the submission path must answer from the candidates it already holds"
+        );
+        assert_eq!(
+            lock.expense_lock(imported_expense.id).unwrap(),
+            Some(LockReason::Imported)
+        );
+        assert_eq!(lock.expense_lock(free_expense.id).unwrap(), None);
+        let mut bulk = lock.locked_expenses().unwrap();
+        assert!(bulk.remove(&imported_expense.id));
+        assert!(bulk.is_empty(), "{bulk:?}");
+
+        imported_entry.imported.as_mut().unwrap().origin.invoiced = false;
+        store.put_entry(&imported_entry).unwrap();
+        assert_eq!(lock.entry_lock(imported_entry.id).unwrap(), None);
+        assert!(lock.locked_entries().unwrap().is_empty());
+        imported_expense.imported = None;
+        store.put_expense(&imported_expense).unwrap();
+        assert_eq!(lock.expense_lock(imported_expense.id).unwrap(), None);
+        assert!(lock.locked_expenses().unwrap().is_empty());
     }
 }
