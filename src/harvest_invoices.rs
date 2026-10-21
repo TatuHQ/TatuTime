@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::io::{Cursor, Read};
 
-use chrono::{Datelike, NaiveDate};
+use chrono::{Datelike, NaiveDate, Weekday};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
@@ -490,10 +490,22 @@ fn month_bounds(year: i32, month: u32) -> Option<(NaiveDate, NaiveDate)> {
     Some((start, next.pred_opt()?))
 }
 
+/// The last weekday of a month. Source invoices are normally issued on it, so
+/// a weekend date at the very end of the month still belongs to that month.
+fn last_weekday(year: i32, month: u32) -> Option<NaiveDate> {
+    let (_, mut date) = month_bounds(year, month)?;
+    while matches!(date.weekday(), Weekday::Sat | Weekday::Sun) {
+        date = date.pred_opt()?;
+    }
+    Some(date)
+}
+
 /// The billing period rule the import follows: an invoice covers the calendar
-/// month before its issue date, except when it is issued on the last day of a
-/// month, where it covers that month. Both are derived from the one date the
-/// document prints, never from line-item guesses.
+/// month before its issue date, except when it is issued at the end of a month
+/// (on its last weekday, or the weekend after it), where it covers that month.
+/// The source invoices are normally issued on the last weekday; a delayed one
+/// issued in the first days of the next month still belongs to the month
+/// before. Both cases derive from the one date the document prints.
 fn period_suggestions(suggestions: &[PdfSuggestion]) -> Vec<PdfSuggestion> {
     let Some(issue) = suggestions
         .iter()
@@ -507,10 +519,13 @@ fn period_suggestions(suggestions: &[PdfSuggestion]) -> Vec<PdfSuggestion> {
     let Some((issue_start, issue_end)) = month_bounds(issue_date.year(), issue_date.month()) else {
         return Vec::new();
     };
-    let (period, reason) = if issue_date == issue_end {
+    let Some(last_weekday) = last_weekday(issue_date.year(), issue_date.month()) else {
+        return Vec::new();
+    };
+    let (period, reason) = if issue_date >= last_weekday {
         (
             (issue_start, issue_end),
-            "Issue date is the last day of its month",
+            "Issue date is at the end of its month",
         )
     } else {
         let Some(previous_end) = issue_start.pred_opt() else {
@@ -1020,6 +1035,40 @@ mod tests {
         assert_eq!(find(PdfField::InvoiceDate).value, "2025-06-30");
         assert_eq!(find(PdfField::PeriodFrom).value, "2025-06-01");
         assert_eq!(find(PdfField::PeriodTo).value, "2025-06-30");
+    }
+
+    #[test]
+    fn an_invoice_issued_on_the_last_weekday_covers_its_own_month() {
+        // 30 Jan 2026 is a Friday and the last weekday of January: the
+        // calendar month still runs to the 31st.
+        let pdf = pdf_document(&[&["Issue date", "30/01/2026"]]);
+        let inspection = inspect(&pdf);
+        let find = |field| {
+            inspection
+                .suggestions
+                .iter()
+                .find(|suggestion| suggestion.field == field)
+                .unwrap_or_else(|| panic!("missing {field:?}: {:?}", inspection.suggestions))
+        };
+        assert_eq!(find(PdfField::PeriodFrom).value, "2026-01-01");
+        assert_eq!(find(PdfField::PeriodTo).value, "2026-01-31");
+    }
+
+    #[test]
+    fn a_delayed_january_invoice_issued_in_early_february_covers_january() {
+        // 6 Feb 2026 is in the first days of the month, so the invoice bills the
+        // month before it.
+        let pdf = pdf_document(&[&["Issue date", "06/02/2026"]]);
+        let inspection = inspect(&pdf);
+        let find = |field| {
+            inspection
+                .suggestions
+                .iter()
+                .find(|suggestion| suggestion.field == field)
+                .unwrap_or_else(|| panic!("missing {field:?}: {:?}", inspection.suggestions))
+        };
+        assert_eq!(find(PdfField::PeriodFrom).value, "2026-01-01");
+        assert_eq!(find(PdfField::PeriodTo).value, "2026-01-31");
     }
 
     #[test]

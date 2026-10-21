@@ -1699,7 +1699,7 @@ dependencies = [
 
 [[package]]
 name = "tucano-time"
-version = "0.1.58"
+version = "0.1.59"
 dependencies = [
  "aes-gcm",
  "argon2",

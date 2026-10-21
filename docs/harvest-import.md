@@ -59,8 +59,11 @@ produces **suggestions only**:
   equals the printed total and `issued` otherwise (including when no payments
   row exists). Customer names are taken from `Invoice for`.
 - `Period from`/`Period to` are derived from the issue date: the calendar month
-  before it, or its own month when the invoice is issued on the last day. A
-  `1 Feb` issue covers `1–31 Jan`; a `30 Jun` issue covers `1–30 Jun`.
+  before it, or its own month when the invoice is issued on (or after) the
+  month's last weekday. Invoices normally go out on that last weekday, so a
+  `30 Jan 2026` issue covers January even though the 31st is a Saturday, and a
+  delayed `6 Feb 2026` issue still covers January. Bounds are the full calendar
+  month (`1 Jan–31 Jan`).
 - Each suggestion carries the 1-based source page, the source line as
   `evidence`, and a confidence. Nothing is inferred from the filename, and the
   original PDF stays authoritative.
