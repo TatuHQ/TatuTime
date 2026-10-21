@@ -197,7 +197,10 @@ TUCANOTIME_HARVEST_SAMPLES=/path/to/private/exports \
   cargo test --locked --test contract imports::supplied_private_exports_parse_only_when_explicitly_enabled -- --nocapture
 ```
 
-Run it only after the owner of the data confirms local use. Without the variable
+Run it only after the owner of the data confirms local use. With the variable
+set it also stages all three sources in a throwaway data directory, runs the
+planner with empty reviewed choices and logs decision/reconciliation counts; it
+asserts the unreviewed preview is never ready to commit. Without the variable
 the test prints a skip and touches nothing. Never commit the exports, their
 extracted PDFs or any derived private row values.
 
