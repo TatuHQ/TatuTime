@@ -58,6 +58,9 @@ produces **suggestions only**:
   already settled. A derived `Status` suggestion says `paid` when that amount
   equals the printed total and `issued` otherwise (including when no payments
   row exists). Customer names are taken from `Invoice for`.
+- `Period from`/`Period to` are derived from the issue date: the calendar month
+  before it, or its own month when the invoice is issued on the last day. A
+  `1 Feb` issue covers `1–31 Jan`; a `30 Jun` issue covers `1–30 Jun`.
 - Each suggestion carries the 1-based source page, the source line as
   `evidence`, and a confidence. Nothing is inferred from the filename, and the
   original PDF stays authoritative.
@@ -168,16 +171,18 @@ records), writes original PDFs byte-for-byte, and advances only the matching
 paths; `Store::open` rolls back an interrupted `Prepared` journal before serving
 traffic. `imports/` is admin-only and never exposed to member routes.
 
-The Settings workspace builds labelled mapping tables from the preview's
-original source values: people, customers, projects, tasks and expense
-categories can be mapped to existing records or created explicitly, while each
-invoice gets a review card labelled like the source document (`Invoice ID`,
-`Invoice for`, `Issue date`, `Subtotal`, `Payments`) and prefilled from the PDF
-suggestions, while the period remains an explicitly reviewed value. Original
-PDFs are linked directly from the member, and an externally billed row can be
+The Settings workspace has one tab per source — Time, Expenses and Invoices.
+Each tab stages and reviews only its own file, because the later imports map
+onto references the time import creates; start a new batch for the next file to
+keep the imports separate. Within a tab, people, customers, projects, tasks and
+expense categories can be mapped to existing records or created explicitly,
+while each invoice gets a review card labelled like the source document
+(`Invoice ID`, `Invoice for`, `Issue date`, `Period from`/`Period to`,
+`Subtotal`, `Payments`) and prefilled from the PDF suggestions. Original PDFs
+are linked directly from the member, and an externally billed row can be
 explicitly linked to an invoice PDF. One reconciliation table shows
-accepted/skipped totals per source and currency. The advanced JSON view remains
-available for operators but is no longer the primary control.
+accepted/skipped totals for the tab's source and currency. The advanced JSON
+view remains available for operators but is no longer the primary control.
 
 An explicit row→invoice link is reconciled, never inferred: the invoice must be
 included in the same batch, the row must be externally billed, the row currency

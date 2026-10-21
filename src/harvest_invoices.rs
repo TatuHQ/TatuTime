@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::io::{Cursor, Read};
 
-use chrono::NaiveDate;
+use chrono::{Datelike, NaiveDate};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
@@ -175,6 +175,11 @@ pub enum PdfField {
     /// Derived once by comparing `Payments` with `Total`: `paid` when they are
     /// equal, `issued` otherwise. Never read from a word in the document.
     Status,
+    /// Derived from the issue date: the calendar month before it, or its own
+    /// month when the invoice is issued on the last day. Never read from a
+    /// word in the document.
+    PeriodFrom,
+    PeriodTo,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -470,8 +475,64 @@ fn suggest(
                 }
             }
         }
-        PdfField::Status => {}
+        PdfField::Status | PdfField::PeriodFrom | PdfField::PeriodTo => {}
     }
+}
+
+fn month_bounds(year: i32, month: u32) -> Option<(NaiveDate, NaiveDate)> {
+    let start = NaiveDate::from_ymd_opt(year, month, 1)?;
+    let (next_year, next_month) = if month == 12 {
+        (year.checked_add(1)?, 1)
+    } else {
+        (year, month + 1)
+    };
+    let next = NaiveDate::from_ymd_opt(next_year, next_month, 1)?;
+    Some((start, next.pred_opt()?))
+}
+
+/// The billing period rule the import follows: an invoice covers the calendar
+/// month before its issue date, except when it is issued on the last day of a
+/// month, where it covers that month. Both are derived from the one date the
+/// document prints, never from line-item guesses.
+fn period_suggestions(suggestions: &[PdfSuggestion]) -> Vec<PdfSuggestion> {
+    let Some(issue) = suggestions
+        .iter()
+        .find(|suggestion| suggestion.field == PdfField::InvoiceDate)
+    else {
+        return Vec::new();
+    };
+    let Ok(issue_date) = NaiveDate::parse_from_str(&issue.value, "%Y-%m-%d") else {
+        return Vec::new();
+    };
+    let Some((issue_start, issue_end)) = month_bounds(issue_date.year(), issue_date.month()) else {
+        return Vec::new();
+    };
+    let (period, reason) = if issue_date == issue_end {
+        (
+            (issue_start, issue_end),
+            "Issue date is the last day of its month",
+        )
+    } else {
+        let Some(previous_end) = issue_start.pred_opt() else {
+            return Vec::new();
+        };
+        let Some(bounds) = month_bounds(previous_end.year(), previous_end.month()) else {
+            return Vec::new();
+        };
+        (bounds, "Billing month preceding the issue date")
+    };
+    let suggestion = |field, date: NaiveDate| PdfSuggestion {
+        field,
+        value: date.format("%Y-%m-%d").to_string(),
+        amount_minor: None,
+        page: issue.page,
+        evidence: reason.to_string(),
+        confidence: PdfConfidence::Medium,
+    };
+    vec![
+        suggestion(PdfField::PeriodFrom, period.0),
+        suggestion(PdfField::PeriodTo, period.1),
+    ]
 }
 
 fn scan_page(page: u32, text: &str, suggestions: &mut Vec<PdfSuggestion>) {
@@ -613,8 +674,11 @@ pub fn inspect_invoice_text(source: &InvoiceSource) -> PdfInspection {
             Err(_) => failed = true,
         }
     }
-    if !failed && let Some(derived) = status_suggestion(&suggestions) {
-        suggestions.push(derived);
+    if !failed {
+        suggestions.extend(period_suggestions(&suggestions));
+        if let Some(derived) = status_suggestion(&suggestions) {
+            suggestions.push(derived);
+        }
     }
     dedupe(&mut suggestions);
     let status = if failed {
@@ -931,6 +995,31 @@ mod tests {
         assert_eq!(find(PdfField::Subtotal).amount_minor, Some(576_000));
         assert_eq!(find(PdfField::Payments).amount_minor, Some(576_000));
         assert_eq!(find(PdfField::Status).value, "paid");
+        assert_eq!(find(PdfField::PeriodFrom).value, "2025-01-01");
+        assert_eq!(find(PdfField::PeriodTo).value, "2025-01-31");
+    }
+
+    #[test]
+    fn an_invoice_issued_on_the_last_day_covers_its_own_month() {
+        let pdf = pdf_document(&[&[
+            "Issue date",
+            "30/06/2025",
+            "Subtotal",
+            "EUR 1,000.00",
+            "Payments",
+            "EUR -1,000.00",
+        ]]);
+        let inspection = inspect(&pdf);
+        let find = |field| {
+            inspection
+                .suggestions
+                .iter()
+                .find(|suggestion| suggestion.field == field)
+                .unwrap_or_else(|| panic!("missing {field:?}: {:?}", inspection.suggestions))
+        };
+        assert_eq!(find(PdfField::InvoiceDate).value, "2025-06-30");
+        assert_eq!(find(PdfField::PeriodFrom).value, "2025-06-01");
+        assert_eq!(find(PdfField::PeriodTo).value, "2025-06-30");
     }
 
     #[test]

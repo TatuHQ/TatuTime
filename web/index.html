@@ -1410,28 +1410,51 @@
             </div>
             <div class="p-card">
               <div class="p-card__header">
-                <h2>Sources</h2>
+                <h2>Source</h2>
               </div>
               <div class="p-card__content">
+                <div id="import-source-tabs" class="settings-tabs p-tabs__list" role="tablist"
+                  aria-label="Import source">
+                  <div class="p-tabs__item"><button type="button" class="p-tabs__link" role="tab" id="import-tab-time"
+                      aria-controls="import-panel-time" aria-selected="true">Time</button></div>
+                  <div class="p-tabs__item"><button type="button" class="p-tabs__link" role="tab"
+                      id="import-tab-expenses" aria-controls="import-panel-expenses" aria-selected="false"
+                      tabindex="-1">Expenses</button></div>
+                  <div class="p-tabs__item"><button type="button" class="p-tabs__link" role="tab"
+                      id="import-tab-invoices" aria-controls="import-panel-invoices" aria-selected="false"
+                      tabindex="-1">Invoices</button></div>
+                </div>
                 <p id="import-status" class="p-form-help-text" role="status" aria-live="polite"></p>
-                <p class="p-form-help-text">Upload any one, two or all three Harvest sources. Files are validated before
-                  they replace a staged source; nothing is written until the reviewed commit.</p>
                 <p id="import-batch-label" class="p-form-help-text"></p>
-                <div class="p-form__group"><label class="p-form__label" for="import-time-file">Time CSV (max
-                    1 MiB)</label>
-                  <input type="file" class="p-form__control" id="import-time-file" accept=".csv,text/csv">
-                  <button type="button" id="import-time-upload">Upload time CSV</button>
+                <div id="import-panel-time" role="tabpanel" aria-labelledby="import-tab-time">
+                  <p class="p-form-help-text">Detailed time CSV (max 1 MiB). Time first: it creates the customers,
+                    projects and tasks the other imports map onto.</p>
+                  <div class="p-form__group"><label class="p-form__label" for="import-time-file">Time CSV (max
+                      1 MiB)</label>
+                    <input type="file" class="p-form__control" id="import-time-file" accept=".csv,text/csv">
+                    <button type="button" id="import-time-upload">Upload time CSV</button>
+                  </div>
                 </div>
-                <div class="p-form__group"><label class="p-form__label" for="import-expenses-file">Expense CSV (max
-                    1 MiB)</label>
-                  <input type="file" class="p-form__control" id="import-expenses-file" accept=".csv,text/csv">
-                  <button type="button" id="import-expenses-upload">Upload expense CSV</button>
+                <div id="import-panel-expenses" role="tabpanel" aria-labelledby="import-tab-expenses" hidden>
+                  <p class="p-form-help-text">Expense CSV (max 1 MiB). Import expense categories and people after the
+                    time batch has created its references.</p>
+                  <div class="p-form__group"><label class="p-form__label" for="import-expenses-file">Expense CSV (max
+                      1 MiB)</label>
+                    <input type="file" class="p-form__control" id="import-expenses-file" accept=".csv,text/csv">
+                    <button type="button" id="import-expenses-upload">Upload expense CSV</button>
+                  </div>
                 </div>
-                <div class="p-form__group"><label class="p-form__label" for="import-invoices-file">Invoice ZIP (max
-                    5 MiB)</label>
-                  <input type="file" class="p-form__control" id="import-invoices-file" accept=".zip,application/zip">
-                  <button type="button" id="import-invoices-upload">Upload invoice ZIP</button>
+                <div id="import-panel-invoices" role="tabpanel" aria-labelledby="import-tab-invoices" hidden>
+                  <p class="p-form-help-text">Invoice ZIP (max 5 MiB). Invoice cards are filled from each PDF; the batch
+                    needs the customers created by the earlier imports.</p>
+                  <div class="p-form__group"><label class="p-form__label" for="import-invoices-file">Invoice ZIP (max
+                      5 MiB)</label>
+                    <input type="file" class="p-form__control" id="import-invoices-file" accept=".zip,application/zip">
+                    <button type="button" id="import-invoices-upload">Upload invoice ZIP</button>
+                  </div>
                 </div>
+                <p class="p-form-help-text">Each tab stages its own source. Start a new batch for the next file when you
+                  want the imports kept apart.</p>
               </div>
             </div>
             <div class="p-card">
@@ -1504,6 +1527,7 @@
                         <th scope="col">Decision</th>
                         <th scope="col">Amount</th>
                         <th scope="col">Issues</th>
+                        <th scope="col">Link</th>
                       </tr>
                     </thead>
                     <tbody></tbody>

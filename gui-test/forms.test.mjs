@@ -69,8 +69,9 @@ test('the shell ships the official form vocabulary and no bespoke class (#232 ph
     assert.equal(groups.length, 173, 'every field wrapper is a p-form__group');
     assert.equal(document.querySelectorAll('.p-form__label').length, 165, 'one official label per field row');
     assert.equal(document.querySelectorAll('.p-form__control').length, 165, 'one official control per field row');
-    // The previous 55 plus the template footer and notes placement hints.
-    assert.equal(document.querySelectorAll('.p-form-help-text').length, 64, 'the hints became p-form-help-text');
+    // The previous 55 plus the template footer and notes placement hints, plus
+    // one hint per Harvest import source tab.
+    assert.equal(document.querySelectorAll('.p-form-help-text').length, 67, 'the hints became p-form-help-text');
     assert.equal(document.querySelectorAll('.p-form-validation__message').length, ERROR_IDS.length,
         'every error message is the official validation message');
     assert.equal(document.querySelectorAll('.p-form-validation.is-error').length, ERROR_IDS.length,

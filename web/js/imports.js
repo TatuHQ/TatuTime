@@ -11,6 +11,14 @@ import { $, announce, askConfirm, clearFormError, el, formatMoney, showFormError
 
 const BASE = '/admin/imports/harvest';
 const PAGE_SIZE = 25;
+// One tab per source. `row` is the name the preview uses for rows, issues and
+// totals; `kind` is the upload/staging name.
+const SOURCE_TABS = {
+    time: { row: 'time', label: 'Time' },
+    expenses: { row: 'expense', label: 'Expenses' },
+    invoices: { row: 'invoice', label: 'Invoices' },
+};
+let importSource = 'time';
 let currentBatch = null;
 let currentPreview = null;
 let draft = null;
@@ -73,6 +81,51 @@ function renderBatch(batch) {
     if (committed) {
         $('import-ready').textContent = `Committed ${batch.commit?.committed_at || ''}`;
         $('import-commit').disabled = true;
+    }
+}
+
+function sourceKey() {
+    return SOURCE_TABS[importSource].row;
+}
+
+function setImportSource(kind, moveFocus = false) {
+    if (!SOURCE_TABS[kind]) return;
+    importSource = kind;
+    for (const key of Object.keys(SOURCE_TABS)) {
+        const tab = $(`import-tab-${key}`);
+        const panel = $(`import-panel-${key}`);
+        if (!tab || !panel) continue;
+        const active = key === kind;
+        tab.setAttribute('aria-selected', String(active));
+        tab.tabIndex = active ? 0 : -1;
+        panel.hidden = !active;
+    }
+    if (moveFocus) $(`import-tab-${kind}`)?.focus();
+    if (currentPreview) renderPreview(currentPreview);
+    else renderMapping(null);
+}
+
+function wireImportTabs() {
+    const tabs = Object.keys(SOURCE_TABS)
+        .map((kind) => $(`import-tab-${kind}`))
+        .filter(Boolean);
+    const activate = (tab, moveFocus) => {
+        setImportSource(tab.id.replace('import-tab-', ''), moveFocus);
+    };
+    for (const tab of tabs) {
+        tab.addEventListener('click', () => activate(tab, false));
+        tab.addEventListener('keydown', (event) => {
+            const index = tabs.indexOf(tab);
+            let next = null;
+            if (event.key === 'ArrowRight') next = (index + 1) % tabs.length;
+            if (event.key === 'ArrowLeft') next = (index - 1 + tabs.length) % tabs.length;
+            if (event.key === 'Home') next = 0;
+            if (event.key === 'End') next = tabs.length - 1;
+            if (next !== null) {
+                event.preventDefault();
+                activate(tabs[next], true);
+            }
+        });
     }
 }
 
@@ -242,6 +295,8 @@ function invoiceDefaults(row) {
         originalNumber: pdfText(found, 'invoice_number'),
         currency: pdfText(found, 'currency'),
         invoiceDate: pdfText(found, 'invoice_date') || null,
+        periodFrom: pdfText(found, 'period_from') || null,
+        periodTo: pdfText(found, 'period_to') || null,
         total,
         payments,
         status,
@@ -259,8 +314,8 @@ function ensureInvoice(row) {
             original_number: row.original_number || defaults.originalNumber,
             currency: row.currency || defaults.currency,
             invoice_date: row.invoice_date || defaults.invoiceDate,
-            period_from: row.period_from || null,
-            period_to: row.period_to || null,
+            period_from: row.period_from || defaults.periodFrom,
+            period_to: row.period_to || defaults.periodTo,
             total_minor: row.total_minor ?? defaults.total,
             opening_paid_minor: row.opening_paid_minor || defaults.openingPaid,
             status: row.status || defaults.status,
@@ -275,6 +330,8 @@ function ensureInvoice(row) {
         if (choice.customer_id == null && defaults.customerId) choice.customer_id = defaults.customerId;
         if (!choice.currency && defaults.currency) choice.currency = defaults.currency;
         if (!choice.invoice_date && defaults.invoiceDate) choice.invoice_date = defaults.invoiceDate;
+        if (!choice.period_from && defaults.periodFrom) choice.period_from = defaults.periodFrom;
+        if (!choice.period_to && defaults.periodTo) choice.period_to = defaults.periodTo;
         if (choice.total_minor == null && defaults.total != null) choice.total_minor = defaults.total;
         if ((choice.opening_paid_minor ?? 0) === 0 && defaults.openingPaid) choice.opening_paid_minor = defaults.openingPaid;
         if (!choice.status && defaults.status) choice.status = defaults.status;
@@ -297,9 +354,22 @@ function renderMapping(preview) {
         host.appendChild(el('p', { cls: 'p-form-help-text', text: 'Upload a source and run Preview to build the mapping controls.' }));
         return;
     }
-    const timeRows = preview.time || [];
-    const expenseRows = preview.expenses || [];
+    if (importSource === 'invoices') {
+        renderInvoices(host, preview);
+        $('import-choices').value = JSON.stringify(draft, null, 2);
+        return;
+    }
+    const timeRows = importSource === 'time' ? (preview.time || []) : [];
+    const expenseRows = importSource === 'expenses' ? (preview.expenses || []) : [];
     const rows = [...timeRows, ...expenseRows];
+    if (!rows.length) {
+        host.appendChild(el('p', {
+            cls: 'p-form-help-text',
+            text: `No ${SOURCE_TABS[importSource].label.toLowerCase()} rows in this batch.`,
+        }));
+        $('import-choices').value = JSON.stringify(draft, null, 2);
+        return;
+    }
 
     const people = new Map();
     for (const row of rows) people.set(personKey(row.source_person, row.source_employee_id), row);
@@ -454,58 +524,63 @@ function renderMapping(preview) {
         })));
     }
 
-    if ((preview.invoices || []).length) {
-        host.appendChild(el('h3', { text: 'Invoices' }));
-        const card = el('div', { cls: 'import-invoice-list' });
-        for (const row of preview.invoices) {
-            const choice = ensureInvoice(row);
-            const defaults = invoiceDefaults(row);
-            const pdf = el('a', {
-                attrs: {
-                    href: `${BASE}/${currentBatch.id}/invoices/${row.pdf_sha256}/pdf`,
-                    target: '_blank', rel: 'noopener',
-                },
-                text: 'Original PDF',
-            });
-            card.appendChild(el('fieldset', { cls: 'import-invoice-card' }, [
-                el('legend', { text: row.original_name }),
-                el('div', { cls: 'import-invoice-grid' }, [
-                    el('div', {}, [labelFor(`import-inv-number-${row.pdf_sha256}`, 'Invoice ID'),
-                    textControl(`import-inv-number-${row.pdf_sha256}`, choice.original_number, (value) => { choice.original_number = value; })]),
-                    el('div', {}, [labelFor(`import-inv-customer-${row.pdf_sha256}`, 'Invoice for'),
-                    selectControl(`import-inv-customer-${row.pdf_sha256}`, choice.customer_id || '',
-                        [['', 'Select customer…'], ...options.customers.map((customer) => [customer.id, customer.name])],
-                        (value) => { choice.customer_id = value || null; }),
-                    ...(defaults.customerName
-                        ? [el('p', { cls: 'p-form-help-text', text: `PDF: ${defaults.customerName}` })]
-                        : [])]),
-                    el('div', {}, [labelFor(`import-inv-currency-${row.pdf_sha256}`, 'Currency'),
-                    textControl(`import-inv-currency-${row.pdf_sha256}`, choice.currency || '', (value) => { choice.currency = value; })]),
-                    el('div', {}, [labelFor(`import-inv-date-${row.pdf_sha256}`, 'Issue date'),
-                    textControl(`import-inv-date-${row.pdf_sha256}`, choice.invoice_date || '', (value) => { choice.invoice_date = value || null; }, 'date')]),
-                    el('div', {}, [labelFor(`import-inv-from-${row.pdf_sha256}`, 'Period from'),
-                    textControl(`import-inv-from-${row.pdf_sha256}`, choice.period_from || '', (value) => { choice.period_from = value || null; }, 'date')]),
-                    el('div', {}, [labelFor(`import-inv-to-${row.pdf_sha256}`, 'Period to'),
-                    textControl(`import-inv-to-${row.pdf_sha256}`, choice.period_to || '', (value) => { choice.period_to = value || null; }, 'date')]),
-                    el('div', {}, [labelFor(`import-inv-total-${row.pdf_sha256}`, 'Subtotal'),
-                    moneyInput(`import-inv-total-${row.pdf_sha256}`, choice.total_minor, (value) => { choice.total_minor = value; })]),
-                    el('div', {}, [labelFor(`import-inv-paid-${row.pdf_sha256}`, 'Payments'),
-                    moneyInput(`import-inv-paid-${row.pdf_sha256}`, choice.opening_paid_minor, (value) => { choice.opening_paid_minor = value ?? 0; })]),
-                    el('div', {}, [labelFor(`import-inv-status-${row.pdf_sha256}`, 'Status'),
-                    selectControl(`import-inv-status-${row.pdf_sha256}`, choice.status || '',
-                        [['', 'Select status…'], ['issued', 'Issued'], ['partly_paid', 'Partly paid'],
-                        ['paid', 'Paid'], ['written_off', 'Written off']],
-                        (value) => { choice.status = value || null; })]),
-                    el('div', {}, [labelFor(`import-inv-exclude-${row.pdf_sha256}`, 'Exclude'),
-                    checkboxControl(`import-inv-exclude-${row.pdf_sha256}`, choice.excluded,
-                        (checked) => { choice.excluded = checked; })]),
-                ]),
-                el('p', { cls: 'p-form-help-text' }, [pdf]),
-            ]));
-        }
-        host.appendChild(card);
-    }
     $('import-choices').value = JSON.stringify(draft, null, 2);
+}
+
+function renderInvoices(host, preview) {
+    if (!(preview.invoices || []).length) {
+        host.appendChild(el('p', { cls: 'p-form-help-text', text: 'No invoices staged in this batch.' }));
+        return;
+    }
+    host.appendChild(el('h3', { text: 'Invoices' }));
+    const card = el('div', { cls: 'import-invoice-list' });
+    for (const row of preview.invoices) {
+        const choice = ensureInvoice(row);
+        const defaults = invoiceDefaults(row);
+        const pdf = el('a', {
+            attrs: {
+                href: `${BASE}/${currentBatch.id}/invoices/${row.pdf_sha256}/pdf`,
+                target: '_blank', rel: 'noopener',
+            },
+            text: 'Original PDF',
+        });
+        card.appendChild(el('fieldset', { cls: 'import-invoice-card' }, [
+            el('legend', { text: row.original_name }),
+            el('div', { cls: 'import-invoice-grid' }, [
+                el('div', {}, [labelFor(`import-inv-number-${row.pdf_sha256}`, 'Invoice ID'),
+                textControl(`import-inv-number-${row.pdf_sha256}`, choice.original_number, (value) => { choice.original_number = value; })]),
+                el('div', {}, [labelFor(`import-inv-customer-${row.pdf_sha256}`, 'Invoice for'),
+                selectControl(`import-inv-customer-${row.pdf_sha256}`, choice.customer_id || '',
+                    [['', 'Select customer…'], ...options.customers.map((customer) => [customer.id, customer.name])],
+                    (value) => { choice.customer_id = value || null; }),
+                ...(defaults.customerName
+                    ? [el('p', { cls: 'p-form-help-text', text: `PDF: ${defaults.customerName}` })]
+                    : [])]),
+                el('div', {}, [labelFor(`import-inv-currency-${row.pdf_sha256}`, 'Currency'),
+                textControl(`import-inv-currency-${row.pdf_sha256}`, choice.currency || '', (value) => { choice.currency = value; })]),
+                el('div', {}, [labelFor(`import-inv-date-${row.pdf_sha256}`, 'Issue date'),
+                textControl(`import-inv-date-${row.pdf_sha256}`, choice.invoice_date || '', (value) => { choice.invoice_date = value || null; }, 'date')]),
+                el('div', {}, [labelFor(`import-inv-from-${row.pdf_sha256}`, 'Period from'),
+                textControl(`import-inv-from-${row.pdf_sha256}`, choice.period_from || '', (value) => { choice.period_from = value || null; }, 'date')]),
+                el('div', {}, [labelFor(`import-inv-to-${row.pdf_sha256}`, 'Period to'),
+                textControl(`import-inv-to-${row.pdf_sha256}`, choice.period_to || '', (value) => { choice.period_to = value || null; }, 'date')]),
+                el('div', {}, [labelFor(`import-inv-total-${row.pdf_sha256}`, 'Subtotal'),
+                moneyInput(`import-inv-total-${row.pdf_sha256}`, choice.total_minor, (value) => { choice.total_minor = value; })]),
+                el('div', {}, [labelFor(`import-inv-paid-${row.pdf_sha256}`, 'Payments'),
+                moneyInput(`import-inv-paid-${row.pdf_sha256}`, choice.opening_paid_minor, (value) => { choice.opening_paid_minor = value ?? 0; })]),
+                el('div', {}, [labelFor(`import-inv-status-${row.pdf_sha256}`, 'Status'),
+                selectControl(`import-inv-status-${row.pdf_sha256}`, choice.status || '',
+                    [['', 'Select status…'], ['issued', 'Issued'], ['partly_paid', 'Partly paid'],
+                    ['paid', 'Paid'], ['written_off', 'Written off']],
+                    (value) => { choice.status = value || null; })]),
+                el('div', {}, [labelFor(`import-inv-exclude-${row.pdf_sha256}`, 'Exclude'),
+                checkboxControl(`import-inv-exclude-${row.pdf_sha256}`, choice.excluded,
+                    (checked) => { choice.excluded = checked; })]),
+            ]),
+            el('p', { cls: 'p-form-help-text' }, [pdf]),
+        ]));
+    }
+    host.appendChild(card);
 }
 
 export async function refreshImports() {
@@ -541,7 +616,8 @@ export async function newBatch() {
         renderBatch(batch);
         resetPreview();
         $('import-mapping').textContent = '';
-        $('import-ready').textContent = 'Draft created. Upload at least one source.';
+        $('import-ready').textContent =
+            `Draft created. Upload the ${SOURCE_TABS[importSource].label.toLowerCase()} source.`;
         await refreshImports();
     } catch (err) {
         showError(err);
@@ -555,6 +631,8 @@ export async function openBatch(id) {
     try {
         await loadOptions();
         renderBatch(await api.get(`${BASE}/${id}`));
+        const staged = ['time', 'expenses', 'invoices'].filter((kind) => currentBatch.files?.[kind]);
+        if (staged.length && !staged.includes(importSource)) setImportSource(staged[0]);
         $('import-ready').textContent = 'Batch loaded. Recompute the preview after any change.';
         if (currentBatch.files && Object.values(currentBatch.files).some(Boolean)) {
             await previewBatch();
@@ -658,11 +736,13 @@ function pageLabel(elementId, page, total, noun) {
 }
 
 function previewRows() {
-    const rows = [];
-    for (const row of currentPreview?.time || []) rows.push({ source: 'time', row });
-    for (const row of currentPreview?.expenses || []) rows.push({ source: 'expense', row });
-    for (const row of currentPreview?.invoices || []) rows.push({ source: 'invoice', row });
-    return rows;
+    if (importSource === 'time') {
+        return (currentPreview?.time || []).map((row) => ({ source: 'time', row }));
+    }
+    if (importSource === 'expenses') {
+        return (currentPreview?.expenses || []).map((row) => ({ source: 'expense', row }));
+    }
+    return (currentPreview?.invoices || []).map((row) => ({ source: 'invoice', row }));
 }
 
 function renderRows() {
@@ -696,7 +776,8 @@ function renderRows() {
 }
 
 function renderIssues() {
-    const filtered = (currentPreview?.issues || []).filter((issue) => issueMatches(issue, issueFilter));
+    const filtered = (currentPreview?.issues || [])
+        .filter((issue) => issue.source === sourceKey() && issueMatches(issue, issueFilter));
     issuePage = clampPage(issuePage, filtered.length);
     const tbody = $('import-issue-list').querySelector('tbody');
     tbody.textContent = '';
@@ -726,7 +807,7 @@ function renderPreview(preview) {
     $('import-issue-filter').value = issueFilter;
     const tbody = $('import-totals').querySelector('tbody');
     tbody.textContent = '';
-    for (const row of preview.totals || []) {
+    for (const row of (preview.totals || []).filter((entry) => entry.source === sourceKey())) {
         tbody.appendChild(el('tr', {}, [
             el('th', { attrs: { scope: 'row' }, text: row.source }),
             el('td', { attrs: { 'data-heading': 'Currency' }, text: row.currency }),
@@ -739,7 +820,7 @@ function renderPreview(preview) {
     renderRows();
     renderIssues();
     $('import-issues').textContent = preview.blocking
-        ? `${preview.blocking} blocking issue(s); commit stays disabled.`
+        ? `${preview.blocking} blocking issue(s) across staged sources; commit stays disabled.`
         : 'No blocking issues.';
     $('import-ready').textContent = preview.ready
         ? `Ready to commit (revision ${preview.revision.slice(0, 12)}…).`
@@ -838,6 +919,7 @@ let wired = false;
 export function wireImports() {
     if (wired || !$('import-new')) return;
     wired = true;
+    wireImportTabs();
     $('import-new').addEventListener('click', newBatch);
     $('settings-tab-import').addEventListener('click', () => {
         refreshImports();
