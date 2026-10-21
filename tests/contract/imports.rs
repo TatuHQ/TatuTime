@@ -329,3 +329,125 @@ async fn import_api_previews_commits_retries_and_rejects_stale_revision() {
     assert_eq!(rows["ready"], false, "{rows}");
     assert!(rows["blocking"].as_u64().unwrap() > 0);
 }
+
+// ------------------------------------------------ three-source import (#404) --
+
+const EXPENSE_SOURCE_HEADER: &str = "Date,Client,Project,Project Code,Category,Notes,Amount,Units,Billable,Invoiced?,Approved?,First name,Last name,Employee Id,Currency\n";
+
+fn invoice_zip() -> Vec<u8> {
+    use std::io::{Cursor, Write as _};
+    let pdf = b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\n%%EOF\n";
+    let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
+    writer
+        .start_file(
+            "invoices/H-1.pdf",
+            zip::write::SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Stored),
+        )
+        .unwrap();
+    writer.write_all(pdf).unwrap();
+    writer.finish().unwrap().into_inner()
+}
+
+#[tokio::test]
+async fn time_expenses_and_original_invoice_pdf_commit_together() {
+    use sha2::{Digest, Sha256};
+    let (app, dir) = app().await;
+    let base = "/api/admin/imports/harvest";
+    let mut choices = import_fixture(&app).await;
+    let cid = choices["customers"][0]["customer_id"].clone();
+    let pdf = b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\n%%EOF\n";
+    let sha = Sha256::digest(pdf)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    choices["invoices"] = json!([{
+        "sha256": sha,
+        "customer_id": cid,
+        "original_number": "H-1",
+        "currency": "EUR",
+        "invoice_date": "2026-01-31",
+        "period_from": "2026-01-01",
+        "period_to": "2026-01-31",
+        "total_minor": 10000,
+        "opening_paid_minor": 0,
+        "status": "issued",
+        "excluded": false
+    }]);
+
+    let id = new_import_batch(&app).await;
+    let time = format!("{IMPORT_TIME_HEADER}{IMPORT_ROW}");
+    let expense = format!(
+        "{EXPENSE_SOURCE_HEADER}2026-01-06,Acme,Website,WEB,Travel,Train,12.00,,Yes,No,Yes,Ada,Lovelace,E1,EUR\n"
+    );
+    for (kind, content_type, bytes) in [
+        ("time", "text/csv", time.into_bytes()),
+        ("expenses", "text/csv", expense.into_bytes()),
+        ("invoices", "application/zip", invoice_zip()),
+    ] {
+        let (status, _) = body_req(
+            &app,
+            "PUT",
+            &format!("{base}/{id}/files/{kind}"),
+            content_type,
+            bytes,
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{kind}");
+    }
+    let (status, batch) =
+        json_req(&app, "PUT", &format!("{base}/{id}/review"), Some(choices)).await;
+    assert_eq!(status, StatusCode::OK, "{batch}");
+    let (status, preview) = json_req(&app, "POST", &format!("{base}/{id}/preview"), None).await;
+    assert_eq!(status, StatusCode::OK, "{preview}");
+    assert_eq!(preview["ready"], true, "{preview}");
+    let (status, outcome) = json_req(
+        &app,
+        "POST",
+        &format!("{base}/{id}/commit"),
+        Some(json!({"revision": preview["revision"]})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{outcome}");
+    assert_eq!(outcome["entries"].as_array().unwrap().len(), 1);
+    assert_eq!(outcome["expenses"].as_array().unwrap().len(), 1);
+    assert_eq!(outcome["invoices"], json!(["H-1"]));
+
+    let (status, invoices) = json_req(&app, "GET", "/api/invoices", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let invoice = invoices["invoices"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|invoice| invoice["number"] == "H-1")
+        .expect("imported invoice");
+    assert_eq!(invoice["imported"]["original_number"], "H-1");
+    let (status, _, archived) = raw_req(
+        &app,
+        "GET",
+        &format!("/api/invoices/{}/pdf", invoice["id"].as_str().unwrap()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(archived, pdf, "the original PDF is preserved byte-for-byte");
+
+    // #404: the original bytes and provenance survive backup/restore.
+    let backup = dir.path().join("import-backup.tar.gz");
+    tucano_time::backup::create(&dir.path().join("data"), &backup).unwrap();
+    let restored_dir = tempfile::tempdir().unwrap();
+    let restored_root = restored_dir.path().join("data");
+    tucano_time::backup::restore(&backup, &restored_root, false).unwrap();
+    let restored = Store::open(&restored_root).unwrap();
+    let restored_invoice = restored
+        .find_invoice_by_number("H-1")
+        .unwrap()
+        .expect("restored imported invoice");
+    assert_eq!(
+        restored
+            .invoice_pdf_bytes(restored_invoice.id)
+            .unwrap()
+            .unwrap(),
+        pdf,
+        "backup/restore preserves the original PDF bytes"
+    );
+}

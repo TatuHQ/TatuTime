@@ -990,3 +990,20 @@ html[data-advanced-billing="off"] #advanced-billing { display: none; }
 .accent-row { display: flex; align-items: center; gap: .5rem; }
 .accent-swatch { width: 2rem; height: 1.4rem; border: 1px solid var(--line);
   border-radius: calc(var(--radius) / 2); background: transparent; }
+
+/* ---- Harvest import mapping (#403) ---- */
+.import-mapping { display: grid; gap: 1rem; }
+.import-map-section h3 { margin: 0 0 .4rem; font-size: 1rem; }
+.import-map-table { width: 100%; border-collapse: collapse; }
+.import-map-table th, .import-map-table td { padding: .35rem .5rem; text-align: left;
+  border-bottom: 1px solid var(--line); vertical-align: top; }
+.import-map-label { display: block; font-size: .8rem; color: var(--muted); margin-bottom: .2rem; }
+.import-map-control { width: 100%; max-width: 28rem; }
+.import-invoice-list { display: grid; gap: .75rem; }
+.import-invoice-card { border: 1px solid var(--line); border-radius: var(--radius);
+  padding: .75rem; background: var(--surface); }
+.import-invoice-card legend { font-weight: 600; padding: 0 .3rem; }
+.import-invoice-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: .6rem; }
+.import-row-link { display: flex; gap: .4rem; align-items: center; }
+.import-row-link select { min-width: 8rem; }

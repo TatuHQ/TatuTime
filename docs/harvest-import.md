@@ -149,9 +149,21 @@ records), writes original PDFs byte-for-byte, and advances only the matching
 paths; `Store::open` rolls back an interrupted `Prepared` journal before serving
 traffic. `imports/` is admin-only and never exposed to member routes.
 
+The Settings workspace builds labelled mapping tables from the preview's
+original source values: people, customers, projects, tasks and expense
+categories can be mapped to existing records or created explicitly, while each
+invoice gets a review card with its legal number, customer, currency, dates,
+period, total, opening paid amount and status. Original PDFs are linked directly
+from the member, and an externally billed row can be explicitly linked to an
+invoice PDF. One reconciliation table shows accepted/skipped totals per source
+and currency. The advanced JSON view remains available for operators but is no
+longer the primary control.
+
 ## Remaining delivery
 
-1. End-to-end verification (#404): synthetic three-source fixtures, fault and
-   restart recovery, backup/restore, browser gates and private-sample confirmation.
-2. Any documented follow-ups found by #404 (for example a killable PDF worker if a
+1. End-to-end verification (#404): private-sample confirmation and any
+   browser-only cases not covered by the synthetic three-source contract test
+   (time + expenses + original invoice PDF, including backup/restore hash
+   equality) or the import-specific jsdom suite.
+2. Any documented follow-ups found there (for example a killable PDF worker if a
    real sample defeats the bounded parser).

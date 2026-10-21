@@ -1439,11 +1439,11 @@
                 <h2>Review</h2>
               </div>
               <div class="p-card__content">
-                <p class="p-form-help-text">Approved mapping/corrections (JSON). Every reference is explicit; nothing is
-                  guessed from names, filenames or amounts. <code>GET rows</code> lists the unresolved source
-                  records and their issues.</p>
-                <div class="p-form__group">
-                  <label class="p-form__label" for="import-choices">Mapping</label>
+                <p class="p-form-help-text">Every reference is explicit; nothing is guessed from names, filenames or
+                  amounts. Choose an existing record or create a reviewed one, then recompute the preview.</p>
+                <div id="import-mapping" class="import-mapping"></div>
+                <div class="p-form__group" id="import-json-group" hidden>
+                  <label class="p-form__label" for="import-choices">Advanced mapping JSON</label>
                   <textarea class="p-form__control" id="import-choices" rows="10" spellcheck="false"></textarea>
                 </div>
                 <div class="buttons">
