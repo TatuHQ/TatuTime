@@ -1276,12 +1276,12 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
 {
   window.document.getElementById('tab-settings').dispatchEvent(new window.Event('click', { bubbles: true }));
   await waitFor(() => [...window.document.querySelectorAll('#settings-tabs [role="tab"]')].map((tab) => tab.id).join(',') ===
-    'settings-tab-users,settings-tab-company,settings-tab-invoice-template,settings-tab-catalog,settings-tab-expenses,settings-tab-email,settings-tab-security', {
+    'settings-tab-users,settings-tab-company,settings-tab-invoice-template,settings-tab-catalog,settings-tab-expenses,settings-tab-email,settings-tab-import,settings-tab-security', {
     message: 'the Settings section to render its tab bar',
   });
-  check('Settings tab bar lists the seven focused sections in order',
+  check('Settings tab bar lists the eight focused sections in order',
     [...window.document.querySelectorAll('#settings-tabs [role="tab"]')].map((tab) => tab.id).join(',') ===
-    'settings-tab-users,settings-tab-company,settings-tab-invoice-template,settings-tab-catalog,settings-tab-expenses,settings-tab-email,settings-tab-security');
+    'settings-tab-users,settings-tab-company,settings-tab-invoice-template,settings-tab-catalog,settings-tab-expenses,settings-tab-email,settings-tab-import,settings-tab-security');
   check('Settings opens on Users by default',
     window.document.getElementById('settings-tab-users').getAttribute('aria-selected') === 'true'
     && !window.document.getElementById('settings-panel-users').hidden
