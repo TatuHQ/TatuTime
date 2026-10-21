@@ -70,6 +70,37 @@ test('the invoice chart renders real bar heights via el() style (#188)', () => {
   assert.ok(tallest > 2, `non-zero data renders taller than the 2px floor (got ${tallest})`);
   dom.window.close();
 });
+test('imported settlements feed the closed trend from their opening paid amount', () => {
+  const { dom, context, document } = makeDom();
+  context.dash.year = 2025;
+  context.dashRenderOverview([
+    {
+      id: 'imp-paid', number: '1', status: 'paid', currency: 'EUR',
+      period_from: '2025-01-01', period_to: '2025-01-31',
+      document: { invoice_date: '2025-02-01' },
+      total_minor: 576000, payments: [],
+      imported: { opening_paid_minor: 576000 },
+      created_at: '2026-10-21T00:00:00Z',
+    },
+    {
+      id: 'imp-part', number: '2', status: 'partly_paid', currency: 'EUR',
+      period_from: '2025-03-01', period_to: '2025-03-31',
+      document: { invoice_date: '2025-04-02' },
+      total_minor: 100000, payments: [],
+      imported: { opening_paid_minor: 40000 },
+      created_at: '2026-10-21T00:00:00Z',
+    },
+  ]);
+  const months = [...document.querySelectorAll('#inv-chart .inv-col-chart')];
+  // Paid import: closed in the reviewed issue month, no open balance.
+  assert.match(months[1].querySelector('.inv-bar.closed').getAttribute('title'), /Closed EUR 5760\.00/);
+  assert.match(months[0].querySelector('.inv-bar.open').getAttribute('title'), /Open EUR 0\.00/);
+  // Partly paid import: the opening payment is closed, the remainder is open.
+  assert.match(months[3].querySelector('.inv-bar.closed').getAttribute('title'), /Closed EUR 400\.00/);
+  assert.match(months[2].querySelector('.inv-bar.open').getAttribute('title'), /Open EUR 600\.00/);
+  dom.window.close();
+});
+
 test('the chart labels months in words and names the period on hover (#F)', () => {
   const { dom, context, document } = makeDom();
   context.dashRenderOverview([
@@ -810,12 +841,12 @@ test('a silent PDF worker falls back instead of loading forever', async () => {
   const { dom, context } = makeDom();
   let expire;
   dom.window.setTimeout = callback => { expire = callback; return 1; };
-  dom.window.clearTimeout = () => {};
+  dom.window.clearTimeout = () => { };
   const workers = [];
   class WorkerFixture {
     constructor() {
       this.destroyed = false;
-      this.promise = workers.length ? Promise.resolve() : new Promise(() => {});
+      this.promise = workers.length ? Promise.resolve() : new Promise(() => { });
       workers.push(this);
     }
     destroy() { this.destroyed = true; }
@@ -851,8 +882,8 @@ api.get = async () => ({events:[]});
 `);
   let expire;
   dom.window.setTimeout = callback => { expire = callback; return 1; };
-  dom.window.clearTimeout = () => {};
-  const pending = context.openInvoicePreview({id:'stalled',number:'INV-42',status:'draft'}, null);
+  dom.window.clearTimeout = () => { };
+  const pending = context.openInvoicePreview({ id: 'stalled', number: 'INV-42', status: 'draft' }, null);
   expire();
   await pending;
   assert.match(document.getElementById('ip-pdf-state').textContent, /request timed out/);
@@ -912,8 +943,8 @@ test('invoice periods step across years and filter invoice dates, not work dates
   assert.equal(context.dash.from, '2027-01-01');
   assert.equal(context.dash.to, '2027-03-31');
   const rows = context.dashFilter([
-    {number:'A',status:'draft',document:{invoice_date:'2027-02-01'},period_from:'2026-01-01',period_to:'2026-01-31'},
-    {number:'B',status:'draft',document:{invoice_date:'2026-02-01'},period_from:'2027-01-01',period_to:'2027-01-31'},
+    { number: 'A', status: 'draft', document: { invoice_date: '2027-02-01' }, period_from: '2026-01-01', period_to: '2026-01-31' },
+    { number: 'B', status: 'draft', document: { invoice_date: '2026-02-01' }, period_from: '2027-01-01', period_to: '2027-01-31' },
   ]);
   assert.deepEqual([...rows].map(row => row.number), ['A']);
   context.wireInvoiceDashboard();
@@ -1033,7 +1064,7 @@ api.get = async path => path === '/admin/invoice-template'
   ? {template:{subject:'Org subject',notes:'Org notes',payment_terms:{kind:'net_30'}}}
   : {projects:[]};
 `);
-  context.state.customers = [{id:'c1',name:'Example',currency:'EUR',invoice_subject:'Customer subject',invoice_notes:'Customer notes'}];
+  context.state.customers = [{ id: 'c1', name: 'Example', currency: 'EUR', invoice_subject: 'Customer subject', invoice_notes: 'Customer notes' }];
   addCustomerOption(document, 'c1', 'Example');
   context.wireWeekGrid();
   context.edOpen(null);
@@ -1043,14 +1074,14 @@ api.get = async path => path === '/admin/invoice-template'
   document.getElementById('ed-terms').value = 'net_45';
   document.getElementById('ed-due').value = '2027-01-01';
   document.getElementById('ed-defaults').click();
-  await waitFor(() => document.getElementById('ed-defaults-state').textContent === 'Document defaults restored.', {message:'visible defaults reset'});
+  await waitFor(() => document.getElementById('ed-defaults-state').textContent === 'Document defaults restored.', { message: 'visible defaults reset' });
   assert.equal(document.getElementById('ed-subject').value, 'Customer subject');
   assert.equal(document.getElementById('ed-notes').value, 'Org notes\n\nCustomer notes');
   assert.equal(document.getElementById('ed-due').value, '');
   assert.equal(document.getElementById('ed-terms').value, '');
   assert.equal(document.getElementById('ed-terms-button').textContent.trim(), 'Default (Net 30)');
   document.getElementById('ed-defaults').click();
-  await waitFor(() => document.getElementById('ed-defaults-state').textContent === 'Already using document defaults.', {message:'unchanged defaults result'});
+  await waitFor(() => document.getElementById('ed-defaults-state').textContent === 'Already using document defaults.', { message: 'unchanged defaults result' });
   context.api.get = async () => { throw new Error('unavailable'); };
   await context.edLoadDefaults(true);
   assert.match(document.getElementById('ed-defaults-state').textContent, /Defaults unavailable/);
@@ -1066,18 +1097,18 @@ test('the catalog preset is distinct from description and hidden without saved i
   assert.ok(description);
   assert.equal(preset.options[0].textContent, 'Custom item');
   assert.equal(preset.__filterButton.hidden, true);
-  context.catalogItems.push({id:'item1',active:true,name:'Consulting',kind:'service',currency:'EUR',default_price_minor:6000});
+  context.catalogItems.push({ id: 'item1', active: true, name: 'Consulting', kind: 'service', currency: 'EUR', default_price_minor: 6000 });
   const row = document.querySelector('#ed-lines tbody tr');
   row.__attachItemSelect();
   preset.__filterSync();
   assert.equal(preset.__filterButton.hidden, false);
   preset.value = 'item1';
-  preset.dispatchEvent(new dom.window.Event('change', {bubbles:true}));
+  preset.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
   assert.equal(description.value, 'Consulting');
   assert.equal(row.querySelector('[aria-label="Product or service"]'), null);
   assert.equal(row.__read().item_kind, 'service', 'catalog metadata remains compatible without a visible type');
   preset.__filterButton.click();
-  document.getElementById(`${preset.id}-menu`).dispatchEvent(new dom.window.KeyboardEvent('keydown', {key:'Escape',bubbles:true,cancelable:true}));
+  document.getElementById(`${preset.id}-menu`).dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
   assert.equal(document.getElementById('invoice-editor').open, true);
   assert.equal(document.getElementById('app-dialog').open, false, 'Escape only dismisses the option menu');
   dom.window.close();
@@ -1086,9 +1117,11 @@ test('the catalog preset is distinct from description and hidden without saved i
 test('editing existing invoice items preserves legacy metadata without a type field', () => {
   const { dom, context, document } = makeDom('api.get = async () => ({template:{},projects:[]});');
   addCustomerOption(document, 'c1', 'Example');
-  context.edOpen({id:'draft1',number:'INV-42',status:'draft',customer_id:'c1',currency:'EUR',lines:[
-    {kind:'fixed',note:'Existing item',item_kind:'product',quantity_hundredths:100,unit_price_minor:5000,amount_minor:5000},
-  ]});
+  context.edOpen({
+    id: 'draft1', number: 'INV-42', status: 'draft', customer_id: 'c1', currency: 'EUR', lines: [
+      { kind: 'fixed', note: 'Existing item', item_kind: 'product', quantity_hundredths: 100, unit_price_minor: 5000, amount_minor: 5000 },
+    ]
+  });
   const row = document.querySelector('#ed-lines tbody tr');
   assert.equal(row.__read().item_kind, 'product');
   assert.equal(row.querySelector('[aria-label="Product or service"]'), null);
@@ -1103,7 +1136,7 @@ test('shared selects preserve native values, events, validation and reset', asyn
   const form = document.createElement('form');
   const select = document.createElement('select');
   select.id = 'shared-select-test'; select.required = true;
-  for (const [value, text] of [['','Choose'],['alpha','Alpha'],['beta','Beta']]) {
+  for (const [value, text] of [['', 'Choose'], ['alpha', 'Alpha'], ['beta', 'Beta']]) {
     const option = document.createElement('option'); option.value = value; option.textContent = text; select.appendChild(option);
   }
   form.appendChild(select); document.body.appendChild(form);
@@ -1122,11 +1155,11 @@ test('shared selects preserve native values, events, validation and reset', asyn
   select.value = 'alpha';
   assert.equal(select.__filterButton.textContent.trim(), 'Alpha');
   select.disabled = true;
-  await waitFor(() => select.__filterButton.disabled, {message:'native disabled state to sync'});
+  await waitFor(() => select.__filterButton.disabled, { message: 'native disabled state to sync' });
   select.disabled = false; select.hidden = true;
-  await waitFor(() => select.__filterButton.hidden, {message:'native hidden state to sync'});
+  await waitFor(() => select.__filterButton.hidden, { message: 'native hidden state to sync' });
   select.hidden = false; form.reset();
-  await waitFor(() => select.__filterButton.textContent.trim() === 'Choose', {message:'form reset to sync'});
+  await waitFor(() => select.__filterButton.textContent.trim() === 'Choose', { message: 'form reset to sync' });
   assert.equal(select.value, '');
   dom.window.close();
 });
@@ -1137,10 +1170,10 @@ test('shared dropdown discovery enhances dynamic single selects, not multiple li
   const select = document.createElement('select');
   select.setAttribute('aria-label', 'Dynamic choice');
   document.body.appendChild(select);
-  await waitFor(() => !!select.__filterButton, {message:'dynamic select discovery'});
+  await waitFor(() => !!select.__filterButton, { message: 'dynamic select discovery' });
   const option = document.createElement('option'); option.value = 'one'; option.textContent = 'Loaded option';
   select.appendChild(option);
-  await waitFor(() => select.__filterButton.textContent.trim() === 'Loaded option', {message:'dynamic options to sync'});
+  await waitFor(() => select.__filterButton.textContent.trim() === 'Loaded option', { message: 'dynamic options to sync' });
   const multiple = document.createElement('select'); multiple.multiple = true; document.body.appendChild(multiple);
   await yieldToEventLoop();
   assert.equal(multiple.__filterButton, undefined);

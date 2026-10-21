@@ -706,7 +706,11 @@ export function statusLabel(status) {
 }
 
 export function invBalance(inv) {
-  const paid = (inv.payments || []).reduce((a, p) => a + p.amount_minor, 0);
+  // An imported invoice's reviewed opening settlement is part of what has been
+  // paid even though it has no payment-ledger entry (the server's
+  // `paid_minor()` counts it the same way).
+  const paid = (inv.payments || []).reduce((a, p) => a + p.amount_minor, 0)
+    + (inv.imported?.opening_paid_minor || 0);
   if (inv.status === 'paid' || inv.status === 'written_off') return 0;
   return Math.max(inv.total_minor - paid, 0);
 }
@@ -808,6 +812,19 @@ export function chartSeriesByCurrency(invoices) {
       const pm = String(i.paid_at || '').slice(0, 7);
       if (i.status === 'paid' && pm.slice(0, 4) === String(dash.year)) {
         series.closed[Number(pm.slice(5, 7)) - 1] += i.total_minor;
+      }
+    }
+    // Imported invoices carry a reviewed historical settlement
+    // (`opening_paid_minor`) instead of a payment ledger. Count it in the
+    // Closed series in the month of the reviewed issue date, falling back to
+    // the period end; without this every imported settled invoice is invisible
+    // to the trend.
+    const openingPaid = i.imported?.opening_paid_minor || 0;
+    if (openingPaid > 0) {
+      const basis = String(i.document?.invoice_date || i.period_to || '').slice(0, 7);
+      const month = Number(basis.slice(5, 7)) - 1;
+      if (basis.slice(0, 4) === String(dash.year) && month >= 0 && month < 12) {
+        series.closed[month] += openingPaid;
       }
     }
     if (i.status === 'written_off') {
