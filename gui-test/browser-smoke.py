@@ -1444,10 +1444,10 @@ class Gate:
             # row and the Expense-categories dialog's name field. Mirrors the
             # shell census in gui-test/forms.test.mjs:68, so the two suites
             # cannot drift.
-            and counts["groups"] == 169 and counts["labels"] == 161
-            and counts["controls"] == 161
+            and counts["groups"] == 173 and counts["labels"] == 165
+            and counts["controls"] == 165
             # 57: the previous 55 plus the template footer and notes hints.
-            and counts["help"] == 57
+            and counts["help"] == 64
             # 28: the previous 27 plus the vault card's #vault-error.
             and counts["messages"] == counts["errorGroups"] == 28,
             f"counts={counts}",
