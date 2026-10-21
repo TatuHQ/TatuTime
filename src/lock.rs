@@ -455,6 +455,8 @@ mod bulk_tests {
 
     fn invoice(number: &str, status: InvoiceStatus, lines: Vec<InvoiceLine>) -> Invoice {
         Invoice {
+            supersedes: None,
+            superseded_by: None,
             imported: None,
             id: Uuid::new_v4(),
             number: number.into(),

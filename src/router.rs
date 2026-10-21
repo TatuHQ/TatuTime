@@ -190,6 +190,10 @@ pub fn build_router(state: AppState) -> Router {
             "/invoices/{id}/issue",
             axum::routing::post(api::issue_invoice),
         )
+        .route(
+            "/invoices/{id}/revise",
+            axum::routing::post(api::revise_invoice),
+        )
         .route("/invoices/{id}/pdf", get(api::invoice_pdf))
         .route("/invoices/{id}/pdf/preview", get(api::invoice_pdf_preview))
         .route("/invoices/{id}/pay", axum::routing::post(api::pay_invoice))

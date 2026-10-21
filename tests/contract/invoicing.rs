@@ -699,6 +699,155 @@ async fn manual_invoice_creation_computes_exact_totals() {
     );
 }
 
+/// A correction revision keeps the original document and PDF as history: the
+/// revision gets its own id and PDF, the original is marked `superseded_by`,
+/// and active aggregates count only the revision.
+#[tokio::test]
+async fn correction_revisions_keep_the_original_and_supersede_it() {
+    let (app, _d) = app().await;
+    let c = new_customer(&app, "Corrections", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap();
+    let (s, original) = json_req(
+        &app,
+        "POST",
+        "/api/invoices/manual",
+        Some(json!({"customer_id":cid,
+          "lines":[{"description":"Work","item_kind":"service","quantity_hundredths":100,"unit_price_minor":10000}]})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{original}");
+    let original_id = original["id"].as_str().unwrap().to_string();
+    let number = original["number"].as_str().unwrap().to_string();
+    let (s, issued) = json_req(
+        &app,
+        "POST",
+        &format!("/api/invoices/{original_id}/issue"),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{issued}");
+
+    let revision_body = json!({
+        "lines":[{"kind":"fixed","date":"2026-01-01","note":"Corrected work",
+                  "item_kind":"service","quantity_hundredths":100,
+                  "unit_price_minor":12000,"amount_minor":12000}],
+        "status":"issued"
+    });
+    let (s, revision) = json_req(
+        &app,
+        "POST",
+        &format!("/api/invoices/{original_id}/revise"),
+        Some(revision_body.clone()),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{revision}");
+    let revision_id = revision["id"].as_str().unwrap().to_string();
+    assert_ne!(revision_id, original_id, "the revision has its own id");
+    assert_eq!(revision["number"], number.as_str());
+    assert_eq!(revision["supersedes"], original_id.as_str());
+    assert_eq!(revision["status"], "issued");
+    assert_eq!(revision["total_minor"], 12000);
+
+    let (s, stored_original) =
+        json_req(&app, "GET", &format!("/api/invoices/{original_id}"), None).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(stored_original["superseded_by"], revision_id.as_str());
+    assert_eq!(stored_original["total_minor"], 10000, "original untouched");
+    // Both documents remain downloadable.
+    for id in [&original_id, &revision_id] {
+        let (s, _, _) = raw_req(&app, "GET", &format!("/api/invoices/{id}/pdf")).await;
+        assert_eq!(s, StatusCode::OK, "PDF for {id}");
+    }
+    // The original cannot be revised twice.
+    let (s, again) = json_req(
+        &app,
+        "POST",
+        &format!("/api/invoices/{original_id}/revise"),
+        Some(revision_body),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CONFLICT, "{again}");
+
+    // Active aggregates count only the revision.
+    let (s, summary) = json_req(&app, "GET", "/api/invoices/summary", None).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(summary["outstanding"]["EUR"], 12000);
+    assert_eq!(summary["issued"], 1);
+    let (_, all) = json_req(&app, "GET", "/api/invoices", None).await;
+    assert_eq!(
+        all["invoices"].as_array().unwrap().len(),
+        2,
+        "history keeps both"
+    );
+}
+
+/// A revision can be returned to draft, edited in place, and issued again.
+#[tokio::test]
+async fn a_sent_invoice_can_return_to_draft_through_a_revision() {
+    let (app, _d) = app().await;
+    let c = new_customer(&app, "Reopen", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap();
+    let (_, original) = json_req(
+        &app,
+        "POST",
+        "/api/invoices/manual",
+        Some(json!({"customer_id":cid,
+          "lines":[{"description":"Work","item_kind":"service","quantity_hundredths":100,"unit_price_minor":5000}]})),
+    )
+    .await;
+    let original_id = original["id"].as_str().unwrap().to_string();
+    let (s, _) = json_req(
+        &app,
+        "POST",
+        &format!("/api/invoices/{original_id}/issue"),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    let (s, draft) = json_req(
+        &app,
+        "POST",
+        &format!("/api/invoices/{original_id}/revise"),
+        Some(json!({
+            "lines":[{"kind":"fixed","date":"2026-01-01","note":"To correct",
+                      "item_kind":"service","quantity_hundredths":100,
+                      "unit_price_minor":5000,"amount_minor":5000}],
+            "status":"draft"
+        })),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{draft}");
+    assert_eq!(draft["status"], "draft");
+    let revision_id = draft["id"].as_str().unwrap();
+    let (s, _, _) = raw_req(&app, "GET", &format!("/api/invoices/{revision_id}/pdf")).await;
+    assert_eq!(s, StatusCode::CONFLICT, "a draft has no archived PDF");
+    // The draft revision can be edited and issued again.
+    let (s, edited) = json_req(
+        &app,
+        "PUT",
+        &format!("/api/invoices/{revision_id}"),
+        Some(json!({
+            "lines":[{"kind":"fixed","date":"2026-01-01","note":"Corrected",
+                      "item_kind":"service","quantity_hundredths":100,
+                      "unit_price_minor":6000,"amount_minor":6000}],
+            "status":"draft"
+        })),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{edited}");
+    assert_eq!(edited["total_minor"], 6000);
+    let (s, reissued) = json_req(
+        &app,
+        "POST",
+        &format!("/api/invoices/{revision_id}/issue"),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{reissued}");
+    assert_eq!(reissued["status"], "issued");
+    assert_eq!(reissued["number"], original["number"]);
+}
+
 #[tokio::test]
 async fn invoice_document_overrides_round_trip_and_reject_without_persistence() {
     let (app, _d) = app().await;

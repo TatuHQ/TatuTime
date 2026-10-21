@@ -1303,6 +1303,18 @@
             "$ref": "#/components/schemas/ImportedInvoice",
             "readOnly": true
           },
+          "supersedes": {
+            "type": "string",
+            "format": "uuid",
+            "readOnly": true,
+            "description": "Set on a correction revision: the invoice it supersedes."
+          },
+          "superseded_by": {
+            "type": "string",
+            "format": "uuid",
+            "readOnly": true,
+            "description": "Set on a superseded original: the active correction revision. History only; excluded from active aggregates."
+          },
           "document": {
             "$ref": "#/components/schemas/InvoiceDocument"
           },
@@ -2721,7 +2733,7 @@
         "required": [
           "lines"
         ],
-        "description": "Draft-only full replacement. Tracked lines must come back verbatim; manual amounts are recomputed server-side.",
+        "description": "Draft edit or correction revision. Tracked lines must come back verbatim; manual amounts are recomputed server-side. status is only meaningful on a revision.",
         "properties": {
           "document": {
             "$ref": "#/components/schemas/InvoiceDocument"
@@ -2746,6 +2758,10 @@
             "type": "integer",
             "minimum": 0,
             "maximum": 10000
+          },
+          "status": {
+            "$ref": "#/components/schemas/InvoiceStatus",
+            "description": "Reviewed status of a correction revision. Absent keeps the original status; draft returns the corrected document to a draft for reissue."
           }
         },
         "additionalProperties": false
@@ -6508,6 +6524,73 @@
           },
           "200": {
             "description": "Updated draft.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Invoice"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          }
+        }
+      }
+    },
+    "/api/invoices/{id}/revise": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "post": {
+        "operationId": "reviseInvoice",
+        "x-admin-only": true,
+        "tags": [
+          "invoices"
+        ],
+        "summary": "Create a correction revision of a sent or imported invoice",
+        "description": "The revision keeps the original number, gets its own id and archived PDF, and may carry a manually reviewed status (including draft, so it can be corrected and issued again). The original document and PDF stay untouched as history.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InvoiceEditInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "201": {
+            "description": "Correction revision created.",
             "content": {
               "application/json": {
                 "schema": {

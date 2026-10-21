@@ -161,6 +161,28 @@ the invoice. The API answers `409` with a reason for an attempted change, and
 `503 lock_unavailable` if the lock state cannot be verified. See
 [Security](security.md#record-locks-and-invoice-permanence).
 
+## Corrections and resending
+
+Editing a sent (issued/partly paid/paid/written off) or imported invoice never
+rewrites it: `POST /api/invoices/{id}/revise` creates a **correction revision**
+with its own id and the same number. The original keeps its document and
+archived PDF untouched, is marked `superseded_by`, stays visible in the register
+and remains downloadable, but is excluded from every active aggregate (summary,
+outstanding, reports, profitability, CSV and reminders). The revision carries
+`supersedes`, owns its own PDF and is the document that is emailed again.
+
+The edit form can set the revision's **status** manually, including **draft** so
+a sent invoice can return for correction: a draft revision locks nothing, can be
+edited in place, and is issued again from the invoice view (same number). Status
+choices are validated against the recorded payments: a draft or issued revision
+cannot keep payments, partly paid needs a payment between zero and the total,
+paid either matches the total or relies on the legacy no-ledger rule, and no
+status may carry payments above the corrected total.
+
+A draft invoice is still edited in place with `PUT /api/invoices/{id}`; the
+revision endpoint refuses it (`409`). Only the active revision can be revised
+again; the superseded original cannot.
+
 ## PDFs, email and reminders
 
 - `GET /api/invoices/{id}/pdf` downloads the archived PDF; the preview endpoint

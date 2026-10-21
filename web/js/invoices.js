@@ -47,18 +47,27 @@ async function refreshInvoicesBody() {
     // fully settled; a written-off balance is forgiven, not outstanding.
     const balance = invBalance(inv); // #189: shared semantic
     const open = isOpenInvoice(inv);
-    if (inv.status === 'draft') {
+    const superseded = Boolean(inv.superseded_by);
+    const edit = () => action('link', 'Edit',
+      () => api.get(`/invoices/${inv.id}`).then(edOpen, (e) => announce(e.message)),
+      'Edit, or create a correction revision of, this invoice', 'edit');
+    if (superseded) {
+      // History only: the active correction revision owns the actions.
       actions.push(
-        action('link', 'Edit', () => api.get(`/invoices/${inv.id}`).then(edOpen, (e) => announce(e.message)),
-          'Edit the draft lines and percentages', 'edit'),
+        action('link', 'PDF', () => downloadInvoicePdf(inv.id, inv.number),
+          'Download the superseded original PDF', 'file'),
+      );
+    } else if (inv.status === 'draft') {
+      actions.push(
+        edit(),
         action('link', 'Issue', () => issueInvoice(inv), 'Issue invoice', 'credit-card'),
         action('danger', 'Delete', () => removeInvoice(inv.id), 'Delete invoice', 'delete'),
       );
     } else if (open) {
       actions.push(
+        edit(),
         action('link', 'Record payment', () => recordPayment(inv, balance),
           'Record a full or partial payment (partly paid keeps the rest open)', 'credit-card'),
-
         action('link', 'PDF', () => downloadInvoicePdf(inv.id, inv.number),
           'Download the archived invoice PDF', 'file'),
         action('link', 'Email', (evt) => emailInvoice(inv, evt.currentTarget),
@@ -70,12 +79,20 @@ async function refreshInvoicesBody() {
       );
     } else if (inv.status === 'paid') {
       actions.push(
+        edit(),
         action('link', 'PDF', () => downloadInvoicePdf(inv.id, inv.number),
           'Download the archived invoice PDF', 'file'),
         action('link', 'Email', (evt) => emailInvoice(inv, evt.currentTarget),
           'Choose recipients and send this invoice (PDF attached)', 'contact'),
         action('link', 'Email copy', () => emailInvoiceCopy(inv.id),
           'Send a PDF copy to another address, e.g. the accountant', 'email'),
+      );
+    } else {
+      // Written off: the corrected document can still be revised and resent.
+      actions.push(
+        edit(),
+        action('link', 'PDF', () => downloadInvoicePdf(inv.id, inv.number),
+          'Download the archived invoice PDF', 'file'),
       );
     }
     // #133: selecting the row (its Preview button, a click anywhere on the
@@ -117,6 +134,18 @@ async function refreshInvoicesBody() {
           // while draft, paid and written off stay neutral. The label is the
           // ratified lifecycle vocabulary (#349) -- presentation only.
           statusChip(statusLabel(inv.status), open),
+          inv.superseded_by
+            ? el('span', {
+              cls: 'inv-imported',
+              attrs: { title: 'Superseded by a correction revision; this document stays as history' },
+            }, [statusChip('Superseded')])
+            : null,
+          inv.supersedes
+            ? el('span', {
+              cls: 'inv-imported',
+              attrs: { title: 'Correction revision of the earlier document with the same number' },
+            }, [statusChip('Correction')])
+            : null,
           // #403: an imported invoice keeps its reviewed native status and says
           // where it came from. The archived original is the authoritative
           // document; the PDF action downloads those exact bytes.
@@ -170,7 +199,10 @@ export async function refreshInvoiceSummary(preloaded) {
   // the chained call at its foot) instead of a third GET /invoices per
   // filter change; standalone callers still fetch once.
   try {
-    const all = preloaded ?? (await api.get('/invoices')).invoices ?? [];
+    const listed = preloaded ?? (await api.get('/invoices')).invoices ?? [];
+    // A superseded original stays in the register but never double-counts in
+    // the overview; only correction revisions are active invoices.
+    const all = listed.filter((invoice) => !invoice.superseded_by);
     if (all.length && !dash.currency) dash.currency = all.find((i) => i.status !== 'draft')?.currency || '';
     dashRenderOverview(all);
   } catch { /* overview is additive; table remains authoritative */ }
@@ -1174,6 +1206,11 @@ export async function openInvoicePreview(inv, opener) {
   // plain-text subtitle and one sentence about when it was frozen; the region
   // is still the rendered PDF plus that identity and the history.
   const draft = inv.status === 'draft';
+  const superseded = Boolean(inv.superseded_by);
+  // A superseded original is history: only its PDF is offered here. The active
+  // correction revision owns delivery and payment.
+  $('ip-send').hidden = superseded;
+  $('ip-mark-sent').hidden = superseded;
   // `subject` is snapshotted at issue, so an issued invoice shows exactly what
   // was billed while a draft (which has no frozen subject yet) says it still
   // follows the live settings. Both are plain text and never editable here —
@@ -1193,13 +1230,17 @@ export async function openInvoicePreview(inv, opener) {
     documentNote.textContent +=
       ` Imported from Harvest as ${inv.imported.original_number}; the original archived PDF is shown and downloaded unchanged.`;
   }
+  if (superseded) {
+    documentNote.textContent +=
+      ' This document was superseded by a correction revision with the same number; use that revision to resend.';
+  }
   // ---- Get paid: the collect-payment box on the invoice. No hosted
   // checkout exists by design, so this shows the customer's own payment
   // details, what has been settled and when, and offers manual
   // settlement. A draft gets no box: it is not collectable yet, and
   // nothing here gates it.
   const gp = $('ip-getpaid');
-  gp.hidden = draft;
+  gp.hidden = draft || superseded;
   const gpFacts = $('ip-getpaid-facts');
   const gpPay = $('ip-getpaid-pay');
   const gpHist = $('ip-getpaid-history');
@@ -1396,7 +1437,11 @@ export function edLineRow(line = null) {
     cls: 'num',
     attrs: {
       type: 'number', min: '0', step: '0.01', inputmode: 'decimal', style: 'width:9ch', 'aria-label': 'Unit price',
-      value: line && line.unit_price_minor != null ? (line.unit_price_minor / 100).toFixed(2) : '0.00'
+      // Imported/legacy fixed lines carry only an amount: show it as one unit
+      // at that price so opening and saving the editor cannot zero the total.
+      value: line && line.unit_price_minor != null
+        ? (line.unit_price_minor / 100).toFixed(2)
+        : (line?.amount_minor ? (line.amount_minor / 100).toFixed(2) : '0.00')
     },
   });
   const amount = el('td', { cls: 'num' });
@@ -1497,12 +1542,25 @@ export function edRecalc() {
 
 export function edOpen(draft) {
   ed.epoch = (ed.epoch || 0) + 1;
-  if (draft?.status && draft.status !== 'draft') { announce('Only draft invoices can be edited.'); return; }
   if (draft) $('ed-customer').value = draft.customer_id;
   ed.id = draft ? draft.id : null;
+  ed.originalStatus = draft?.status || null;
+  const statusSelect = $('ed-status');
+  statusSelect.textContent = '';
+  const statusOptions = !draft || draft.status === 'draft'
+    ? [['draft', 'Draft']]
+    : [['draft', 'Draft (return for correction)'], ['issued', 'Sent'], ['partly_paid', 'Partly paid'],
+    ['paid', 'Paid'], ['written_off', 'Written off']];
+  for (const [value, text] of statusOptions) {
+    statusSelect.appendChild(el('option', { value, text }));
+  }
+  statusSelect.value = draft?.status || 'draft';
+  statusSelect.disabled = !draft || draft.status === 'draft';
+  statusSelect.title = draft?.status === 'draft' ? 'Issue the draft from the invoice view' : '';
   ed.tracked = draft ? (draft.lines || []).filter((l) => l.entry_id || l.expense_id) : [];
   ed.currency = draft ? draft.currency : (state.customers.find((c) => c.id === $('ed-customer').value)?.currency || 'EUR');
   $('ed-title').textContent = draft ? `Edit invoice ${draft.number}` : 'New invoice';
+  $('ed-save').textContent = draft ? 'Save changes' : 'Save draft';
   $('ed-customer').disabled = Boolean(draft);
   const tbody = $('ed-lines').querySelector('tbody');
   tbody.textContent = '';
@@ -1546,7 +1604,9 @@ export function edOpen(draft) {
   ed.defaultsPromise = edLoadDefaults(false);
   (draft ? $('ed-po') : $('ed-customer').__filterButton).focus({ preventScroll: true });
   dlg.querySelector('.p-modal__dialog').scrollTop = 0;
-  announce(draft ? `Editing draft ${draft.number}.` : 'Manual invoice editor open.');
+  announce(draft
+    ? `Editing invoice ${draft.number}${draft.status !== 'draft' ? ' — saving creates a correction revision' : ''}.`
+    : 'Manual invoice editor open.');
 }
 
 export function edClose() {
@@ -1688,12 +1748,22 @@ async function edSaveBody(preview = false) {
           hours: null, rate_minor: null,
         })),
       ];
-      const updated = await api.put(`/invoices/${ed.id}`, {
+      const payload = {
         document, currency,
         lines: payloadLines, tax_hundredths: taxH, discount_hundredths: discH,
-      });
+        status: $('ed-status').value || ed.originalStatus || 'draft',
+      };
+      // A sent/imported invoice is never rewritten: saving creates a
+      // superseding revision that keeps the number, and the original stays
+      // visible as history. A draft is edited in place.
+      const correction = Boolean(ed.originalStatus && ed.originalStatus !== 'draft');
+      const updated = correction
+        ? await api.post(`/invoices/${ed.id}/revise`, payload)
+        : await api.put(`/invoices/${ed.id}`, payload);
       saved = updated;
-      announce(`Draft ${updated.number} updated (total ${formatMoney(updated.total_minor)} ${updated.currency}).`);
+      announce(correction
+        ? `Correction ${updated.number} created (${updated.status}). The original stays in history.`
+        : `Draft ${updated.number} updated (total ${formatMoney(updated.total_minor)} ${updated.currency}).`);
     }
     if (ed.epoch !== epoch) return;
     edClose();

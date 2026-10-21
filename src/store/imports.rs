@@ -885,6 +885,8 @@ impl Store {
             invoice_numbers.push(row.original_number.clone());
             invoice_pdfs.push((pdf_path, source.pdf.clone()));
             new_invoices.push(Invoice {
+                supersedes: None,
+                superseded_by: None,
                 imported: Some(ImportedInvoice {
                     origin: ImportOrigin {
                         provider: ImportProvider::Harvest,

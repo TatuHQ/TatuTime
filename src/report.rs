@@ -282,6 +282,7 @@ pub fn summarise_profit(
             std::collections::BTreeMap::new();
         for i in invoices
             .iter()
+            .filter(|i| !i.is_superseded())
             .filter(|i| i.customer_id == c.id && i.status != InvoiceStatus::Draft)
             .filter(|i| i.period_to >= from && i.period_from <= to)
         {
@@ -371,6 +372,7 @@ pub fn invoice_report(
     for c in customers {
         let mine: Vec<&crate::domain::Invoice> = invoices
             .iter()
+            .filter(|i| !i.is_superseded())
             .filter(|i| i.customer_id == c.id && i.status != InvoiceStatus::Draft)
             .filter(|i| i.period_to >= from && i.period_from <= to)
             .collect();
@@ -452,7 +454,7 @@ pub fn invoice_csv(invoices: &[crate::domain::Invoice], customers: &[Customer]) 
     let mut out = String::from(
         "number,customer,period_from,period_to,currency,total_minor,status,issued_at,due_date,paid_at,payment_reference,paid_minor,balance_minor,write_off_reason\n",
     );
-    for i in invoices {
+    for i in invoices.iter().filter(|invoice| !invoice.is_superseded()) {
         let fields = [
             i.number.clone(),
             name(i.customer_id),

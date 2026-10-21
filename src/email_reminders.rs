@@ -111,9 +111,11 @@ impl EmailReminderJob {
     ) -> Vec<(Invoice, i64)> {
         invoices
             .iter()
+            .filter(|inv| !inv.is_superseded())
             .filter_map(|inv| {
                 // #114: reminders chase the BALANCE — written-off and fully
-                // paid invoices are out, partly paid ones are in.
+                // paid invoices are out, partly paid ones are in. A superseded
+                // original is history; its revision is what gets chased.
                 if !inv.status.is_open() || inv.balance_minor() == 0 {
                     return None;
                 }
@@ -282,6 +284,8 @@ mod tests {
 
     fn issued_due(id: &str, due: NaiveDate, status: InvoiceStatus) -> Invoice {
         Invoice {
+            supersedes: None,
+            superseded_by: None,
             imported: None,
             id: id.parse().unwrap(),
             number: format!("INV-{id}"),

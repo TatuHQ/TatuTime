@@ -40,11 +40,23 @@ impl Store {
         {
             return Ok(Some(invoice));
         }
-        // Authoritative scan (also covers an absent or drifted index).
+        // Authoritative scan (also covers an absent or drifted index). A
+        // correction revision and its original share the number: the active
+        // (non-superseded) document wins, then the earliest created.
         let mut found: Option<Invoice> = None;
         for inv in self.list_invoices()? {
-            if inv.number == number && found.as_ref().is_none_or(|f| inv.created_at < f.created_at)
-            {
+            if inv.number != number {
+                continue;
+            }
+            let better = match &found {
+                None => true,
+                Some(current) => match (current.is_superseded(), inv.is_superseded()) {
+                    (true, false) => true,
+                    (false, true) => false,
+                    _ => inv.created_at < current.created_at,
+                },
+            };
+            if better {
                 found = Some(inv);
             }
         }
@@ -68,12 +80,25 @@ impl Store {
 
     pub fn delete_invoice(&self, id: Uuid) -> Result<(), StoreError> {
         let _guard = self.write_lock()?;
+        let revision = read_json::<Invoice>(&self.doc_path::<Invoice>(&id.to_string()))?;
         self.remove_doc_locked::<Invoice>(&id.to_string())?;
         // #113: the invoice JSON is the record of authority — when it goes,
         // its archived PDF goes in the same transactional write (#52 logs it).
         let pdf = self.invoice_pdf_path(&id.to_string());
         if pdf.exists() {
             std::fs::remove_file(&pdf)?;
+        }
+        // Deleting a draft revision must not leave a dangling link on the
+        // original: clear `superseded_by` so it becomes active again.
+        if let Some(original_id) = revision.and_then(|invoice| invoice.supersedes) {
+            let original_path = self.doc_path::<Invoice>(&original_id.to_string());
+            if let Some(mut original) = read_json::<Invoice>(&original_path)?
+                && original.superseded_by == Some(id)
+            {
+                original.superseded_by = None;
+                write_json(&original_path, &original)?;
+                self.index_invoice_locked(&original)?;
+            }
         }
         self.unindex_invoice_locked(&id.to_string())
     }
@@ -267,6 +292,8 @@ mod invoice_seq_tests {
 
     fn draft(number: &str) -> Invoice {
         Invoice {
+            supersedes: None,
+            superseded_by: None,
             imported: None,
             id: Uuid::new_v4(),
             number: number.into(),
