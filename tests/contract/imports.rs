@@ -2,9 +2,11 @@ use crate::support::*;
 use axum::http::StatusCode;
 use serde_json::json;
 use std::sync::Arc;
-use tucano_time::domain::{Currency, Hours, ImportOrigin, ImportProvider, ImportedTime};
+use tucano_time::domain::{
+    Currency, Hours, ImportChoices, ImportOrigin, ImportProvider, ImportedTime,
+};
 use tucano_time::lock::{EntryLock, ImportLock};
-use tucano_time::store::{ImportBatchState, ImportKind, Store};
+use tucano_time::store::{ImportBatch, ImportBatchState, ImportFiles, ImportKind, Store};
 use uuid::Uuid;
 
 #[tokio::test]
@@ -964,5 +966,76 @@ fn supplied_private_exports_parse_only_when_explicitly_enabled() {
         time_report.rows.len(),
         expense_report.rows.len(),
         sources.len()
+    );
+
+    // Exercise staging and planning in a throwaway data directory. Empty
+    // reviewed choices are expected to leave everything unresolved; only
+    // decision and reconciliation counts are logged. No private client,
+    // person, amount, note or PDF text is printed or persisted anywhere.
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().join("data")).unwrap();
+    let batch_id = Uuid::new_v4();
+    let now = chrono::Utc::now();
+    store
+        .create_import_batch(ImportBatch {
+            id: batch_id,
+            namespace: "private-sample".into(),
+            state: ImportBatchState::Draft,
+            created_at: now,
+            updated_at: now,
+            files: ImportFiles::default(),
+            choices: ImportChoices::default(),
+            preview_revision: None,
+            commit: None,
+            error: None,
+        })
+        .unwrap();
+    for (kind, name, bytes) in [
+        (ImportKind::Time, "time.csv", &time),
+        (ImportKind::Expenses, "expenses.csv", &expenses),
+        (ImportKind::Invoices, "invoices.zip", &invoices),
+    ] {
+        store
+            .stage_import_source(batch_id, kind, name, bytes, now)
+            .unwrap();
+    }
+    let preview = store.import_preview(batch_id).unwrap();
+    let mut time_decisions = std::collections::BTreeMap::new();
+    for row in &preview.time {
+        *time_decisions
+            .entry(format!("{:?}", row.decision))
+            .or_insert(0_usize) += 1;
+    }
+    let mut expense_decisions = std::collections::BTreeMap::new();
+    for row in &preview.expenses {
+        *expense_decisions
+            .entry(format!("{:?}", row.decision))
+            .or_insert(0_usize) += 1;
+    }
+    let mut invoice_decisions = std::collections::BTreeMap::new();
+    for row in &preview.invoices {
+        *invoice_decisions
+            .entry(format!("{:?}", row.decision))
+            .or_insert(0_usize) += 1;
+    }
+    eprintln!("time decisions: {time_decisions:?}");
+    eprintln!("expense decisions: {expense_decisions:?}");
+    eprintln!("invoice decisions: {invoice_decisions:?}");
+    for row in &preview.totals {
+        eprintln!(
+            "reconciliation {} {}: accepted {}, skipped {}",
+            row.source, row.currency, row.accepted_count, row.skipped_count
+        );
+    }
+    eprintln!(
+        "preview ready: {}, blocking issues: {}",
+        preview.ready, preview.blocking
+    );
+    assert_eq!(preview.time.len(), time_report.rows.len());
+    assert_eq!(preview.expenses.len(), expense_report.rows.len());
+    assert_eq!(preview.invoices.len(), sources.len());
+    assert!(
+        !preview.ready,
+        "an unreviewed private sample must never be ready to commit"
     );
 }
