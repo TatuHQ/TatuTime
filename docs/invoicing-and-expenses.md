@@ -236,6 +236,13 @@ org template is never frozen onto a revision or its PDF.
 - `POST /api/invoices/{id}/email` sends the invoice with the PDF attached to the
   customer. `POST /api/invoices/{id}/email-copy` sends an ad-hoc copy to a third
   party such as an accountant; it is audited but is not a customer delivery.
+- **The accountant copy is one click.** *Settings → Company* stores
+  `OrgProfile.accountant_email`, and the register's **Email copy** action opens
+  its dialog pre-filled with that address (editable, with a visible Cancel).
+  Marking an invoice paid — the *Record payment* action or a status change in
+  the editor — offers the same dialog, so the accountant gets the document at
+  the moment it settles. With no address on file the paid offer points at the
+  setting instead of opening an empty prompt.
 - `POST /api/invoices/{id}/sent` records the manual "mark as sent" transition
   without sending anything.
 - A daily scheduler job emails reminders for issued, unpaid invoices past their
@@ -337,7 +344,9 @@ remains available and unchanged.
   before the org's own id (`OrgProfile.legal_id_label`, e.g. `Tax ID` or `VAT`)
   feed the issuer/customer blocks.
 - The invoice accent colour and the sender display name / Reply-To are honoured
-  by the PDF and the real email transport.
+  by the PDF and the real email transport. The accountant email is recipient
+  data only: it never prints on a document and is validated as an email address
+  before it is stored.
 
 ## Accounting sync
 

@@ -2517,6 +2517,11 @@
             "type": "string",
             "maxLength": 40,
             "description": "Display prefix for legal_id on documents (Tax ID, VAT, Company number). Empty keeps the built-in 'VAT / company id' wording."
+          },
+          "accountant_email": {
+            "type": "string",
+            "maxLength": 320,
+            "description": "Accountant address offered when a paid invoice's PDF copy is sent. Empty asks each time. Validated as an email recipient."
           }
         },
         "additionalProperties": false

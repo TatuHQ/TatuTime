@@ -160,6 +160,9 @@ The invoice document model gained these fields; the schemas live in
   number (≤ 60 characters, no control characters), printed on documents.
 - `OrgProfile.legal_id_label` — the display prefix for the org's `legal_id`
   (`Tax ID`, `VAT`, `Company number`; ≤ 40 characters).
+- `OrgProfile.accountant_email` — the accountant's address offered when a paid
+  invoice's PDF copy is sent (≤ 320 characters, validated as an email
+  recipient; empty = ask each time). Recipient data only, never printed.
 - `LabelOverrides` gains display-only, ≤ 40-character keys for the reference
   document's wording: `from`, `invoice_for`, `invoice_id`, `issue_date`,
   `due_date`, `subject`, `payment_heading`, `item_type`, `payments`,

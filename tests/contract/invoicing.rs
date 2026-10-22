@@ -595,17 +595,35 @@ async fn org_profile_round_trips_and_prints_on_the_document() {
     let (_sv, before) = json_req(&app, "GET", "/api/admin/org", None).await;
     assert_eq!(before["name"], "", "rejection persisted nothing");
 
+    // The accountant address is validated like an email-copy recipient.
+    let (sa, ab) = json_req(
+        &app,
+        "PUT",
+        "/api/admin/org",
+        Some(json!({"name":"X","accountant_email":"not-an-address"})),
+    )
+    .await;
+    assert_eq!(sa, StatusCode::UNPROCESSABLE_ENTITY, "{ab}");
+    assert_eq!(ab["error"]["fields"][0]["field"], "accountant_email");
+    let (_sa2, before2) = json_req(&app, "GET", "/api/admin/org", None).await;
+    assert_eq!(
+        before2["name"], "",
+        "an invalid accountant address persists nothing"
+    );
+
     // Valid save round-trips.
     let (sp, saved) = json_req(
         &app,
         "PUT",
         "/api/admin/org",
         Some(json!({"name":"Tucano BV","legal_id":"BE0123456789",
+          "accountant_email":"books@tucano.test",
           "address":{"street":"Markt 1","city":"Brugge","postal_code":"8000","country":"BE"}})),
     )
     .await;
     assert_eq!(sp, StatusCode::OK, "{saved}");
     assert_eq!(saved["name"], "Tucano BV");
+    assert_eq!(saved["accountant_email"], "books@tucano.test");
 
     // The identity prints on the issued document (uncompressed streams, so
     // the bytes are greppable — the determinism contract of #113 in use).

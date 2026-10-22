@@ -32,7 +32,12 @@ const CUSTOMER = {
 };
 const INVOICE = { id: 'i1', number: 'INV-0001', customer_id: 'c1' };
 
-function setup({ adminEmail = { configured: true, transport: 'smtp' }, postResult, postError = null } = {}) {
+function setup({
+    adminEmail = { configured: true, transport: 'smtp' },
+    postResult,
+    postError = null,
+    org = { accountant_email: 'books@tucanotime.test' },
+} = {}) {
     const dom = new JSDOM(html, { runScripts: 'outside-only', url: 'http://localhost/' });
     const { window } = dom;
     window.HTMLDialogElement.prototype.showModal = function showModal() {
@@ -47,6 +52,7 @@ function setup({ adminEmail = { configured: true, transport: 'smtp' }, postResul
     const prelude = `
       window.calls = [];
       window.__adminEmail = ${JSON.stringify(adminEmail)};
+      window.__org = ${JSON.stringify(org)};
       window.__postError = ${JSON.stringify(postError)};
       window.__postResult = ${JSON.stringify(postResult || {
         sent_to: 'ada@tucanotime.test',
@@ -64,6 +70,7 @@ function setup({ adminEmail = { configured: true, transport: 'smtp' }, postResul
           if (window.__adminEmail === 503) { const e = new Error('vault disabled'); e.status = 503; throw e; }
           return window.__adminEmail;
         }
+        if (path === '/admin/org') return window.__org;
         if (path === '/customers') return { customers: [${JSON.stringify(CUSTOMER)}] };
         return {};
       };
@@ -84,7 +91,8 @@ function setup({ adminEmail = { configured: true, transport: 'smtp' }, postResul
     `;
     window.eval(`${app}\n${prelude}\nwindow.t = {
       state, openSendEmailDialog, closeSendEmailDialog, confirmSendEmail,
-      emailCandidates, parseExtraEmails, sendInvoiceEmail, EMAIL_SETTINGS_ROUTE,
+      emailCandidates, parseExtraEmails, sendInvoiceEmail, emailInvoiceCopy,
+      offerAccountantCopy, EMAIL_SETTINGS_ROUTE,
       setPreview: (inv) => window.__setPreview(inv),
       seed: () => window.__setCustomer(),
       calls: () => window.calls,
@@ -258,6 +266,51 @@ test('a 422 validation error renders inline without closing the dialog', async (
         { message: 'the 422 error' });
     assert.match(document.getElementById('send-email-error').textContent, /no billing email on file/);
     assert.ok(isOpen(dlgOf(document)), 'a 422 keeps the dialog open');
+    dom.window.close();
+});
+
+// ------------------------------------------------- accountant copy (#112) --
+
+test('the Email copy action opens a dialog pre-filled with the accountant address', async () => {
+    const { dom, document, t } = setup();
+    await settleBoot(document);
+    const pending = t.emailInvoiceCopy({ id: 'i1', number: 'INV-0001' });
+    await waitFor(() => document.getElementById('app-dialog').open === true,
+        { message: 'the Email copy prompt to open' });
+    assert.equal(document.getElementById('dlg-title').textContent, 'Email a copy');
+    assert.equal(document.getElementById('dlg-input').value, 'books@tucanotime.test',
+        'the accountant address from Settings -> Company is offered, not retyped');
+    assert.equal(document.getElementById('dlg-ok').textContent, 'Send copy');
+    assert.equal(document.getElementById('dlg-cancel').hidden, false, 'the copy prompt can be cancelled');
+    document.getElementById('dlg-ok').click();
+    await pending;
+    assert.deepEqual(JSON.parse(JSON.stringify(t.calls())),
+        [{ path: '/invoices/i1/email-copy', body: { to: 'books@tucanotime.test' } }],
+        'one copy request to the pre-filled address');
+    dom.window.close();
+});
+
+test('marking an invoice paid offers the accountant copy and cancelling sends nothing', async () => {
+    const { dom, document, t } = setup();
+    await settleBoot(document);
+    const pending = t.offerAccountantCopy({ id: 'i1', number: 'INV-0001', status: 'paid' });
+    await waitFor(() => document.getElementById('app-dialog').open === true,
+        { message: 'the paid offer to open' });
+    assert.equal(document.getElementById('dlg-input').value, 'books@tucanotime.test');
+    document.getElementById('dlg-cancel').click();
+    await pending;
+    assert.equal(t.calls().length, 0, 'cancelling the offer sends nothing');
+    assert.equal(document.getElementById('app-dialog').open, false, 'the dialog closes on cancel');
+    dom.window.close();
+});
+
+test('with no accountant address the paid offer points at Settings instead of a dialog', async () => {
+    const { dom, document, t } = setup({ org: {} });
+    await settleBoot(document);
+    await t.offerAccountantCopy({ id: 'i1', number: 'INV-0001', status: 'paid' });
+    assert.equal(document.getElementById('app-dialog').open, false, 'nothing to pre-fill means no dialog');
+    assert.match(document.getElementById('live-region').textContent,
+        /Set the accountant email in Settings/);
     dom.window.close();
 });
 

@@ -65,13 +65,14 @@ test('the shell ships the official form vocabulary and no bespoke class (#232 ph
     // #354 added the Company legal-details fieldset, the payment-rails
     // fieldset and the ten Document label rows (each in its own grouped
     // fieldset) to the Settings split's 146 groups; the template notes row
-    // added one more, and the Expense-categories dialog one more.
-    assert.equal(groups.length, 174, 'every field wrapper is a p-form__group');
-    assert.equal(document.querySelectorAll('.p-form__label').length, 166, 'one official label per field row');
-    assert.equal(document.querySelectorAll('.p-form__control').length, 166, 'one official control per field row');
+    // added one more, the Expense-categories dialog one more, and the
+    // accountant-email row (#112 follow-up) one more.
+    assert.equal(groups.length, 175, 'every field wrapper is a p-form__group');
+    assert.equal(document.querySelectorAll('.p-form__label').length, 167, 'one official label per field row');
+    assert.equal(document.querySelectorAll('.p-form__control').length, 167, 'one official control per field row');
     // The previous 55 plus the template footer and notes placement hints, plus
-    // one hint per Harvest import source tab.
-    assert.equal(document.querySelectorAll('.p-form-help-text').length, 67, 'the hints became p-form-help-text');
+    // one hint per Harvest import source tab, plus the accountant-email hint.
+    assert.equal(document.querySelectorAll('.p-form-help-text').length, 68, 'the hints became p-form-help-text');
     assert.equal(document.querySelectorAll('.p-form-validation__message').length, ERROR_IDS.length,
         'every error message is the official validation message');
     assert.equal(document.querySelectorAll('.p-form-validation.is-error').length, ERROR_IDS.length,
@@ -114,9 +115,9 @@ test('every p-form__group pairs its label with its own control (#232 phase 2b)',
         paired += 1;
     }
     // 152: the Settings split's 141 plus the ten Document label rows (#354)
-    // and the template notes row; the Expense-categories dialog and the invoice
-    // editor status row add one each.
-    assert.equal(paired, 166, 'all 166 label/control pairs were verified');
+    // and the template notes row; the Expense-categories dialog, the invoice
+    // editor status row and the accountant-email row add one each.
+    assert.equal(paired, 167, 'all 167 label/control pairs were verified');
     assert.equal(composed.length, 8, 'eight composed rows have no label of their own');
     assert.equal(composed.filter((row) => row.tag === 'FIELDSET').length, 7, 'seven grouped fieldsets');
     assert.equal(composed.filter((row) => row.tag === 'DIV').length, 1, 'the Contacts row');

@@ -231,10 +231,17 @@ export function askConfirm(message, okLabel = 'Confirm') {
 }
 
 // Resolves with the typed string, or null when cancelled (like prompt()).
-export function askPrompt(message, defaultValue = '') {
-  return showDialog({ title: 'Input', message, input: message, value: defaultValue }).then(
-    (r) => (r === 'cancel' ? null : r),
-  );
+// `options` lets one prompt name itself (`title`, `okLabel`) and offer a visible
+// Cancel; the historical single-argument callers keep the plain Input dialog.
+export function askPrompt(message, defaultValue = '', options = {}) {
+  return showDialog({
+    title: options.title || 'Input',
+    message,
+    input: message,
+    value: defaultValue,
+    okLabel: options.okLabel || 'OK',
+    cancelLabel: options.cancelLabel ?? null,
+  }).then((r) => (r === 'cancel' ? null : r));
 }
 
 export function askAlert(message) {

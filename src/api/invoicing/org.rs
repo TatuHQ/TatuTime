@@ -52,6 +52,17 @@ pub async fn org_put(
     {
         errors.push(FieldError::new("reply_to", "not a valid email address"));
     }
+    // The paid-invoice copy goes to this address, so it carries the same
+    // recipient rule as the email-copy endpoint (one '@', no control chars,
+    // at most 320 characters).
+    if !profile.accountant_email.trim().is_empty()
+        && crate::email::recipient_problem(&profile.accountant_email).is_some()
+    {
+        errors.push(FieldError::new(
+            "accountant_email",
+            "not a valid email address",
+        ));
+    }
     if !profile.accent.is_empty() && crate::pdf::parse_accent(&profile.accent).is_none() {
         errors.push(FieldError::new("accent", "expected a #rrggbb hex color"));
     }

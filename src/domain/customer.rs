@@ -628,6 +628,12 @@ pub struct OrgProfile {
     /// `Company number`). Empty keeps today's `VAT / company id` wording.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub legal_id_label: String,
+    /// The company accountant's address (#112 follow-up). Prefills the
+    /// "send a PDF copy" dialog and is offered when an invoice is marked paid.
+    /// Empty means "ask each time"; it is display/recipient data only and is
+    /// never printed on a document.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub accountant_email: String,
 }
 
 /// Display-label overrides for invoice documents (#147). Empty = built-in

@@ -76,8 +76,8 @@ async function refreshInvoicesBody() {
           'Download the archived invoice PDF', 'file'),
         action('link', 'Email', (evt) => emailInvoice(inv, evt.currentTarget),
           'Choose recipients and send this invoice (PDF attached)', 'contact'),
-        action('link', 'Email copy', () => emailInvoiceCopy(inv.id),
-          'Send a PDF copy to another address, e.g. the accountant', 'email'),
+        action('link', 'Email copy', () => emailInvoiceCopy(inv),
+          'Send a PDF copy to the accountant (address from Settings)', 'email'),
         action('danger', 'Write off', () => writeOffInvoice(inv, balance),
           'Forgive the remaining balance (final; excluded from outstanding)', 'ignored'),
         remove(),
@@ -89,8 +89,8 @@ async function refreshInvoicesBody() {
           'Download the archived invoice PDF', 'file'),
         action('link', 'Email', (evt) => emailInvoice(inv, evt.currentTarget),
           'Choose recipients and send this invoice (PDF attached)', 'contact'),
-        action('link', 'Email copy', () => emailInvoiceCopy(inv.id),
-          'Send a PDF copy to another address, e.g. the accountant', 'email'),
+        action('link', 'Email copy', () => emailInvoiceCopy(inv),
+          'Send a PDF copy to the accountant (address from Settings)', 'email'),
         remove(),
       );
     } else {
@@ -235,6 +235,9 @@ export async function recordPayment(inv, balance) {
       announce(`Payment recorded. ${paid.currency} ${formatMoney(rest)} still outstanding.`);
     }
     await refreshInvoices();
+    // Marking an invoice paid offers the accountant copy in the same dialog the
+    // register's Email copy action opens, pre-filled from Settings → Company.
+    if (paid.status === 'paid') await offerAccountantCopy(paid);
   } catch (err) {
     announce(err.message);
   }
@@ -567,21 +570,55 @@ export function emailInvoice(inv, opener = null) {
   return openSendEmailDialog(inv, opener);
 }
 
-// Sends a PDF copy of the invoice to any address — e.g. the accountant
-// (#112). Recipient via the inline dialog (#102); the server validates and
-// refuses drafts/invalid shapes before sending anything.
-export async function emailInvoiceCopy(id) {
-  const to = ((await askPrompt('Send a PDF copy to this email address:')) || '').trim();
+// The accountant's address lives in Settings → Company (`OrgProfile`), so the
+// copy dialog is pre-filled instead of retyped. A member cannot read the org
+// profile: the answer is empty and the dialog still asks for an address.
+async function accountantEmail() {
+  try {
+    const profile = await api.get('/admin/org');
+    return String(profile.accountant_email || '').trim();
+  } catch {
+    return '';
+  }
+}
+
+// Sends a PDF copy of the invoice to the accountant — or any address the admin
+// edits in the field (#112). Recipient via the inline dialog (#102), pre-filled
+// from Settings → Company; the server validates and refuses drafts/invalid
+// shapes before sending anything. Accepts the invoice object (or a bare id for
+// older callers).
+export async function emailInvoiceCopy(inv) {
+  const invoice = typeof inv === 'string' ? { id: inv } : (inv || {});
+  const to = ((await askPrompt(
+    `Send a PDF copy of ${invoice.number || 'this invoice'} to:`,
+    await accountantEmail(),
+    { title: 'Email a copy', okLabel: 'Send copy', cancelLabel: 'Cancel' },
+  )) || '').trim();
   if (!to) {
     announce('Email copy cancelled.');
     return;
   }
   try {
-    const res = await api.post(`/invoices/${id}/email-copy`, { to });
+    const res = await api.post(`/invoices/${invoice.id}/email-copy`, { to });
     announce(emailOutcome(res, `PDF copy sent to ${res.sent_to}.`));
   } catch (err) {
     announce(`Email copy failed: ${err.message}`);
   }
+}
+
+// A settled invoice is the moment the accountant needs the document: offer the
+// same pre-filled copy dialog. With no address on file there is nothing to
+// offer, so the live region points at Settings instead of opening a dialog.
+export async function offerAccountantCopy(inv) {
+  if (!inv || inv.status !== 'paid') return;
+  const to = await accountantEmail();
+  if (!to) {
+    // Keep the settlement wording: the payment already announced it, and this
+    // is the same event with advice attached, not a second status.
+    announce('Invoice marked paid. Set the accountant email in Settings → Company to send the copy automatically.');
+    return;
+  }
+  await emailInvoiceCopy(inv);
 }
 
 // Download the archived invoice PDF (#113). Fetch the binary as a blob (so
@@ -1726,6 +1763,9 @@ export async function edSave(preview = false) {
 
 async function edSaveBody(preview = false) {
   const epoch = ed.epoch;
+  // Whether this save is the transition INTO paid: the offer below only fires
+  // on that transition, never on a re-save of an already settled invoice.
+  const wasPaid = ed.originalStatus === 'paid';
   await ed.defaultsPromise;
   if (ed.epoch !== epoch || !$('invoice-editor').open) return;
   clearFormError($('ed-error'));
@@ -1799,6 +1839,7 @@ async function edSaveBody(preview = false) {
     edClose();
     await refreshInvoices();
     if (preview && saved) await openInvoicePreview(saved, null);
+    if (saved && saved.status === 'paid' && !wasPaid) await offerAccountantCopy(saved);
   } catch (err) {
     if (ed.epoch === epoch) showFormError($('ed-error'), err);
   }

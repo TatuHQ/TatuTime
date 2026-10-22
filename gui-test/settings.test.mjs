@@ -39,6 +39,7 @@ const ORG = {
     address: { street: 'Harbour 9', city: 'Antwerp', postal_code: '2000', country: 'BE' },
     from_name: 'Tucano Billing',
     reply_to: 'billing@tucanotime.test',
+    accountant_email: 'books@tucanotime.test',
     accent: '#e95420',
 };
 
@@ -375,9 +376,12 @@ test('Company loads its identity and saves via PUT /admin/org', async () => {
     assert.equal(document.getElementById('org-name').value, 'Tucano');
     assert.equal(document.getElementById('org-city').value, 'Antwerp');
     assert.equal(document.getElementById('org-accent').value, '#e95420');
+    assert.equal(document.getElementById('org-accountant').value, 'books@tucanotime.test',
+        'the accountant address loads for the paid-invoice copy');
     assert.equal(document.getElementById('accent-swatch').style.background !== '', true, 'the swatch paints');
 
     setValue(document, 'org-name', 'Tucano Invoice Co');
+    setValue(document, 'org-accountant', 'ledger@tucanotime.test');
     await t.saveOrgProfile({ preventDefault() { } });
     const call = t.calls().put.find((entry) => entry.path === '/admin/org');
     assert.deepEqual(JSON.parse(JSON.stringify(call.body)), {
@@ -386,6 +390,7 @@ test('Company loads its identity and saves via PUT /admin/org', async () => {
         legal_id_label: 'VAT',
         from_name: 'Tucano Billing',
         reply_to: 'billing@tucanotime.test',
+        accountant_email: 'ledger@tucanotime.test',
         accent: '#e95420',
         address: { street: 'Harbour 9', city: 'Antwerp', postal_code: '2000', country: 'BE' },
     });
