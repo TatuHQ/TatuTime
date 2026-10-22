@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 use std::io::{Cursor, Read};
 
+use chrono::{Datelike, NaiveDate, Weekday};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
@@ -162,8 +163,23 @@ pub enum PdfField {
     InvoiceDate,
     Customer,
     Currency,
+    /// The printed invoice total.
     Total,
+    /// The pre-tax/total row Harvest prints (`Subtotal`). Kept distinct from
+    /// `Total` so an exporter that prints both never collapses them.
+    Subtotal,
     AmountDue,
+    /// The payments applied to the invoice. Printed as a credit, so the
+    /// suggestion's `amount_minor` is the positive amount already paid.
+    Payments,
+    /// Derived once by comparing `Payments` with `Total`: `paid` when they are
+    /// equal, `issued` otherwise. Never read from a word in the document.
+    Status,
+    /// Derived from the issue date: the calendar month before it, or its own
+    /// month when the invoice is issued on the last day. Never read from a
+    /// word in the document.
+    PeriodFrom,
+    PeriodTo,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -242,17 +258,32 @@ fn normalise_label(raw: &str) -> String {
 fn field_for_label(label: &str) -> Option<PdfField> {
     match label {
         "invoice number" | "invoice no" | "invoice no." | "invoice nr" | "invoice nr."
-        | "invoice #" | "invoice" | "invoice ref" | "invoice reference" => {
+        | "invoice #" | "invoice" | "invoice ref" | "invoice reference" | "invoice id" => {
             Some(PdfField::InvoiceNumber)
         }
         "invoice date" | "date" | "issue date" | "issued" | "issued on" => {
             Some(PdfField::InvoiceDate)
         }
-        "bill to" | "billed to" | "customer" | "client" => Some(PdfField::Customer),
+        "bill to" | "billed to" | "invoice for" | "invoice to" | "customer" | "client" => {
+            Some(PdfField::Customer)
+        }
         "currency" => Some(PdfField::Currency),
         "total" | "invoice total" | "grand total" | "total amount" => Some(PdfField::Total),
+        "subtotal" | "sub total" => Some(PdfField::Subtotal),
+        "payments" | "payment" | "amount paid" | "payments applied" => Some(PdfField::Payments),
         "amount due" | "balance due" | "total due" | "amount payable" => Some(PdfField::AmountDue),
         _ => None,
+    }
+}
+
+/// A label printed alone on its line, with the value on the next non-empty
+/// line, as PDF text extraction often yields. The bare document title
+/// `INVOICE` is not an invoice-number label — only the colon form may use it.
+fn standalone_label(label: &str) -> Option<PdfField> {
+    if label == "invoice" {
+        None
+    } else {
+        field_for_label(label)
     }
 }
 
@@ -276,24 +307,48 @@ fn parse_amount(raw: &str) -> Option<(i64, Option<crate::domain::Currency>)> {
         currency = Some(parsed);
         text = tail.trim();
     }
-    loop {
-        let stripped = text.trim_start_matches(|character: char| {
-            character.is_whitespace() || matches!(character, '$' | '€' | '£' | '¥')
-        });
-        if stripped == text {
-            break;
-        }
-        text = stripped;
-    }
     let parenthesised = text.starts_with('(') && text.ends_with(')');
     if parenthesised {
         text = &text[1..text.len() - 1];
     }
-    let mut amount = decimal(text, true)?;
+    // A printed credit can put its sign before the currency symbol
+    // (`EUR -€5,760.00`), so strip whitespace, symbols and a leading sign in
+    // any order before delegating the digits to the shared decimal parser.
+    let mut body = text;
+    let mut sign = 1_i64;
+    loop {
+        let trimmed = body.trim_start();
+        let stripped = trimmed.trim_start_matches(['$', '€', '£', '¥']);
+        if let Some(rest) = stripped.strip_prefix('-') {
+            sign = -sign;
+            body = rest;
+            continue;
+        }
+        if let Some(rest) = stripped.strip_prefix('+') {
+            body = rest;
+            continue;
+        }
+        let removed_symbol = stripped.len() != trimmed.len();
+        body = stripped;
+        if !removed_symbol {
+            break;
+        }
+    }
+    let mut amount = decimal(body.trim(), true)?.checked_mul(sign)?;
     if parenthesised && amount > 0 {
         amount = -amount;
     }
     Some((amount, currency))
+}
+
+/// Dates are accepted only in the forms the source documents print. Harvest
+/// prints the issue date as `DD/MM/YYYY`; ISO stays accepted for other
+/// exporters. The suggestion is normalised to ISO so the review field can be a
+/// plain `date` input.
+fn parse_invoice_date(value: &str) -> Option<NaiveDate> {
+    ["%Y-%m-%d", "%d/%m/%Y", "%d.%m.%Y"]
+        .iter()
+        .find_map(|format| NaiveDate::parse_from_str(value.trim(), format).ok())
 }
 
 fn offer(
@@ -319,105 +374,251 @@ fn offer(
     });
 }
 
-fn scan_page(page: u32, text: &str, suggestions: &mut Vec<PdfSuggestion>) {
-    for line in text.lines().take(MAX_LINES_PER_PAGE) {
-        let Some((raw_label, raw_value)) = line.split_once(':') else {
-            continue;
-        };
-        let label = normalise_label(raw_label);
-        let Some(field) = field_for_label(&label) else {
-            continue;
-        };
-        let value = raw_value.trim();
-        match field {
-            PdfField::InvoiceNumber => {
-                let value = value.trim_start_matches('#').trim();
-                let valid = !value.is_empty()
-                    && value.len() <= MAX_VALUE_CHARS
-                    && value.bytes().all(|byte| {
-                        byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'/' | b'.')
-                    });
-                if valid {
-                    offer(
-                        suggestions,
-                        field,
-                        value,
-                        None,
-                        page,
-                        line,
-                        PdfConfidence::Medium,
-                    );
-                }
+fn suggest(
+    page: u32,
+    field: PdfField,
+    value: &str,
+    evidence: &str,
+    suggestions: &mut Vec<PdfSuggestion>,
+) {
+    let value = value.trim();
+    match field {
+        PdfField::InvoiceNumber => {
+            let value = value.trim_start_matches('#').trim();
+            let valid = !value.is_empty()
+                && value.len() <= MAX_VALUE_CHARS
+                && value.bytes().all(|byte| {
+                    byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'/' | b'.')
+                });
+            if valid {
+                offer(
+                    suggestions,
+                    field,
+                    value,
+                    None,
+                    page,
+                    evidence,
+                    PdfConfidence::Medium,
+                );
             }
-            PdfField::InvoiceDate => {
-                if value.len() == 10 && chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d").is_ok()
-                {
-                    offer(
-                        suggestions,
-                        field,
-                        value,
-                        None,
-                        page,
-                        line,
-                        PdfConfidence::Medium,
-                    );
-                }
+        }
+        PdfField::InvoiceDate => {
+            if let Some(date) = parse_invoice_date(value) {
+                offer(
+                    suggestions,
+                    field,
+                    &date.format("%Y-%m-%d").to_string(),
+                    None,
+                    page,
+                    evidence,
+                    PdfConfidence::Medium,
+                );
             }
-            PdfField::Customer => {
-                if !value.is_empty()
-                    && value.chars().count() <= 120
-                    && !value.chars().any(char::is_control)
-                {
+        }
+        PdfField::Customer => {
+            if !value.is_empty()
+                && value.chars().count() <= 120
+                && !value.chars().any(char::is_control)
+            {
+                offer(
+                    suggestions,
+                    field,
+                    value,
+                    None,
+                    page,
+                    evidence,
+                    PdfConfidence::Low,
+                );
+            }
+        }
+        PdfField::Currency => {
+            if let Some(currency) = crate::domain::Currency::parse(value) {
+                offer(
+                    suggestions,
+                    field,
+                    &currency.0,
+                    None,
+                    page,
+                    evidence,
+                    PdfConfidence::Medium,
+                );
+            }
+        }
+        PdfField::Total | PdfField::Subtotal | PdfField::AmountDue | PdfField::Payments => {
+            if let Some((amount, currency)) = parse_amount(value) {
+                // Payments are printed as a credit; suggest the positive
+                // amount already paid so the review field can be prefilled.
+                let suggested = if field == PdfField::Payments {
+                    amount.checked_abs()
+                } else {
+                    Some(amount)
+                };
+                offer(
+                    suggestions,
+                    field,
+                    value,
+                    suggested,
+                    page,
+                    evidence,
+                    PdfConfidence::Medium,
+                );
+                if let Some(currency) = currency {
                     offer(
                         suggestions,
-                        field,
-                        value,
+                        PdfField::Currency,
+                        &currency.0,
                         None,
                         page,
-                        line,
+                        evidence,
                         PdfConfidence::Low,
                     );
                 }
             }
-            PdfField::Currency => {
-                if let Some(currency) = crate::domain::Currency::parse(value) {
-                    offer(
-                        suggestions,
-                        field,
-                        &currency.0,
-                        None,
-                        page,
-                        line,
-                        PdfConfidence::Medium,
-                    );
-                }
+        }
+        PdfField::Status | PdfField::PeriodFrom | PdfField::PeriodTo => {}
+    }
+}
+
+fn month_bounds(year: i32, month: u32) -> Option<(NaiveDate, NaiveDate)> {
+    let start = NaiveDate::from_ymd_opt(year, month, 1)?;
+    let (next_year, next_month) = if month == 12 {
+        (year.checked_add(1)?, 1)
+    } else {
+        (year, month + 1)
+    };
+    let next = NaiveDate::from_ymd_opt(next_year, next_month, 1)?;
+    Some((start, next.pred_opt()?))
+}
+
+/// The last weekday of a month. Source invoices are normally issued on it, so
+/// a weekend date at the very end of the month still belongs to that month.
+fn last_weekday(year: i32, month: u32) -> Option<NaiveDate> {
+    let (_, mut date) = month_bounds(year, month)?;
+    while matches!(date.weekday(), Weekday::Sat | Weekday::Sun) {
+        date = date.pred_opt()?;
+    }
+    Some(date)
+}
+
+/// The billing period rule the import follows: an invoice covers the calendar
+/// month before its issue date, except when it is issued at the end of a month
+/// (on its last weekday, or the weekend after it), where it covers that month.
+/// The source invoices are normally issued on the last weekday; a delayed one
+/// issued in the first days of the next month still belongs to the month
+/// before. Both cases derive from the one date the document prints.
+fn period_suggestions(suggestions: &[PdfSuggestion]) -> Vec<PdfSuggestion> {
+    let Some(issue) = suggestions
+        .iter()
+        .find(|suggestion| suggestion.field == PdfField::InvoiceDate)
+    else {
+        return Vec::new();
+    };
+    let Ok(issue_date) = NaiveDate::parse_from_str(&issue.value, "%Y-%m-%d") else {
+        return Vec::new();
+    };
+    let Some((issue_start, issue_end)) = month_bounds(issue_date.year(), issue_date.month()) else {
+        return Vec::new();
+    };
+    let Some(last_weekday) = last_weekday(issue_date.year(), issue_date.month()) else {
+        return Vec::new();
+    };
+    let (period, reason) = if issue_date >= last_weekday {
+        (
+            (issue_start, issue_end),
+            "Issue date is at the end of its month",
+        )
+    } else {
+        let Some(previous_end) = issue_start.pred_opt() else {
+            return Vec::new();
+        };
+        let Some(bounds) = month_bounds(previous_end.year(), previous_end.month()) else {
+            return Vec::new();
+        };
+        (bounds, "Billing month preceding the issue date")
+    };
+    let suggestion = |field, date: NaiveDate| PdfSuggestion {
+        field,
+        value: date.format("%Y-%m-%d").to_string(),
+        amount_minor: None,
+        page: issue.page,
+        evidence: reason.to_string(),
+        confidence: PdfConfidence::Medium,
+    };
+    vec![
+        suggestion(PdfField::PeriodFrom, period.0),
+        suggestion(PdfField::PeriodTo, period.1),
+    ]
+}
+
+fn scan_page(page: u32, text: &str, suggestions: &mut Vec<PdfSuggestion>) {
+    // Harvest prints a label on its own extracted line and the value on the
+    // next one (`Invoice for` / `Sedona Digital Ltd`), while other exporters
+    // print `Label: value`. Both shapes are evidence; nothing is inferred from
+    // position beyond the immediately following non-empty line.
+    let mut pending: Option<(PdfField, &str)> = None;
+    for line in text.lines().take(MAX_LINES_PER_PAGE) {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if let Some((raw_label, raw_value)) = line.split_once(':') {
+            let label = normalise_label(raw_label);
+            if let Some(field) = field_for_label(&label) {
+                suggest(page, field, raw_value, line, suggestions);
             }
-            PdfField::Total | PdfField::AmountDue => {
-                if let Some((amount, currency)) = parse_amount(value) {
-                    offer(
-                        suggestions,
-                        field,
-                        value,
-                        Some(amount),
-                        page,
-                        line,
-                        PdfConfidence::Medium,
-                    );
-                    if let Some(currency) = currency {
-                        offer(
-                            suggestions,
-                            PdfField::Currency,
-                            &currency.0,
-                            None,
-                            page,
-                            line,
-                            PdfConfidence::Low,
-                        );
-                    }
-                }
-            }
+            pending = None;
+            continue;
+        }
+        let label = normalise_label(trimmed);
+        if let Some(field) = standalone_label(&label) {
+            pending = Some((field, line));
+            continue;
+        }
+        if let Some((field, evidence)) = pending.take() {
+            suggest(
+                page,
+                field,
+                trimmed,
+                &format!("{evidence} {trimmed}"),
+                suggestions,
+            );
         }
     }
+}
+
+/// The settlement rule the import follows: payments equal to the printed total
+/// mean the invoice is `paid`; anything else (including no payments line) means
+/// `issued`. This is derived from the two documented amounts, never guessed.
+fn status_suggestion(suggestions: &[PdfSuggestion]) -> Option<PdfSuggestion> {
+    let total = suggestions
+        .iter()
+        .find(|suggestion| suggestion.field == PdfField::Total)
+        .or_else(|| {
+            suggestions
+                .iter()
+                .find(|suggestion| suggestion.field == PdfField::Subtotal)
+        })?;
+    let total_minor = total.amount_minor?;
+    if total_minor < 0 {
+        return None;
+    }
+    let paid = suggestions
+        .iter()
+        .find(|suggestion| suggestion.field == PdfField::Payments)
+        .and_then(|suggestion| suggestion.amount_minor);
+    let value = if paid == Some(total_minor) {
+        "paid"
+    } else {
+        "issued"
+    };
+    Some(PdfSuggestion {
+        field: PdfField::Status,
+        value: value.to_string(),
+        amount_minor: None,
+        page: total.page,
+        evidence: "Payments compared with Subtotal".to_string(),
+        confidence: PdfConfidence::Medium,
+    })
 }
 
 fn dedupe(suggestions: &mut Vec<PdfSuggestion>) {
@@ -486,6 +687,12 @@ pub fn inspect_invoice_text(source: &InvoiceSource) -> PdfInspection {
                 scan_page(number, slice, &mut suggestions);
             }
             Err(_) => failed = true,
+        }
+    }
+    if !failed {
+        suggestions.extend(period_suggestions(&suggestions));
+        if let Some(derived) = status_suggestion(&suggestions) {
+            suggestions.push(derived);
         }
     }
     dedupe(&mut suggestions);
@@ -646,6 +853,7 @@ mod tests {
         assert_eq!(find(PdfField::Customer).value, "Example Ltd");
         assert_eq!(find(PdfField::Customer).confidence, PdfConfidence::Low);
         assert_eq!(find(PdfField::Currency).value, "USD");
+        assert_eq!(find(PdfField::Subtotal).amount_minor, Some(100_000));
         assert_eq!(find(PdfField::Total).amount_minor, Some(123_456));
         assert_eq!(find(PdfField::AmountDue).amount_minor, Some(123_456));
         assert!(
@@ -660,7 +868,7 @@ mod tests {
     #[test]
     fn does_not_guess_dates_totals_or_customers_without_evidence() {
         let pdf = pdf_document(&[&[
-            "Invoice Date: 06/01/2025",
+            "Invoice Date: 31/13/2025",
             "Total: about a thousand",
             "Bill To:",
         ]]);
@@ -759,6 +967,132 @@ mod tests {
                 .message
                 .contains("limits")
         );
+    }
+
+    #[test]
+    fn suggests_the_harvest_layout_with_payments_and_settlement() {
+        // A label on its own extracted line, the value on the next one. This is
+        // the shape the real exporter produces, in contrast to `Label: value`.
+        let pdf = pdf_document(&[&[
+            "INVOICE",
+            "Invoice for",
+            "Sedona Digital Ltd",
+            "33 Cavendish Square,",
+            "Invoice ID",
+            "1",
+            "Issue date",
+            "01/02/2025",
+            "Subtotal",
+            "EUR 5,760.00",
+            "Payments",
+            "EUR -5,760.00",
+            "Amount due",
+            "EUR 0.00",
+        ]]);
+        let inspection = inspect(&pdf);
+        assert_eq!(
+            inspection.status,
+            PdfInspectionStatus::Suggestions,
+            "{:?}",
+            inspection.suggestions
+        );
+        let find = |field| {
+            inspection
+                .suggestions
+                .iter()
+                .find(|suggestion| suggestion.field == field)
+                .unwrap_or_else(|| panic!("missing {field:?}: {:?}", inspection.suggestions))
+        };
+        assert_eq!(find(PdfField::InvoiceNumber).value, "1");
+        assert_eq!(find(PdfField::InvoiceDate).value, "2025-02-01");
+        assert_eq!(find(PdfField::Customer).value, "Sedona Digital Ltd");
+        assert_eq!(find(PdfField::Currency).value, "EUR");
+        assert_eq!(find(PdfField::Subtotal).amount_minor, Some(576_000));
+        assert_eq!(find(PdfField::Payments).amount_minor, Some(576_000));
+        assert_eq!(find(PdfField::Status).value, "paid");
+        assert_eq!(find(PdfField::PeriodFrom).value, "2025-01-01");
+        assert_eq!(find(PdfField::PeriodTo).value, "2025-01-31");
+    }
+
+    #[test]
+    fn an_invoice_issued_on_the_last_day_covers_its_own_month() {
+        let pdf = pdf_document(&[&[
+            "Issue date",
+            "30/06/2025",
+            "Subtotal",
+            "EUR 1,000.00",
+            "Payments",
+            "EUR -1,000.00",
+        ]]);
+        let inspection = inspect(&pdf);
+        let find = |field| {
+            inspection
+                .suggestions
+                .iter()
+                .find(|suggestion| suggestion.field == field)
+                .unwrap_or_else(|| panic!("missing {field:?}: {:?}", inspection.suggestions))
+        };
+        assert_eq!(find(PdfField::InvoiceDate).value, "2025-06-30");
+        assert_eq!(find(PdfField::PeriodFrom).value, "2025-06-01");
+        assert_eq!(find(PdfField::PeriodTo).value, "2025-06-30");
+    }
+
+    #[test]
+    fn an_invoice_issued_on_the_last_weekday_covers_its_own_month() {
+        // 30 Jan 2026 is a Friday and the last weekday of January: the
+        // calendar month still runs to the 31st.
+        let pdf = pdf_document(&[&["Issue date", "30/01/2026"]]);
+        let inspection = inspect(&pdf);
+        let find = |field| {
+            inspection
+                .suggestions
+                .iter()
+                .find(|suggestion| suggestion.field == field)
+                .unwrap_or_else(|| panic!("missing {field:?}: {:?}", inspection.suggestions))
+        };
+        assert_eq!(find(PdfField::PeriodFrom).value, "2026-01-01");
+        assert_eq!(find(PdfField::PeriodTo).value, "2026-01-31");
+    }
+
+    #[test]
+    fn a_delayed_january_invoice_issued_in_early_february_covers_january() {
+        // 6 Feb 2026 is in the first days of the month, so the invoice bills the
+        // month before it.
+        let pdf = pdf_document(&[&["Issue date", "06/02/2026"]]);
+        let inspection = inspect(&pdf);
+        let find = |field| {
+            inspection
+                .suggestions
+                .iter()
+                .find(|suggestion| suggestion.field == field)
+                .unwrap_or_else(|| panic!("missing {field:?}: {:?}", inspection.suggestions))
+        };
+        assert_eq!(find(PdfField::PeriodFrom).value, "2026-01-01");
+        assert_eq!(find(PdfField::PeriodTo).value, "2026-01-31");
+    }
+
+    #[test]
+    fn payments_below_the_printed_total_are_suggested_as_issued() {
+        let pdf = pdf_document(&[&[
+            "Subtotal",
+            "USD $1,430.00",
+            "Payments",
+            "USD -$1,000.00",
+            "Amount due",
+            "USD $430.00",
+        ]]);
+        let inspection = inspect(&pdf);
+        let find = |field| {
+            inspection
+                .suggestions
+                .iter()
+                .find(|suggestion| suggestion.field == field)
+                .unwrap_or_else(|| panic!("missing {field:?}: {:?}", inspection.suggestions))
+        };
+        assert_eq!(find(PdfField::Currency).value, "USD");
+        assert_eq!(find(PdfField::Subtotal).amount_minor, Some(143_000));
+        assert_eq!(find(PdfField::Payments).amount_minor, Some(100_000));
+        assert_eq!(find(PdfField::Status).value, "issued");
     }
 
     #[test]

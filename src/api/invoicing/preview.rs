@@ -40,6 +40,8 @@ fn day(year: i32, month: u32, day: u32) -> NaiveDate {
 #[must_use]
 pub(crate) fn sample_invoice() -> Invoice {
     Invoice {
+        supersedes: None,
+        superseded_by: None,
         imported: None,
         document: Default::default(),
         id: Uuid::nil(),

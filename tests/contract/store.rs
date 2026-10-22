@@ -408,6 +408,8 @@ mod storage_layout {
 
         let invoice = store
             .create_invoice(Invoice {
+                supersedes: None,
+                superseded_by: None,
                 imported: None,
                 id: Uuid::new_v4(),
                 number: String::new(),

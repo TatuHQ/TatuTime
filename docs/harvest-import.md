@@ -46,10 +46,24 @@ produces **suggestions only**:
 - At most 50 pages, 1 MiB of decompressed page content per page and 256 KiB of
   collected text; the text budget is reported as `text_truncated` rather than
   silently overrun.
-- Suggestions are drawn only from labelled lines in the document's own text
-  (`Invoice Number:`, `Invoice Date:`, `Bill To:`, `Currency:`, `Total:`,
-  `Amount Due:`). Amounts are integer minor units with correct grouping; dates
-  must be unambiguous ISO `YYYY-MM-DD` values.
+- Suggestions are drawn only from labelled lines in the document's own text,
+  in either the `Label: value` shape or the shape the Harvest exporter emits,
+  where the label is alone on its extracted line and the value is the next
+  non-empty line (`Invoice for`, `Invoice ID`, `Issue date`, `Subtotal`,
+  `Payments`, `Amount due`). Amounts are integer minor units with correct
+  grouping, a currency token or symbol before or after the number, and a
+  leading sign or parentheses for credits. Dates are ISO `YYYY-MM-DD` or the
+  document's `DD/MM/YYYY`, normalised to ISO for the review field.
+- `Payments` is a credit in the document; its suggestion is the positive amount
+  already settled. A derived `Status` suggestion says `paid` when that amount
+  equals the printed total and `issued` otherwise (including when no payments
+  row exists). Customer names are taken from `Invoice for`.
+- `Period from`/`Period to` are derived from the issue date: the calendar month
+  before it, or its own month when the invoice is issued on (or after) the
+  month's last weekday. Invoices normally go out on that last weekday, so a
+  `30 Jan 2026` issue covers January even though the 31st is a Saturday, and a
+  delayed `6 Feb 2026` issue still covers January. Bounds are the full calendar
+  month (`1 Jan–31 Jan`).
 - Each suggestion carries the 1-based source page, the source line as
   `evidence`, and a confidence. Nothing is inferred from the filename, and the
   original PDF stays authoritative.
@@ -160,15 +174,30 @@ records), writes original PDFs byte-for-byte, and advances only the matching
 paths; `Store::open` rolls back an interrupted `Prepared` journal before serving
 traffic. `imports/` is admin-only and never exposed to member routes.
 
-The Settings workspace builds labelled mapping tables from the preview's
-original source values: people, customers, projects, tasks and expense
-categories can be mapped to existing records or created explicitly, while each
-invoice gets a review card with its legal number, customer, currency, dates,
-period, total, opening paid amount and status. Original PDFs are linked directly
-from the member, and an externally billed row can be explicitly linked to an
-invoice PDF. One reconciliation table shows accepted/skipped totals per source
-and currency. The advanced JSON view remains available for operators but is no
-longer the primary control.
+The Settings workspace has one tab per source — Time, Expenses and Invoices.
+Each tab stages and reviews only its own file, because the later imports map
+onto references the time import creates; start a new batch for the next file to
+keep the imports separate. Within a tab, people, customers, projects, tasks and
+expense categories can be mapped to existing records or created explicitly,
+while each invoice gets a review card labelled like the source document
+(`Invoice ID`, `Invoice for`, `Issue date`, `Period from`/`Period to`,
+`Subtotal`, `Payments`, `Status`) and prefilled from the PDF suggestions.
+Original PDFs are linked directly from the member, and an externally billed row
+can be explicitly linked to an invoice PDF. One reconciliation table shows
+accepted/skipped totals for the tab's source and currency. The advanced JSON
+view remains available for operators but is no longer the primary control.
+
+The card is the review of record: the typed `Subtotal` and `Payments` are what
+the import stores, even when they disagree with the PDF's own text — a document
+that fails to print its total is reviewed once in the workspace, not patched
+afterwards — while the original PDF is still archived byte-for-byte against the
+imported invoice. The `Status` select follows the two amounts while they are
+edited (equal means *Paid*, a positive part means *Partly paid*, zero means
+*Issued*) unless the admin picks a status explicitly. Import provenance is an
+entry in the invoice's history, never a status: the register shows one status
+per invoice, its timeline says the document came from a Harvest batch and links
+the archived original, and any invoice — imported included — can be revised or
+deleted from the register.
 
 An explicit row→invoice link is reconciled, never inferred: the invoice must be
 included in the same batch, the row must be externally billed, the row currency

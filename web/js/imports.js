@@ -11,6 +11,14 @@ import { $, announce, askConfirm, clearFormError, el, formatMoney, showFormError
 
 const BASE = '/admin/imports/harvest';
 const PAGE_SIZE = 25;
+// One tab per source. `row` is the name the preview uses for rows, issues and
+// totals; `kind` is the upload/staging name.
+const SOURCE_TABS = {
+    time: { row: 'time', label: 'Time' },
+    expenses: { row: 'expense', label: 'Expenses' },
+    invoices: { row: 'invoice', label: 'Invoices' },
+};
+let importSource = 'time';
 let currentBatch = null;
 let currentPreview = null;
 let draft = null;
@@ -57,6 +65,13 @@ function blankChoices() {
     };
 }
 
+// The `import-choices` box mirrors the in-memory mapping, so a value the admin
+// types (and the settlement it implies) is visible without a save round trip.
+function serializeChoices() {
+    const box = $('import-choices');
+    if (box) box.value = JSON.stringify(draft, null, 2);
+}
+
 function renderBatch(batch) {
     currentBatch = batch;
     $('import-batch-label').textContent = `Batch ${batch.id} · ${batch.namespace} · ${batch.state}`;
@@ -64,7 +79,7 @@ function renderBatch(batch) {
     for (const key of Object.keys(blankChoices())) {
         if (!Array.isArray(draft[key])) draft[key] = blankChoices()[key];
     }
-    $('import-choices').value = JSON.stringify(draft, null, 2);
+    serializeChoices();
     const committed = batch.state === 'committed';
     for (const id of ['import-time-upload', 'import-expenses-upload', 'import-invoices-upload',
         'import-save', 'import-preview', 'import-discard']) {
@@ -73,6 +88,51 @@ function renderBatch(batch) {
     if (committed) {
         $('import-ready').textContent = `Committed ${batch.commit?.committed_at || ''}`;
         $('import-commit').disabled = true;
+    }
+}
+
+function sourceKey() {
+    return SOURCE_TABS[importSource].row;
+}
+
+function setImportSource(kind, moveFocus = false) {
+    if (!SOURCE_TABS[kind]) return;
+    importSource = kind;
+    for (const key of Object.keys(SOURCE_TABS)) {
+        const tab = $(`import-tab-${key}`);
+        const panel = $(`import-panel-${key}`);
+        if (!tab || !panel) continue;
+        const active = key === kind;
+        tab.setAttribute('aria-selected', String(active));
+        tab.tabIndex = active ? 0 : -1;
+        panel.hidden = !active;
+    }
+    if (moveFocus) $(`import-tab-${kind}`)?.focus();
+    if (currentPreview) renderPreview(currentPreview);
+    else renderMapping(null);
+}
+
+function wireImportTabs() {
+    const tabs = Object.keys(SOURCE_TABS)
+        .map((kind) => $(`import-tab-${kind}`))
+        .filter(Boolean);
+    const activate = (tab, moveFocus) => {
+        setImportSource(tab.id.replace('import-tab-', ''), moveFocus);
+    };
+    for (const tab of tabs) {
+        tab.addEventListener('click', () => activate(tab, false));
+        tab.addEventListener('keydown', (event) => {
+            const index = tabs.indexOf(tab);
+            let next = null;
+            if (event.key === 'ArrowRight') next = (index + 1) % tabs.length;
+            if (event.key === 'ArrowLeft') next = (index - 1 + tabs.length) % tabs.length;
+            if (event.key === 'Home') next = 0;
+            if (event.key === 'End') next = tabs.length - 1;
+            if (next !== null) {
+                event.preventDefault();
+                activate(tabs[next], true);
+            }
+        });
     }
 }
 
@@ -206,23 +266,97 @@ function ensureCategory(sourceCategory) {
     return choice;
 }
 
+function pdfSuggestions(row) {
+    const found = new Map();
+    for (const suggestion of row?.suggestions?.suggestions || []) {
+        if (!found.has(suggestion.field)) found.set(suggestion.field, suggestion);
+    }
+    return found;
+}
+
+function pdfText(found, field) {
+    return found.get(field)?.value ?? '';
+}
+
+function pdfAmount(found, field) {
+    return found.get(field)?.amount_minor ?? null;
+}
+
+// The import follows the document, not a guess: the printed total is the
+// Subtotal (or Total/Amount due when the exporter prints no subtotal row), the
+// Payments credit is the amount already settled, and payments equal to the
+// total mean `paid` while anything else means `issued`.
+function invoiceDefaults(row) {
+    const found = pdfSuggestions(row);
+    const total = pdfAmount(found, 'total') ?? pdfAmount(found, 'subtotal') ?? pdfAmount(found, 'amount_due');
+    const payments = pdfAmount(found, 'payments');
+    const status = pdfText(found, 'status')
+        || (total == null ? null : (payments != null && payments === total ? 'paid' : 'issued'));
+    const customerName = pdfText(found, 'customer');
+    const customer = customerName
+        ? options.customers.find((entry) => entry.name.trim().toLowerCase() === customerName.trim().toLowerCase())
+        : null;
+    return {
+        customerId: customer?.id ?? null,
+        customerName,
+        originalNumber: pdfText(found, 'invoice_number'),
+        currency: pdfText(found, 'currency'),
+        invoiceDate: pdfText(found, 'invoice_date') || null,
+        periodFrom: pdfText(found, 'period_from') || null,
+        periodTo: pdfText(found, 'period_to') || null,
+        total,
+        payments,
+        status,
+        openingPaid: status === 'paid' && payments != null ? payments : 0,
+    };
+}
+
+// Keep the reviewed settlement in step with the two amounts while the admin
+// edits the card: equal means paid, a positive part means partly paid, zero
+// means issued. An explicit status choice wins (`data-touched`).
+function syncInvoiceSettlement(choice, sha) {
+    const select = $(`import-inv-status-${sha}`);
+    if (!select) return;
+    const total = choice.total_minor;
+    const paid = choice.opening_paid_minor ?? 0;
+    if (total != null && select.dataset.touched !== '1') {
+        select.value = paid === total ? 'paid' : paid > 0 ? 'partly_paid' : 'issued';
+        choice.status = select.value;
+    }
+    serializeChoices();
+}
+
 function ensureInvoice(row) {
+    const defaults = invoiceDefaults(row);
     let choice = draft.invoices.find((entry) => entry.sha256 === row.pdf_sha256);
     if (!choice) {
         choice = {
             sha256: row.pdf_sha256,
-            customer_id: row.customer_id || null,
-            original_number: row.original_number || '',
-            currency: row.currency || '',
-            invoice_date: row.invoice_date || null,
-            period_from: row.period_from || null,
-            period_to: row.period_to || null,
-            total_minor: row.total_minor ?? null,
-            opening_paid_minor: row.opening_paid_minor || 0,
-            status: row.status || null,
+            customer_id: row.customer_id || defaults.customerId,
+            original_number: row.original_number || defaults.originalNumber,
+            currency: row.currency || defaults.currency,
+            invoice_date: row.invoice_date || defaults.invoiceDate,
+            period_from: row.period_from || defaults.periodFrom,
+            period_to: row.period_to || defaults.periodTo,
+            total_minor: row.total_minor ?? defaults.total,
+            opening_paid_minor: row.opening_paid_minor || defaults.openingPaid,
+            status: row.status || defaults.status,
             excluded: false,
         };
         draft.invoices.push(choice);
+    } else {
+        // A mapping saved before the PDF pass (or by an earlier build) can hold
+        // blank fields: fill only the ones still empty, never overwrite a
+        // reviewed value.
+        if (!choice.original_number && defaults.originalNumber) choice.original_number = defaults.originalNumber;
+        if (choice.customer_id == null && defaults.customerId) choice.customer_id = defaults.customerId;
+        if (!choice.currency && defaults.currency) choice.currency = defaults.currency;
+        if (!choice.invoice_date && defaults.invoiceDate) choice.invoice_date = defaults.invoiceDate;
+        if (!choice.period_from && defaults.periodFrom) choice.period_from = defaults.periodFrom;
+        if (!choice.period_to && defaults.periodTo) choice.period_to = defaults.periodTo;
+        if (choice.total_minor == null && defaults.total != null) choice.total_minor = defaults.total;
+        if ((choice.opening_paid_minor ?? 0) === 0 && defaults.openingPaid) choice.opening_paid_minor = defaults.openingPaid;
+        if (!choice.status && defaults.status) choice.status = defaults.status;
     }
     return choice;
 }
@@ -242,9 +376,22 @@ function renderMapping(preview) {
         host.appendChild(el('p', { cls: 'p-form-help-text', text: 'Upload a source and run Preview to build the mapping controls.' }));
         return;
     }
-    const timeRows = preview.time || [];
-    const expenseRows = preview.expenses || [];
+    if (importSource === 'invoices') {
+        renderInvoices(host, preview);
+        serializeChoices();
+        return;
+    }
+    const timeRows = importSource === 'time' ? (preview.time || []) : [];
+    const expenseRows = importSource === 'expenses' ? (preview.expenses || []) : [];
     const rows = [...timeRows, ...expenseRows];
+    if (!rows.length) {
+        host.appendChild(el('p', {
+            cls: 'p-form-help-text',
+            text: `No ${SOURCE_TABS[importSource].label.toLowerCase()} rows in this batch.`,
+        }));
+        serializeChoices();
+        return;
+    }
 
     const people = new Map();
     for (const row of rows) people.set(personKey(row.source_person, row.source_employee_id), row);
@@ -399,54 +546,72 @@ function renderMapping(preview) {
         })));
     }
 
-    if ((preview.invoices || []).length) {
-        host.appendChild(el('h3', { text: 'Invoices' }));
-        const card = el('div', { cls: 'import-invoice-list' });
-        for (const row of preview.invoices) {
-            const choice = ensureInvoice(row);
-            const pdf = el('a', {
-                attrs: {
-                    href: `${BASE}/${currentBatch.id}/invoices/${row.pdf_sha256}/pdf`,
-                    target: '_blank', rel: 'noopener',
-                },
-                text: 'Original PDF',
-            });
-            card.appendChild(el('fieldset', { cls: 'import-invoice-card' }, [
-                el('legend', { text: row.original_name }),
-                el('div', { cls: 'import-invoice-grid' }, [
-                    el('div', {}, [labelFor(`import-inv-number-${row.pdf_sha256}`, 'Legal number'),
-                    textControl(`import-inv-number-${row.pdf_sha256}`, choice.original_number, (value) => { choice.original_number = value; })]),
-                    el('div', {}, [labelFor(`import-inv-customer-${row.pdf_sha256}`, 'Customer'),
-                    selectControl(`import-inv-customer-${row.pdf_sha256}`, choice.customer_id || '',
-                        [['', 'Select customer…'], ...options.customers.map((customer) => [customer.id, customer.name])],
-                        (value) => { choice.customer_id = value || null; })]),
-                    el('div', {}, [labelFor(`import-inv-currency-${row.pdf_sha256}`, 'Currency'),
-                    textControl(`import-inv-currency-${row.pdf_sha256}`, choice.currency || '', (value) => { choice.currency = value; })]),
-                    el('div', {}, [labelFor(`import-inv-date-${row.pdf_sha256}`, 'Invoice date'),
-                    textControl(`import-inv-date-${row.pdf_sha256}`, choice.invoice_date || '', (value) => { choice.invoice_date = value || null; }, 'date')]),
-                    el('div', {}, [labelFor(`import-inv-from-${row.pdf_sha256}`, 'Period from'),
-                    textControl(`import-inv-from-${row.pdf_sha256}`, choice.period_from || '', (value) => { choice.period_from = value || null; }, 'date')]),
-                    el('div', {}, [labelFor(`import-inv-to-${row.pdf_sha256}`, 'Period to'),
-                    textControl(`import-inv-to-${row.pdf_sha256}`, choice.period_to || '', (value) => { choice.period_to = value || null; }, 'date')]),
-                    el('div', {}, [labelFor(`import-inv-total-${row.pdf_sha256}`, 'Total'),
-                    moneyInput(`import-inv-total-${row.pdf_sha256}`, choice.total_minor, (value) => { choice.total_minor = value; })]),
-                    el('div', {}, [labelFor(`import-inv-paid-${row.pdf_sha256}`, 'Opening paid'),
-                    moneyInput(`import-inv-paid-${row.pdf_sha256}`, choice.opening_paid_minor, (value) => { choice.opening_paid_minor = value ?? 0; })]),
-                    el('div', {}, [labelFor(`import-inv-status-${row.pdf_sha256}`, 'Status'),
-                    selectControl(`import-inv-status-${row.pdf_sha256}`, choice.status || '',
-                        [['', 'Select status…'], ['issued', 'Issued'], ['partly_paid', 'Partly paid'],
-                        ['paid', 'Paid'], ['written_off', 'Written off']],
-                        (value) => { choice.status = value || null; })]),
-                    el('div', {}, [labelFor(`import-inv-exclude-${row.pdf_sha256}`, 'Exclude'),
-                    checkboxControl(`import-inv-exclude-${row.pdf_sha256}`, choice.excluded,
-                        (checked) => { choice.excluded = checked; })]),
-                ]),
-                el('p', { cls: 'p-form-help-text' }, [pdf]),
-            ]));
-        }
-        host.appendChild(card);
+    serializeChoices();
+}
+
+function renderInvoices(host, preview) {
+    if (!(preview.invoices || []).length) {
+        host.appendChild(el('p', { cls: 'p-form-help-text', text: 'No invoices staged in this batch.' }));
+        return;
     }
-    $('import-choices').value = JSON.stringify(draft, null, 2);
+    host.appendChild(el('h3', { text: 'Invoices' }));
+    const card = el('div', { cls: 'import-invoice-list' });
+    for (const row of preview.invoices) {
+        const choice = ensureInvoice(row);
+        const defaults = invoiceDefaults(row);
+        const pdf = el('a', {
+            attrs: {
+                href: `${BASE}/${currentBatch.id}/invoices/${row.pdf_sha256}/pdf`,
+                target: '_blank', rel: 'noopener',
+            },
+            text: 'Original PDF',
+        });
+        card.appendChild(el('fieldset', { cls: 'import-invoice-card' }, [
+            el('legend', { text: row.original_name }),
+            el('div', { cls: 'import-invoice-grid' }, [
+                el('div', {}, [labelFor(`import-inv-number-${row.pdf_sha256}`, 'Invoice ID'),
+                textControl(`import-inv-number-${row.pdf_sha256}`, choice.original_number, (value) => { choice.original_number = value; })]),
+                el('div', {}, [labelFor(`import-inv-customer-${row.pdf_sha256}`, 'Invoice for'),
+                selectControl(`import-inv-customer-${row.pdf_sha256}`, choice.customer_id || '',
+                    [['', 'Select customer…'], ...options.customers.map((customer) => [customer.id, customer.name])],
+                    (value) => { choice.customer_id = value || null; }),
+                ...(defaults.customerName
+                    ? [el('p', { cls: 'p-form-help-text', text: `PDF: ${defaults.customerName}` })]
+                    : [])]),
+                el('div', {}, [labelFor(`import-inv-currency-${row.pdf_sha256}`, 'Currency'),
+                textControl(`import-inv-currency-${row.pdf_sha256}`, choice.currency || '', (value) => { choice.currency = value; })]),
+                el('div', {}, [labelFor(`import-inv-date-${row.pdf_sha256}`, 'Issue date'),
+                textControl(`import-inv-date-${row.pdf_sha256}`, choice.invoice_date || '', (value) => { choice.invoice_date = value || null; }, 'date')]),
+                el('div', {}, [labelFor(`import-inv-from-${row.pdf_sha256}`, 'Period from'),
+                textControl(`import-inv-from-${row.pdf_sha256}`, choice.period_from || '', (value) => { choice.period_from = value || null; }, 'date')]),
+                el('div', {}, [labelFor(`import-inv-to-${row.pdf_sha256}`, 'Period to'),
+                textControl(`import-inv-to-${row.pdf_sha256}`, choice.period_to || '', (value) => { choice.period_to = value || null; }, 'date')]),
+                el('div', {}, [labelFor(`import-inv-total-${row.pdf_sha256}`, 'Subtotal'),
+                moneyInput(`import-inv-total-${row.pdf_sha256}`, choice.total_minor, (value) => {
+                    choice.total_minor = value;
+                    syncInvoiceSettlement(choice, row.pdf_sha256);
+                })]),
+                el('div', {}, [labelFor(`import-inv-paid-${row.pdf_sha256}`, 'Payments'),
+                moneyInput(`import-inv-paid-${row.pdf_sha256}`, choice.opening_paid_minor, (value) => {
+                    choice.opening_paid_minor = value ?? 0;
+                    syncInvoiceSettlement(choice, row.pdf_sha256);
+                })]),
+                el('div', {}, [labelFor(`import-inv-status-${row.pdf_sha256}`, 'Status'),
+                selectControl(`import-inv-status-${row.pdf_sha256}`, choice.status || '',
+                    [['', 'Select status…'], ['issued', 'Issued'], ['partly_paid', 'Partly paid'],
+                    ['paid', 'Paid'], ['written_off', 'Written off']],
+                    (value) => {
+                        choice.status = value || null;
+                        $(`import-inv-status-${row.pdf_sha256}`).dataset.touched = '1';
+                    })]),
+                el('div', {}, [labelFor(`import-inv-exclude-${row.pdf_sha256}`, 'Exclude'),
+                checkboxControl(`import-inv-exclude-${row.pdf_sha256}`, choice.excluded,
+                    (checked) => { choice.excluded = checked; })]),
+            ]),
+            el('p', { cls: 'p-form-help-text' }, [pdf]),
+        ]));
+    }
+    host.appendChild(card);
 }
 
 export async function refreshImports() {
@@ -482,7 +647,8 @@ export async function newBatch() {
         renderBatch(batch);
         resetPreview();
         $('import-mapping').textContent = '';
-        $('import-ready').textContent = 'Draft created. Upload at least one source.';
+        $('import-ready').textContent =
+            `Draft created. Upload the ${SOURCE_TABS[importSource].label.toLowerCase()} source.`;
         await refreshImports();
     } catch (err) {
         showError(err);
@@ -496,6 +662,8 @@ export async function openBatch(id) {
     try {
         await loadOptions();
         renderBatch(await api.get(`${BASE}/${id}`));
+        const staged = ['time', 'expenses', 'invoices'].filter((kind) => currentBatch.files?.[kind]);
+        if (staged.length && !staged.includes(importSource)) setImportSource(staged[0]);
         $('import-ready').textContent = 'Batch loaded. Recompute the preview after any change.';
         if (currentBatch.files && Object.values(currentBatch.files).some(Boolean)) {
             await previewBatch();
@@ -533,7 +701,7 @@ async function saveMapping() {
     if (!id) return;
     clearError();
     try {
-        $('import-choices').value = JSON.stringify(draft, null, 2);
+        serializeChoices();
         renderBatch(await api.put(`${BASE}/${id}/review`, draft));
         $('import-ready').textContent = 'Mapping saved. Recompute the preview.';
         $('import-commit').disabled = true;
@@ -560,7 +728,7 @@ function linkRow(preview, sourceKey, invoiced) {
                 const sha = select.value;
                 draft.invoice_links = draft.invoice_links.filter((link) => link.source_key !== sourceKey);
                 if (sha) draft.invoice_links.push({ source_key: sourceKey, invoice_sha256: sha });
-                $('import-choices').value = JSON.stringify(draft, null, 2);
+                serializeChoices();
                 announce(sha ? 'Row linked; recompute the preview.' : 'Link removed; recompute the preview.');
             },
         },
@@ -599,11 +767,13 @@ function pageLabel(elementId, page, total, noun) {
 }
 
 function previewRows() {
-    const rows = [];
-    for (const row of currentPreview?.time || []) rows.push({ source: 'time', row });
-    for (const row of currentPreview?.expenses || []) rows.push({ source: 'expense', row });
-    for (const row of currentPreview?.invoices || []) rows.push({ source: 'invoice', row });
-    return rows;
+    if (importSource === 'time') {
+        return (currentPreview?.time || []).map((row) => ({ source: 'time', row }));
+    }
+    if (importSource === 'expenses') {
+        return (currentPreview?.expenses || []).map((row) => ({ source: 'expense', row }));
+    }
+    return (currentPreview?.invoices || []).map((row) => ({ source: 'invoice', row }));
 }
 
 function renderRows() {
@@ -637,7 +807,8 @@ function renderRows() {
 }
 
 function renderIssues() {
-    const filtered = (currentPreview?.issues || []).filter((issue) => issueMatches(issue, issueFilter));
+    const filtered = (currentPreview?.issues || [])
+        .filter((issue) => issue.source === sourceKey() && issueMatches(issue, issueFilter));
     issuePage = clampPage(issuePage, filtered.length);
     const tbody = $('import-issue-list').querySelector('tbody');
     tbody.textContent = '';
@@ -667,20 +838,20 @@ function renderPreview(preview) {
     $('import-issue-filter').value = issueFilter;
     const tbody = $('import-totals').querySelector('tbody');
     tbody.textContent = '';
-    for (const row of preview.totals || []) {
+    for (const row of (preview.totals || []).filter((entry) => entry.source === sourceKey())) {
         tbody.appendChild(el('tr', {}, [
             el('th', { attrs: { scope: 'row' }, text: row.source }),
             el('td', { attrs: { 'data-heading': 'Currency' }, text: row.currency }),
             el('td', { attrs: { 'data-heading': 'Accepted' }, text: `${row.accepted_count} · ${formatMoney(row.accepted_minor)}` }),
             el('td', { attrs: { 'data-heading': 'Skipped' }, text: `${row.skipped_count} · ${formatMoney(row.skipped_minor)}` }),
             el('td', { attrs: { 'data-heading': 'Cost' }, text: formatMoney(row.cost_minor) }),
-            el('td', { attrs: { 'data-heading': 'Opening paid' }, text: formatMoney(row.opening_paid_minor) }),
+            el('td', { attrs: { 'data-heading': 'Payments' }, text: formatMoney(row.opening_paid_minor) }),
         ]));
     }
     renderRows();
     renderIssues();
     $('import-issues').textContent = preview.blocking
-        ? `${preview.blocking} blocking issue(s); commit stays disabled.`
+        ? `${preview.blocking} blocking issue(s) across staged sources; commit stays disabled.`
         : 'No blocking issues.';
     $('import-ready').textContent = preview.ready
         ? `Ready to commit (revision ${preview.revision.slice(0, 12)}…).`
@@ -694,9 +865,17 @@ async function previewBatch() {
     if (!id) return;
     clearError();
     try {
-        $('import-choices').value = JSON.stringify(draft, null, 2);
+        serializeChoices();
         renderBatch(await api.put(`${BASE}/${id}/review`, draft));
+        const sent = JSON.stringify(draft);
         renderPreview(await api.post(`${BASE}/${id}/preview`));
+        // Rendering the mapping fills defaults from the PDF suggestions (and
+        // from the preview's own source rows). Persist them and recompute once
+        // so a single Preview click also reflects the prefilled invoice cards.
+        if (JSON.stringify(draft) !== sent) {
+            renderBatch(await api.put(`${BASE}/${id}/review`, draft));
+            renderPreview(await api.post(`${BASE}/${id}/preview`));
+        }
         announce('Preview computed.');
     } catch (err) {
         showError(err);
@@ -771,6 +950,14 @@ let wired = false;
 export function wireImports() {
     if (wired || !$('import-new')) return;
     wired = true;
+    wireImportTabs();
+    // Every mapping control edits `draft` in place; mirror it into the box so
+    // the visible JSON never lags behind a typed amount or a derived status.
+    for (const type of ['input', 'change']) {
+        $('import-mapping').addEventListener(type, () => {
+            if (draft) serializeChoices();
+        });
+    }
     $('import-new').addEventListener('click', newBatch);
     $('settings-tab-import').addEventListener('click', () => {
         refreshImports();

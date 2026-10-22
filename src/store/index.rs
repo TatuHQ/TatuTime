@@ -55,13 +55,21 @@ impl Store {
     /// file) resolve to the earliest-created invoice, matching the scan.
     pub(super) fn rebuild_invoice_index(&self) -> Result<(), StoreError> {
         let _guard = self.write_lock()?;
+        let invoices = self.list_invoices()?;
         let mut best: HashMap<String, (String, chrono::DateTime<chrono::Utc>)> = HashMap::new();
-        for inv in self.list_invoices()? {
+        // Active documents win over superseded originals; among equals the
+        // earliest created wins, matching `find_invoice_by_number`.
+        for inv in invoices.iter().filter(|invoice| !invoice.is_superseded()) {
             match best.get(&inv.number) {
                 Some((_, at)) if *at <= inv.created_at => {}
                 _ => {
                     best.insert(inv.number.clone(), (inv.id.to_string(), inv.created_at));
                 }
+            }
+        }
+        for inv in invoices.iter().filter(|invoice| invoice.is_superseded()) {
+            if !best.contains_key(&inv.number) {
+                best.insert(inv.number.clone(), (inv.id.to_string(), inv.created_at));
             }
         }
         let idx: HashMap<String, String> = best
@@ -637,6 +645,8 @@ mod index_tests {
 
     fn draft() -> Invoice {
         Invoice {
+            supersedes: None,
+            superseded_by: None,
             imported: None,
             id: Uuid::new_v4(),
             number: String::new(),

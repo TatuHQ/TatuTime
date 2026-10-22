@@ -191,6 +191,8 @@ pub fn generate_invoice(
         .iter()
         .fold(0u64, |acc, l| acc.saturating_add(l.amount_minor)); // #190
     Ok(Invoice {
+        supersedes: None,
+        superseded_by: None,
         imported: None,
         id: Uuid::new_v4(),
         number,
@@ -335,6 +337,8 @@ mod tests {
 
     fn inv(status: InvoiceStatus, total: u64, due: Option<NaiveDate>) -> Invoice {
         Invoice {
+            supersedes: None,
+            superseded_by: None,
             imported: None,
             id: Uuid::new_v4(),
             number: "INV-1".into(),

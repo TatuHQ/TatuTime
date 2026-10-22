@@ -47,35 +47,59 @@ async function refreshInvoicesBody() {
     // fully settled; a written-off balance is forgiven, not outstanding.
     const balance = invBalance(inv); // #189: shared semantic
     const open = isOpenInvoice(inv);
-    if (inv.status === 'draft') {
+    const superseded = Boolean(inv.superseded_by);
+    const edit = () => action('link', 'Edit',
+      () => api.get(`/invoices/${inv.id}`).then(edOpen, (e) => announce(e.message)),
+      'Edit, or create a correction revision of, this invoice', 'edit');
+    const remove = () => action('danger', 'Delete', () => removeInvoice(inv.id),
+      'Delete this invoice, its archived PDF and any recorded payments', 'delete');
+    if (superseded) {
+      // History only: the active correction revision owns the live actions,
+      // but every invoice can still be deleted outright.
       actions.push(
-        action('link', 'Edit', () => api.get(`/invoices/${inv.id}`).then(edOpen, (e) => announce(e.message)),
-          'Edit the draft lines and percentages', 'edit'),
+        action('link', 'PDF', () => downloadInvoicePdf(inv.id, inv.number),
+          'Download the superseded original PDF', 'file'),
+        remove(),
+      );
+    } else if (inv.status === 'draft') {
+      actions.push(
+        edit(),
         action('link', 'Issue', () => issueInvoice(inv), 'Issue invoice', 'credit-card'),
         action('danger', 'Delete', () => removeInvoice(inv.id), 'Delete invoice', 'delete'),
       );
     } else if (open) {
       actions.push(
+        edit(),
         action('link', 'Record payment', () => recordPayment(inv, balance),
           'Record a full or partial payment (partly paid keeps the rest open)', 'credit-card'),
-
         action('link', 'PDF', () => downloadInvoicePdf(inv.id, inv.number),
           'Download the archived invoice PDF', 'file'),
         action('link', 'Email', (evt) => emailInvoice(inv, evt.currentTarget),
           'Choose recipients and send this invoice (PDF attached)', 'contact'),
-        action('link', 'Email copy', () => emailInvoiceCopy(inv.id),
-          'Send a PDF copy to another address, e.g. the accountant', 'email'),
+        action('link', 'Email copy', () => emailInvoiceCopy(inv),
+          'Send a PDF copy to the accountant (address from Settings)', 'email'),
         action('danger', 'Write off', () => writeOffInvoice(inv, balance),
           'Forgive the remaining balance (final; excluded from outstanding)', 'ignored'),
+        remove(),
       );
     } else if (inv.status === 'paid') {
       actions.push(
+        edit(),
         action('link', 'PDF', () => downloadInvoicePdf(inv.id, inv.number),
           'Download the archived invoice PDF', 'file'),
         action('link', 'Email', (evt) => emailInvoice(inv, evt.currentTarget),
           'Choose recipients and send this invoice (PDF attached)', 'contact'),
-        action('link', 'Email copy', () => emailInvoiceCopy(inv.id),
-          'Send a PDF copy to another address, e.g. the accountant', 'email'),
+        action('link', 'Email copy', () => emailInvoiceCopy(inv),
+          'Send a PDF copy to the accountant (address from Settings)', 'email'),
+        remove(),
+      );
+    } else {
+      // Written off: the corrected document can still be revised and resent.
+      actions.push(
+        edit(),
+        action('link', 'PDF', () => downloadInvoicePdf(inv.id, inv.number),
+          'Download the archived invoice PDF', 'file'),
+        remove(),
       );
     }
     // #133: selecting the row (its Preview button, a click anywhere on the
@@ -117,17 +141,20 @@ async function refreshInvoicesBody() {
           // while draft, paid and written off stay neutral. The label is the
           // ratified lifecycle vocabulary (#349) -- presentation only.
           statusChip(statusLabel(inv.status), open),
-          // #403: an imported invoice keeps its reviewed native status and says
-          // where it came from. The archived original is the authoritative
-          // document; the PDF action downloads those exact bytes.
-          inv.imported
+          inv.superseded_by
             ? el('span', {
               cls: 'inv-imported',
-              attrs: {
-                title: `Imported from Harvest as ${inv.imported.original_number}; the archived original PDF is authoritative`,
-              },
-            }, [statusChip('Harvest import')])
+              attrs: { title: 'Superseded by a correction revision; this document stays as history' },
+            }, [statusChip('Superseded')])
             : null,
+          inv.supersedes
+            ? el('span', {
+              cls: 'inv-imported',
+              attrs: { title: 'Correction revision of the earlier document with the same number' },
+            }, [statusChip('Correction')])
+            : null,
+          // Import provenance is history, not a second status: it is shown as
+          // an Imported entry in the invoice timeline instead of a chip here.
         ]),
         iconActionsCell(actions),
       ]),
@@ -170,7 +197,10 @@ export async function refreshInvoiceSummary(preloaded) {
   // the chained call at its foot) instead of a third GET /invoices per
   // filter change; standalone callers still fetch once.
   try {
-    const all = preloaded ?? (await api.get('/invoices')).invoices ?? [];
+    const listed = preloaded ?? (await api.get('/invoices')).invoices ?? [];
+    // A superseded original stays in the register but never double-counts in
+    // the overview; only correction revisions are active invoices.
+    const all = listed.filter((invoice) => !invoice.superseded_by);
     if (all.length && !dash.currency) dash.currency = all.find((i) => i.status !== 'draft')?.currency || '';
     dashRenderOverview(all);
   } catch { /* overview is additive; table remains authoritative */ }
@@ -205,6 +235,9 @@ export async function recordPayment(inv, balance) {
       announce(`Payment recorded. ${paid.currency} ${formatMoney(rest)} still outstanding.`);
     }
     await refreshInvoices();
+    // Marking an invoice paid offers the accountant copy in the same dialog the
+    // register's Email copy action opens, pre-filled from Settings → Company.
+    if (paid.status === 'paid') await offerAccountantCopy(paid);
   } catch (err) {
     announce(err.message);
   }
@@ -537,21 +570,55 @@ export function emailInvoice(inv, opener = null) {
   return openSendEmailDialog(inv, opener);
 }
 
-// Sends a PDF copy of the invoice to any address — e.g. the accountant
-// (#112). Recipient via the inline dialog (#102); the server validates and
-// refuses drafts/invalid shapes before sending anything.
-export async function emailInvoiceCopy(id) {
-  const to = ((await askPrompt('Send a PDF copy to this email address:')) || '').trim();
+// The accountant's address lives in Settings → Company (`OrgProfile`), so the
+// copy dialog is pre-filled instead of retyped. A member cannot read the org
+// profile: the answer is empty and the dialog still asks for an address.
+async function accountantEmail() {
+  try {
+    const profile = await api.get('/admin/org');
+    return String(profile.accountant_email || '').trim();
+  } catch {
+    return '';
+  }
+}
+
+// Sends a PDF copy of the invoice to the accountant — or any address the admin
+// edits in the field (#112). Recipient via the inline dialog (#102), pre-filled
+// from Settings → Company; the server validates and refuses drafts/invalid
+// shapes before sending anything. Accepts the invoice object (or a bare id for
+// older callers).
+export async function emailInvoiceCopy(inv) {
+  const invoice = typeof inv === 'string' ? { id: inv } : (inv || {});
+  const to = ((await askPrompt(
+    `Send a PDF copy of ${invoice.number || 'this invoice'} to:`,
+    await accountantEmail(),
+    { title: 'Email a copy', okLabel: 'Send copy', cancelLabel: 'Cancel' },
+  )) || '').trim();
   if (!to) {
     announce('Email copy cancelled.');
     return;
   }
   try {
-    const res = await api.post(`/invoices/${id}/email-copy`, { to });
+    const res = await api.post(`/invoices/${invoice.id}/email-copy`, { to });
     announce(emailOutcome(res, `PDF copy sent to ${res.sent_to}.`));
   } catch (err) {
     announce(`Email copy failed: ${err.message}`);
   }
+}
+
+// A settled invoice is the moment the accountant needs the document: offer the
+// same pre-filled copy dialog. With no address on file there is nothing to
+// offer, so the live region points at Settings instead of opening a dialog.
+export async function offerAccountantCopy(inv) {
+  if (!inv || inv.status !== 'paid') return;
+  const to = await accountantEmail();
+  if (!to) {
+    // Keep the settlement wording: the payment already announced it, and this
+    // is the same event with advice attached, not a second status.
+    announce('Invoice marked paid. Set the accountant email in Settings → Company to send the copy automatically.');
+    return;
+  }
+  await emailInvoiceCopy(inv);
 }
 
 // Download the archived invoice PDF (#113). Fetch the binary as a blob (so
@@ -674,7 +741,11 @@ export function statusLabel(status) {
 }
 
 export function invBalance(inv) {
-  const paid = (inv.payments || []).reduce((a, p) => a + p.amount_minor, 0);
+  // An imported invoice's reviewed opening settlement is part of what has been
+  // paid even though it has no payment-ledger entry (the server's
+  // `paid_minor()` counts it the same way).
+  const paid = (inv.payments || []).reduce((a, p) => a + p.amount_minor, 0)
+    + (inv.imported?.opening_paid_minor || 0);
   if (inv.status === 'paid' || inv.status === 'written_off') return 0;
   return Math.max(inv.total_minor - paid, 0);
 }
@@ -776,6 +847,19 @@ export function chartSeriesByCurrency(invoices) {
       const pm = String(i.paid_at || '').slice(0, 7);
       if (i.status === 'paid' && pm.slice(0, 4) === String(dash.year)) {
         series.closed[Number(pm.slice(5, 7)) - 1] += i.total_minor;
+      }
+    }
+    // Imported invoices carry a reviewed historical settlement
+    // (`opening_paid_minor`) instead of a payment ledger. Count it in the
+    // Closed series in the month of the reviewed issue date, falling back to
+    // the period end; without this every imported settled invoice is invisible
+    // to the trend.
+    const openingPaid = i.imported?.opening_paid_minor || 0;
+    if (openingPaid > 0) {
+      const basis = String(i.document?.invoice_date || i.period_to || '').slice(0, 7);
+      const month = Number(basis.slice(5, 7)) - 1;
+      if (basis.slice(0, 4) === String(dash.year) && month >= 0 && month < 12) {
+        series.closed[month] += openingPaid;
       }
     }
     if (i.status === 'written_off') {
@@ -1108,6 +1192,18 @@ async function renderTimeline(inv) {
     const data = await api.get(`/invoices/${id}/timeline`);
     if (!invoicePreview || invoicePreview.id !== id) return;
     const events = data.events || [];
+    // Import provenance is history, not a status: surface it as the oldest
+    // timeline entry (the import may predate any recorded event on the
+    // document, and old imports have no stored timeline event).
+    if (inv.imported) {
+      events.push({
+        kind: 'created',
+        description: `Imported from Harvest as ${inv.imported.original_number}; the original PDF is archived.`,
+        actor_name: 'Harvest import',
+        at: inv.created_at,
+        meta: { source: 'harvest', original_number: inv.imported.original_number, pdf_sha256: inv.imported.pdf_sha256 },
+      });
+    }
     previewTimeline = events;
     if (events.length === 0) {
       state.textContent = 'No history yet.';
@@ -1174,6 +1270,11 @@ export async function openInvoicePreview(inv, opener) {
   // plain-text subtitle and one sentence about when it was frozen; the region
   // is still the rendered PDF plus that identity and the history.
   const draft = inv.status === 'draft';
+  const superseded = Boolean(inv.superseded_by);
+  // A superseded original is history: only its PDF is offered here. The active
+  // correction revision owns delivery and payment.
+  $('ip-send').hidden = superseded;
+  $('ip-mark-sent').hidden = superseded;
   // `subject` is snapshotted at issue, so an issued invoice shows exactly what
   // was billed while a draft (which has no frozen subject yet) says it still
   // follows the live settings. Both are plain text and never editable here —
@@ -1193,13 +1294,17 @@ export async function openInvoicePreview(inv, opener) {
     documentNote.textContent +=
       ` Imported from Harvest as ${inv.imported.original_number}; the original archived PDF is shown and downloaded unchanged.`;
   }
+  if (superseded) {
+    documentNote.textContent +=
+      ' This document was superseded by a correction revision with the same number; use that revision to resend.';
+  }
   // ---- Get paid: the collect-payment box on the invoice. No hosted
   // checkout exists by design, so this shows the customer's own payment
   // details, what has been settled and when, and offers manual
   // settlement. A draft gets no box: it is not collectable yet, and
   // nothing here gates it.
   const gp = $('ip-getpaid');
-  gp.hidden = draft;
+  gp.hidden = draft || superseded;
   const gpFacts = $('ip-getpaid-facts');
   const gpPay = $('ip-getpaid-pay');
   const gpHist = $('ip-getpaid-history');
@@ -1337,7 +1442,10 @@ export async function markInvoiceSent(inv) {
 
 
 export async function removeInvoice(id) {
-  if (!(await askConfirm('Delete this draft invoice?'))) return;
+  if (!(await askConfirm(
+    'Delete this invoice? Its archived PDF and any recorded payments are removed, and its entries/expenses become editable again.',
+    'Delete invoice',
+  ))) return;
   try {
     await api.del(`/invoices/${id}`);
     await refreshInvoices();
@@ -1396,7 +1504,11 @@ export function edLineRow(line = null) {
     cls: 'num',
     attrs: {
       type: 'number', min: '0', step: '0.01', inputmode: 'decimal', style: 'width:9ch', 'aria-label': 'Unit price',
-      value: line && line.unit_price_minor != null ? (line.unit_price_minor / 100).toFixed(2) : '0.00'
+      // Imported/legacy fixed lines carry only an amount: show it as one unit
+      // at that price so opening and saving the editor cannot zero the total.
+      value: line && line.unit_price_minor != null
+        ? (line.unit_price_minor / 100).toFixed(2)
+        : (line?.amount_minor ? (line.amount_minor / 100).toFixed(2) : '0.00')
     },
   });
   const amount = el('td', { cls: 'num' });
@@ -1497,12 +1609,25 @@ export function edRecalc() {
 
 export function edOpen(draft) {
   ed.epoch = (ed.epoch || 0) + 1;
-  if (draft?.status && draft.status !== 'draft') { announce('Only draft invoices can be edited.'); return; }
   if (draft) $('ed-customer').value = draft.customer_id;
   ed.id = draft ? draft.id : null;
+  ed.originalStatus = draft?.status || null;
+  const statusSelect = $('ed-status');
+  statusSelect.textContent = '';
+  const statusOptions = !draft || draft.status === 'draft'
+    ? [['draft', 'Draft']]
+    : [['draft', 'Draft (return for correction)'], ['issued', 'Sent'], ['partly_paid', 'Partly paid'],
+    ['paid', 'Paid'], ['written_off', 'Written off']];
+  for (const [value, text] of statusOptions) {
+    statusSelect.appendChild(el('option', { value, text }));
+  }
+  statusSelect.value = draft?.status || 'draft';
+  statusSelect.disabled = !draft || draft.status === 'draft';
+  statusSelect.title = draft?.status === 'draft' ? 'Issue the draft from the invoice view' : '';
   ed.tracked = draft ? (draft.lines || []).filter((l) => l.entry_id || l.expense_id) : [];
   ed.currency = draft ? draft.currency : (state.customers.find((c) => c.id === $('ed-customer').value)?.currency || 'EUR');
   $('ed-title').textContent = draft ? `Edit invoice ${draft.number}` : 'New invoice';
+  $('ed-save').textContent = draft ? 'Save changes' : 'Save draft';
   $('ed-customer').disabled = Boolean(draft);
   const tbody = $('ed-lines').querySelector('tbody');
   tbody.textContent = '';
@@ -1546,7 +1671,9 @@ export function edOpen(draft) {
   ed.defaultsPromise = edLoadDefaults(false);
   (draft ? $('ed-po') : $('ed-customer').__filterButton).focus({ preventScroll: true });
   dlg.querySelector('.p-modal__dialog').scrollTop = 0;
-  announce(draft ? `Editing draft ${draft.number}.` : 'Manual invoice editor open.');
+  announce(draft
+    ? `Editing invoice ${draft.number}${draft.status !== 'draft' ? ' — saving creates a correction revision' : ''}.`
+    : 'Manual invoice editor open.');
 }
 
 export function edClose() {
@@ -1636,6 +1763,9 @@ export async function edSave(preview = false) {
 
 async function edSaveBody(preview = false) {
   const epoch = ed.epoch;
+  // Whether this save is the transition INTO paid: the offer below only fires
+  // on that transition, never on a re-save of an already settled invoice.
+  const wasPaid = ed.originalStatus === 'paid';
   await ed.defaultsPromise;
   if (ed.epoch !== epoch || !$('invoice-editor').open) return;
   clearFormError($('ed-error'));
@@ -1688,17 +1818,28 @@ async function edSaveBody(preview = false) {
           hours: null, rate_minor: null,
         })),
       ];
-      const updated = await api.put(`/invoices/${ed.id}`, {
+      const payload = {
         document, currency,
         lines: payloadLines, tax_hundredths: taxH, discount_hundredths: discH,
-      });
+        status: $('ed-status').value || ed.originalStatus || 'draft',
+      };
+      // A sent/imported invoice is never rewritten: saving creates a
+      // superseding revision that keeps the number, and the original stays
+      // visible as history. A draft is edited in place.
+      const correction = Boolean(ed.originalStatus && ed.originalStatus !== 'draft');
+      const updated = correction
+        ? await api.post(`/invoices/${ed.id}/revise`, payload)
+        : await api.put(`/invoices/${ed.id}`, payload);
       saved = updated;
-      announce(`Draft ${updated.number} updated (total ${formatMoney(updated.total_minor)} ${updated.currency}).`);
+      announce(correction
+        ? `Correction ${updated.number} created (${updated.status}). The original stays in history.`
+        : `Draft ${updated.number} updated (total ${formatMoney(updated.total_minor)} ${updated.currency}).`);
     }
     if (ed.epoch !== epoch) return;
     edClose();
     await refreshInvoices();
     if (preview && saved) await openInvoicePreview(saved, null);
+    if (saved && saved.status === 'paid' && !wasPaid) await offerAccountantCopy(saved);
   } catch (err) {
     if (ed.epoch === epoch) showFormError($('ed-error'), err);
   }

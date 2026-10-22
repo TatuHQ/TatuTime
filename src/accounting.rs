@@ -610,6 +610,8 @@ mod tests {
             legal_id: String::new(),
         };
         let inv = Invoice {
+            supersedes: None,
+            superseded_by: None,
             imported: None,
             id: Uuid::new_v4(),
             number: "INV-0042".into(),

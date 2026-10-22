@@ -10,11 +10,15 @@ An invoice moves through these statuses:
 
 | Status | Meaning | Editable? |
 | --- | --- | --- |
-| `draft` | Generated or created manually, not yet issued | Yes; it locks nothing and can be deleted |
+| `draft` | Generated or created manually, not yet issued | Yes; it locks nothing |
 | `issued` | Issued and delivered; the archived document is the record | No; its entries and expenses are frozen |
 | `partly_paid` | Some payments recorded, balance still open | No; frozen |
 | `paid` | The ledger covers the total | No; frozen |
 | `written_off` | The remaining balance was forgiven with a reason | No; frozen |
+
+Any status can still be **corrected** through a revision or **deleted** outright
+(see [Corrections and resending](#corrections-and-resending) and
+[Frozen records](#frozen-records)).
 
 ### Generate a draft
 
@@ -153,13 +157,48 @@ Saving a template explicitly replaces those defaults; a saved template with
 An issued invoice freezes its entries and expenses permanently. Settling
 (`paid`/`partly_paid`) or writing off (`written_off`) does **not** release them:
 the archived invoice is the evidence of what was billed and the timesheet must
-never drift from it. The only editable state is before issue. Drafts lock
-nothing and can be deleted.
+never drift from it. The only editable state is before issue; drafts lock
+nothing.
+
+**Every invoice is deletable.** `DELETE /api/invoices/{id}` (admin tier, `204`)
+works on a draft, an issued, a settled, a written-off or an imported invoice —
+the register offers *Delete* on every row. One writer-locked operation removes
+the document, its archived PDF (an imported original included), its payment
+ledger and its timeline sidecar; a superseded original's revision (or a deleted
+revision's original) has the dangling link cleared, and `audit.log` records
+`invoice_deleted`. Because the lock provider only sees invoices that exist,
+deleting a non-draft invoice releases the entries and expenses it locked — the
+deliberate escape hatch, which is why the GUI confirms first and names what will
+be removed.
 
 The GUI hides edit/delete actions on invoiced rows and shows a lock that links to
 the invoice. The API answers `409` with a reason for an attempted change, and
 `503 lock_unavailable` if the lock state cannot be verified. See
 [Security](security.md#record-locks-and-invoice-permanence).
+
+## Corrections and resending
+
+Editing a sent (issued/partly paid/paid/written off) or imported invoice never
+rewrites it: `POST /api/invoices/{id}/revise` creates a **correction revision**
+with its own id and the same number. The original keeps its document and
+archived PDF untouched, is marked `superseded_by`, stays visible in the register
+and remains downloadable, but is excluded from every active aggregate (summary,
+outstanding, reports, profitability, CSV and reminders). The revision carries
+`supersedes`, owns its own PDF and is the document that is emailed again.
+
+The edit form can set the revision's **status** manually, including **draft** so
+a sent invoice can return for correction: a draft revision locks nothing, can be
+edited in place, and is issued again from the invoice view (same number). Status
+choices are validated against the recorded payments: a draft or issued revision
+cannot keep payments, partly paid needs a payment between zero and the total,
+paid either matches the total or relies on the legacy no-ledger rule, and no
+status may carry payments above the corrected total.
+
+A draft invoice is still edited in place with `PUT /api/invoices/{id}`; the
+revision endpoint refuses it (`409`). Only the active revision can be revised
+again; the superseded original cannot. A revision's subject is interpolated
+exactly as issuing resolves it, so a raw `%customer_name%` placeholder from the
+org template is never frozen onto a revision or its PDF.
 
 ## PDFs, email and reminders
 
@@ -197,6 +236,13 @@ the invoice. The API answers `409` with a reason for an attempted change, and
 - `POST /api/invoices/{id}/email` sends the invoice with the PDF attached to the
   customer. `POST /api/invoices/{id}/email-copy` sends an ad-hoc copy to a third
   party such as an accountant; it is audited but is not a customer delivery.
+- **The accountant copy is one click.** *Settings → Company* stores
+  `OrgProfile.accountant_email`, and the register's **Email copy** action opens
+  its dialog pre-filled with that address (editable, with a visible Cancel).
+  Marking an invoice paid — the *Record payment* action or a status change in
+  the editor — offers the same dialog, so the accountant gets the document at
+  the moment it settles. With no address on file the paid offer points at the
+  setting instead of opening an empty prompt.
 - `POST /api/invoices/{id}/sent` records the manual "mark as sent" transition
   without sending anything.
 - A daily scheduler job emails reminders for issued, unpaid invoices past their
@@ -298,7 +344,9 @@ remains available and unchanged.
   before the org's own id (`OrgProfile.legal_id_label`, e.g. `Tax ID` or `VAT`)
   feed the issuer/customer blocks.
 - The invoice accent colour and the sender display name / Reply-To are honoured
-  by the PDF and the real email transport.
+  by the PDF and the real email transport. The accountant email is recipient
+  data only: it never prints on a document and is validated as an email address
+  before it is stored.
 
 ## Accounting sync
 

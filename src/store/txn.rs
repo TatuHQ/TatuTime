@@ -145,6 +145,64 @@ impl Store {
         Ok(invoice)
     }
 
+    /// Create a correction revision and mark the original `superseded_by`, in
+    /// one writer lock. The original document and its archived PDF are never
+    /// rewritten (only the link field changes); the revision keeps the original
+    /// number but gets its own id, and, when it is not a draft, its own archived
+    /// PDF. The number index is written revision-last so lookups by number find
+    /// the active document.
+    pub fn create_invoice_revision(
+        &self,
+        original_id: Uuid,
+        mut revision: Invoice,
+        pdf: Option<&[u8]>,
+        now: DateTime<Utc>,
+    ) -> Result<Invoice, StoreError> {
+        let _guard = self.write_lock()?;
+        let original_path = self.doc_path::<Invoice>(&original_id.to_string());
+        let Some(mut original) = read_json::<Invoice>(&original_path)? else {
+            return Err(StoreError::NotFound);
+        };
+        if original.superseded_by.is_some() {
+            return Err(StoreError::Conflict(
+                "this invoice already has a correction revision".into(),
+            ));
+        }
+        revision.number = original.number.clone();
+        revision.created_at = now;
+        revision.supersedes = Some(original_id);
+        revision.superseded_by = None;
+        let revision_path = self.doc_path::<Invoice>(&revision.id.to_string());
+        if revision_path.exists() {
+            return Err(StoreError::Conflict(
+                "a revision id is already taken".into(),
+            ));
+        }
+        self.ensure_capacity::<Invoice>()?;
+        std::fs::create_dir_all(self.doc_dir::<Invoice>())?;
+        let pdf_path = self.invoice_pdf_path(&revision.id.to_string());
+        if let Some(bytes) = pdf {
+            std::fs::create_dir_all(self.doc_dir::<Invoice>())?;
+            write_bytes_atomic(&pdf_path, bytes)?;
+            let archived = std::fs::read(&pdf_path)?;
+            revision.pdf = Some(pdf_hint(&revision.number, &archived, now));
+        }
+        write_json(&revision_path, &revision)?;
+        original.superseded_by = Some(revision.id);
+        if let Err(error) = write_json(&original_path, &original) {
+            // The original is the record of authority: leave it untouched and
+            // remove everything the failed revision wrote.
+            let _ = std::fs::remove_file(&revision_path);
+            if pdf.is_some() {
+                let _ = std::fs::remove_file(&pdf_path);
+            }
+            return Err(error);
+        }
+        self.index_invoice_locked(&original)?;
+        self.index_invoice_locked(&revision)?;
+        Ok(revision)
+    }
+
     /// Mark paid atomically with the issued-state check: records the full
     /// remaining balance (#114 default; keeps the pre-ledger behaviour for
     /// callers that do not pass an amount).
@@ -468,6 +526,8 @@ mod txn_tests {
 
     fn invoice() -> Invoice {
         Invoice {
+            supersedes: None,
+            superseded_by: None,
             imported: None,
             id: Uuid::new_v4(),
             number: "_".into(),

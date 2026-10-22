@@ -679,6 +679,7 @@ export async function refreshOrgProfile() {
     $('org-country').value = a.country || '';
     $('org-from').value = o.from_name || '';
     $('org-reply').value = o.reply_to || '';
+    $('org-accountant').value = o.accountant_email || '';
     orgReplyTo = o.reply_to || '';
     if (!$('email-test-to').value) $('email-test-to').value = orgReplyTo;
     $('org-accent').value = o.accent || '';
@@ -733,6 +734,7 @@ export async function saveOrgProfile(evt) {
         // #146 presentation rides the same org store — no parallel truth.
         from_name: $('org-from').value.trim(),
         reply_to: $('org-reply').value.trim(),
+        accountant_email: $('org-accountant').value.trim(),
         accent: $('org-accent').value.trim(),
         address: street || city || postal || country
           ? { street, city, postal_code: postal, country }

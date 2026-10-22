@@ -127,22 +127,125 @@ function attachFile(dom, inputId, name, type) {
     return input;
 }
 
-test('mapping controls are built from source values and link the original PDF', async () => {
+test('source tabs build only their own mapping and link the original PDF', async () => {
     const { dom } = await harness({ ready: false });
     await dom.window.openBatch(batch().id);
     await waitFor(() => dom.window.document.querySelector('#import-mapping h3'), {
         message: 'mapping controls to render',
     });
-    const mapping = dom.window.document.getElementById('import-mapping');
+    const document = dom.window.document;
+    const mapping = document.getElementById('import-mapping');
     assert.match(mapping.textContent, /People/);
     assert.match(mapping.textContent, /Customers/);
     assert.match(mapping.textContent, /Projects/);
     assert.match(mapping.textContent, /Tasks/);
+    assert.doesNotMatch(mapping.textContent, /Invoices/, 'the Time tab does not show invoice cards');
+    assert.equal(document.getElementById('import-tab-time').getAttribute('aria-selected'), 'true');
+    assert.equal(document.getElementById('import-panel-time').hidden, false);
+    assert.equal(document.getElementById('import-panel-invoices').hidden, true);
+    assert.equal(document.getElementById('import-time-upload').disabled, false);
+
+    document.getElementById('import-tab-invoices').click();
+    await waitFor(() => document.getElementById(`import-inv-total-${SHA}`), {
+        message: 'the invoice mapping card',
+    });
+    assert.equal(document.getElementById('import-tab-invoices').getAttribute('aria-selected'), 'true');
+    assert.equal(document.getElementById('import-panel-invoices').hidden, false);
+    assert.equal(document.getElementById('import-panel-time').hidden, true);
+    assert.doesNotMatch(mapping.textContent, /People/);
     assert.match(mapping.textContent, /Invoices/);
     const pdf = [...mapping.querySelectorAll('a')].find((a) => a.textContent === 'Original PDF');
     assert.ok(pdf, 'invoice PDF link exists');
     assert.match(pdf.getAttribute('href'), /\/invoices\/b{64}\/pdf$/);
-    assert.equal(dom.window.document.getElementById('import-commit').disabled, true);
+    assert.equal(document.getElementById('import-commit').disabled, true);
+    dom.window.close();
+});
+
+test('invoice cards take their values and labels from the PDF suggestions', async () => {
+    const withSuggestions = preview(false);
+    withSuggestions.invoices[0] = {
+        ...withSuggestions.invoices[0],
+        customer_id: null, original_number: '', currency: null, invoice_date: null,
+        period_from: null, period_to: null, total_minor: null, opening_paid_minor: 0, status: null,
+        suggestions: {
+            pages: 1, text_bytes: 10, text_truncated: false, status: 'suggestions', reason: null,
+            suggestions: [
+                { field: 'customer', value: 'Acme', amount_minor: null, page: 1, evidence: 'Invoice for Acme', confidence: 'low' },
+                { field: 'invoice_number', value: '1', amount_minor: null, page: 1, evidence: 'Invoice ID 1', confidence: 'medium' },
+                { field: 'currency', value: 'EUR', amount_minor: null, page: 1, evidence: 'Subtotal EUR 5,760.00', confidence: 'low' },
+                { field: 'invoice_date', value: '2025-02-01', amount_minor: null, page: 1, evidence: 'Issue date 01/02/2025', confidence: 'medium' },
+                { field: 'period_from', value: '2025-01-01', amount_minor: null, page: 1, evidence: 'Billing month preceding the issue date', confidence: 'medium' },
+                { field: 'period_to', value: '2025-01-31', amount_minor: null, page: 1, evidence: 'Billing month preceding the issue date', confidence: 'medium' },
+                { field: 'subtotal', value: 'EUR 5,760.00', amount_minor: 576000, page: 1, evidence: 'Subtotal EUR 5,760.00', confidence: 'medium' },
+                { field: 'payments', value: 'EUR -5,760.00', amount_minor: 576000, page: 1, evidence: 'Payments EUR -5,760.00', confidence: 'medium' },
+                { field: 'status', value: 'paid', amount_minor: null, page: 1, evidence: 'Payments compared with Subtotal', confidence: 'medium' },
+            ],
+        },
+    };
+    const { dom } = await harness({ ready: false, previewBody: withSuggestions });
+    await dom.window.openBatch(batch().id);
+    dom.window.document.getElementById('import-tab-invoices').click();
+    await waitFor(() => dom.window.document.getElementById(`import-inv-total-${SHA}`), {
+        message: 'the prefilled invoice card',
+    });
+    const document = dom.window.document;
+    assert.equal(document.getElementById(`import-inv-number-${SHA}`).value, '1');
+    assert.equal(document.getElementById(`import-inv-customer-${SHA}`).value, 'c1');
+    assert.equal(document.getElementById(`import-inv-currency-${SHA}`).value, 'EUR');
+    assert.equal(document.getElementById(`import-inv-date-${SHA}`).value, '2025-02-01');
+    assert.equal(document.getElementById(`import-inv-from-${SHA}`).value, '2025-01-01');
+    assert.equal(document.getElementById(`import-inv-to-${SHA}`).value, '2025-01-31');
+    assert.equal(document.getElementById(`import-inv-total-${SHA}`).value, '5760.00');
+    assert.equal(document.getElementById(`import-inv-paid-${SHA}`).value, '5760.00');
+    assert.equal(document.getElementById(`import-inv-status-${SHA}`).value, 'paid');
+    const mapping = document.getElementById('import-mapping');
+    for (const label of ['Invoice ID', 'Invoice for', 'Issue date', 'Subtotal', 'Payments']) {
+        assert.match(mapping.textContent, new RegExp(label));
+    }
+    assert.match(mapping.textContent, /PDF: Acme/);
+    dom.window.close();
+});
+
+test('overriding Subtotal and Payments recomputes the import status and keeps the override', async () => {
+    const body = preview(false);
+    body.invoices[0] = {
+        ...body.invoices[0],
+        customer_id: null, original_number: '6', currency: 'USD',
+        invoice_date: '2025-05-01', period_from: '2025-05-01', period_to: '2025-05-31',
+        total_minor: 0, opening_paid_minor: 0, status: 'issued',
+        suggestions: {
+            pages: 1, text_bytes: 10, text_truncated: false, status: 'suggestions', reason: null,
+            suggestions: [
+                { field: 'customer', value: 'Acme', amount_minor: null, page: 1, evidence: '', confidence: 'low' },
+                { field: 'invoice_number', value: '6', amount_minor: null, page: 1, evidence: '', confidence: 'medium' },
+                { field: 'currency', value: 'USD', amount_minor: null, page: 1, evidence: '', confidence: 'low' },
+                { field: 'invoice_date', value: '2025-05-01', amount_minor: null, page: 1, evidence: '', confidence: 'medium' },
+                { field: 'period_from', value: '2025-05-01', amount_minor: null, page: 1, evidence: '', confidence: 'medium' },
+                { field: 'period_to', value: '2025-05-31', amount_minor: null, page: 1, evidence: '', confidence: 'medium' },
+                { field: 'amount_due', value: 'USD $0.00', amount_minor: 0, page: 1, evidence: '', confidence: 'medium' },
+                { field: 'status', value: 'issued', amount_minor: null, page: 1, evidence: '', confidence: 'medium' },
+            ],
+        },
+    };
+    const { dom } = await harness({ ready: false, previewBody: body });
+    await dom.window.openBatch(batch().id);
+    dom.window.document.getElementById('import-tab-invoices').click();
+    await waitFor(() => dom.window.document.getElementById(`import-inv-total-${SHA}`), {
+        message: 'the invoice card',
+    });
+    const document = dom.window.document;
+    const total = document.getElementById(`import-inv-total-${SHA}`);
+    const paid = document.getElementById(`import-inv-paid-${SHA}`);
+    total.value = '162.50';
+    total.dispatchEvent(new dom.window.Event('input'));
+    paid.value = '162.50';
+    paid.dispatchEvent(new dom.window.Event('input'));
+    assert.equal(document.getElementById(`import-inv-status-${SHA}`).value, 'paid');
+    const choices = JSON.parse(document.getElementById('import-choices').value);
+    const saved = choices.invoices.find((choice) => choice.sha256 === SHA);
+    assert.equal(saved.total_minor, 16250, 'the reviewed total overrides the PDF');
+    assert.equal(saved.opening_paid_minor, 16250, 'the reviewed payment overrides the PDF');
+    assert.equal(saved.status, 'paid');
     dom.window.close();
 });
 
@@ -218,7 +321,7 @@ test('row and issue filters page the preview without refetching it', async () =>
     });
     const previews = calls.preview;
     const document = dom.window.document;
-    assert.equal(document.querySelectorAll('#import-rows tbody tr').length, 2, 'time and invoice rows');
+    assert.equal(document.querySelectorAll('#import-rows tbody tr').length, 1, 'only the Time rows');
     assert.equal(document.querySelectorAll('#import-issue-list tbody tr').length, 1);
 
     const rowFilter = document.getElementById('import-row-filter');
@@ -233,7 +336,7 @@ test('row and issue filters page the preview without refetching it', async () =>
 
     rowFilter.value = 'all';
     rowFilter.dispatchEvent(new dom.window.Event('change'));
-    assert.equal(document.querySelectorAll('#import-rows tbody tr').length, 2);
+    assert.equal(document.querySelectorAll('#import-rows tbody tr').length, 1);
 
     const issueFilter = document.getElementById('import-issue-filter');
     issueFilter.value = 'all';
@@ -242,7 +345,11 @@ test('row and issue filters page the preview without refetching it', async () =>
     issueFilter.value = 'blocking';
     issueFilter.dispatchEvent(new dom.window.Event('change'));
     assert.equal(document.querySelectorAll('#import-issue-list tbody tr').length, 1);
-    assert.equal(calls.preview, previews, 'filtering never recomputes the preview');
+
+    document.getElementById('import-tab-invoices').click();
+    assert.equal(document.querySelectorAll('#import-rows tbody tr').length, 1, 'only the invoice row');
+    assert.equal(document.querySelectorAll('#import-issue-list tbody tr').length, 0);
+    assert.equal(calls.preview, previews, 'filtering and tab switches never recompute the preview');
     dom.window.close();
 });
 

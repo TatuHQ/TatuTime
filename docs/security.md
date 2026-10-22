@@ -134,15 +134,19 @@ Reads are never blocked. Only a write to a frozen record is refused, with
 
 | Provider | What it freezes | Released by |
 | --- | --- | --- |
-| `InvoiceLock` | Entries **and** expenses on any **non-draft** invoice | Nothing — invoiced records are permanent |
+| `InvoiceLock` | Entries **and** expenses on any **non-draft** invoice | Deleting the invoice (admin tier, any status) — otherwise nothing |
 | `SubmissionLock` | Entries in a submitted or approved week | Rejecting or withdrawing a submitted week; an approved week is permanent |
 | `ClaimLock` | Expenses on a submitted or approved reimbursement claim | Rejecting a submitted claim |
 
-Draft invoices lock nothing and can be deleted. Once an invoice is issued, its
-lines are frozen by the archived invoice document: settling (`paid` or
-`partly_paid`) or writing off (`written_off`) does **not** release the entries,
-because the timesheet must never drift from what was billed. The only way back to
-editable is before issue.
+Draft invoices lock nothing and can be edited or deleted. Once an invoice is
+issued, its lines are frozen by the archived invoice document: settling (`paid`
+or `partly_paid`) or writing off (`written_off`) does **not** release the
+entries, because the timesheet must never drift from what was billed. The
+normal way back to editable is before issue. The deliberate exception is
+deleting the invoice itself: `DELETE /api/invoices/{id}` works on any status,
+removes the document, its archived PDF (imported originals included), its
+payments and its timeline sidecar, and records `invoice_deleted` in
+`audit.log`; the register offers it on every row behind a confirmation.
 
 `CombinedLocks` composes the three providers. They answer from one memoised
 snapshot keyed on the source collections' directory mtimes, so a per-record check

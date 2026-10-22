@@ -23,8 +23,8 @@ use crate::auth::{
 use crate::domain::{
     Category, CategoryInput, ClaimInput, ClaimState, Currency, Customer, CustomerInput, Entry,
     EntryInput, Expense, ExpenseClaim, ExpenseInput, FieldError, Hours, Invoice, InvoiceError,
-    InvoiceStatus, Project, ProjectCode, ProjectInput, Source, StartTimerInput, Task, TaskInput,
-    Timer, elapsed_hundredths, generate_invoice, validate_category_input, validate_customer_input,
+    Project, ProjectCode, ProjectInput, Source, StartTimerInput, Task, TaskInput, Timer,
+    elapsed_hundredths, generate_invoice, validate_category_input, validate_customer_input,
     validate_entry_input, validate_expense_input, validate_project_input, validate_task_input,
 };
 use crate::domain::{Submission, SubmissionState};
@@ -784,9 +784,9 @@ pub use self::invoicing::{
     invoice_document, invoice_export_csv, invoice_pdf, invoice_pdf_preview, invoice_report_handler,
     invoice_summary, invoice_template_get, invoice_template_preview, invoice_template_put,
     invoice_timeline, issue_invoice, list_invoices, list_item_types, mark_invoice_sent,
-    money_for_email, org_get, org_put, pay_invoice, preview_invoice, send_invoice_email,
-    send_invoice_email_copy, sync_invoice, sync_status, update_invoice_draft, update_item_type,
-    write_off_invoice,
+    money_for_email, org_get, org_put, pay_invoice, preview_invoice, revise_invoice,
+    send_invoice_email, send_invoice_email_copy, sync_invoice, sync_status, update_invoice_draft,
+    update_item_type, write_off_invoice,
 };
 pub use self::people::{
     UserInput, UserPasswordInput, UserUpdateInput, change_user_password, create_customer,

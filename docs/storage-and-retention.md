@@ -64,13 +64,18 @@ These invariants are recorded in [ADR-001](architecture/adr-001-filesystem-and-s
 An invoice line snapshots the resolved rate when the invoice is generated. Issue
 the invoice and the archived document becomes the record of what was billed:
 
-- Draft invoices lock nothing and can be deleted or edited.
+- Draft invoices lock nothing and can be edited or deleted.
 - A non-draft invoice (`issued`, `partly_paid`, `paid`, `written_off`) freezes
   every entry and expense it references.
 - Settling or writing off an invoice never releases the referenced records.
-  There is no path from an issued invoice back to an editable timesheet.
 - `already_invoiced` excludes every non-draft invoice, so a settled or
   written-off invoice is never billed again either.
+- Deleting the invoice itself — `DELETE /api/invoices/{id}`, admin tier, any
+  status — is the only operation that releases what it locked: the document,
+  its archived PDF (an imported original included), its payment ledger and its
+  `invoices/.timeline.<id>.json` sidecar go in one writer-locked write, a
+  dangling `supersedes`/`superseded_by` link is cleared, and `audit.log`
+  records `invoice_deleted`.
 
 The GUI reflects this by hiding edit/delete actions on invoiced rows and showing
 a lock that links to the invoice. See [Security](security.md#record-locks-and-invoice-permanence)

@@ -30,7 +30,7 @@ pub use lifecycle::{
     list_invoices, mark_invoice_sent, pay_invoice, preview_invoice, write_off_invoice,
 };
 pub use manual::{
-    InvoiceEditInput, InvoiceLineInput, ManualInvoiceInput, create_manual_invoice,
+    InvoiceEditInput, InvoiceLineInput, ManualInvoiceInput, create_manual_invoice, revise_invoice,
     update_invoice_draft,
 };
 pub use org::{org_get, org_put};
@@ -38,7 +38,8 @@ pub use preview::invoice_template_preview;
 pub use sync::{SyncInput, sync_invoice, sync_status};
 
 pub(crate) use document::{
-    content_for, invoice_pdf_for_delivery, load_template, resolve_due_date, resolve_terms,
+    content_for, invoice_pdf_for_delivery, load_template, render_pdf_now, resolve_due_date,
+    resolve_terms,
 };
 pub(crate) use lifecycle::get_invoice_or_404;
 pub(crate) use org::{load_org, org_for};

@@ -596,6 +596,7 @@ fn reviewed_project(
     record: Option<usize>,
     required: bool,
     taken: &mut BTreeMap<Uuid, BTreeSet<String>>,
+    resolved: &mut BTreeMap<(String, Uuid), String>,
 ) -> Option<String> {
     match choice {
         Some(ProjectChoice::Existing {
@@ -633,6 +634,9 @@ fn reviewed_project(
             }
         }
         Some(ProjectChoice::Create {
+            source_client,
+            source_project,
+            source_code,
             customer_id: mapped,
             code,
             name,
@@ -649,6 +653,18 @@ fn reviewed_project(
                     true,
                 ));
                 return None;
+            }
+            // A choice is a mapping, not a row: resolve its code once and reuse
+            // it for every source row. Re-deriving it per row would append a
+            // collision suffix on each pass (`WEB`, `WEB_2`, `WEB_3`, ...) and
+            // leave every row after the first pointing at a project the commit
+            // never creates.
+            let key = (
+                project_key(source_client, source_project, source_code),
+                customer_id,
+            );
+            if let Some(code) = resolved.get(&key) {
+                return Some(code.clone());
             }
             // The GUI sends the source code (or an empty string) plus the
             // reviewed name; prefer the source code and fall back to the name,
@@ -673,6 +689,7 @@ fn reviewed_project(
                 None
             } else {
                 taken.insert(code.0.clone());
+                resolved.insert(key, code.0.clone());
                 Some(code.0)
             }
         }
@@ -931,6 +948,9 @@ pub fn plan(
             .or_default()
             .insert(project.code.0.clone());
     }
+    // Codes already resolved for a reviewed project create, keyed by source
+    // mapping and customer. One mapping must produce exactly one project.
+    let mut resolved_project_codes: BTreeMap<(String, Uuid), String> = BTreeMap::new();
 
     // Existing provenance, keyed by provider + namespace + source key. Batch id
     // is deliberately excluded: overlapping exports must collide.
@@ -1134,6 +1154,7 @@ pub fn plan(
                     Some(row.record),
                     true,
                     &mut taken_codes,
+                    &mut resolved_project_codes,
                 )
             });
             let task_code = reviewed_task(
@@ -1348,6 +1369,7 @@ pub fn plan(
                     Some(row.record),
                     false,
                     &mut taken_codes,
+                    &mut resolved_project_codes,
                 )
             });
             let category_id = reviewed_category(

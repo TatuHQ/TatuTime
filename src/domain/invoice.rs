@@ -226,6 +226,16 @@ pub fn validate_manual_lines(
 pub struct Invoice {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub imported: Option<super::ImportedInvoice>,
+    /// Set on a correction revision: the invoice this document supersedes. The
+    /// original is left intact (its own document and PDF stay as evidence) and
+    /// is only marked with [`Invoice::superseded_by`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub supersedes: Option<Uuid>,
+    /// Set on the superseded original: the active correction revision. A
+    /// superseded invoice is history and is excluded from every active
+    /// aggregate; its entries stay locked by the revision.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub superseded_by: Option<Uuid>,
     #[serde(default, skip_serializing_if = "InvoiceDocument::is_empty")]
     pub document: InvoiceDocument,
     pub id: Uuid,
@@ -487,6 +497,18 @@ pub struct PdfHint {
 }
 
 impl Invoice {
+    /// True once a correction revision replaced this document. It stays
+    /// readable in history, but no aggregate counts it as an active invoice.
+    #[must_use]
+    pub fn is_superseded(&self) -> bool {
+        self.superseded_by.is_some()
+    }
+
+    /// True on the active correction revision of another invoice.
+    #[must_use]
+    pub fn is_revision(&self) -> bool {
+        self.supersedes.is_some()
+    }
     /// Sum of the payment ledger (integer minor units). A legacy `Paid`
     /// document predating #114 carries no ledger: its total counts as paid
     /// so receivables are never overstated by the migration.
@@ -545,7 +567,9 @@ pub fn summarise_invoices(invoices: &[Invoice], today: NaiveDate) -> InvoiceSumm
         written_off: 0,
         outstanding: BTreeMap::new(),
     };
-    for inv in invoices {
+    // A superseded original and its correction revision share a number: only
+    // the active revision counts, the original stays history.
+    for inv in invoices.iter().filter(|invoice| !invoice.is_superseded()) {
         match inv.status {
             InvoiceStatus::Draft => s.draft += 1,
             InvoiceStatus::Paid => s.paid += 1,
@@ -586,6 +610,8 @@ mod tests {
 
     fn inv(status: InvoiceStatus, total: u64, due: Option<NaiveDate>) -> Invoice {
         Invoice {
+            supersedes: None,
+            superseded_by: None,
             imported: None,
             id: Uuid::new_v4(),
             number: "INV-1".into(),

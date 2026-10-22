@@ -709,6 +709,8 @@ mod tests {
 
     fn sample_invoice() -> Invoice {
         Invoice {
+            supersedes: None,
+            superseded_by: None,
             imported: None,
             id: "11111111-1111-1111-1111-111111111111".parse().unwrap(),
             number: "INV-0001".into(),

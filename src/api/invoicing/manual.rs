@@ -1,4 +1,4 @@
-use super::{get_invoice_or_404, lifecycle::record_timeline};
+use super::{content_for, get_invoice_or_404, lifecycle::record_timeline, load_template};
 use crate::api::*;
 use crate::domain::InvoiceTimelineEventKind;
 
@@ -77,9 +77,11 @@ impl From<&InvoiceLineInput> for crate::domain::InvoiceLine {
     }
 }
 
-/// Body for `PUT /invoices/{id}` (#143): draft-only full replacement of the
-/// line set + percentages. Tracked lines must come back exactly as stored
-/// (identity and amounts are enforced server-side); manual lines are free.
+/// Body for `PUT /invoices/{id}` (draft edit) and
+/// `POST /invoices/{id}/revise` (correction revision). Tracked lines must come
+/// back exactly as stored (identity and amounts are enforced server-side);
+/// manual lines are free. `status` is only meaningful on a revision — a draft
+/// is issued from the invoice view, not by editing it.
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct InvoiceEditInput {
@@ -92,6 +94,11 @@ pub struct InvoiceEditInput {
     pub tax_hundredths: u16,
     #[serde(default)]
     pub discount_hundredths: u16,
+    /// Reviewed settlement status of the correction revision. Absent keeps the
+    /// original's status. `draft` returns the corrected document to a draft
+    /// (it can then be changed and issued again).
+    #[serde(default)]
+    pub status: Option<crate::domain::InvoiceStatus>,
 }
 
 fn percent_field(value: u16, field: &str, errors: &mut Vec<FieldError>) {
@@ -191,6 +198,8 @@ pub async fn create_manual_invoice(
     let totals =
         crate::domain::invoice_totals(subtotal, input.tax_hundredths, input.discount_hundredths);
     let draft = Invoice {
+        supersedes: None,
+        superseded_by: None,
         imported: None,
         document: input.document,
         id: Uuid::new_v4(),
@@ -258,23 +267,29 @@ fn validate_line_projects(
     Ok(())
 }
 
-/// Edit a draft invoice (#143): replace the line set and percentages under a
-/// Draft-only guard. Tracked lines must be preserved verbatim; manual lines
-/// are re-priced from their integer quantity x unit price. 409 for anything
-/// that is not a draft; validation failures persist nothing.
-pub async fn update_invoice_draft(
-    State(app): State<AppState>,
-    actor: AuthUser,
-    Path(id): Path<Uuid>,
-    ValidJson(edit): ValidJson<InvoiceEditInput>,
-) -> ApiResult {
-    let invoice = get_invoice_or_404(&app, id)?;
-    if invoice.status != crate::domain::InvoiceStatus::Draft {
-        return Err(ApiError::conflict("only a draft invoice can be edited"));
-    }
+struct EditedInvoice {
+    document: crate::domain::InvoiceDocument,
+    currency: Currency,
+    lines: Vec<crate::domain::InvoiceLine>,
+    tax_hundredths: u16,
+    discount_hundredths: u16,
+    total_minor: u64,
+}
+
+/// Validate and assemble an edit payload against the stored invoice. Tracked
+/// lines must come back exactly as snapshotted; manual lines are re-priced;
+/// legacy/imported fixed lines that carry only an amount keep it verbatim.
+fn assemble_edit(
+    app: &AppState,
+    invoice: &Invoice,
+    edit: &InvoiceEditInput,
+) -> Result<EditedInvoice, ApiError> {
     let mut errors = Vec::new();
-    let document = edit.document.as_ref().unwrap_or(&invoice.document);
-    validate_document(document, app.clock.today(), &mut errors);
+    let document = edit
+        .document
+        .clone()
+        .unwrap_or_else(|| invoice.document.clone());
+    validate_document(&document, app.clock.today(), &mut errors);
     if edit
         .currency
         .as_ref()
@@ -317,7 +332,7 @@ pub async fn update_invoice_draft(
             else {
                 errors.push(FieldError::new(
                     format!("lines[{i}]"),
-                    "tracked lines must come from this draft",
+                    "tracked lines must come from this invoice",
                 ));
                 continue;
             };
@@ -330,32 +345,54 @@ pub async fn update_invoice_draft(
                 continue;
             }
             out_lines.push((*orig).clone());
-        } else {
-            // Manual line: re-priced server-side. Uses the SAME bounds as
-            // POST /invoices/manual (#187), so the two never diverge.
-            let qty = l.quantity_hundredths.unwrap_or(0);
-            let price = l.unit_price_minor.unwrap_or(0);
-            if l.kind != crate::domain::LineKind::Fixed || l.item_kind.is_none() {
+            continue;
+        }
+        // Legacy and imported fixed lines carry only an amount: preserve it
+        // verbatim rather than demanding the manual quantity x price shape.
+        let bare_amount = l.item_kind.is_none()
+            && l.quantity_hundredths.is_none()
+            && l.unit_price_minor.is_none();
+        if bare_amount {
+            if l.kind != crate::domain::LineKind::Fixed {
                 errors.push(FieldError::new(
                     format!("lines[{i}].kind"),
-                    "manual lines are Fixed with an item kind",
+                    "a line without an entry or expense must be Fixed",
                 ));
                 continue;
             }
-            crate::domain::check_manual_line(
-                &l.note,
-                qty,
-                price,
-                &format!("lines[{i}].note"),
-                &format!("lines[{i}].quantity_hundredths"),
-                &format!("lines[{i}].unit_price_minor"),
-                &mut errors,
-            );
             let mut line: crate::domain::InvoiceLine = l.into();
-            line.amount_minor = crate::domain::manual_amount_minor(qty, price);
+            line.amount_minor = l.amount_minor;
             line.note = l.note.trim().to_string();
+            line.item_kind = Some(crate::domain::LineItemKind::Service);
+            line.quantity_hundredths = Some(100);
+            line.unit_price_minor = Some(l.amount_minor);
             out_lines.push(line);
+            continue;
         }
+        // Manual line: re-priced server-side. Uses the SAME bounds as
+        // POST /invoices/manual (#187), so the two never diverge.
+        let qty = l.quantity_hundredths.unwrap_or(0);
+        let price = l.unit_price_minor.unwrap_or(0);
+        if l.kind != crate::domain::LineKind::Fixed || l.item_kind.is_none() {
+            errors.push(FieldError::new(
+                format!("lines[{i}].kind"),
+                "manual lines are Fixed with an item kind",
+            ));
+            continue;
+        }
+        crate::domain::check_manual_line(
+            &l.note,
+            qty,
+            price,
+            &format!("lines[{i}].note"),
+            &format!("lines[{i}].quantity_hundredths"),
+            &format!("lines[{i}].unit_price_minor"),
+            &mut errors,
+        );
+        let mut line: crate::domain::InvoiceLine = l.into();
+        line.amount_minor = crate::domain::manual_amount_minor(qty, price);
+        line.note = l.note.trim().to_string();
+        out_lines.push(line);
     }
     for original in &stored_tracked {
         if out_lines
@@ -372,20 +409,113 @@ pub async fn update_invoice_draft(
             ));
         }
     }
-    validate_line_projects(&app, &invoice.customer_id, &out_lines, &mut errors)?;
+    validate_line_projects(app, &invoice.customer_id, &out_lines, &mut errors)?;
     if !errors.is_empty() {
         return Err(ApiError::validation(errors));
     }
     let subtotal = out_lines.iter().map(|l| l.amount_minor).sum();
     let totals =
         crate::domain::invoice_totals(subtotal, edit.tax_hundredths, edit.discount_hundredths);
-    let candidate = Invoice {
-        document: edit.document.unwrap_or_else(|| invoice.document.clone()),
-        currency: edit.currency.unwrap_or_else(|| invoice.currency.clone()),
+    Ok(EditedInvoice {
+        document,
+        currency: edit
+            .currency
+            .clone()
+            .unwrap_or_else(|| invoice.currency.clone()),
         lines: out_lines,
-        total_minor: totals.total_minor,
         tax_hundredths: edit.tax_hundredths,
         discount_hundredths: edit.discount_hundredths,
+        total_minor: totals.total_minor,
+    })
+}
+
+/// Status consistency for a correction revision. A draft carries no payments;
+/// issued carries none either (a payment makes it partly paid); partly paid
+/// needs a payment between zero and the total; paid may rely on the legacy
+/// no-ledger rule or match the total exactly.
+fn validate_status(
+    status: crate::domain::InvoiceStatus,
+    total_minor: u64,
+    payments: &[crate::domain::InvoicePayment],
+    errors: &mut Vec<FieldError>,
+) {
+    let paid: u64 = payments.iter().map(|payment| payment.amount_minor).sum();
+    if paid > total_minor {
+        errors.push(FieldError::new(
+            "lines",
+            "recorded payments exceed the corrected total",
+        ));
+    }
+    match status {
+        crate::domain::InvoiceStatus::Draft => {
+            if !payments.is_empty() {
+                errors.push(FieldError::new(
+                    "status",
+                    "a draft cannot keep recorded payments",
+                ));
+            }
+        }
+        crate::domain::InvoiceStatus::Issued => {
+            if !payments.is_empty() {
+                errors.push(FieldError::new(
+                    "status",
+                    "an issued invoice cannot carry payments; use partly paid",
+                ));
+            }
+        }
+        crate::domain::InvoiceStatus::PartlyPaid => {
+            if paid == 0 || paid >= total_minor {
+                errors.push(FieldError::new(
+                    "status",
+                    "partly paid needs a payment above zero and below the total",
+                ));
+            }
+        }
+        crate::domain::InvoiceStatus::Paid => {
+            if !payments.is_empty() && paid != total_minor {
+                errors.push(FieldError::new(
+                    "status",
+                    "paid needs recorded payments equal to the total",
+                ));
+            }
+        }
+        crate::domain::InvoiceStatus::WrittenOff => {}
+    }
+}
+
+/// Edit a draft invoice (#143): replace the line set and percentages under a
+/// Draft-only guard. Tracked lines must be preserved verbatim; manual lines
+/// are re-priced from their integer quantity x unit price. 409 for anything
+/// that is not a draft; validation failures persist nothing.
+pub async fn update_invoice_draft(
+    State(app): State<AppState>,
+    actor: AuthUser,
+    Path(id): Path<Uuid>,
+    ValidJson(edit): ValidJson<InvoiceEditInput>,
+) -> ApiResult {
+    let invoice = get_invoice_or_404(&app, id)?;
+    if invoice.status != crate::domain::InvoiceStatus::Draft {
+        return Err(ApiError::conflict(
+            "only a draft invoice is edited in place; use the correction revision action",
+        ));
+    }
+    if edit
+        .status
+        .is_some_and(|status| status != crate::domain::InvoiceStatus::Draft)
+    {
+        return Err(ApiError::validation(vec![FieldError::new(
+            "status",
+            "issue the draft from the invoice view instead of editing its status",
+        )]));
+    }
+    let edited = assemble_edit(&app, &invoice, &edit)?;
+    let candidate = Invoice {
+        document: edited.document,
+        currency: edited.currency,
+        lines: edited.lines,
+        total_minor: edited.total_minor,
+        tax_hundredths: edited.tax_hundredths,
+        discount_hundredths: edited.discount_hundredths,
         // #256: the loaded draft is not read again below — move it into the
         // candidate instead of deep-cloning the whole document (the store then
         // stamps identity in place rather than cloning again).
@@ -402,4 +532,139 @@ pub async fn update_invoice_draft(
     )
     .await;
     Ok(Json(updated).into_response())
+}
+
+/// Create a correction revision of an issued or imported invoice. The
+/// original document and its archived PDF are left intact; the revision keeps
+/// the number, gets its own id and (unless it is a draft) its own PDF, and the
+/// original is marked `superseded_by`. The reviewed status may return the
+/// corrected document to a draft so it can be edited and issued again.
+pub async fn revise_invoice(
+    State(app): State<AppState>,
+    actor: AuthUser,
+    Path(id): Path<Uuid>,
+    ValidJson(edit): ValidJson<InvoiceEditInput>,
+) -> ApiResult {
+    let invoice = get_invoice_or_404(&app, id)?;
+    if invoice.status == crate::domain::InvoiceStatus::Draft {
+        return Err(ApiError::conflict(
+            "a draft invoice is edited in place, not revised",
+        ));
+    }
+    if invoice.superseded_by.is_some() {
+        return Err(ApiError::conflict(
+            "this invoice already has a correction revision",
+        ));
+    }
+    let edited = assemble_edit(&app, &invoice, &edit)?;
+    let status = edit.status.unwrap_or(invoice.status);
+    let mut errors = Vec::new();
+    validate_status(status, edited.total_minor, &invoice.payments, &mut errors);
+    if !errors.is_empty() {
+        return Err(ApiError::validation(errors));
+    }
+    let document_due = edited.document.due_date;
+    let document_terms = edited.document.payment_terms;
+    let now = app.clock.now();
+    let mut revision = Invoice {
+        imported: None,
+        supersedes: Some(invoice.id),
+        superseded_by: None,
+        document: edited.document,
+        id: Uuid::new_v4(),
+        number: invoice.number.clone(),
+        customer_id: invoice.customer_id,
+        currency: edited.currency,
+        period_from: invoice.period_from,
+        period_to: invoice.period_to,
+        lines: edited.lines,
+        total_minor: edited.total_minor,
+        status,
+        created_at: now,
+        issued_at: None,
+        due_date: None,
+        paid_at: None,
+        payment_reference: invoice.payment_reference.clone(),
+        tax_hundredths: edited.tax_hundredths,
+        discount_hundredths: edited.discount_hundredths,
+        pdf: None,
+        payments: invoice.payments.clone(),
+        write_off_reason: String::new(),
+        written_off_at: None,
+        // Resolved below from the reviewed document/customer/template, so a
+        // raw placeholder subject can never be frozen onto the revision.
+        subject: String::new(),
+        terms: invoice.terms,
+    };
+    match status {
+        crate::domain::InvoiceStatus::Draft => {
+            revision.payments.clear();
+        }
+        crate::domain::InvoiceStatus::Issued | crate::domain::InvoiceStatus::PartlyPaid => {
+            revision.issued_at = Some(now);
+            revision.due_date = document_due.or(invoice.due_date);
+            revision.terms = document_terms.or(invoice.terms);
+        }
+        crate::domain::InvoiceStatus::Paid => {
+            revision.issued_at = Some(now);
+            revision.due_date = document_due.or(invoice.due_date);
+            revision.terms = document_terms.or(invoice.terms);
+            revision.paid_at = invoice.paid_at.or(Some(now));
+        }
+        crate::domain::InvoiceStatus::WrittenOff => {
+            revision.issued_at = Some(now);
+            revision.due_date = document_due.or(invoice.due_date);
+            revision.terms = document_terms.or(invoice.terms);
+            revision.paid_at = invoice.paid_at;
+            revision.written_off_at = invoice.written_off_at.or(Some(now));
+            revision.write_off_reason = if invoice.write_off_reason.is_empty() {
+                "Status set on correction revision".into()
+            } else {
+                invoice.write_off_reason.clone()
+            };
+        }
+    }
+    if status != crate::domain::InvoiceStatus::Draft {
+        // Resolve the reviewed subject exactly as issuing would: the editor may
+        // carry the org template's placeholders (`%customer_name% ...`), and
+        // those must be interpolated, never frozen raw onto the revision.
+        let customer = app
+            .store
+            .get_customer(invoice.customer_id)?
+            .ok_or_else(|| ApiError::not_found("customer"))?;
+        let template = load_template(&app)?;
+        let resolved = content_for(&revision, &customer, &template);
+        revision.subject = resolved.subject.unwrap_or_default();
+    }
+    let pdf = if status == crate::domain::InvoiceStatus::Draft {
+        None
+    } else {
+        Some(super::render_pdf_now(&app, &revision)?)
+    };
+    let saved = app
+        .store
+        .create_invoice_revision(invoice.id, revision, pdf.as_deref(), now)?;
+    record_timeline(
+        &app,
+        saved.id,
+        InvoiceTimelineEventKind::Created,
+        format!(
+            "Correction revision of {} ({} lines).",
+            invoice.number,
+            saved.lines.len()
+        ),
+        actor.0.name.clone(),
+        None,
+    )
+    .await;
+    record_timeline(
+        &app,
+        invoice.id,
+        InvoiceTimelineEventKind::Updated,
+        format!("Superseded by correction revision {}.", saved.id),
+        actor.0.name.clone(),
+        None,
+    )
+    .await;
+    Ok((StatusCode::CREATED, Json(saved)).into_response())
 }
