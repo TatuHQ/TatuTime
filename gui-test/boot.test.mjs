@@ -971,10 +971,10 @@ api.requestBlob = async (method, url, body) => {
   context.iw.step = 3;
   context.iwShow();
   await context.iwRefreshPreview();
-  assert.equal(window.previewCalls.length, 1, 'one stateless preview request');
-  assert.equal(window.previewCalls[0].method, 'POST');
-  assert.equal(window.previewCalls[0].url, '/invoices/preview/pdf');
-  assert.deepEqual(window.previewCalls[0].body, {
+  assert.equal(dom.window.previewCalls.length, 1, 'one stateless preview request');
+  assert.equal(dom.window.previewCalls[0].method, 'POST');
+  assert.equal(dom.window.previewCalls[0].url, '/invoices/preview/pdf');
+  assert.deepEqual(JSON.parse(JSON.stringify(dom.window.previewCalls[0].body)), {
     customer_id: 'c1',
     from: '2026-10-01',
     to: '2026-10-31',
@@ -987,8 +987,8 @@ api.requestBlob = async (method, url, body) => {
   // Changing the grouping re-renders the same candidate with the new choice.
   document.getElementById('iw-grouping').value = 'single';
   document.getElementById('iw-grouping').dispatchEvent(new dom.window.Event('change', { bubbles: true }));
-  await waitFor(() => window.previewCalls.length === 2, { message: 'grouping change to refresh the preview' });
-  assert.equal(window.previewCalls[1].body.line_grouping, 'single');
+  await waitFor(() => dom.window.previewCalls.length === 2, { message: 'grouping change to refresh the preview' });
+  assert.equal(dom.window.previewCalls[1].body.line_grouping, 'single');
   dom.window.close();
 });
 

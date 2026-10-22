@@ -409,7 +409,7 @@ test('Company pairs the legal id with its printed label and explains the From bl
     assert.equal(label.labels.length, 1);
     assert.match(label.labels[0].textContent, /legal \/ registration\s+id\s+label/i);
     const help = document.getElementById('org-legal-group-help');
-    assert.match(help.textContent, /VAT \/ company id/, 'the default wording is explained');
+    assert.match(help.textContent, /Tax ID/, 'the default wording is explained');
     assert.match(help.textContent, /leave it empty/i);
     const note = document.getElementById('org-legal-group').querySelector('p.p-form-help-text');
     assert.match(note.textContent, /From/, 'the note points at the invoice From block');

@@ -144,19 +144,16 @@ test('clicking #ip-send opens the recipient dialog and sends nothing', async () 
 });
 
 test('issuing a draft opens the recipient dialog for the issued invoice', async () => {
-    const { dom, document, window, t } = setup();
-    await settleBoot(document);
     const issued = { ...INVOICE, status: 'issued' };
-    window.eval(`
-      askConfirm = async () => true;
-      dueDatePreview = async () => null;
-      refreshInvoices = async () => {};
-      api.post = async (path, body) => {
-        window.calls.push({ path, body });
-        return ${JSON.stringify(issued)};
-      };
-    `);
-    await t.issueInvoice(INVOICE);
+    const { dom, document, window, t } = setup({ postResult: issued });
+    await settleBoot(document);
+    const draft = { ...INVOICE, period_to: '2026-09-30' };
+    const pending = t.issueInvoice(draft);
+    await waitFor(() => document.getElementById('app-dialog').open, {
+        message: 'the issue confirmation',
+    });
+    click(window, document.getElementById('dlg-ok'));
+    await pending;
     await waitFor(() => isOpen(dlgOf(document)), { message: 'the recipient dialog after issue' });
     assert.equal(t.calls().length, 1, 'issuing posts once and never sends');
     assert.equal(t.calls()[0].path, '/invoices/i1/issue');
@@ -197,7 +194,7 @@ test('the receipt option stays hidden when the invoice has no stored receipt', a
     const { dom, document, t } = setup();
     await t.openSendEmailDialog(INVOICE, null);
     assert.equal(document.getElementById('send-email-receipts-group').hidden, true);
-    assert.deepEqual(t.calls(), [], 'opening the dialog still sends nothing');
+    assert.equal(t.calls().length, 0, 'opening the dialog still sends nothing');
     dom.window.close();
 });
 
