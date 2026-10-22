@@ -28,7 +28,7 @@ non-root uid **10001**, and only `/data` writable.
 
 | Item | Value |
 |---|---|
-| Image | `ghcr.io/tucanotechnology/tucanotime:latest` (published by CI) |
+| Image | `ghcr.io/tucanotechnology/tucanotime:latest` (published by CI; pin a release with `:<version>`) |
 | Runtime base | `gcr.io/distroless/cc-debian13:nonroot` — **no shell**, no package manager |
 | User | `10001:10001` (numeric, fixed in the image) |
 | Writable paths | `/data` (bind mount) and `/tmp` (tmpfs); nothing else |
@@ -132,19 +132,22 @@ CI publishes on every push to `main`
 
 ```
 ghcr.io/tucanotechnology/tucanotime:latest
+ghcr.io/tucanotechnology/tucanotime:<version>
 ghcr.io/tucanotechnology/tucanotime:sha-<short-sha>
 ```
 
-Published at `ghcr.io/tucanotechnology/tucanotime` as `:latest` and
-`:sha-<short>`. Check the registry package visibility: when it is public, an
+Published at `ghcr.io/tucanotechnology/tucanotime` as `:latest`, `:<version>`
+(the crate version of the release, the same number as the `v<version>` git tag)
+and `:sha-<short>`. Check the registry package visibility: when it is public, an
 anonymous `docker manifest inspect` succeeds and Unraid does **not** need
 registry credentials to pull `:latest`. Example reproducible pin:
 
 ```
-ghcr.io/tucanotechnology/tucanotime:sha-<short-sha>
+ghcr.io/tucanotechnology/tucanotime:<version>
 ```
 
-Use the `sha-`-prefixed tag, not a bare SHA, when you want a fixed build.
+Use `:<version>` to follow releases, or the `sha-`-prefixed tag (never a bare
+SHA) when you want one exact build.
 
 If the package is private, authenticate on Unraid once and pull:
 
