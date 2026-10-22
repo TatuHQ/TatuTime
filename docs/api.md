@@ -124,6 +124,12 @@ accordingly; expenses and manual lines always keep their own rows.
 the candidate document as a PDF (200, nothing persisted) for the creation
 wizard's live preview.
 
+`POST /api/invoices/{id}/email` accepts optional `include_receipts` (default
+false) to attach the stored receipt files of the invoice's expense lines. The
+response's `receipt_count` says how many were attached, and the `email_sent`
+timeline entry records their names. `GET /api/invoices/{id}/receipts` returns
+those names only (never the bytes) for the recipient dialog.
+
 This is an additive pre-1.0 contract revision shipped in application 0.1.65,
 not a new URL version. Existing request bodies remain valid. Consumers that
 validate responses against a closed schema must use the matching checked-in

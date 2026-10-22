@@ -22,7 +22,8 @@ pub use document::{
     invoice_document, invoice_pdf, invoice_pdf_preview, invoice_template_get, invoice_template_put,
 };
 pub use email::{
-    EmailCopyInput, InvoiceEmailInput, money_for_email, send_invoice_email, send_invoice_email_copy,
+    EmailCopyInput, InvoiceEmailInput, invoice_receipts_handler, money_for_email,
+    send_invoice_email, send_invoice_email_copy,
 };
 pub use lifecycle::{
     PayInput, WriteOffInput, create_invoice, delete_invoice, get_invoice_handler,

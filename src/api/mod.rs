@@ -781,12 +781,13 @@ pub use self::imports::{
 pub use self::invoicing::{
     InvoiceEditInput, InvoiceInput, ManualInvoiceInput, PayInput, SyncInput, create_invoice,
     create_item_type, create_manual_invoice, delete_invoice, delete_item_type, get_invoice_handler,
-    invoice_document, invoice_export_csv, invoice_pdf, invoice_pdf_preview, invoice_report_handler,
-    invoice_summary, invoice_template_get, invoice_template_preview, invoice_template_put,
-    invoice_timeline, issue_invoice, list_invoices, list_item_types, mark_invoice_sent,
-    money_for_email, org_get, org_put, pay_invoice, preview_invoice, preview_invoice_pdf,
-    revise_invoice, send_invoice_email, send_invoice_email_copy, sync_invoice, sync_status,
-    update_invoice_draft, update_item_type, write_off_invoice,
+    invoice_document, invoice_export_csv, invoice_pdf, invoice_pdf_preview,
+    invoice_receipts_handler, invoice_report_handler, invoice_summary, invoice_template_get,
+    invoice_template_preview, invoice_template_put, invoice_timeline, issue_invoice, list_invoices,
+    list_item_types, mark_invoice_sent, money_for_email, org_get, org_put, pay_invoice,
+    preview_invoice, preview_invoice_pdf, revise_invoice, send_invoice_email,
+    send_invoice_email_copy, sync_invoice, sync_status, update_invoice_draft, update_item_type,
+    write_off_invoice,
 };
 pub use self::people::{
     UserInput, UserPasswordInput, UserUpdateInput, change_user_password, create_customer,

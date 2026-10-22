@@ -34,6 +34,145 @@ pub fn money_for_email(minor: u64, currency: &str) -> String {
 pub struct InvoiceEmailInput {
     #[serde(default)]
     pub recipients: Vec<String>,
+    /// Attach the stored receipt files of the invoice's expense lines (#new).
+    /// Defaults to false so existing callers keep the invoice-PDF-only email.
+    #[serde(default)]
+    pub include_receipts: bool,
+}
+
+/// One receipt file attached to an invoice's expense lines, resolved from the
+/// stored expense documents (never from the invoice line snapshot).
+pub(crate) struct InvoiceReceipt {
+    pub expense_id: Uuid,
+    pub name: String,
+    pub b64: String,
+}
+
+/// The receipts this invoice can send: one per distinct expense line that has a
+/// stored receipt. Order follows the invoice lines. Files are not decoded here,
+/// so the read-only summary endpoint never pays for base64 decoding.
+pub(crate) fn invoice_receipts(
+    app: &AppState,
+    invoice: &crate::domain::Invoice,
+) -> Result<Vec<InvoiceReceipt>, ApiError> {
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    for line in &invoice.lines {
+        let Some(id) = line.expense_id else {
+            continue;
+        };
+        if !seen.insert(id) {
+            continue;
+        }
+        let Some(expense) = app.store.get_expense(id)? else {
+            continue;
+        };
+        let Some(b64) = expense
+            .receipt_b64
+            .as_deref()
+            .map(str::trim)
+            .filter(|b| !b.is_empty())
+        else {
+            continue;
+        };
+        out.push(InvoiceReceipt {
+            expense_id: id,
+            name: receipt_filename(expense.receipt_name.as_deref(), expense.date),
+            b64: b64.to_string(),
+        });
+    }
+    Ok(out)
+}
+
+/// `GET /invoices/{id}/receipts` — names of the receipt files an email could
+/// attach, for the recipient dialog's include-receipts option. Never returns
+/// the bytes. Admin tier like the rest of the invoice surface.
+pub async fn invoice_receipts_handler(
+    State(app): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> ApiResult {
+    let invoice = get_invoice_or_404(&app, id)?;
+    let receipts = invoice_receipts(&app, &invoice)?;
+    Ok(Json(serde_json::json!({
+        "receipts": receipts
+            .iter()
+            .map(|r| serde_json::json!({
+                "expense_id": r.expense_id,
+                "name": r.name,
+            }))
+            .collect::<Vec<_>>(),
+    }))
+    .into_response())
+}
+
+/// Sanitise a stored receipt name for `Content-Disposition`: keep the extension
+/// and readable stem, drop a path (a receipt never has one) and any character
+/// that could break the header. A nameless receipt gets a date-based name.
+fn receipt_filename(name: Option<&str>, date: chrono::NaiveDate) -> String {
+    let raw = name.unwrap_or("").trim();
+    let base = raw.rsplit(['/', '\\']).next().unwrap_or("");
+    let mut cleaned: String = base
+        .chars()
+        .map(|c| {
+            if c.is_control() || matches!(c, '"' | ';' | '\r' | '\n') {
+                '_'
+            } else {
+                c
+            }
+        })
+        .collect();
+    cleaned = cleaned.trim().trim_matches('.').to_string();
+    if cleaned.is_empty() {
+        return format!("receipt-{date}");
+    }
+    // Keep header sizes sane while preserving the extension.
+    const MAX: usize = 120;
+    if cleaned.chars().count() > MAX {
+        let (stem, ext) = cleaned
+            .rsplit_once('.')
+            .filter(|(_, ext)| ext.len() <= 12)
+            .unwrap_or((cleaned.as_str(), ""));
+        let ext_len = if ext.is_empty() { 0 } else { ext.len() + 1 };
+        let take = MAX.saturating_sub(ext_len);
+        let stem: String = stem.chars().take(take).collect();
+        cleaned = if ext.is_empty() {
+            stem
+        } else {
+            format!("{stem}.{ext}")
+        };
+    }
+    cleaned
+}
+
+/// Decode the resolved receipts and enforce the per-email caps before anything
+/// is sent. A malformed receipt is a hard error: silently dropping a file the
+/// admin asked to include would misrepresent the delivery.
+fn receipt_attachments(receipts: &[InvoiceReceipt]) -> Result<Vec<(String, Vec<u8>)>, ApiError> {
+    const MAX_RECEIPTS: usize = 20;
+    const MAX_TOTAL_BYTES: usize = 25_000_000;
+    if receipts.len() > MAX_RECEIPTS {
+        return Err(ApiError::validation(vec![FieldError::new(
+            "include_receipts",
+            format!("at most {MAX_RECEIPTS} expense receipts per email"),
+        )]));
+    }
+    use base64::Engine;
+    let mut out = Vec::with_capacity(receipts.len());
+    let mut total = 0usize;
+    for receipt in receipts {
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(receipt.b64.as_bytes())
+            .map_err(|_| ApiError::internal("an expense receipt is not valid base64".into()))?;
+        total = total.saturating_add(bytes.len());
+        out.push((receipt.name.clone(), bytes));
+    }
+    if total > MAX_TOTAL_BYTES {
+        return Err(ApiError::validation(vec![FieldError::new(
+            "include_receipts",
+            "expense receipts exceed the 25 MB total email attachment limit",
+        )]));
+    }
+    Ok(out)
 }
 
 /// Emails an issued invoice to the customer's billing address (#35), or to an
@@ -59,6 +198,7 @@ pub async fn send_invoice_email(
     // top-level email still works for customers without contacts. An explicit
     // list is used verbatim (order preserved, case-insensitive de-duplication)
     // and does not require the customer to have a billing address.
+    let include_receipts = input.as_ref().is_some_and(|body| body.include_receipts);
     let requested = input.map(|body| body.recipients).unwrap_or_default();
     let recipients = crate::email::resolve_recipients(&requested, Some(customer.billing_email()))
         .map_err(|errors| {
@@ -70,6 +210,16 @@ pub async fn send_invoice_email(
         )
     })?;
     let (filename, pdf) = invoice_pdf_for_delivery(&app, &invoice)?;
+    let receipts = if include_receipts {
+        invoice_receipts(&app, &invoice)?
+    } else {
+        Vec::new()
+    };
+    let receipt_files = receipt_attachments(&receipts)?;
+    let receipt_count = receipt_files.len();
+    let mut attachments = vec![(filename, pdf)];
+    let receipt_names: Vec<String> = receipt_files.iter().map(|(name, _)| name.clone()).collect();
+    attachments.extend(receipt_files);
     let amount = money_for_email(invoice.total_minor, &invoice.currency.0);
     let due = invoice.due_date.map(|d| d.to_string());
     let org = org_for(&app)?;
@@ -80,7 +230,7 @@ pub async fn send_invoice_email(
         .payment_details
         .as_ref()
         .and_then(|p| p.email_block());
-    let text = crate::email::render_invoice_email(
+    let mut text = crate::email::render_invoice_email(
         &customer.name,
         &invoice.number,
         &amount,
@@ -89,6 +239,13 @@ pub async fn send_invoice_email(
         true,
         payment.as_deref(),
     );
+    if receipt_count > 0 {
+        text.push_str(&format!(
+            "\n\n{} expense receipt{} attached for your reference.",
+            receipt_count,
+            if receipt_count == 1 { "" } else { "s" }
+        ));
+    }
     // The document's own snapshot is the first word on the subject (phase 2):
     // whatever `invoice.subject` reads on the PDF is what the email carries.
     // Otherwise the live precedence still applies (customer override → org
@@ -112,7 +269,7 @@ pub async fn send_invoice_email(
         subject,
         text,
         html,
-        attachment: Some((filename, pdf)),
+        attachments,
         from_name: sender_field(&profile.from_name),
         reply_to: sender_field(&profile.reply_to),
     };
@@ -166,11 +323,29 @@ pub async fn send_invoice_email(
         meta.insert("from_email".into(), serde_json::Value::from(from_email));
     }
     meta.insert("transport".into(), serde_json::Value::from(transport));
+    if !receipt_names.is_empty() {
+        meta.insert(
+            "receipts".into(),
+            serde_json::Value::from(receipt_names.clone()),
+        );
+        meta.insert(
+            "receipt_count".into(),
+            serde_json::Value::from(receipt_count),
+        );
+    }
+    let receipt_note = if receipt_count == 0 {
+        String::new()
+    } else {
+        format!(
+            ", with {receipt_count} expense receipt{}",
+            if receipt_count == 1 { "" } else { "s" }
+        )
+    };
     record_timeline(
         &app,
         invoice.id,
         InvoiceTimelineEventKind::EmailSent,
-        format!("Sent invoice to {sent_to}, from {from_display}."),
+        format!("Sent invoice to {sent_to}, from {from_display}{receipt_note}."),
         actor.0.name.clone(),
         Some(meta),
     )
@@ -182,6 +357,7 @@ pub async fn send_invoice_email(
         "sent_to": sent_to,
         "recipients": recipients,
         "transport": transport,
+        "receipt_count": receipt_count,
     }))
     .into_response())
 }
@@ -251,7 +427,7 @@ pub async fn send_invoice_email_copy(
         subject,
         text,
         html: None,
-        attachment: Some((filename, pdf)),
+        attachments: vec![(filename, pdf)],
         // Copy email carries the same configured sender identity (#146).
         from_name: sender_field(&profile.from_name),
         reply_to: sender_field(&profile.reply_to),

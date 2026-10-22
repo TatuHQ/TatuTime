@@ -260,7 +260,7 @@ impl Job for EmailReminderJob {
                 subject: format!("Overdue invoice {}", inv.number),
                 text,
                 html: None,
-                attachment,
+                attachments: attachment.into_iter().collect(),
                 // Same configured sender identity as the API paths (#146).
                 from_name: sender_opt(&self.store).0,
                 reply_to: sender_opt(&self.store).1,

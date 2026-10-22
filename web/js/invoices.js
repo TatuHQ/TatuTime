@@ -339,6 +339,7 @@ const sendEmail = {
   opener: null,
   defaultRecipient: '',
   configured: true,
+  receipts: [],
 };
 
 /// Addresses known for a customer, billing first. The flagged billing contact
@@ -428,6 +429,45 @@ function renderSendEmailCandidates(candidates) {
   $('send-email-empty').hidden = candidates.length !== 0;
 }
 
+/// The expense receipt files an email can carry: names only, resolved by the
+/// server from the invoice's expense lines. A 403/404 leaves the option hidden;
+/// it never blocks opening the dialog.
+async function invoiceReceiptCandidates(inv) {
+  if (!inv?.id) return [];
+  try {
+    const data = await api.get(`/invoices/${inv.id}/receipts`);
+    return (data.receipts || []).filter((receipt) => receipt && receipt.name);
+  } catch {
+    return [];
+  }
+}
+
+function renderReceiptOption(receipts) {
+  sendEmail.receipts = receipts;
+  const group = $('send-email-receipts-group');
+  if (!group) return;
+  group.hidden = receipts.length === 0;
+  // Opt-in: a receipt can carry personal or third-party information, so the
+  // admin ticks it deliberately rather than sending it by default.
+  $('send-email-receipts').checked = false;
+  $('send-email-receipts-count').textContent = String(receipts.length);
+  const list = $('send-email-receipts-list');
+  list.textContent = '';
+  for (const receipt of receipts) {
+    list.appendChild(el('li', { text: receipt.name }));
+  }
+}
+
+function resetReceiptOption() {
+  sendEmail.receipts = [];
+  const group = $('send-email-receipts-group');
+  if (group) group.hidden = true;
+  const list = $('send-email-receipts-list');
+  if (list) list.textContent = '';
+  const count = $('send-email-receipts-count');
+  if (count) count.textContent = '0';
+}
+
 async function resolveCustomer(customerId) {
   const known = state.customers.find((c) => c.id === customerId);
   if (known) return known;
@@ -452,10 +492,15 @@ export async function openSendEmailDialog(inv, opener = null) {
   $('send-email-extra').value = '';
   $('send-email-settings').dataset.route = EMAIL_SETTINGS_ROUTE;
   $('send-email-invoice').textContent = `${inv.number || 'Draft'} — ${customerName(inv.customer_id)}`;
-  const customer = await resolveCustomer(inv.customer_id);
+  resetReceiptOption();
+  const [customer, receipts] = await Promise.all([
+    resolveCustomer(inv.customer_id),
+    invoiceReceiptCandidates(inv),
+  ]);
   const candidates = emailCandidates(customer);
   sendEmail.defaultRecipient = (candidates.find((c) => c.checked) || {}).email || '';
   renderSendEmailCandidates(candidates);
+  renderReceiptOption(receipts);
   if (!(dlg.open === true || dlg.hasAttribute('open'))) {
     if (typeof dlg.showModal === 'function') dlg.showModal();
     else dlg.setAttribute('open', '');
@@ -492,6 +537,7 @@ export function closeSendEmailDialog() {
   const opener = sendEmail.opener;
   sendEmail.invoice = null;
   sendEmail.opener = null;
+  resetReceiptOption();
   $('send-email-send').disabled = false;
   $('send-email-send').removeAttribute('aria-disabled');
   $('send-email-error').hidden = true;
@@ -533,15 +579,17 @@ export async function confirmSendEmail() {
     showFormError($('send-email-error'), new Error('At most 10 recipients can be emailed at once.'));
     return;
   }
+  const includeReceipts = sendEmail.receipts.length > 0 && $('send-email-receipts').checked;
   const onlyDefault = recipients.length === 1
     && extra.emails.length === 0
+    && !includeReceipts
     && sendEmail.defaultRecipient !== ''
     && recipients[0].toLowerCase() === sendEmail.defaultRecipient.toLowerCase();
   let res;
   try {
     res = await singleFlight($('send-email-send'), () => api.post(
       `/invoices/${inv.id}/email`,
-      onlyDefault ? undefined : { recipients },
+      onlyDefault ? undefined : { recipients, include_receipts: includeReceipts },
     ));
   } catch (err) {
     // 409 draft, 422 validation/no billing email and 502 transport failures all
@@ -553,7 +601,10 @@ export async function confirmSendEmail() {
   const delivered = Array.isArray(res.recipients) && res.recipients.length
     ? res.recipients.join(', ')
     : res.sent_to;
-  const message = emailOutcome(res, `Invoice emailed to ${delivered} (PDF attached).`);
+  const attached = res.receipt_count > 0
+    ? `PDF and ${res.receipt_count} expense receipt${res.receipt_count === 1 ? '' : 's'} attached`
+    : 'PDF attached';
+  const message = emailOutcome(res, `Invoice emailed to ${delivered} (${attached}).`);
   $('send-email-result').textContent = message;
   $('send-email-result').hidden = false;
   announce(message);
@@ -1242,6 +1293,9 @@ export function showDeliveryRecord(ev) {
   row('To', meta.to);
   row('Subject', meta.subject);
   row('From', meta.from_email ? `${meta.from_name} <${meta.from_email}>` : meta.from_name);
+  if (Array.isArray(meta.receipts) && meta.receipts.length) {
+    row('Expense receipts', meta.receipts.join(', '));
+  }
   const delivered = meta.transport === 'smtp';
   row('Transport', delivered ? 'smtp' : `${meta.transport || 'unknown'} — not delivered`);
   $('message-note').textContent = delivered

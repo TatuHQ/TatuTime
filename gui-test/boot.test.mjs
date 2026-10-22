@@ -628,7 +628,7 @@ api.get = async (path) => {
   return { events: [
     { kind: 'email_sent', description: 'Sent invoice to ap@x.test, from Tucano <a@x.test>.',
       actor_name: 'Emanuele Ciurleo', at: '2026-10-01T11:26:00Z',
-      meta: { to: 'ap@x.test', subject: 'INV-0001', from_name: 'Tucano', from_email: 'a@x.test', transport: 'smtp' } },
+      meta: { to: 'ap@x.test', subject: 'INV-0001', from_name: 'Tucano', from_email: 'a@x.test', transport: 'smtp', receipts: ['taxi.png'] } },
     { kind: 'created', description: 'Invoice created.', actor_name: 'Emanuele Ciurleo', at: '2026-09-28T10:12:00Z' },
   ] };
 };
@@ -673,6 +673,8 @@ api.get = async (path) => {
   assert.match(rec.textContent, /ap@x\.test/, 'the recipient that was actually used');
   assert.match(rec.textContent, /INV-0001/, 'the retained subject');
   assert.match(rec.textContent, /Tucano <a@x\.test>/, 'the From identity');
+  assert.match(rec.textContent, /Expense receipts/, 'the included receipt is history');
+  assert.match(rec.textContent, /taxi\.png/, 'the receipt filename is named');
   assert.ok([...rec.children].every((n) => n.children.length === 0), 'the record is text only');
   assert.match(document.getElementById('message-note').textContent, /not retained/);
   assert.ok(!/Apologies|Dear/.test(document.getElementById('message-dialog').textContent),

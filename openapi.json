@@ -6842,6 +6842,11 @@
                       "maxLength": 320
                     },
                     "description": "Explicit recipients. Absent or empty keeps the customer's billing address."
+                  },
+                  "include_receipts": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Attach the stored receipt files of this invoice's expense lines. At most 20 files and 25 MB in total; malformed receipts are refused before sending."
                   }
                 },
                 "additionalProperties": false
@@ -6867,7 +6872,8 @@
                   "required": [
                     "sent_to",
                     "recipients",
-                    "transport"
+                    "transport",
+                    "receipt_count"
                   ],
                   "properties": {
                     "sent_to": {
@@ -6889,6 +6895,11 @@
                         "disabled"
                       ],
                       "description": "Delivery path. \"disabled\" = logged, NOT sent (no smtp.host configured)."
+                    },
+                    "receipt_count": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "description": "Expense receipt files actually attached (0 when the option was off or no receipt was stored)."
                     }
                   },
                   "additionalProperties": false
@@ -9335,6 +9346,75 @@
                     },
                     "html": {
                       "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/api/invoices/{id}/receipts": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "listInvoiceReceipts",
+        "x-admin-only": true,
+        "tags": [
+          "invoices"
+        ],
+        "summary": "Expense receipt files available to attach to the invoice email",
+        "description": "Admin only. Returns one entry per distinct expense line on the invoice that has a stored receipt. Names only — the bytes stay on the server. Used by the email recipient dialog to offer the include-receipts option.",
+        "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "200": {
+            "description": "Receipt summaries.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "receipts"
+                  ],
+                  "properties": {
+                    "receipts": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "expense_id",
+                          "name"
+                        ],
+                        "properties": {
+                          "expense_id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "name": {
+                            "type": "string"
+                          }
+                        },
+                        "additionalProperties": false
+                      }
                     }
                   },
                   "additionalProperties": false

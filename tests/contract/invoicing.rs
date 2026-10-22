@@ -508,8 +508,8 @@ async fn invoice_email_carries_the_archived_pdf_attachment() {
     let msgs = app.email.messages();
     assert_eq!(msgs.len(), 1);
     let (name, bytes) = msgs[0]
-        .attachment
-        .as_ref()
+        .attachments
+        .first()
         .expect("the invoice email carries the PDF (#113)");
     assert_eq!(*name, format!("{}.pdf", issued["number"].as_str().unwrap()));
     assert_eq!(*bytes, pdf, "the attachment is the archived document");
@@ -529,6 +529,113 @@ async fn invoice_email_carries_the_archived_pdf_attachment() {
     let mime = tucano_time::email::build_mime(&msgs[0]).expect("the message builds");
     assert!(mime.contains("Content-Type: application/pdf"));
     assert!(mime.contains("base64"));
+}
+
+#[tokio::test]
+async fn invoice_email_can_attach_expense_receipts_and_records_them_in_history() {
+    let (app, _d) = app().await;
+    let c = new_customer(&app, "Receipt Co", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap();
+    let (se, expense) = json_req(
+        &app,
+        "POST",
+        "/api/expenses",
+        Some(json!({
+            "date":"2026-10-02","customer_id":cid,"amount_minor":500,"currency":"EUR",
+            "receipt_name":"hotel.png","receipt_b64":"aGVsbG8="
+        })),
+    )
+    .await;
+    assert_eq!(se, StatusCode::CREATED, "{expense}");
+    let (si, invoice) = json_req(
+        &app,
+        "POST",
+        "/api/invoices",
+        Some(json!({"customer_id":cid,"from":"2026-10-01","to":"2026-10-31"})),
+    )
+    .await;
+    assert_eq!(si, StatusCode::CREATED, "{invoice}");
+    let iid = invoice["id"].as_str().unwrap().to_string();
+    let (s_issue, issued) =
+        json_req(&app, "POST", &format!("/api/invoices/{iid}/issue"), None).await;
+    assert_eq!(s_issue, StatusCode::OK, "{issued}");
+
+    // The dialog's summary endpoint names the receipt, never its bytes.
+    let (sr, receipts) =
+        json_req(&app, "GET", &format!("/api/invoices/{iid}/receipts"), None).await;
+    assert_eq!(sr, StatusCode::OK, "{receipts}");
+    assert_eq!(receipts["receipts"].as_array().unwrap().len(), 1);
+    assert_eq!(receipts["receipts"][0]["name"], "hotel.png");
+    assert!(
+        receipts["receipts"][0].get("receipt_b64").is_none(),
+        "the summary must not ship the file"
+    );
+
+    // Opting in attaches both the invoice PDF and the receipt.
+    let (semail, sent) = json_req(
+        &app,
+        "POST",
+        &format!("/api/invoices/{iid}/email"),
+        Some(json!({"recipients":["billing@receipt.test"],"include_receipts":true})),
+    )
+    .await;
+    assert_eq!(semail, StatusCode::OK, "{sent}");
+    assert_eq!(sent["receipt_count"], 1);
+    let messages = app.email.messages();
+    let msg = messages.last().expect("the email was recorded");
+    assert_eq!(msg.attachments.len(), 2, "invoice PDF + one receipt");
+    let (_, receipt_bytes) = msg
+        .attachments
+        .iter()
+        .find(|(name, _)| name == "hotel.png")
+        .expect("the receipt rides along");
+    assert_eq!(receipt_bytes, b"hello");
+    assert!(
+        msg.text.contains("1 expense receipt attached"),
+        "{}",
+        msg.text
+    );
+    let mime = tucano_time::email::build_mime(msg).expect("multi-attachment MIME builds");
+    assert!(mime.contains("Content-Type: image/png"), "{mime}");
+    assert!(mime.contains("filename=\"hotel.png\""), "{mime}");
+    assert!(mime.contains("Content-Type: application/pdf"), "{mime}");
+
+    // The delivery is history: the timeline names the receipt, so the admin can
+    // prove later what left the building.
+    let (st, timeline) =
+        json_req(&app, "GET", &format!("/api/invoices/{iid}/timeline"), None).await;
+    assert_eq!(st, StatusCode::OK, "{timeline}");
+    let event = timeline["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["kind"] == "email_sent")
+        .expect("email_sent history entry");
+    assert!(
+        event["description"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("with 1 expense receipt"),
+        "{event}"
+    );
+    assert_eq!(event["meta"]["receipts"][0], "hotel.png");
+    assert_eq!(event["meta"]["receipt_count"], 1);
+
+    // Without the option the historical PDF-only email is unchanged.
+    let (splain, plain) = json_req(
+        &app,
+        "POST",
+        &format!("/api/invoices/{iid}/email"),
+        Some(json!({"recipients":["billing@receipt.test"]})),
+    )
+    .await;
+    assert_eq!(splain, StatusCode::OK, "{plain}");
+    assert_eq!(plain["receipt_count"], 0);
+    assert_eq!(
+        app.email.messages().last().unwrap().attachments.len(),
+        1,
+        "receipts are opt-in"
+    );
 }
 
 #[tokio::test]
@@ -561,7 +668,7 @@ async fn legacy_draft_stamp_is_removed_only_from_the_delivery_copy() {
         json_req(&app, "POST", &format!("/api/invoices/{iid}/email"), None).await;
     assert_eq!(status, StatusCode::OK, "{response}");
     let messages = app.email.messages();
-    let (_, attachment) = messages[0].attachment.as_ref().unwrap();
+    let (_, attachment) = messages[0].attachments.first().unwrap();
     assert!(
         !has_stamp(attachment, "DRAFT"),
         "legacy DRAFT stamp must not reach the customer"

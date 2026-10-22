@@ -37,6 +37,7 @@ function setup({
     postResult,
     postError = null,
     org = { accountant_email: 'books@tucanotime.test' },
+    receipts = [],
 } = {}) {
     const dom = new JSDOM(html, { runScripts: 'outside-only', url: 'http://localhost/' });
     const { window } = dom;
@@ -53,6 +54,7 @@ function setup({
       window.calls = [];
       window.__adminEmail = ${JSON.stringify(adminEmail)};
       window.__org = ${JSON.stringify(org)};
+      window.__receipts = ${JSON.stringify(receipts)};
       window.__postError = ${JSON.stringify(postError)};
       window.__postResult = ${JSON.stringify(postResult || {
         sent_to: 'ada@tucanotime.test',
@@ -71,6 +73,7 @@ function setup({
           return window.__adminEmail;
         }
         if (path === '/admin/org') return window.__org;
+        if (path === '/invoices/i1/receipts') return { receipts: window.__receipts };
         if (path === '/customers') return { customers: [${JSON.stringify(CUSTOMER)}] };
         return {};
       };
@@ -163,6 +166,38 @@ test('issuing a draft opens the recipient dialog for the issued invoice', async 
     click(window, document.getElementById('send-email-close'));
     await waitFor(() => !isOpen(dlgOf(document)), { message: 'closing the dialog after issue' });
     assert.equal(t.calls().length, 1, 'closing the dialog sends nothing');
+    dom.window.close();
+});
+
+test('expense receipts are offered, listed and sent when requested', async () => {
+    const { dom, document, window, t } = setup({
+        receipts: [
+            { expense_id: 'x1', name: 'train-ticket.pdf' },
+            { expense_id: 'x2', name: 'hotel.jpg' },
+        ],
+    });
+    await t.openSendEmailDialog(INVOICE, null);
+    const group = document.getElementById('send-email-receipts-group');
+    const box = document.getElementById('send-email-receipts');
+    assert.equal(group.hidden, false, 'the option appears when receipts exist');
+    assert.equal(box.checked, false, 'receipts are opt-in');
+    assert.match(document.getElementById('send-email-receipts-count').textContent, /2/);
+    assert.match(document.getElementById('send-email-receipts-list').textContent, /train-ticket\.pdf/);
+    assert.match(document.getElementById('send-email-receipts-list').textContent, /hotel\.jpg/);
+    box.checked = true;
+    click(window, document.getElementById('send-email-send'));
+    await waitFor(() => t.calls().length === 1, { message: 'the send request with receipts' });
+    const body = t.calls()[0].body;
+    assert.equal(body.include_receipts, true, 'the flag travels with the send');
+    assert.deepEqual([...body.recipients], ['ada@tucanotime.test']);
+    dom.window.close();
+});
+
+test('the receipt option stays hidden when the invoice has no stored receipt', async () => {
+    const { dom, document, t } = setup();
+    await t.openSendEmailDialog(INVOICE, null);
+    assert.equal(document.getElementById('send-email-receipts-group').hidden, true);
+    assert.deepEqual(t.calls(), [], 'opening the dialog still sends nothing');
     dom.window.close();
 });
 

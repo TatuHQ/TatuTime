@@ -252,8 +252,15 @@ org template is never frozen onto a revision or its PDF.
   document are `dd/mm/yyyy`, and an issued invoice's due date carries the terms
   suffix from its own snapshot (`(Net 30)`, `(Due on receipt)`).
 - `POST /api/invoices/{id}/email` sends the invoice with the PDF attached to the
-  customer. `POST /api/invoices/{id}/email-copy` sends an ad-hoc copy to a third
-  party such as an accountant; it is audited but is not a customer delivery.
+  customer. When the invoice includes expense lines whose expense has a stored
+  receipt, the recipient dialog offers **Include expense receipts (N)**; ticking
+  it attaches those files (at most 20 and 25 MB total) alongside the invoice PDF.
+  The delivery's timeline entry (`email_sent`) records the receipt names and
+  count, and **View message** shows them, so the history says exactly what left
+  the building. `GET /api/invoices/{id}/receipts` returns the names only, for
+  that dialog; the bytes never leave the server until an email is sent.
+  `POST /api/invoices/{id}/email-copy` sends an ad-hoc copy to a third party
+  such as an accountant; it is audited but is not a customer delivery.
 - **The accountant copy is one click.** *Settings → Company* stores
   `OrgProfile.accountant_email`, and the register's **Email copy** action opens
   its dialog pre-filled with that address (editable, with a visible Cancel).

@@ -361,7 +361,7 @@ async fn email_uses_resolved_subject_and_html_body() {
     let html = msgs[0].html.as_ref().expect("template body -> html part");
     assert!(html.contains("Org footer body"), "{html}");
     // The PDF attachment still rides along.
-    assert!(msgs[0].attachment.is_some());
+    assert!(!msgs[0].attachments.is_empty());
 }
 
 #[tokio::test]
