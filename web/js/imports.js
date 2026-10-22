@@ -136,8 +136,8 @@ function wireImportTabs() {
     }
 }
 
-async function loadOptions() {
-    if (optionsLoaded) return;
+async function loadOptions(force = false) {
+    if (optionsLoaded && !force) return;
     const [users, customers, categories] = await Promise.all([
         api.get('/users'),
         api.get('/customers'),
@@ -264,6 +264,28 @@ function ensureCategory(sourceCategory) {
         draft.categories.push(choice);
     }
     return choice;
+}
+
+// The rendered control may outlive one `draft` object (a preview round-trip
+// replaces it with the server's stored choices). Mutations therefore locate
+// their row by its source key instead of relying on object identity.
+function customerIndex(sourceClient) {
+    return draft.customers.findIndex((entry) => entry.source_client === sourceClient);
+}
+
+function projectIndex(row) {
+    return draft.projects.findIndex((entry) =>
+        entry.source_client === row.source_client
+        && entry.source_project === row.source_project
+        && (entry.source_code || '') === (row.source_code || ''));
+}
+
+function taskIndex(sourceTask) {
+    return draft.tasks.findIndex((entry) => entry.source_task === sourceTask);
+}
+
+function categoryIndex(sourceCategory) {
+    return draft.categories.findIndex((entry) => entry.source_category === sourceCategory);
 }
 
 function pdfSuggestions(row) {
@@ -427,18 +449,25 @@ function renderMapping(preview) {
             [['', 'Select customer…'], ['__create', 'Create customer'],
             ...options.customers.map((customer) => [customer.id, customer.name])],
             (value) => {
-                if (value === '__create') {
-                    draft.customers[draft.customers.indexOf(choice)] = {
+                const at = customerIndex(client);
+                const next = value === '__create'
+                    ? {
                         action: 'create', source_client: client, name: client,
                         currency: 'EUR', default_rate_minor: 0,
-                    };
-                } else if (value) {
-                    draft.customers[draft.customers.indexOf(choice)] = {
-                        action: 'existing', source_client: client, customer_id: value,
-                    };
-                } else {
-                    choice.action = 'unresolved';
+                    }
+                    : value
+                        ? { action: 'existing', source_client: client, customer_id: value }
+                        : null;
+                if (next) {
+                    if (at >= 0) draft.customers[at] = next;
+                    else draft.customers.push(next);
+                } else if (at >= 0) {
+                    draft.customers[at].action = 'unresolved';
+                    draft.customers[at].customer_id = null;
                 }
+                // The project picker is scoped to the chosen customer, so it
+                // must be rebuilt as soon as that choice changes.
+                renderProjects();
             });
         return el('tr', {}, [
             el('th', { attrs: { scope: 'row' }, text: client }),
@@ -446,47 +475,81 @@ function renderMapping(preview) {
         ]);
     })));
 
+    const projectsHost = el('div', { cls: 'import-map-projects' });
     const projectKeys = new Set(rows.map((row) => `${row.source_client}|${row.source_project}|${row.source_code}`));
-    host.appendChild(section('Projects', ['Source project', 'Map to'], [...projectKeys].map((key) => {
-        const row = rows.find((entry) => `${entry.source_client}|${entry.source_project}|${entry.source_code}` === key);
-        const choice = ensureProject(row.source_client, row.source_project, row.source_code);
-        const selected = choice.action === 'existing' ? `${choice.customer_id}|${choice.code}`
-            : choice.action === 'create' ? '__create' : choice.action === 'skip' ? '__skip' : '';
-        const select = selectControl(`import-project-${key}`, selected,
-            [['', 'Select project…'], ['__skip', 'Skip project (expenses only)'], ['__create', 'Create project'],
-            ...options.projects.map((project) => [
-                `${project.customer_id}|${project.code}`,
-                `${project.customer_name} — ${project.code} ${project.name}`,
-            ])],
-            (value) => {
-                if (value === '__create') {
-                    draft.projects[draft.projects.indexOf(choice)] = {
-                        action: 'create', source_client: row.source_client,
-                        source_project: row.source_project, source_code: row.source_code,
-                        customer_id: null, code: row.source_code || '', name: row.source_project,
-                        currency: 'EUR', rate_minor: 0,
-                    };
-                } else if (value === '__skip') {
-                    draft.projects[draft.projects.indexOf(choice)] = {
-                        action: 'skip', source_client: row.source_client,
-                        source_project: row.source_project, source_code: row.source_code,
-                    };
-                } else if (value) {
-                    const [customerId, code] = value.split('|');
-                    draft.projects[draft.projects.indexOf(choice)] = {
-                        action: 'existing', source_client: row.source_client,
-                        source_project: row.source_project, source_code: row.source_code,
-                        customer_id: customerId, code,
-                    };
-                } else {
-                    choice.action = 'unresolved';
-                }
-            });
-        return el('tr', {}, [
-            el('th', { attrs: { scope: 'row' }, text: `${row.source_client} — ${row.source_project} (${row.source_code || 'no code'})` }),
-            el('td', {}, [labelFor(select.id, `Map project ${row.source_project}`), select]),
-        ]);
-    })));
+    const renderProjects = () => {
+        projectsHost.textContent = '';
+        projectsHost.appendChild(el('p', {
+            cls: 'p-form-help-text',
+            text: 'Projects are limited to the customer mapped above. Map a customer first to choose one of its projects.',
+        }));
+        projectsHost.appendChild(section('Projects', ['Source project', 'Map to'], [...projectKeys].map((key) => {
+            const row = rows.find((entry) => `${entry.source_client}|${entry.source_project}|${entry.source_code}` === key);
+            const choice = ensureProject(row.source_client, row.source_project, row.source_code);
+            const customer = ensureCustomer(row.source_client);
+            const customerId = customer.action === 'existing' ? customer.customer_id : null;
+            const available = customerId
+                ? options.projects.filter((project) => project.customer_id === customerId)
+                : [];
+            // A customer change invalidates a project mapped to the previous
+            // customer. Clear it rather than silently keeping a cross-customer
+            // reference the new picker does not show.
+            if (choice.action === 'existing'
+                && (!customerId || choice.customer_id !== customerId
+                    || !available.some((project) => project.code === choice.code))) {
+                choice.action = 'unresolved';
+                choice.customer_id = null;
+                choice.code = '';
+            }
+            const selected = choice.action === 'existing' ? `${choice.customer_id}|${choice.code}`
+                : choice.action === 'create' ? '__create' : choice.action === 'skip' ? '__skip' : '';
+            const select = selectControl(`import-project-${key}`, selected,
+                [['', 'Select project…'], ['__skip', 'Skip project (expenses only)'], ['__create', 'Create project'],
+                ...available.map((project) => [
+                    `${project.customer_id}|${project.code}`,
+                    `${project.customer_name} — ${project.code} ${project.name}`,
+                ])],
+                (value) => {
+                    const at = projectIndex(row);
+                    const next = value === '__create'
+                        ? {
+                            action: 'create', source_client: row.source_client,
+                            source_project: row.source_project, source_code: row.source_code,
+                            customer_id: null, code: row.source_code || '', name: row.source_project,
+                            currency: 'EUR', rate_minor: 0,
+                        }
+                        : value === '__skip'
+                            ? {
+                                action: 'skip', source_client: row.source_client,
+                                source_project: row.source_project, source_code: row.source_code,
+                            }
+                            : value
+                                ? (() => {
+                                    const [projectCustomerId, code] = value.split('|');
+                                    return {
+                                        action: 'existing', source_client: row.source_client,
+                                        source_project: row.source_project, source_code: row.source_code,
+                                        customer_id: projectCustomerId, code,
+                                    };
+                                })()
+                                : null;
+                    if (next) {
+                        if (at >= 0) draft.projects[at] = next;
+                        else draft.projects.push(next);
+                    } else if (at >= 0) {
+                        draft.projects[at].action = 'unresolved';
+                        draft.projects[at].customer_id = null;
+                        draft.projects[at].code = '';
+                    }
+                });
+            return el('tr', {}, [
+                el('th', { attrs: { scope: 'row' }, text: `${row.source_client} — ${row.source_project} (${row.source_code || 'no code'})` }),
+                el('td', {}, [labelFor(select.id, `Map project ${row.source_project}`), select]),
+            ]);
+        })));
+    };
+    renderProjects();
+    host.appendChild(projectsHost);
 
     const taskNames = [...new Set(rows.map((row) => row.source_task).filter(Boolean))];
     if (taskNames.length) {
@@ -498,16 +561,19 @@ function renderMapping(preview) {
                 [['', 'Select task…'], ['__skip', 'Skip task'], ['__create', 'Create task'],
                 ...options.tasks.map((entry) => [entry.code, `${entry.customer_name} / ${entry.project_code} — ${entry.code}`])],
                 (value) => {
-                    if (value === '__create') {
-                        draft.tasks[draft.tasks.indexOf(choice)] = {
-                            action: 'create', source_task: task, code: task, name: task,
-                        };
-                    } else if (value === '__skip') {
-                        draft.tasks[draft.tasks.indexOf(choice)] = { action: 'skip', source_task: task };
-                    } else if (value) {
-                        draft.tasks[draft.tasks.indexOf(choice)] = { action: 'existing', source_task: task, code: value };
-                    } else {
-                        choice.action = 'unresolved';
+                    const at = taskIndex(task);
+                    const next = value === '__create'
+                        ? { action: 'create', source_task: task, code: task, name: task }
+                        : value === '__skip'
+                            ? { action: 'skip', source_task: task }
+                            : value
+                                ? { action: 'existing', source_task: task, code: value }
+                                : null;
+                    if (next) {
+                        if (at >= 0) draft.tasks[at] = next;
+                        else draft.tasks.push(next);
+                    } else if (at >= 0) {
+                        draft.tasks[at].action = 'unresolved';
                     }
                 });
             return el('tr', {}, [
@@ -527,16 +593,17 @@ function renderMapping(preview) {
                 [['', 'Select category…'], ['__create', 'Create category'],
                 ...options.categories.map((entry) => [entry.id, entry.name])],
                 (value) => {
-                    if (value === '__create') {
-                        draft.categories[draft.categories.indexOf(choice)] = {
-                            action: 'create', source_category: category, name: category, billable: true,
-                        };
-                    } else if (value) {
-                        draft.categories[draft.categories.indexOf(choice)] = {
-                            action: 'existing', source_category: category, category_id: value,
-                        };
-                    } else {
-                        choice.action = 'unresolved';
+                    const at = categoryIndex(category);
+                    const next = value === '__create'
+                        ? { action: 'create', source_category: category, name: category, billable: true }
+                        : value
+                            ? { action: 'existing', source_category: category, category_id: value }
+                            : null;
+                    if (next) {
+                        if (at >= 0) draft.categories[at] = next;
+                        else draft.categories.push(next);
+                    } else if (at >= 0) {
+                        draft.categories[at].action = 'unresolved';
                     }
                 });
             return el('tr', {}, [
@@ -642,7 +709,7 @@ export async function refreshImports() {
 export async function newBatch() {
     clearError();
     try {
-        await loadOptions();
+        await loadOptions(true);
         const batch = await api.post(BASE, { namespace: 'harvest' });
         renderBatch(batch);
         resetPreview();
@@ -660,7 +727,7 @@ export async function openBatch(id) {
     resetPreview();
     $('import-commit').disabled = true;
     try {
-        await loadOptions();
+        await loadOptions(true);
         renderBatch(await api.get(`${BASE}/${id}`));
         const staged = ['time', 'expenses', 'invoices'].filter((kind) => currentBatch.files?.[kind]);
         if (staged.length && !staged.includes(importSource)) setImportSource(staged[0]);
@@ -701,6 +768,7 @@ async function saveMapping() {
     if (!id) return;
     clearError();
     try {
+        await loadOptions(true);
         serializeChoices();
         renderBatch(await api.put(`${BASE}/${id}/review`, draft));
         $('import-ready').textContent = 'Mapping saved. Recompute the preview.';
@@ -865,6 +933,7 @@ async function previewBatch() {
     if (!id) return;
     clearError();
     try {
+        await loadOptions(true);
         serializeChoices();
         renderBatch(await api.put(`${BASE}/${id}/review`, draft));
         const sent = JSON.stringify(draft);

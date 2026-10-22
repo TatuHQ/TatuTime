@@ -66,6 +66,8 @@ function preview(ready) {
 
 async function harness({
     ready = false, commitStatus = 200, getBatch = batch(), previewBody = null,
+    customers = [{ id: 'c1', name: 'Acme' }],
+    projectsByCustomer = { c1: [{ code: 'WEB', name: 'Website' }] },
 } = {}) {
     const calls = { commit: 0, preview: 0, discard: 0, uploads: [] };
     const dom = new JSDOM(html, {
@@ -80,9 +82,12 @@ async function harness({
         const method = opts.method || 'GET';
         const path = String(url);
         if (path.endsWith('/api/users')) return response(200, { users: [{ id: 'u1', name: 'Ada', email: 'ada@test.local' }] });
-        if (path.endsWith('/api/customers')) return response(200, { customers: [{ id: 'c1', name: 'Acme' }] });
+        if (path.endsWith('/api/customers')) return response(200, { customers });
         if (path.endsWith('/api/categories')) return response(200, { categories: [{ id: 'cat1', name: 'Travel' }] });
-        if (path.endsWith('/projects')) return response(200, { projects: [{ code: 'WEB', name: 'Website' }] });
+        if (path.endsWith('/projects')) {
+            const customerId = path.match(/customers\/([^/]+)\/projects$/)?.[1];
+            return response(200, { projects: projectsByCustomer[customerId] || [] });
+        }
         if (path.endsWith('/tasks')) return response(200, { tasks: [{ code: 'DESIGN', name: 'Design' }] });
         if (path.includes('/imports/harvest?limit=')) return response(200, { total: 0, items: [] });
         if (path.endsWith('/admin/imports/harvest') && method === 'POST') return response(201, batch());
@@ -158,6 +163,45 @@ test('source tabs build only their own mapping and link the original PDF', async
     assert.ok(pdf, 'invoice PDF link exists');
     assert.match(pdf.getAttribute('href'), /\/invoices\/b{64}\/pdf$/);
     assert.equal(document.getElementById('import-commit').disabled, true);
+    dom.window.close();
+});
+
+test('project choices are limited to the customer mapped for that source client', async () => {
+    const { dom } = await harness({
+        customers: [{ id: 'c1', name: 'Acme' }, { id: 'c2', name: 'Beta' }],
+        projectsByCustomer: {
+            c1: [{ code: 'WEB', name: 'Website' }],
+            c2: [{ code: 'APP', name: 'App' }],
+        },
+    });
+    await dom.window.openBatch(batch().id);
+    await waitFor(() => dom.window.document.querySelector('#import-mapping h3'), {
+        message: 'mapping controls to render',
+    });
+    const document = dom.window.document;
+    const customer = document.getElementById('import-customer-Acme');
+    assert.deepEqual([...customer.options].map((option) => option.value),
+        ['', '__create', 'c1', 'c2'], 'existing customers are offered');
+    let project = document.getElementById('import-project-Acme|Website|WEB');
+    assert.deepEqual([...project.options].map((option) => option.value),
+        ['', '__skip', '__create'], 'no existing project is offered before the customer is mapped');
+
+    customer.value = 'c1';
+    customer.dispatchEvent(new dom.window.Event('change'));
+    project = document.getElementById('import-project-Acme|Website|WEB');
+    assert.deepEqual([...project.options].map((option) => option.value),
+        ['', '__skip', '__create', 'c1|WEB'], 'only the mapped customer projects appear');
+    assert.match(project.textContent, /Acme — WEB Website/);
+    assert.doesNotMatch(project.textContent, /Beta|APP/, 'another customer project never leaks in');
+
+    project.value = 'c1|WEB';
+    project.dispatchEvent(new dom.window.Event('change'));
+    customer.value = 'c2';
+    customer.dispatchEvent(new dom.window.Event('change'));
+    project = document.getElementById('import-project-Acme|Website|WEB');
+    assert.equal(project.value, '', 'a project from the previous customer is cleared');
+    assert.deepEqual([...project.options].map((option) => option.value),
+        ['', '__skip', '__create', 'c2|APP'], 'the picker follows the new customer');
     dom.window.close();
 });
 
