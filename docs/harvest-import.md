@@ -178,8 +178,12 @@ The Settings workspace has one tab per source — Time, Expenses and Invoices.
 Each tab stages and reviews only its own file, because the later imports map
 onto references the time import creates; start a new batch for the next file to
 keep the imports separate. Within a tab, people, customers, projects, tasks and
-expense categories can be mapped to existing records or created explicitly,
-while each invoice gets a review card labelled like the source document
+expense categories can be mapped to existing records or created explicitly.
+The customer and project lists are refreshed from the live registers on every
+Preview, and mapping a source client to an existing customer narrows its
+project choices to that customer's projects (a newly created customer lists no
+existing projects — create them in the same pass instead). Each invoice gets a
+review card labelled like the source document
 (`Invoice ID`, `Invoice for`, `Issue date`, `Period from`/`Period to`,
 `Subtotal`, `Payments`, `Status`) and prefilled from the PDF suggestions.
 Original PDFs are linked directly from the member, and an externally billed row

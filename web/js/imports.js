@@ -29,6 +29,10 @@ let rowFilter = 'all';
 let rowPage = 0;
 let issueFilter = 'all';
 let issuePage = 0;
+// Project selects rendered by the current mapping: key -> { select, choice }.
+// A customer change rebuilds each one in place, so focus and scroll position
+// stay where the admin left them.
+let importProjectSelects = new Map();
 
 function panelVisible() {
     const panel = $('settings-panel-import');
@@ -136,8 +140,8 @@ function wireImportTabs() {
     }
 }
 
-async function loadOptions() {
-    if (optionsLoaded) return;
+async function loadOptions(force = false) {
+    if (optionsLoaded && !force) return;
     const [users, customers, categories] = await Promise.all([
         api.get('/users'),
         api.get('/customers'),
@@ -145,17 +149,34 @@ async function loadOptions() {
     ]);
     const projects = [];
     const tasks = [];
-    for (const customer of customers.customers || []) {
-        const list = await api.get(`/customers/${customer.id}/projects`);
+    // Fetch each customer's projects in parallel; the old sequential walk made
+    // a large register feel like the dropdowns had failed to load.
+    const projectLists = await Promise.all(
+        (customers.customers || []).map(async (customer) => ({
+            customer,
+            list: await api.get(`/customers/${customer.id}/projects`),
+        })),
+    );
+    const taskCalls = [];
+    for (const { customer, list } of projectLists) {
         for (const project of list.projects || []) {
             projects.push({ ...project, customer_id: customer.id, customer_name: customer.name });
-            const taskList = await api.get(`/customers/${customer.id}/projects/${project.code}/tasks`);
-            for (const task of taskList.tasks || []) {
-                tasks.push({
-                    ...task, customer_id: customer.id, customer_name: customer.name,
-                    project_code: project.code, project_name: project.name,
-                });
-            }
+            taskCalls.push({ customer, project });
+        }
+    }
+    const taskLists = await Promise.all(
+        taskCalls.map(async ({ customer, project }) => ({
+            customer,
+            project,
+            list: await api.get(`/customers/${customer.id}/projects/${project.code}/tasks`),
+        })),
+    );
+    for (const { customer, project, list } of taskLists) {
+        for (const task of list.tasks || []) {
+            tasks.push({
+                ...task, customer_id: customer.id, customer_name: customer.name,
+                project_code: project.code, project_name: project.name,
+            });
         }
     }
     options = {
@@ -248,6 +269,86 @@ function ensureProject(sourceClient, sourceProject, sourceCode) {
     return choice;
 }
 
+/// The customer a source client is mapped to, or null while unresolved /
+/// pending creation (a project cannot be picked until the customer exists).
+function importMappedCustomerId(sourceClient) {
+    const choice = draft.customers.find((entry) => entry.source_client === sourceClient);
+    return choice?.action === 'existing' ? choice.customer_id : null;
+}
+
+/// Projects offered for a source client: only those of the customer it is
+/// already mapped to. With no existing customer there is nothing to list —
+/// "Create project" and, for expenses, "Skip project" remain available.
+function importProjectsFor(sourceClient) {
+    const customerId = importMappedCustomerId(sourceClient);
+    if (!customerId) return [];
+    return options.projects.filter((project) => project.customer_id === customerId);
+}
+
+/// The project select's option list for one source client, preserving a
+/// selected legacy value even when it is no longer in the filtered set (the
+/// preview will report it; the select never silently points at a missing item).
+function importProjectChoices(sourceClient, selected) {
+    const mapped = Boolean(importMappedCustomerId(sourceClient));
+    const choices = [
+        ['', mapped ? 'Select project…' : 'Select a customer first…'],
+        ['__skip', 'Skip project (expenses only)'],
+        ['__create', 'Create project'],
+    ];
+    for (const project of importProjectsFor(sourceClient)) {
+        choices.push([
+            `${project.customer_id}|${project.code}`,
+            `${project.code} — ${project.name}`,
+        ]);
+    }
+    if (selected && !choices.some(([value]) => value === selected)) {
+        choices.push([selected, 'Saved project (not listed for this customer)']);
+    }
+    return choices;
+}
+
+/// A project choice is only selectable under the source client's current
+/// customer. Reset a stale customer-bound selection to unresolved so a customer
+/// change cannot silently keep a project from the previous customer.
+function normalizeImportProjectChoice(choice) {
+    if (choice.action !== 'existing') return;
+    const customerId = importMappedCustomerId(choice.source_client);
+    if (customerId && choice.customer_id === customerId) return;
+    choice.action = 'unresolved';
+    choice.customer_id = null;
+    choice.code = null;
+}
+
+function importProjectChoiceValue(choice) {
+    return choice.action === 'existing' ? `${choice.customer_id}|${choice.code}`
+        : choice.action === 'create' ? '__create' : choice.action === 'skip' ? '__skip' : '';
+}
+
+/// Rebuild one project select from the customer it is now mapped to, resetting
+/// a selection that belongs to another customer.
+function fillImportProjectSelect(select, choice) {
+    normalizeImportProjectChoice(choice);
+    const selected = importProjectChoiceValue(choice);
+    select.textContent = '';
+    for (const [value, text] of importProjectChoices(choice.source_client, selected)) {
+        const option = el('option', { value, text });
+        if (value === selected) option.selected = true;
+        select.appendChild(option);
+    }
+    select.value = selected;
+}
+
+/// A customer mapping changed: every project under that source client now sees
+/// only that customer's projects, and a project from the previous customer is
+/// reset instead of being kept invisibly.
+function syncImportProjectSelects(sourceClient) {
+    for (const { select, choice } of importProjectSelects.values()) {
+        if (choice.source_client !== sourceClient) continue;
+        fillImportProjectSelect(select, choice);
+    }
+    serializeChoices();
+}
+
 function ensureTask(sourceTask) {
     let choice = draft.tasks.find((entry) => entry.source_task === sourceTask);
     if (!choice) {
@@ -264,6 +365,16 @@ function ensureCategory(sourceCategory) {
         draft.categories.push(choice);
     }
     return choice;
+}
+
+/// Replace a choice's fields without replacing the object itself. Select
+/// handlers and the project-sync map hold references to the choice, so keeping
+/// its identity is what makes a second mapping change (or a customer change
+/// narrowing the project list) update the same entry instead of writing to a
+/// stale array index.
+function replaceImportChoice(choice, next) {
+    for (const key of Object.keys(choice)) delete choice[key];
+    Object.assign(choice, next);
 }
 
 function pdfSuggestions(row) {
@@ -372,6 +483,7 @@ function renderMapping(preview) {
     const host = $('import-mapping');
     if (!host) return;
     host.textContent = '';
+    importProjectSelects = new Map();
     if (!preview) {
         host.appendChild(el('p', { cls: 'p-form-help-text', text: 'Upload a source and run Preview to build the mapping controls.' }));
         return;
@@ -428,17 +540,18 @@ function renderMapping(preview) {
             ...options.customers.map((customer) => [customer.id, customer.name])],
             (value) => {
                 if (value === '__create') {
-                    draft.customers[draft.customers.indexOf(choice)] = {
+                    replaceImportChoice(choice, {
                         action: 'create', source_client: client, name: client,
                         currency: 'EUR', default_rate_minor: 0,
-                    };
+                    });
                 } else if (value) {
-                    draft.customers[draft.customers.indexOf(choice)] = {
+                    replaceImportChoice(choice, {
                         action: 'existing', source_client: client, customer_id: value,
-                    };
+                    });
                 } else {
-                    choice.action = 'unresolved';
+                    replaceImportChoice(choice, { action: 'unresolved', source_client: client });
                 }
+                syncImportProjectSelects(client);
             });
         return el('tr', {}, [
             el('th', { attrs: { scope: 'row' }, text: client }),
@@ -450,38 +563,37 @@ function renderMapping(preview) {
     host.appendChild(section('Projects', ['Source project', 'Map to'], [...projectKeys].map((key) => {
         const row = rows.find((entry) => `${entry.source_client}|${entry.source_project}|${entry.source_code}` === key);
         const choice = ensureProject(row.source_client, row.source_project, row.source_code);
-        const selected = choice.action === 'existing' ? `${choice.customer_id}|${choice.code}`
-            : choice.action === 'create' ? '__create' : choice.action === 'skip' ? '__skip' : '';
-        const select = selectControl(`import-project-${key}`, selected,
-            [['', 'Select project…'], ['__skip', 'Skip project (expenses only)'], ['__create', 'Create project'],
-            ...options.projects.map((project) => [
-                `${project.customer_id}|${project.code}`,
-                `${project.customer_name} — ${project.code} ${project.name}`,
-            ])],
+        const select = selectControl(`import-project-${key}`, '', [['', 'Select project…']],
             (value) => {
                 if (value === '__create') {
-                    draft.projects[draft.projects.indexOf(choice)] = {
+                    replaceImportChoice(choice, {
                         action: 'create', source_client: row.source_client,
                         source_project: row.source_project, source_code: row.source_code,
                         customer_id: null, code: row.source_code || '', name: row.source_project,
                         currency: 'EUR', rate_minor: 0,
-                    };
+                    });
                 } else if (value === '__skip') {
-                    draft.projects[draft.projects.indexOf(choice)] = {
+                    replaceImportChoice(choice, {
                         action: 'skip', source_client: row.source_client,
                         source_project: row.source_project, source_code: row.source_code,
-                    };
+                    });
                 } else if (value) {
                     const [customerId, code] = value.split('|');
-                    draft.projects[draft.projects.indexOf(choice)] = {
+                    replaceImportChoice(choice, {
                         action: 'existing', source_client: row.source_client,
                         source_project: row.source_project, source_code: row.source_code,
                         customer_id: customerId, code,
-                    };
+                    });
                 } else {
-                    choice.action = 'unresolved';
+                    replaceImportChoice(choice, {
+                        action: 'unresolved', source_client: row.source_client,
+                        source_project: row.source_project, source_code: row.source_code,
+                    });
                 }
+                serializeChoices();
             });
+        importProjectSelects.set(key, { select, choice });
+        fillImportProjectSelect(select, choice);
         return el('tr', {}, [
             el('th', { attrs: { scope: 'row' }, text: `${row.source_client} — ${row.source_project} (${row.source_code || 'no code'})` }),
             el('td', {}, [labelFor(select.id, `Map project ${row.source_project}`), select]),
@@ -499,16 +611,17 @@ function renderMapping(preview) {
                 ...options.tasks.map((entry) => [entry.code, `${entry.customer_name} / ${entry.project_code} — ${entry.code}`])],
                 (value) => {
                     if (value === '__create') {
-                        draft.tasks[draft.tasks.indexOf(choice)] = {
+                        replaceImportChoice(choice, {
                             action: 'create', source_task: task, code: task, name: task,
-                        };
+                        });
                     } else if (value === '__skip') {
-                        draft.tasks[draft.tasks.indexOf(choice)] = { action: 'skip', source_task: task };
+                        replaceImportChoice(choice, { action: 'skip', source_task: task });
                     } else if (value) {
-                        draft.tasks[draft.tasks.indexOf(choice)] = { action: 'existing', source_task: task, code: value };
+                        replaceImportChoice(choice, { action: 'existing', source_task: task, code: value });
                     } else {
-                        choice.action = 'unresolved';
+                        replaceImportChoice(choice, { action: 'unresolved', source_task: task });
                     }
+                    serializeChoices();
                 });
             return el('tr', {}, [
                 el('th', { attrs: { scope: 'row' }, text: task }),
@@ -528,16 +641,17 @@ function renderMapping(preview) {
                 ...options.categories.map((entry) => [entry.id, entry.name])],
                 (value) => {
                     if (value === '__create') {
-                        draft.categories[draft.categories.indexOf(choice)] = {
+                        replaceImportChoice(choice, {
                             action: 'create', source_category: category, name: category, billable: true,
-                        };
+                        });
                     } else if (value) {
-                        draft.categories[draft.categories.indexOf(choice)] = {
+                        replaceImportChoice(choice, {
                             action: 'existing', source_category: category, category_id: value,
-                        };
+                        });
                     } else {
-                        choice.action = 'unresolved';
+                        replaceImportChoice(choice, { action: 'unresolved', source_category: category });
                     }
+                    serializeChoices();
                 });
             return el('tr', {}, [
                 el('th', { attrs: { scope: 'row' }, text: category }),
@@ -642,7 +756,7 @@ export async function refreshImports() {
 export async function newBatch() {
     clearError();
     try {
-        await loadOptions();
+        await loadOptions(true);
         const batch = await api.post(BASE, { namespace: 'harvest' });
         renderBatch(batch);
         resetPreview();
@@ -865,6 +979,9 @@ async function previewBatch() {
     if (!id) return;
     clearError();
     try {
+        // Refresh the mapping lists on every preview: customers/projects added
+        // while this batch was open must be selectable without reopening it.
+        await loadOptions(true);
         serializeChoices();
         renderBatch(await api.put(`${BASE}/${id}/review`, draft));
         const sent = JSON.stringify(draft);

@@ -80,8 +80,10 @@ async function harness({
         const method = opts.method || 'GET';
         const path = String(url);
         if (path.endsWith('/api/users')) return response(200, { users: [{ id: 'u1', name: 'Ada', email: 'ada@test.local' }] });
-        if (path.endsWith('/api/customers')) return response(200, { customers: [{ id: 'c1', name: 'Acme' }] });
+        if (path.endsWith('/api/customers')) return response(200, { customers: [{ id: 'c1', name: 'Acme' }, { id: 'c2', name: 'Beta' }] });
         if (path.endsWith('/api/categories')) return response(200, { categories: [{ id: 'cat1', name: 'Travel' }] });
+        if (path.includes('/customers/c1/projects') && path.endsWith('/projects')) return response(200, { projects: [{ code: 'WEB', name: 'Website' }] });
+        if (path.includes('/customers/c2/projects') && path.endsWith('/projects')) return response(200, { projects: [{ code: 'APP', name: 'App' }] });
         if (path.endsWith('/projects')) return response(200, { projects: [{ code: 'WEB', name: 'Website' }] });
         if (path.endsWith('/tasks')) return response(200, { tasks: [{ code: 'DESIGN', name: 'Design' }] });
         if (path.includes('/imports/harvest?limit=')) return response(200, { total: 0, items: [] });
@@ -158,6 +160,62 @@ test('source tabs build only their own mapping and link the original PDF', async
     assert.ok(pdf, 'invoice PDF link exists');
     assert.match(pdf.getAttribute('href'), /\/invoices\/b{64}\/pdf$/);
     assert.equal(document.getElementById('import-commit').disabled, true);
+    dom.window.close();
+});
+
+test('expense mapping offers existing customers and filters projects by the mapped customer', async () => {
+    const body = preview(false);
+    body.time = [];
+    body.totals = [];
+    body.expenses = [{
+        source_key: 'expense:1', record: 1, line: 2, decision: 'unresolved',
+        source_client: 'Acme', source_project: 'Website', source_code: 'WEB',
+        source_person: 'Ada Lovelace', source_employee_id: 'E1',
+        source_category: 'Travel', invoiced: false, issues: [],
+    }];
+    const { dom } = await harness({
+        previewBody: body,
+        getBatch: batch({
+            files: {
+                expenses: {
+                    name: 'expenses.csv', sha256: 'a'.repeat(64), bytes: 10,
+                    uploaded_at: '2026-01-01T00:00:00Z',
+                },
+            },
+        }),
+    });
+    await dom.window.openBatch(batch().id);
+    await waitFor(() => dom.window.document.getElementById('import-customer-Acme'), {
+        message: 'the expense customer mapping',
+    });
+    const document = dom.window.document;
+    const customer = document.getElementById('import-customer-Acme');
+    const customerValues = [...customer.options].map((option) => option.value);
+    assert.ok(customerValues.includes('c1') && customerValues.includes('c2'),
+        'existing customers are offered');
+    const project = document.getElementById('import-project-Acme|Website|WEB');
+    assert.ok(project, 'the source project has a mapping control');
+    let projectValues = [...project.options].map((option) => option.value);
+    assert.ok(!projectValues.includes('c1|WEB'), 'a customer must be mapped before its projects appear');
+    assert.ok(!projectValues.includes('c2|APP'), 'another customer\'s project is not offered');
+
+    // Mapping the client to Acme immediately narrows the list to Acme projects.
+    customer.value = 'c1';
+    customer.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
+    projectValues = [...project.options].map((option) => option.value);
+    assert.ok(projectValues.includes('c1|WEB'), 'the mapped customer\'s project is offered');
+    assert.ok(!projectValues.includes('c2|APP'), 'another customer\'s project is not offered');
+
+    // Changing the customer immediately narrows the project list and drops a
+    // selection that belonged to the previous customer.
+    project.value = 'c1|WEB';
+    project.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
+    customer.value = 'c2';
+    customer.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
+    projectValues = [...project.options].map((option) => option.value);
+    assert.ok(projectValues.includes('c2|APP'), 'the newly mapped customer\'s project appears');
+    assert.ok(!projectValues.includes('c1|WEB'), 'the previous customer\'s project disappears');
+    assert.equal(project.value, '', 'a stale project selection is reset');
     dom.window.close();
 });
 
