@@ -432,13 +432,12 @@ await waitFor(() => {
 
 // ---- DAY REDESIGN (#12): row structure, week strip, navigator, copy-forward ----
 const mainCell = rows[0].querySelector('.entry-main');
-// #145-columns: the note moved from the stacked main cell to its own
-// Notes column (asserted again with headers in the #141 section below).
+// The work cell combines project/customer, task and notes so a day reads like
+// a diary entry instead of two parallel columns.
 check(
-  'entry row shows project / customer, note lives in its own column',
+  'entry row combines project / customer, task and notes in one cell',
   mainCell.textContent.includes('P-9') && mainCell.textContent.includes('Tucano Time')
-  && !mainCell.textContent.includes('gui-test entry')
-  && rows[0].querySelector('.entry-note').textContent.includes('gui-test entry'),
+  && mainCell.textContent.includes('gui-test entry'),
 );
 const stripDays = window.document.querySelectorAll('#week-strip .ws-day');
 check('week strip renders seven days', stripDays.length === 7);
@@ -2715,11 +2714,11 @@ if (recBtn) {
     && wfDlg.open !== true && !wfDlg.hasAttribute('open'));
   const dayNoteRow = [...window.document.querySelectorAll('#day-table tbody tr')]
     .find((r) => r.textContent.includes('W1'));
-  check('notes are their own column with a header, main cell no longer stacks them',
+  check('project, task and notes share one work column',
     [...window.document.querySelectorAll('#day-table thead th')].map((th) => th.textContent).join(',')
-    === 'Project / customer,Notes,Hours,Actions'
-    && /legal research/.test(dayNoteRow.cells[1].textContent)
-    && !/legal research/.test(dayNoteRow.cells[0].textContent));
+    === 'Project / customer · notes,Hours,Actions'
+    && dayNoteRow.cells.length === 3
+    && /legal research/.test(dayNoteRow.cells[0].textContent));
 
   // ---- WEEK: the same entry as a task-level cell, totals reconciled ----
   const wfWeek = window.document.getElementById('week-date');

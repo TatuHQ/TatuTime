@@ -120,6 +120,32 @@ export function refreshDay() {
   return panelRefresh('panel-day', 'the day view', refreshDayBody);
 }
 
+/// Readable task names for the day's task lines. A task name ("Faptic
+/// Internal") is more useful in the diary than its short code; one request per
+/// distinct project keeps this cheap. A failed lookup falls back to the code,
+/// never blocks the day.
+async function taskNamesFor(rows) {
+  const names = new Map();
+  const projects = new Set();
+  for (const entry of rows) {
+    if (!entry.task_code) continue;
+    const key = `${entry.customer_id}|${entry.project_code}`;
+    if (projects.has(key)) continue;
+    projects.add(key);
+    try {
+      const data = await api.get(
+        `/customers/${entry.customer_id}/projects/${encodeURIComponent(entry.project_code)}/tasks`,
+      );
+      for (const task of data.tasks || []) {
+        names.set(`${key}|${task.code}`, task.name || task.code);
+      }
+    } catch {
+      // Fall back to the stored task code.
+    }
+  }
+  return names;
+}
+
 async function refreshDayBody() {
   const date = dayDate();
   if (!date) return;
@@ -136,6 +162,8 @@ async function refreshDayBody() {
   // it belongs to. A submitted-week lock has no invoice to name.
   const locks = await weekLockIndex();
   if (!isDayCurrent()) return; // #188: same, after the lock round-trip
+  const taskNames = await taskNamesFor(rows);
+  if (!isDayCurrent()) return;
   const tbody = $('day-table').querySelector('tbody');
   tbody.textContent = '';
   let total = 0;
@@ -144,8 +172,11 @@ async function refreshDayBody() {
     const locked = locks.ids.has(e.id) || e.imported?.origin.invoiced;
     const inv = locks.invoiced.get(e.id);
     const projName = (state.projectsByCustomer[e.customer_id] || []).find((p) => p.code === e.project_code);
-    const custLine =
-      customerName(e.customer_id) + (e.task_code ? ` · ${e.task_code}` : '');
+    const projectLabel = projName ? `${e.project_code} — ${projName.name}` : e.project_code;
+    const projectLine = `${projectLabel} (${customerName(e.customer_id)})`;
+    const taskLabel = e.task_code
+      ? taskNames.get(`${e.customer_id}|${e.project_code}|${e.task_code}`) || e.task_code
+      : '';
     const hoursCell = el('td', { cls: 'num entry-hours' }, [
       el('span', { text: fmtHM(Math.round(e.hours * 100)) }),
     ]);
@@ -153,20 +184,16 @@ async function refreshDayBody() {
       'tr',
       { data: { entryId: e.id } }, // C7: target the exact row on jump-to-entry
       [
-        el('td', { cls: 'entry-main' }, [
-          el('div', {
-            cls: 'entry-project',
-            text: projName ? `${e.project_code} — ${projName.name}` : e.project_code,
-          }),
-          el('div', { cls: 'entry-customer', text: custLine }),
+        // One scannable work cell: project and customer, then task, then the
+        // note on its own line (with a deliberate blank line between task and
+        // notes). The separated Notes column duplicated the row's subject;
+        // keeping them together makes a day read like a diary.
+        el('td', { cls: 'entry-main entry-details' }, [
+          el('div', { cls: 'entry-project', text: projectLine }),
+          taskLabel ? el('div', { cls: 'entry-task', text: taskLabel }) : null,
+          e.note ? el('div', { cls: 'entry-note-text', text: e.note }) : null,
+          e.billable ? null : el('div', { cls: 'entry-flags' }, [statusChip('non-billable')]),
         ]),
-        // #145-era stacked note line becomes its own column: scannable
-        // against the header, badge stays with the note it qualifies.
-        el(
-          'td',
-          { cls: 'entry-note', text: e.note || '', attrs: { title: e.note || '' } },
-          e.billable ? [] : [statusChip('non-billable')],
-        ),
         hoursCell,
         // Row actions use the shared link/danger pattern (the rest of the
         // registers); the bespoke 'pill' treatment was the odd one out and
