@@ -22,17 +22,15 @@ const COL_QTY: i32 = 55;
 const COL_UNIT: i32 = 70;
 const COL_AMOUNT: i32 = 80;
 
-// Right metadata column: the subject and invoice identity beside the issuer
-// block, like the reference document.
-const META_X: i32 = MARGIN + 285;
-const META_W: i32 = CONTENT_W - 285;
+// Two identity columns: issuer on the left, recipient on the right. Both start
+// at the same y so `From` and `Invoice for` read as a pair.
+const COLUMN_GAP: i32 = 24;
+const COLUMN_W: i32 = (CONTENT_W - COLUMN_GAP) / 2;
 const META_LABEL_W: i32 = 72;
 const META_SIZE: i32 = 9;
-const META_LINE: i32 = 12;
-/// The left header column stops 15pt before the metadata column: the
-/// `From` / `Invoice for` blocks wrap here so a long name, address line or
-/// legal id can never run into the subject or date rows.
-const HEADER_W: i32 = META_X - MARGIN - 15;
+const META_LINE: i32 = 13;
+/// The left identity column also wraps the subject subtitle under the title.
+const HEADER_W: i32 = COLUMN_W;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Face {
@@ -57,14 +55,6 @@ impl Face {
             Face::Bold => "F2",
             Face::Oblique => "F3",
             Face::BoldOblique => "F4",
-        }
-    }
-    pub(super) fn base(self) -> &'static [u8] {
-        match self {
-            Face::Regular => b"Helvetica",
-            Face::Bold => b"Helvetica-Bold",
-            Face::Oblique => b"Helvetica-Oblique",
-            Face::BoldOblique => b"Helvetica-BoldOblique",
         }
     }
 }
@@ -213,6 +203,23 @@ pub(super) fn layout(doc: &Doc) -> Vec<Vec<Op>> {
     let subject_block =
         (doc.subject.is_some() && !doc.meta.is_empty()).then(|| doc.meta[0].clone());
     let subject_rows = usize::from(subject_block.is_some());
+    p.y = MARGIN + 28;
+    if let Some(block) = &subject_block {
+        p.advance(13); // one blank line below the title
+        emit_subject(&mut p, block, 10);
+    }
+    p.advance(18);
+
+    // Invoice identity (Invoice ID, PO, issue/due dates, period) above the
+    // two identity columns, in a compact two-column grid. This is the first
+    // block after the title/subject and replaces the old right-hand column.
+    let meta_top = p.y;
+    p.y = emit_meta_grid(&mut p, &doc.meta[subject_rows..], meta_top);
+    p.advance(18);
+
+    // Issuer and recipient columns start at the same y and use the same width,
+    // so `From` and `Invoice for` are aligned. Their heights are independent;
+    // the flow continues below the taller one.
     let recipient = doc
         .header
         .iter()
@@ -220,44 +227,22 @@ pub(super) fn layout(doc: &Doc) -> Vec<Vec<Op>> {
         .filter(|(_, block)| matches!(block, Block::Heading { .. }))
         .nth(1)
         .map(|(index, _)| index);
-    let header = if let Some(index) = recipient {
-        for block in &doc.header[..index] {
-            emit_block_in(&mut p, block, 10, META_X - MARGIN, CONTENT_W);
-        }
-        let from_bottom = p.y;
-        if let Some(block) = &subject_block {
-            p.y = MARGIN + 28 + 13; // one blank line below the title
-            emit_subject(&mut p, block, 10);
-            p.y = p.y.max(from_bottom);
-        } else {
-            p.y = from_bottom;
-        }
-        p.y = p.y.max(MARGIN + 65);
-        // With a subject subtitle the invoice identity follows one line below
-        // it; without one the title keeps its historical gap.
-        p.advance(if subject_rows == 1 { 14 } else { 22 });
-        &doc.header[index..]
-    } else {
-        if let Some(block) = &subject_block {
-            p.y = MARGIN + 28 + 13;
-            emit_subject(&mut p, block, 10);
-            p.advance(8);
-        }
-        p.advance(44);
-        &doc.header[..]
+    let (issuer, customer) = match recipient {
+        Some(index) => (&doc.header[..index], &doc.header[index..]),
+        None => (&doc.header[..], &[][..]),
     };
-    let top = p.y;
-    let pages_before = p.pages.len();
-    let meta_bottom = emit_meta(&mut p, &doc.meta[subject_rows..], top);
-    for b in header {
-        emit_block_in(&mut p, b, 10, 0, HEADER_W);
-    }
-    // Only lift the flow cursor when the left column did not page-break (a
-    // break has already moved it back to the page top).
-    if p.pages.len() == pages_before && p.y < meta_bottom {
-        p.y = meta_bottom;
-    }
-    p.advance(8);
+    let columns_top = p.y;
+    let (issuer_ops, issuer_bottom) = render_column(issuer, MARGIN, COLUMN_W, columns_top);
+    let (customer_ops, customer_bottom) = render_column(
+        customer,
+        MARGIN + COLUMN_W + COLUMN_GAP,
+        COLUMN_W,
+        columns_top,
+    );
+    p.cur.extend(issuer_ops);
+    p.cur.extend(customer_ops);
+    p.y = issuer_bottom.max(customer_bottom);
+    p.advance(18);
 
     // Free blocks (template body).
     for b in &doc.blocks {
@@ -274,31 +259,15 @@ pub(super) fn layout(doc: &Doc) -> Vec<Vec<Op>> {
         p.advance(6);
     }
 
-    // Totals (bold rule above; prints persisted minor units, never a re-sum).
+    // Totals (prints persisted minor units, never a re-sum). The values are
+    // right-aligned under the Amount column and labels under Unit price, so the
+    // money block reads as the table's final rows rather than a floating card.
     // #146: the configured accent paints the money section only.
     if let Some(rgb) = doc.accent {
         p.cur.push(Op::Color { rgb });
     }
-    p.need((doc.totals.len() as i32 * 16) + 22);
-    let totals_top = p.y;
-    for b in &doc.totals {
-        emit_block_in(&mut p, b, 11, CONTENT_W / 2, CONTENT_W);
-    }
-    let totals_bottom = p.y;
-    if let Some(hours) = &doc.total_hours {
-        p.y = totals_top;
-        emit_block_in(
-            &mut p,
-            &Block::KeyVal {
-                key: "Total hours".to_string(),
-                spans: vec![Span::bold(hours.clone())],
-            },
-            10,
-            0,
-            CONTENT_W / 2 - 12,
-        );
-        p.y = p.y.max(totals_bottom);
-    }
+    p.need((doc.totals.len() as i32 * 13) + 26);
+    emit_totals(&mut p, doc);
     if doc.accent.is_some() {
         p.cur.push(Op::Color {
             rgb: [0.0, 0.0, 0.0],
@@ -326,16 +295,26 @@ pub(super) fn layout(doc: &Doc) -> Vec<Vec<Op>> {
             *page = stamped;
         }
     }
-    // Page footer, in a post-pass: `Page N of M` needs the final page count,
-    // which only exists after `finish()`.
+    // Page footer, in a post-pass: the generator credit is pinned to the page
+    // footer on every page (left), while `Page N of M` needs the final page
+    // count and sits right-aligned on the same baseline.
     let total = pages.len();
     for (i, page) in pages.iter_mut().enumerate() {
+        if !doc.credit.trim().is_empty() {
+            page.push(Op::Text {
+                face: Face::Oblique,
+                size: 8,
+                x: MARGIN,
+                y: FOOTER_Y,
+                bytes: winansi(&doc.credit),
+            });
+        }
         let bytes = winansi(&format!("Page {} of {}", i + 1, total));
         let width = measure(Face::Regular, 8, &bytes);
         page.push(Op::Text {
             face: Face::Regular,
             size: 8,
-            x: (PAGE_W - width) / 2,
+            x: PAGE_W - MARGIN - width,
             y: FOOTER_Y,
             bytes,
         });
@@ -343,33 +322,98 @@ pub(super) fn layout(doc: &Doc) -> Vec<Vec<Op>> {
     pages
 }
 
-/// Emit the right metadata column starting at `top`, returning the bottom of
-/// the column. Metadata rows are `KeyVal` blocks; anything else is ignored
-/// (the column is layout-owned, not template content).
-fn emit_meta(p: &mut Pager, blocks: &[Block], top: i32) -> i32 {
+/// Emit the invoice identity as a compact two-column grid above the identity
+/// columns. Every metadata row is a `KeyVal`; anything else is ignored (the
+/// grid is layout-owned, not template content). Returns the bottom of the grid.
+fn emit_meta_grid(p: &mut Pager, blocks: &[Block], top: i32) -> i32 {
+    let items: Vec<(&str, &[Span])> = blocks
+        .iter()
+        .filter_map(|block| match block {
+            Block::KeyVal { key, spans } => Some((key.as_str(), spans.as_slice())),
+            _ => None,
+        })
+        .collect();
     let mut y = top;
-    for block in blocks {
-        let Block::KeyVal { key, spans } = block else {
-            continue;
-        };
-        let key_bytes = winansi(&format!("{key}:"));
-        let lines = wrap_spans(spans, META_SIZE, META_W - META_LABEL_W, false);
-        let height = META_LINE * lines.len() as i32;
-        let base = y + META_SIZE;
-        p.cur.push(Op::Text {
-            face: Face::Bold,
-            size: META_SIZE,
-            x: META_X,
-            y: base,
-            bytes: key_bytes,
-        });
-        let xv = META_X + META_LABEL_W;
-        for (i, line) in lines.into_iter().enumerate() {
-            emit_line_ops(p, &line, META_SIZE, xv, base + META_LINE * i as i32);
+    for pair in items.chunks(2) {
+        let mut row_height = META_LINE;
+        for (column, (key, spans)) in pair.iter().enumerate() {
+            let x0 = MARGIN + column as i32 * (COLUMN_W + COLUMN_GAP);
+            let key_bytes = winansi(&format!("{key}:"));
+            let lines = wrap_spans(spans, META_SIZE, COLUMN_W - META_LABEL_W, false);
+            let height = META_LINE * lines.len() as i32;
+            let base = y + META_SIZE;
+            p.cur.push(Op::Text {
+                face: Face::Bold,
+                size: META_SIZE,
+                x: x0,
+                y: base,
+                bytes: key_bytes,
+            });
+            let xv = x0 + META_LABEL_W;
+            for (i, line) in lines.into_iter().enumerate() {
+                emit_line_ops(p, &line, META_SIZE, xv, base + META_LINE * i as i32);
+            }
+            row_height = row_height.max(height);
         }
-        y += height;
+        y += row_height;
     }
     y
+}
+
+/// Lay out one identity column into its own operation list, without advancing
+/// the shared page cursor. `x` is the absolute left edge and `width` the wrap
+/// width; both `From` blocks and `Invoice for` blocks use this so they align.
+fn render_column(blocks: &[Block], x: i32, width: i32, top: i32) -> (Vec<Op>, i32) {
+    let mut column = Pager::new();
+    column.y = top;
+    let indent = x - MARGIN;
+    for block in blocks {
+        emit_block_compact(&mut column, block, 10, indent, width + indent);
+    }
+    (column.cur, column.y)
+}
+
+/// Column blocks use the compact label/value gap for the legal-id and company
+/// rows; the 110pt metadata label column was designed for a narrower right-hand
+/// rail and left `Tax ID:       value` visually disconnected.
+fn emit_block_compact(p: &mut Pager, block: &Block, size: i32, indent: i32, max_w: i32) {
+    match block {
+        Block::KeyVal { key, spans } => emit_keyval_compact(p, key, spans, size, indent, max_w),
+        _ => emit_block_in(p, block, size, indent, max_w),
+    }
+}
+
+/// A compact `Key: value` row: the value starts just after the measured label.
+fn emit_keyval_compact(
+    p: &mut Pager,
+    key: &str,
+    spans: &[Span],
+    size: i32,
+    indent: i32,
+    max_w: i32,
+) {
+    let key_bytes = winansi(&format!("{key}:"));
+    let label_w = measure(Face::Bold, size, &key_bytes) + 6;
+    let avail = max_w - indent - label_w;
+    let mut lines = wrap_spans(spans, size, avail, false);
+    if lines.is_empty() {
+        lines.push(vec![]);
+    }
+    let height = 13 * lines.len() as i32;
+    p.need(height);
+    let base = p.y + size;
+    p.cur.push(Op::Text {
+        face: Face::Bold,
+        size,
+        x: MARGIN + indent,
+        y: base,
+        bytes: key_bytes,
+    });
+    let xv = MARGIN + indent + label_w;
+    for (i, line) in lines.into_iter().enumerate() {
+        emit_line_ops(p, &line, size, xv, base + 13 * i as i32);
+    }
+    p.advance(height);
 }
 
 fn emit_table_head(p: &mut Pager, doc: &Doc) {
@@ -602,6 +646,55 @@ fn emit_subject(p: &mut Pager, block: &Block, size: i32) {
         emit_line_ops(p, &line, size, xv, base + 13 * i as i32);
     }
     p.advance(height);
+}
+
+/// Draw the totals as the table's final rows: labels right-aligned under the
+/// Unit-price column, values right-aligned under Amount. Total hours sits on
+/// the same first line, with its value under Quantity. One 13pt rhythm for
+/// every row keeps the line table and its summary visually identical.
+fn emit_totals(p: &mut Pager, doc: &Doc) {
+    let value_right = MARGIN + COL_ITEM + COL_DESC + COL_QTY + COL_UNIT + COL_AMOUNT - 4;
+    let label_right = MARGIN + COL_ITEM + COL_DESC + COL_QTY + COL_UNIT - 8;
+    let hours_right = MARGIN + COL_ITEM + COL_DESC + COL_QTY - 4;
+    let mut y = p.y;
+    if let Some(hours) = &doc.total_hours {
+        let base = y + 9;
+        p.cur.push(Op::Text {
+            face: Face::Bold,
+            size: 9,
+            x: MARGIN,
+            y: base,
+            bytes: winansi("Total hours:"),
+        });
+        push_text_right(p, Face::Bold, 9, hours_right, base, hours);
+    }
+    for block in &doc.totals {
+        let Block::KeyVal { key, spans } = block else {
+            continue;
+        };
+        let base = y + 9;
+        push_text_right(p, Face::Bold, 9, label_right, base, &format!("{key}:"));
+        let text: String = spans.iter().map(|span| span.text.as_str()).collect();
+        let face = if spans.iter().any(|span| span.bold) {
+            Face::Bold
+        } else {
+            Face::Regular
+        };
+        push_text_right(p, face, 9, value_right, base, &text);
+        y += 13;
+    }
+    p.y = y;
+}
+
+/// Right-align one short run at `x_right`.
+fn push_text_right(p: &mut Pager, face: Face, size: i32, x_right: i32, y: i32, text: &str) {
+    p.cur.push(Op::TextRight {
+        face,
+        size,
+        x_right,
+        y,
+        bytes: winansi(text),
+    });
 }
 
 /// A `Key: value` line: bold key in a fixed label column, value wrapped.
@@ -965,8 +1058,10 @@ mod tests {
         assert_eq!(pages.len(), 1);
         let page = &pages[0];
         // The last line of the customer block bounds the header vertically:
-        // the footer below it also names the org, but it is not a column.
+        // the page footer below it also names the org, but it is not a column.
         let header_bottom = y_of(page, "Freedonia").expect("last header line");
+        let left_end = MARGIN + COLUMN_W;
+        let right_start = MARGIN + COLUMN_W + COLUMN_GAP;
         for op in page {
             if let Op::Text {
                 face,
@@ -976,17 +1071,22 @@ mod tests {
                 bytes,
             } = op
             {
-                // `Page N of M` is centred on the page, not part of a column.
+                // `Page N of M` and the credit are in the page footer, not a
+                // body column.
                 if bytes.starts_with(b"Page ") || *y > header_bottom {
                     continue;
                 }
-                // Left-column ink starts at the margin and must stay clear of
-                // the metadata column, which begins exactly at `META_X`.
-                if *x >= MARGIN && *x < META_X {
-                    let right = x + measure(*face, *size, bytes);
+                let right = x + measure(*face, *size, bytes);
+                if *x >= MARGIN && *x < left_end {
                     assert!(
-                        right <= META_X,
-                        "{:?} ends at {right}, crossing the metadata column at {META_X}",
+                        right <= left_end,
+                        "{:?} ends at {right}, crossing the left column at {left_end}",
+                        String::from_utf8_lossy(bytes)
+                    );
+                } else if *x >= right_start {
+                    assert!(
+                        right <= MARGIN + CONTENT_W,
+                        "{:?} ends at {right}, crossing the content edge",
                         String::from_utf8_lossy(bytes)
                     );
                 }
@@ -1000,6 +1100,84 @@ mod tests {
         let street_first = y_of(page, "Exceedingly").expect("issuer street start");
         let street_last = y_of(page, "Well,").expect("issuer street end");
         assert!(street_first < street_last, "the issuer address line wraps");
+    }
+
+    /// The x baseline of the first text op whose glyph run is exactly `word`.
+    fn x_of(page: &[Op], word: &str) -> Option<i32> {
+        page.iter().find_map(|op| match op {
+            Op::Text { bytes, x, .. } if bytes == word.as_bytes() => Some(*x),
+            _ => None,
+        })
+    }
+
+    #[test]
+    fn metadata_identity_columns_totals_and_footer_follow_the_new_order() {
+        let mut inv = sample_invoice();
+        inv.subject = "October services".into();
+        let mut o = org();
+        o.legal_id = "BE 0123 4567 8901".into();
+        let pages = layout(&doc_for(&inv, &customer(), &o));
+        let page = &pages[0];
+        let meta = y_of(page, "Invoice ID:").expect("invoice id row");
+        let from = y_of(page, "From").expect("From heading");
+        let invoice_for = y_of(page, "for").expect("Invoice for heading");
+        assert!(meta < from, "invoice metadata sits above From");
+        assert_eq!(from, invoice_for, "the identity columns start aligned");
+        let invoice_for_x = page
+            .iter()
+            .find_map(|op| match op {
+                Op::Text { x, y, bytes, .. } if *y == invoice_for && bytes == b"Invoice" => {
+                    Some(*x)
+                }
+                _ => None,
+            })
+            .expect("Invoice for heading start");
+        assert!(
+            x_of(page, "From").unwrap() < invoice_for_x,
+            "From is the left column and Invoice for the right"
+        );
+
+        let tax = y_of(page, "Tax ID:").expect("Tax ID row");
+        let tax_value = page
+            .iter()
+            .find_map(|op| match op {
+                Op::Text { x, y, bytes, .. } if *y == tax && bytes.starts_with(b"BE") => Some(*x),
+                _ => None,
+            })
+            .expect("Tax ID value");
+        assert!(
+            tax_value - x_of(page, "Tax ID:").unwrap() < 80,
+            "the Tax ID value stays close to its label"
+        );
+
+        let value_right = MARGIN + COL_ITEM + COL_DESC + COL_QTY + COL_UNIT + COL_AMOUNT - 4;
+        let label_right = MARGIN + COL_ITEM + COL_DESC + COL_QTY + COL_UNIT - 8;
+        let (total_label_right, total_y) = page
+            .iter()
+            .find_map(|op| match op {
+                Op::TextRight {
+                    x_right, y, bytes, ..
+                } if bytes == b"Total:" => Some((*x_right, *y)),
+                _ => None,
+            })
+            .expect("Total row");
+        assert_eq!(total_label_right, label_right);
+        assert!(
+            page.iter().any(|op| matches!(
+                op,
+                Op::TextRight { x_right, y, .. } if *y == total_y && *x_right == value_right
+            )),
+            "the Total value is right-aligned under the Amount column"
+        );
+
+        assert!(
+            page.iter().any(|op| matches!(
+                op,
+                Op::Text { x, y, bytes, .. }
+                    if *x == MARGIN && *y == FOOTER_Y && bytes.starts_with(b"Generated by")
+            )),
+            "the generator credit is in the page footer"
+        );
     }
 
     #[test]
@@ -1051,6 +1229,7 @@ mod tests {
             lines: vec![],
             totals: vec![],
             footer: vec![],
+            credit: "Generated by Test on TucanoTime.".into(),
         };
         let pages = layout(&doc);
         let faces: Vec<Face> = pages[0]

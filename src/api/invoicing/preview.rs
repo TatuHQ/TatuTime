@@ -277,7 +277,9 @@ pub(crate) fn render_sample_pdf(template: &InvoiceTemplate, org: &crate::pdf::Or
 /// never leave a stale tag looking current (SET-06).
 ///
 /// 3: the sample customer carries a note and the payment block is canonical.
-const PREVIEW_ETAG_VERSION: u32 = 3;
+/// 4: the document embeds the Ubuntu faces and uses the aligned identity and
+/// money layout.
+const PREVIEW_ETAG_VERSION: u32 = 4;
 
 /// The preview `ETag`, keyed on the **inputs** — canonical candidate-template
 /// JSON, the resolved org profile and the renderer/sample version — so it can be

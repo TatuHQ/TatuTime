@@ -98,9 +98,12 @@ New drafts use `CUST1-001`, `CUST1-002`, etc. Each prefix has a durable sequence
 two customers choosing the same prefix share it to avoid duplicate numbers.
 Changing a prefix affects only future drafts and never renames an existing
 draft or issued invoice. Clearing it resumes the original global sequence.
-Deleted numbers are never reused. Manual, tracked-work and recurring creation
-all use the same writer-locked allocator. The additive revision remains within
-the existing pre-1.0 API rather than introducing a new route version.
+Deleted numbers are never reused, and allocation starts after the higher of the
+durable counter and the highest existing number with that prefix (an exact
+collision is skipped), so restored or hand-edited state cannot reissue one.
+Manual, tracked-work and recurring creation all use the same writer-locked
+allocator. The additive revision remains within the existing pre-1.0 API rather
+than introducing a new route version.
 
 ### Invoice Documents
 

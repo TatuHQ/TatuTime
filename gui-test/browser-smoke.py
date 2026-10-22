@@ -2112,7 +2112,15 @@ class Gate:
             "(function () { return document.getElementById('invoice-preview').hidden === true; })()",
             "the detail panel to close after the preview audit (#349)",
         )
-        self.drain_console("invoice detail panel (#349)")
+        # Firefox's font sanitizer corrects the official Ubuntu faces' maxp
+        # composite limits while rendering the embedded PDF font (it reports
+        # "adjusting limit" and draws correctly). This is a browser-side font
+        # warning, not an app error, and only appears when the PDF preview
+        # paints those glyphs.
+        self.drain_console(
+            "invoice detail panel (#349)",
+            allow=("downloadable font: glyf: Number of composite points",),
+        )
 
     # ------------------------------------------------------------ lifecycle --
     def cleanup(self):

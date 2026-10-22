@@ -241,22 +241,38 @@ impl Store {
             let path = self.root.join("invoices").join(".seq.prefixes.json");
             let mut sequences: std::collections::BTreeMap<String, u64> =
                 read_json(&path)?.unwrap_or_default();
-            let highest = match sequences.get(&prefix) {
-                Some(value) => *value,
-                None => {
-                    let start = format!("{prefix}-");
-                    self.list_invoices()?
-                        .iter()
-                        .filter_map(|existing| {
-                            existing.number.strip_prefix(&start)?.parse::<u64>().ok()
-                        })
-                        .max()
-                        .unwrap_or(0)
-                }
-            };
-            let next = highest.checked_add(1).ok_or_else(|| {
+            let invoices = self.list_invoices()?;
+            let highest_existing = invoices
+                .iter()
+                .filter_map(|existing| {
+                    existing
+                        .number
+                        .strip_prefix(&format!("{prefix}-"))?
+                        .parse::<u64>()
+                        .ok()
+                })
+                .max()
+                .unwrap_or(0);
+            // A restored or hand-edited sequence can lag behind an existing
+            // invoice. The candidate is always past both the durable counter
+            // and the highest number actually on file, and the exact-number
+            // check below refuses any collision (review B3).
+            let highest = sequences
+                .get(&prefix)
+                .copied()
+                .unwrap_or(0)
+                .max(highest_existing);
+            let mut next = highest.checked_add(1).ok_or_else(|| {
                 StoreError::Conflict("invoice prefix sequence is exhausted".into())
             })?;
+            while invoices
+                .iter()
+                .any(|existing| existing.number == format!("{prefix}-{next:03}"))
+            {
+                next = next.checked_add(1).ok_or_else(|| {
+                    StoreError::Conflict("invoice prefix sequence is exhausted".into())
+                })?;
+            }
             sequences.insert(prefix.clone(), next);
             write_json(&path, &sequences)?;
             invoice.number = format!("{prefix}-{next:03}");
@@ -266,19 +282,30 @@ impl Store {
         }
         let seq_path = self.root.join("invoices").join(".seq.json");
         let stored: u64 = read_json(&seq_path)?.unwrap_or(0);
+        let invoices = self.list_invoices()?;
+        let highest_existing = invoices
+            .iter()
+            .filter_map(|existing| existing.number.strip_prefix("INV-")?.parse::<u64>().ok())
+            .max()
+            .unwrap_or(0);
+        // The same guard for the global sequence: max(counter, highest on
+        // file), then skip any exact collision before writing.
         let highest = if seq_path.exists() {
-            stored
+            stored.max(highest_existing)
         } else {
-            self.list_invoices()?
-                .iter()
-                .filter_map(|existing| existing.number.strip_prefix("INV-")?.parse::<u64>().ok())
-                .max()
-                .unwrap_or(0)
-                .max(stored)
+            highest_existing.max(stored)
         };
-        let n = highest
+        let mut n = highest
             .checked_add(1)
             .ok_or_else(|| StoreError::Conflict("invoice sequence is exhausted".into()))?;
+        while invoices
+            .iter()
+            .any(|existing| existing.number == format!("INV-{n:04}"))
+        {
+            n = n
+                .checked_add(1)
+                .ok_or_else(|| StoreError::Conflict("invoice sequence is exhausted".into()))?;
+        }
         write_json(&seq_path, &n)?;
         invoice.number = format!("INV-{n:04}");
         write_json(&self.doc_path::<Invoice>(&invoice.id.to_string()), &invoice)?;
@@ -415,6 +442,47 @@ mod invoice_seq_tests {
         global.customer_id = restored.customer_id;
         assert!(store.create_invoice(global).is_err());
         assert_eq!(store.list_invoices().unwrap().len(), 4);
+    }
+
+    #[test]
+    fn a_stale_sequence_never_reissues_an_existing_number() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path().join("data")).unwrap();
+        let mut restored = prefixed_draft(&store, "MONKEY");
+        restored.number = "MONKEY-042".into();
+        store.put_invoice(&restored).unwrap();
+        let global = draft("INV-0099");
+        store.put_invoice(&global).unwrap();
+        // Both durable counters claim the next number is 1, but the collection
+        // already holds 042/0099: allocation must move past the real highest.
+        write_json(
+            &store.root.join("invoices/.seq.prefixes.json"),
+            &serde_json::json!({"MONKEY": 1}),
+        )
+        .unwrap();
+        write_json(&store.root.join("invoices/.seq.json"), &1_u64).unwrap();
+        assert_eq!(
+            store
+                .create_invoice(prefixed_draft(&store, "MONKEY"))
+                .unwrap()
+                .number,
+            "MONKEY-043"
+        );
+        assert_eq!(store.create_invoice(draft("_")).unwrap().number, "INV-0100");
+        let numbers: Vec<_> = store
+            .list_invoices()
+            .unwrap()
+            .into_iter()
+            .map(|invoice| invoice.number)
+            .collect();
+        assert_eq!(
+            numbers
+                .iter()
+                .filter(|number| *number == "MONKEY-042" || *number == "INV-0099")
+                .count(),
+            2,
+            "existing numbers are never overwritten"
+        );
     }
 
     #[test]

@@ -25,94 +25,12 @@ pub(super) fn winansi(text: &str) -> Vec<u8> {
     out
 }
 
-/// Helvetica (and Bold) advance widths in 1/1000 units for the WinAnsi
-/// codes 32..=255. Oblique faces share the roman widths (they are slants,
-/// not re-metrics). Upper WinAnsi punctuation is exact where common; exotic
-/// Latin-1 glyphs fall back to their ASCII base or 556.
+/// Advance width in 1/1000 text units for a WinAnsi code, read from the
+/// embedded Ubuntu face. The old per-code Helvetica table is gone: the PDF now
+/// embeds the shipped font, so its own metrics drive wrapping.
 pub(super) fn width_units(face: Face, code: u8) -> u32 {
-    if code < 32 {
-        return 0;
-    }
-    let bold = matches!(face, Face::Bold | Face::BoldOblique);
-    if code <= 126 {
-        let idx = (code - 32) as usize;
-        return if bold {
-            BOLD_WIDTHS[idx]
-        } else {
-            REG_WIDTHS[idx]
-        };
-    }
-    // WinAnsi 128..=159: only these occur after our mapping.
-    if code <= 159 {
-        return match code {
-            0x85 | 0x89 | 0x97 => 1000, // ellipsis, per-mille, em dash
-            0x95 => {
-                if bold {
-                    400
-                } else {
-                    350
-                }
-            } // bullet
-            0x96 => 556,                // en dash
-            0x91..=0x94 => {
-                if bold {
-                    333
-                } else {
-                    222
-                }
-            } // quotes
-            0x80 => 556,                // euro
-            0x99 => 1000,               // tm
-            _ => 556,
-        };
-    }
-    // Latin-1 supplement: width of the de-accented base, 556 fallback.
-    match code {
-        0xA0 | 0xAD => 278, // nbsp, soft hyphen
-        0xA1 | 0xBF => {
-            if bold {
-                333
-            } else {
-                278
-            }
-        } // inverted !?
-        0xA2..=0xA5 => 556, // cents/pounds/currency/yen
-        0xA6 => 260,        // broken bar
-        0xA7 | 0xB6 => 556, // section, pilcrow
-        0xA8 | 0xAF | 0xB4 | 0xB8 => 333,
-        0xA9 | 0xAE => 667, // (c), (r)
-        0xB0 => 400,        // degree
-        0xB1 => 584,        // plusminus
-        0xB2 | 0xB3 | 0xB9 | 0xAA | 0xBA => 333,
-        0xAB | 0xBB => 556, // guillemets
-        0xAC | 0xD7 | 0xF7 => 584,
-        0xB5 => 556, // micro
-        // Accented letters inherit coarse class widths (metrics only steer
-        // wrapping; viewers use the font's real built-in metrics).
-        c if (0xC0..=0xDE).contains(&c) => 700,
-        c if (0xE0..=0xFE).contains(&c) => 560,
-        0xFF => 500,
-        _ => 556,
-    }
+    super::fonts::width_units(face, code)
 }
-
-/// Advance widths for ASCII 32..=126, Helvetica (units / 1000).
-static REG_WIDTHS: [u32; 95] = [
-    278, 278, 355, 556, 556, 889, 667, 191, 333, 333, 389, 584, 278, 333, 278, 278, 556, 556, 556,
-    556, 556, 556, 556, 556, 556, 556, 278, 278, 584, 584, 584, 556, 1015, 667, 667, 722, 722, 667,
-    611, 778, 722, 278, 500, 667, 556, 833, 722, 778, 667, 778, 722, 667, 611, 722, 667, 944, 667,
-    667, 611, 278, 278, 278, 469, 556, 333, 556, 556, 500, 556, 556, 278, 556, 556, 222, 222, 500,
-    222, 833, 556, 556, 556, 556, 333, 500, 278, 556, 500, 722, 500, 500, 500, 334, 260, 334, 584,
-];
-
-/// Advance widths for ASCII 32..=126, Helvetica-Bold (units / 1000).
-static BOLD_WIDTHS: [u32; 95] = [
-    278, 333, 474, 556, 556, 889, 722, 238, 333, 333, 389, 584, 278, 333, 278, 278, 556, 556, 556,
-    556, 556, 556, 556, 556, 556, 556, 333, 333, 584, 584, 584, 611, 975, 722, 722, 722, 722, 667,
-    611, 778, 722, 278, 556, 722, 611, 833, 722, 778, 667, 778, 722, 667, 611, 722, 667, 944, 667,
-    667, 611, 333, 278, 333, 584, 556, 333, 556, 611, 556, 611, 556, 333, 611, 611, 278, 278, 556,
-    278, 889, 611, 611, 611, 611, 389, 556, 333, 611, 556, 778, 556, 556, 500, 389, 280, 389, 584,
-];
 
 /// Width in integer points (round half up) of WinAnsi bytes at `size`.
 pub(super) fn measure(face: Face, size: i32, bytes: &[u8]) -> i32 {

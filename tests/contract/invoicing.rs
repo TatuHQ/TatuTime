@@ -25,44 +25,57 @@ fn winansi_text(bytes: &[u8]) -> String {
 /// string once they are not (the euro sign), so both forms are decoded. The
 /// layout positions every word itself, so chunks are joined with spaces —
 /// assertions target single words or the joined form.
+///
+/// The scan is limited to **page content streams**: the invoice now embeds the
+/// Ubuntu TrueType fonts, and a raw pass over the file would decode glyph data
+/// as text.
 fn pdf_joined(pdf: &[u8]) -> String {
+    let document = lopdf::Document::load_mem(pdf).expect("invoice PDF re-parses");
     let mut chunks = Vec::new();
+    for page in document.get_pages().into_values() {
+        let content = document.get_page_content(page);
+        decode_pdf_strings(&content, &mut chunks);
+    }
+    chunks.join(" ")
+}
+
+fn decode_pdf_strings(bytes: &[u8], chunks: &mut Vec<String>) {
     let mut i = 0;
-    while i < pdf.len() {
-        match pdf[i] {
+    while i < bytes.len() {
+        match bytes[i] {
             b'(' => {
-                let mut bytes = Vec::new();
+                let mut text = Vec::new();
                 i += 1;
-                while i < pdf.len() && pdf[i] != b')' {
-                    if pdf[i] == b'\\' && i + 1 < pdf.len() {
+                while i < bytes.len() && bytes[i] != b')' {
+                    if bytes[i] == b'\\' && i + 1 < bytes.len() {
                         i += 1;
-                        bytes.push(match pdf[i] {
+                        text.push(match bytes[i] {
                             b'n' => b'\n',
                             b'r' => b'\r',
                             b't' => b'\t',
                             other => other,
                         });
                     } else {
-                        bytes.push(pdf[i]);
+                        text.push(bytes[i]);
                     }
                     i += 1;
                 }
-                chunks.push(winansi_text(&bytes));
+                chunks.push(winansi_text(&text));
                 i += 1;
             }
             // `<<` opens a dictionary, not a hex string: skip it untouched.
-            b'<' if pdf.get(i + 1) != Some(&b'<') => {
+            b'<' if bytes.get(i + 1) != Some(&b'<') => {
                 let start = i + 1;
                 let mut end = start;
-                while end < pdf.len() && pdf[end] != b'>' {
+                while end < bytes.len() && bytes[end] != b'>' {
                     end += 1;
                 }
-                let digits: Vec<u8> = pdf[start..end]
+                let digits: Vec<u8> = bytes[start..end]
                     .iter()
                     .copied()
                     .filter(u8::is_ascii_hexdigit)
                     .collect();
-                let bytes: Vec<u8> = digits
+                let text: Vec<u8> = digits
                     .chunks(2)
                     .filter(|pair| pair.len() == 2)
                     .map(|pair| {
@@ -70,13 +83,12 @@ fn pdf_joined(pdf: &[u8]) -> String {
                         u8::from_str_radix(text, 16).unwrap_or(b'?')
                     })
                     .collect();
-                chunks.push(winansi_text(&bytes));
+                chunks.push(winansi_text(&text));
                 i = end + 1;
             }
             _ => i += 1,
         }
     }
-    chunks.join(" ")
 }
 
 // --------------------------------------------------------------- invoices --
