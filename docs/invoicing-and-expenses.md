@@ -221,9 +221,12 @@ org template is never frozen onto a revision or its PDF.
 - Time rows in the table follow the invoice's frozen `line_grouping`:
   `single` prints one `Time entries` row for the period, `project` one row per
   project, `task` one row per project and task, and `line` (the default and the
-  legacy behaviour) one row per time entry. Expenses and manual lines are never
-  folded into a time row. The stored invoice lines remain one per tracked entry,
-  so locks, rate snapshots and `draft_is_stale` are unaffected.
+  legacy behaviour) one row per time entry. A grouped row prints the shared
+  resolved rate (the project rate in the normal case) in **Unit price**; when
+  its entries resolved different rates, no single price applies and the column
+  prints `-`. Expenses and manual lines are never folded into a time row. The
+  stored invoice lines remain one per tracked entry, so locks, rate snapshots
+  and `draft_is_stale` are unaffected.
 - Below the totals, the footer prints in this order:
   1. the template **footer**;
   2. the **Notes** section — the template `notes`, then the customer's

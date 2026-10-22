@@ -1313,6 +1313,15 @@ async fn preview_pdf_and_creation_apply_line_grouping() {
     let project_text = pdf_joined(&project_pdf);
     assert!(project_text.contains("PA"), "{project_text}");
     assert!(project_text.contains("PB"), "{project_text}");
+    // A grouped row keeps the project rate as its unit price.
+    assert!(
+        project_text.contains("EUR \u{20ac}50.00"),
+        "PA's 50.00 unit price: {project_text}"
+    );
+    assert!(
+        project_text.contains("EUR \u{20ac}70.00"),
+        "PB's 70.00 unit price: {project_text}"
+    );
 
     // Nothing was persisted by either render.
     let (_ls, list) = json_req(&app, "GET", "/api/invoices", None).await;
