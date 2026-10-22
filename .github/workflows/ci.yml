@@ -103,6 +103,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
+      # The crate version IS the release version (AGENTS.md), so the published
+      # image carries it as a tag: `:<version>` pins the release the same way
+      # the `v<version>` git tag does. Read it before the metadata step.
+      - name: Read crate version
+        id: crate
+        run: |
+          version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n1)"
+          test -n "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
       # Log in to GHCR on main pushes; skip on PRs (no token needed for build-only).
       - name: Log in to GitHub Container Registry
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -116,6 +126,7 @@ jobs:
       # `ghcr.io/<owner>/<repo>:<tag>`; on PRs nothing is pushed (push is
       # main-gated below) so the build is a local check only.
       #   • :latest      (main pushes only)
+      #   • :<version>   (main pushes only, the crate version = release version)
       #   • :<short-sha> (computed everywhere, pushed on main pushes only)
       # (#263 item 7: the previous comment claimed PRs get a `tucanotime:<sha>`
       # local tag, which the metadata config never produced.)
@@ -126,6 +137,7 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=${{ steps.crate.outputs.version }},enable=${{ github.ref == 'refs/heads/main' }}
             type=sha,format=short
 
       - name: Build and push image

@@ -29,9 +29,9 @@ docker compose up -d
 ```
 
 Nothing needs to be reconfigured after an image update. A pinned published
-image works the same way: pull its `sha-<short>` tag, tag it `tucanotime:latest`
-locally and recreate the container. The data layout is summarised in
-[Storage and retention](storage-and-retention.md).
+image works the same way: pull its `<version>` (or `sha-<short>`) tag, tag it
+`tucanotime:latest` locally and recreate the container. The data layout is
+summarised in [Storage and retention](storage-and-retention.md).
 
 ## Backup and restore
 
@@ -153,13 +153,16 @@ CI publishes on every push to `main`:
 
 ```
 ghcr.io/tucanotechnology/tucanotime:latest
+ghcr.io/tucanotechnology/tucanotime:<version>
 ghcr.io/tucanotechnology/tucanotime:sha-<short-sha>
 ```
 
-Use the `sha-`-prefixed tag when you want a fixed build. The image is published
-at `ghcr.io/tucanotechnology/tucanotime` as `:latest` and `:sha-<short>`; check
-the registry package visibility (a public package pulls anonymously without
-credentials).
+`:<version>` is the crate version in `Cargo.toml`, which is also the release
+version and the `v<version>` git tag: pin it when you want the release, or the
+`sha-`-prefixed tag when you want a fixed build. The image is published at
+`ghcr.io/tucanotechnology/tucanotime` as `:latest`, `:<version>` and
+`:sha-<short>`; check the registry package visibility (a public package pulls
+anonymously without credentials).
 
 ## Image facts
 

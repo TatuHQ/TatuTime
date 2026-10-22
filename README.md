@@ -89,8 +89,12 @@ Published images are available from the project registry on pushes to `main`:
 
 ```
 ghcr.io/tucanotechnology/tucanotime:latest
+ghcr.io/tucanotechnology/tucanotime:<version>
 ghcr.io/tucanotechnology/tucanotime:sha-<short>
 ```
+
+`:<version>` is the crate version of that release (the same number the
+`v<version>` git tag carries), so it is the tag to pin.
 
 ## Variables available for containers
 
