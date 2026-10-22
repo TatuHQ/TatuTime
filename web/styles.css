@@ -424,12 +424,10 @@ button.icon-action > .p-tooltip__message {
 .ws-clock { position: static; grid-column: 2; grid-row: 1; justify-self: end; align-self: start; color: var(--muted); line-height: 1; }
 .ws-week { grid-column: 1 / -1; justify-self: end; padding: .15rem 0 0; color: var(--muted); font-size: .9rem; font-weight: 600; font-variant-numeric: tabular-nums; }
 .entry-main { padding: .65rem .75rem; }
-.entry-project { font-weight: 600; }
-.entry-customer { margin-top: .1rem; color: var(--muted); font-size: .875rem; }
-#day-table td.entry-note { padding: .65rem .75rem; color: var(--fg); font-size: .875rem;
-  min-width: 0; max-width: 46ch; }
-.entry-note { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-#day-table td.entry-note .p-chip { margin-left: .35rem; }
+.entry-project { font-weight: 600; overflow-wrap: anywhere; }
+.entry-task { margin-top: .1rem; color: var(--muted); font-size: .875rem; overflow-wrap: anywhere; }
+.entry-note-text { margin-top: .9rem; color: var(--fg); font-size: .875rem; white-space: pre-line; overflow-wrap: anywhere; }
+.entry-flags { margin-top: .35rem; }
 .entry-hours { font-variant-numeric: tabular-nums; font-weight: 600; }
 /* Day table Hours column (#107): centred inside its own track — right-
    aligned it hugged the Actions column it sits beside. */
@@ -936,13 +934,11 @@ html[data-advanced-billing="off"] #advanced-billing { display: none; }
    .day-end { grid-column: 1 / -1; grid-row: 3; justify-self: stretch; display: flex; align-items: center; justify-content: space-between; gap: .55rem; flex-wrap: wrap; min-width: 0; }
   .day-actions > .primary { flex: 1 1 auto; }
   #day-table { table-layout: fixed; }
-  #day-table thead th:nth-child(3), #day-table tbody td:nth-child(3) { width: 4.5rem; }
+  #day-table thead th:nth-child(2), #day-table tbody td:nth-child(2) { width: 4.5rem; }
   #day-table thead th:last-child, #day-table tbody td:last-child { width: 7.75rem; }
   #day-table tbody td:last-child { display: flex; flex-wrap: wrap; align-items: center; gap: .25rem; }
 
   #day-table .entry-main { min-width: 0; overflow-wrap: anywhere; }
-  #day-table td.entry-note { max-width: none; }
-  .entry-note { white-space: normal; overflow-wrap: anywhere; }
   #day-table .actions-col { white-space: normal; }
   .invoice-register-column #invoice-table { min-width: 38rem; table-layout: auto; }
 }
