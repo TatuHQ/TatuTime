@@ -8,9 +8,12 @@
 //! makes the archived `invoices/<id>.pdf` verifiable (`sha256`, `ETag`) and lets a
 //! legacy invoice re-render to the same bytes. A `Doc` may carry a text-only,
 //! date-free watermark (`DRAFT`/`SENT`/`PAID`); money is formatted from persisted
-//! minor units, fonts are base-14 Type1 (`WinAnsiEncoding`, Latin text only).
+//! minor units. The document embeds the shipped Ubuntu TrueType faces with
+//! `WinAnsiEncoding`, so Latin content renders in Ubuntu without a runtime font
+//! dependency.
 
 mod content;
+mod fonts;
 mod layout;
 mod metrics;
 mod model;

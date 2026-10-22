@@ -1,5 +1,5 @@
 use super::layout::{Face, Op, PAGE_H, PAGE_W, WATERMARK_GREY, layout};
-use super::metrics::{measure, width_units};
+use super::metrics::measure;
 use super::model::Doc;
 
 /// Render the document to PDF bytes. Pure: same `Doc` in, byte-identical
@@ -79,17 +79,22 @@ pub fn without_delivery_watermark(bytes: &[u8]) -> Result<Vec<u8>, &'static str>
 
 /// Turn laid-out pages into a PDF 1.4 file. Object ids are fixed:
 /// 1 catalog, 2 page tree (carrying the shared /Resources), 3 resources,
-/// 4..7 fonts, 8+ page/content pairs. No /Info, no file ID — those carry
+/// 4..7 embedded fonts, 8..11 their descriptors, 12..15 their TrueType
+/// streams, 16+ page/content pairs. No /Info, no file ID — those carry
 /// timestamps and would break byte determinism.
 fn emit(pages: &[Vec<Op>]) -> Vec<u8> {
-    use pdf_writer::{Content, Name, Pdf, Rect, Ref, writers::Resources};
+    use pdf_writer::types::FontFlags;
+    use pdf_writer::writers::Resources;
+    use pdf_writer::{Content, Name, Pdf, Rect, Ref};
 
     let catalog = Ref::new(1);
     let page_tree = Ref::new(2);
     let resources = Ref::new(3);
     let faces = [Face::Regular, Face::Bold, Face::Oblique, Face::BoldOblique];
     let font_ids: Vec<Ref> = (4..8).map(Ref::new).collect();
-    let first_page = 8usize;
+    let descriptor_ids: Vec<Ref> = (8..12).map(Ref::new).collect();
+    let file_ids: Vec<Ref> = (12..16).map(Ref::new).collect();
+    let first_page = 16usize;
 
     let mut pdf = Pdf::new();
     pdf.set_version(1, 4);
@@ -113,13 +118,55 @@ fn emit(pages: &[Vec<Op>]) -> Vec<u8> {
         }
     }
 
-    for (id, face) in font_ids.iter().zip(faces) {
-        let mut f = pdf.type1_font(*id);
-        f.base_font(Name(face.base()))
-            .encoding_predefined(Name(b"WinAnsiEncoding"))
-            .first_char(32)
-            .last_char(255)
-            .widths((32..=255u8).map(|c| width_units(face, c) as f32));
+    // A simple TrueType font dictionary with WinAnsiEncoding keeps the content
+    // stream's existing one-byte text while embedding the real Ubuntu face.
+    for ((id, desc_id), (file_id, face)) in font_ids
+        .iter()
+        .zip(descriptor_ids.iter())
+        .zip(file_ids.iter().zip(faces))
+    {
+        let metrics = super::fonts::metrics(face);
+        {
+            let mut f = pdf.indirect(*id).dict();
+            f.pair(Name(b"Type"), Name(b"Font"));
+            f.pair(Name(b"Subtype"), Name(b"TrueType"));
+            f.pair(
+                Name(b"BaseFont"),
+                Name(super::fonts::postscript_name(face).as_bytes()),
+            );
+            f.pair(Name(b"Encoding"), Name(b"WinAnsiEncoding"));
+            f.pair(Name(b"FirstChar"), 32);
+            f.pair(Name(b"LastChar"), 255);
+            f.insert(Name(b"Widths"))
+                .array()
+                .items(metrics.widths.iter().map(|width| *width as f32));
+            f.pair(Name(b"FontDescriptor"), *desc_id);
+        }
+
+        let mut flags = FontFlags::NON_SYMBOLIC;
+        if matches!(face, Face::Oblique | Face::BoldOblique) {
+            flags |= FontFlags::ITALIC;
+        }
+        let stem = if matches!(face, Face::Bold | Face::BoldOblique) {
+            120.0
+        } else {
+            80.0
+        };
+        let [x_min, y_min, x_max, y_max] = metrics.bbox;
+        pdf.font_descriptor(*desc_id)
+            .name(Name(super::fonts::postscript_name(face).as_bytes()))
+            .flags(flags)
+            .bbox(Rect::new(x_min, y_min, x_max, y_max))
+            .italic_angle(metrics.italic_angle)
+            .ascent(metrics.ascent)
+            .descent(metrics.descent)
+            .cap_height(metrics.cap_height)
+            .stem_v(stem)
+            .font_file2(*file_id);
+
+        let bytes = super::fonts::font_bytes(face);
+        pdf.stream(*file_id, bytes)
+            .pair(Name(b"Length1"), bytes.len() as i32);
     }
 
     for (i, ops) in pages.iter().enumerate() {
@@ -396,6 +443,14 @@ mod tests {
         assert!(bytes.ends_with(b"%%EOF"), "trailer");
         // Independent validation (ADR guard 2): lopdf must parse it.
         let _ = lopdf::Document::load_mem(&bytes).expect("re-parse");
+        // The document embeds the shipped Ubuntu faces, not base-14 Helvetica.
+        assert!(
+            bytes
+                .windows(b"/BaseFont /Ubuntu".len())
+                .any(|w| w == b"/BaseFont /Ubuntu")
+        );
+        assert!(bytes.windows(10).any(|w| w == b"/FontFile2"));
+        assert!(!bytes.windows(9).any(|w| w == b"Helvetica"));
     }
 
     #[test]
