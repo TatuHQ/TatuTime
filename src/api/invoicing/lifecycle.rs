@@ -425,11 +425,16 @@ pub async fn invoice_export_csv(State(app): State<AppState>) -> ApiResult {
         .into_response())
 }
 
+/// Delete any invoice, draft or not. This is the explicit admin escape hatch
+/// (every invoice offers it): the document, its archived PDF and its revision
+/// links go together, and deleting a non-draft invoice releases its entries and
+/// expenses from the invoice lock. Payment history on the invoice goes with it,
+/// which is why the GUI confirms first.
 pub async fn delete_invoice(State(app): State<AppState>, Path(id): Path<Uuid>) -> ApiResult {
     let invoice = get_invoice_or_404(&app, id)?;
-    if invoice.status != InvoiceStatus::Draft {
-        return Err(ApiError::conflict("only a draft invoice can be deleted"));
-    }
     app.store.delete_invoice(id)?;
+    // #52: the invoice document, its PDF and its payments are gone, so the log
+    // line is the only remaining record that the number was ever billed.
+    record_audit(&app, "invoice_deleted", &invoice.number).await;
     Ok(StatusCode::NO_CONTENT.into_response())
 }

@@ -125,21 +125,23 @@ async fn member_cannot_invoice_or_approve() {
 // ---------------------------------------------------- Tier 1: dangerous paths --
 
 /// #262(1): `DELETE /api/invoices/{id}` over HTTP — the path that was only
-/// covered at the store level. A draft deletes (204 → gone); an issued invoice
-/// can never be deleted (409); a member cannot reach the admin-tier surface.
+/// covered at the store level. Every invoice is deletable (204 → gone), and
+/// deleting a non-draft invoice releases its entries; a member cannot reach the
+/// admin-tier surface.
 #[tokio::test]
-async fn delete_invoice_over_http_is_admin_only_and_draft_only() {
+async fn delete_invoice_over_http_is_admin_only_and_any_status() {
     let (app, _d) = app().await;
     let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
-    json_req(
+    let (_, entry) = json_req(
         &app,
         "POST",
         "/api/entries",
         Some(entry_body(cid, "P1", json!(3), "2026-10-02")),
     )
     .await;
+    let eid = entry["id"].as_str().unwrap().to_string();
 
     // Draft: deletable.
     let (sc, draft) = json_req(
@@ -181,7 +183,7 @@ async fn delete_invoice_over_http_is_admin_only_and_draft_only() {
         StatusCode::NOT_FOUND
     );
 
-    // Issued: never deletable -> 409, and the invoice survives.
+    // Issued: deletable too, and the entry it locked becomes editable again.
     let (sc2, draft2) = json_req(
         &app,
         "POST",
@@ -193,14 +195,37 @@ async fn delete_invoice_over_http_is_admin_only_and_draft_only() {
     let iid = draft2["id"].as_str().unwrap().to_string();
     let (si, issued) = json_req(&app, "POST", &format!("/api/invoices/{iid}/issue"), None).await;
     assert_eq!(si, StatusCode::OK, "{issued}");
-    let (s_conflict, body) = json_req(&app, "DELETE", &format!("/api/invoices/{iid}"), None).await;
-    assert_eq!(s_conflict, StatusCode::CONFLICT, "{body}");
+    let (s_locked, _) = json_req(
+        &app,
+        "PUT",
+        &format!("/api/entries/{eid}"),
+        Some(entry_body(cid, "P1", json!(4), "2026-10-02")),
+    )
+    .await;
+    assert_eq!(
+        s_locked,
+        StatusCode::CONFLICT,
+        "issued invoices lock entries"
+    );
+    let (s_deleted, body) = json_req(&app, "DELETE", &format!("/api/invoices/{iid}"), None).await;
+    assert_eq!(s_deleted, StatusCode::NO_CONTENT, "{body}");
     assert_eq!(
         json_req(&app, "GET", &format!("/api/invoices/{iid}"), None)
             .await
             .0,
+        StatusCode::NOT_FOUND
+    );
+    let (s_released, released) = json_req(
+        &app,
+        "PUT",
+        &format!("/api/entries/{eid}"),
+        Some(entry_body(cid, "P1", json!(4), "2026-10-02")),
+    )
+    .await;
+    assert_eq!(
+        s_released,
         StatusCode::OK,
-        "an issued invoice must survive the refused delete"
+        "deleting the invoice releases its entries: {released}"
     );
 }
 

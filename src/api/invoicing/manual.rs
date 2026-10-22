@@ -1,4 +1,4 @@
-use super::{get_invoice_or_404, lifecycle::record_timeline};
+use super::{content_for, get_invoice_or_404, lifecycle::record_timeline, load_template};
 use crate::api::*;
 use crate::domain::InvoiceTimelineEventKind;
 
@@ -564,7 +564,6 @@ pub async fn revise_invoice(
         return Err(ApiError::validation(errors));
     }
     let document_due = edited.document.due_date;
-    let document_subject = edited.document.subject.clone();
     let document_terms = edited.document.payment_terms;
     let now = app.clock.now();
     let mut revision = Invoice {
@@ -592,7 +591,9 @@ pub async fn revise_invoice(
         payments: invoice.payments.clone(),
         write_off_reason: String::new(),
         written_off_at: None,
-        subject: invoice.subject.clone(),
+        // Resolved below from the reviewed document/customer/template, so a
+        // raw placeholder subject can never be frozen onto the revision.
+        subject: String::new(),
         terms: invoice.terms,
     };
     match status {
@@ -602,20 +603,17 @@ pub async fn revise_invoice(
         crate::domain::InvoiceStatus::Issued | crate::domain::InvoiceStatus::PartlyPaid => {
             revision.issued_at = Some(now);
             revision.due_date = document_due.or(invoice.due_date);
-            revision.subject = document_subject.unwrap_or_else(|| invoice.subject.clone());
             revision.terms = document_terms.or(invoice.terms);
         }
         crate::domain::InvoiceStatus::Paid => {
             revision.issued_at = Some(now);
             revision.due_date = document_due.or(invoice.due_date);
-            revision.subject = document_subject.unwrap_or_else(|| invoice.subject.clone());
             revision.terms = document_terms.or(invoice.terms);
             revision.paid_at = invoice.paid_at.or(Some(now));
         }
         crate::domain::InvoiceStatus::WrittenOff => {
             revision.issued_at = Some(now);
             revision.due_date = document_due.or(invoice.due_date);
-            revision.subject = document_subject.unwrap_or_else(|| invoice.subject.clone());
             revision.terms = document_terms.or(invoice.terms);
             revision.paid_at = invoice.paid_at;
             revision.written_off_at = invoice.written_off_at.or(Some(now));
@@ -625,6 +623,18 @@ pub async fn revise_invoice(
                 invoice.write_off_reason.clone()
             };
         }
+    }
+    if status != crate::domain::InvoiceStatus::Draft {
+        // Resolve the reviewed subject exactly as issuing would: the editor may
+        // carry the org template's placeholders (`%customer_name% ...`), and
+        // those must be interpolated, never frozen raw onto the revision.
+        let customer = app
+            .store
+            .get_customer(invoice.customer_id)?
+            .ok_or_else(|| ApiError::not_found("customer"))?;
+        let template = load_template(&app)?;
+        let resolved = content_for(&revision, &customer, &template);
+        revision.subject = resolved.subject.unwrap_or_default();
     }
     let pdf = if status == crate::domain::InvoiceStatus::Draft {
         None

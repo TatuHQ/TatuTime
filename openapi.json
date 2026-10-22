@@ -6471,7 +6471,8 @@
         "tags": [
           "invoices"
         ],
-        "summary": "Delete a draft invoice",
+        "summary": "Delete an invoice in any status",
+        "description": "Removes the document, its archived PDF (an imported original included), its payment ledger and its timeline sidecar in one writer-locked write, clears the opposite revision link and records the deletion in the audit log. A deleted non-draft invoice releases the entries and expenses it locked.",
         "parameters": [
           {
             "$ref": "#/components/parameters/CsrfProtection"
@@ -6489,9 +6490,6 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
-          },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
           }
         }
       },

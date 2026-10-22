@@ -51,11 +51,15 @@ async function refreshInvoicesBody() {
     const edit = () => action('link', 'Edit',
       () => api.get(`/invoices/${inv.id}`).then(edOpen, (e) => announce(e.message)),
       'Edit, or create a correction revision of, this invoice', 'edit');
+    const remove = () => action('danger', 'Delete', () => removeInvoice(inv.id),
+      'Delete this invoice, its archived PDF and any recorded payments', 'delete');
     if (superseded) {
-      // History only: the active correction revision owns the actions.
+      // History only: the active correction revision owns the live actions,
+      // but every invoice can still be deleted outright.
       actions.push(
         action('link', 'PDF', () => downloadInvoicePdf(inv.id, inv.number),
           'Download the superseded original PDF', 'file'),
+        remove(),
       );
     } else if (inv.status === 'draft') {
       actions.push(
@@ -76,6 +80,7 @@ async function refreshInvoicesBody() {
           'Send a PDF copy to another address, e.g. the accountant', 'email'),
         action('danger', 'Write off', () => writeOffInvoice(inv, balance),
           'Forgive the remaining balance (final; excluded from outstanding)', 'ignored'),
+        remove(),
       );
     } else if (inv.status === 'paid') {
       actions.push(
@@ -86,6 +91,7 @@ async function refreshInvoicesBody() {
           'Choose recipients and send this invoice (PDF attached)', 'contact'),
         action('link', 'Email copy', () => emailInvoiceCopy(inv.id),
           'Send a PDF copy to another address, e.g. the accountant', 'email'),
+        remove(),
       );
     } else {
       // Written off: the corrected document can still be revised and resent.
@@ -93,6 +99,7 @@ async function refreshInvoicesBody() {
         edit(),
         action('link', 'PDF', () => downloadInvoicePdf(inv.id, inv.number),
           'Download the archived invoice PDF', 'file'),
+        remove(),
       );
     }
     // #133: selecting the row (its Preview button, a click anywhere on the
@@ -146,17 +153,8 @@ async function refreshInvoicesBody() {
               attrs: { title: 'Correction revision of the earlier document with the same number' },
             }, [statusChip('Correction')])
             : null,
-          // #403: an imported invoice keeps its reviewed native status and says
-          // where it came from. The archived original is the authoritative
-          // document; the PDF action downloads those exact bytes.
-          inv.imported
-            ? el('span', {
-              cls: 'inv-imported',
-              attrs: {
-                title: `Imported from Harvest as ${inv.imported.original_number}; the archived original PDF is authoritative`,
-              },
-            }, [statusChip('Harvest import')])
-            : null,
+          // Import provenance is history, not a second status: it is shown as
+          // an Imported entry in the invoice timeline instead of a chip here.
         ]),
         iconActionsCell(actions),
       ]),
@@ -1157,6 +1155,18 @@ async function renderTimeline(inv) {
     const data = await api.get(`/invoices/${id}/timeline`);
     if (!invoicePreview || invoicePreview.id !== id) return;
     const events = data.events || [];
+    // Import provenance is history, not a status: surface it as the oldest
+    // timeline entry (the import may predate any recorded event on the
+    // document, and old imports have no stored timeline event).
+    if (inv.imported) {
+      events.push({
+        kind: 'created',
+        description: `Imported from Harvest as ${inv.imported.original_number}; the original PDF is archived.`,
+        actor_name: 'Harvest import',
+        at: inv.created_at,
+        meta: { source: 'harvest', original_number: inv.imported.original_number, pdf_sha256: inv.imported.pdf_sha256 },
+      });
+    }
     previewTimeline = events;
     if (events.length === 0) {
       state.textContent = 'No history yet.';
@@ -1395,7 +1405,10 @@ export async function markInvoiceSent(inv) {
 
 
 export async function removeInvoice(id) {
-  if (!(await askConfirm('Delete this draft invoice?'))) return;
+  if (!(await askConfirm(
+    'Delete this invoice? Its archived PDF and any recorded payments are removed, and its entries/expenses become editable again.',
+    'Delete invoice',
+  ))) return;
   try {
     await api.del(`/invoices/${id}`);
     await refreshInvoices();

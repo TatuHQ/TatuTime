@@ -80,7 +80,7 @@ impl Store {
 
     pub fn delete_invoice(&self, id: Uuid) -> Result<(), StoreError> {
         let _guard = self.write_lock()?;
-        let revision = read_json::<Invoice>(&self.doc_path::<Invoice>(&id.to_string()))?;
+        let stored = read_json::<Invoice>(&self.doc_path::<Invoice>(&id.to_string()))?;
         self.remove_doc_locked::<Invoice>(&id.to_string())?;
         // #113: the invoice JSON is the record of authority — when it goes,
         // its archived PDF goes in the same transactional write (#52 logs it).
@@ -88,9 +88,15 @@ impl Store {
         if pdf.exists() {
             std::fs::remove_file(&pdf)?;
         }
-        // Deleting a draft revision must not leave a dangling link on the
-        // original: clear `superseded_by` so it becomes active again.
-        if let Some(original_id) = revision.and_then(|invoice| invoice.supersedes) {
+        // The per-invoice timeline describes a document that no longer exists:
+        // drop the dot-file sidecar with the invoice it narrates.
+        let timeline = self.invoice_timeline_path(id);
+        if timeline.exists() {
+            std::fs::remove_file(&timeline)?;
+        }
+        // Deleting a draft/correction revision must not leave a dangling link
+        // on the original: clear `superseded_by` so it becomes active again.
+        if let Some(original_id) = stored.as_ref().and_then(|invoice| invoice.supersedes) {
             let original_path = self.doc_path::<Invoice>(&original_id.to_string());
             if let Some(mut original) = read_json::<Invoice>(&original_path)?
                 && original.superseded_by == Some(id)
@@ -98,6 +104,18 @@ impl Store {
                 original.superseded_by = None;
                 write_json(&original_path, &original)?;
                 self.index_invoice_locked(&original)?;
+            }
+        }
+        // Deleting a superseded original leaves its revision active: drop the
+        // now-dangling `supersedes` link so the revision is a plain invoice.
+        if let Some(revision_id) = stored.as_ref().and_then(|invoice| invoice.superseded_by) {
+            let revision_path = self.doc_path::<Invoice>(&revision_id.to_string());
+            if let Some(mut revision) = read_json::<Invoice>(&revision_path)?
+                && revision.supersedes == Some(id)
+            {
+                revision.supersedes = None;
+                write_json(&revision_path, &revision)?;
+                self.index_invoice_locked(&revision)?;
             }
         }
         self.unindex_invoice_locked(&id.to_string())

@@ -747,6 +747,14 @@ async fn correction_revisions_keep_the_original_and_supersede_it() {
     assert_eq!(revision["supersedes"], original_id.as_str());
     assert_eq!(revision["status"], "issued");
     assert_eq!(revision["total_minor"], 12000);
+    // The frozen subject is interpolated exactly as issuing resolves it: a raw
+    // template placeholder must never be baked onto a revision (or its PDF).
+    let subject = revision["subject"].as_str().unwrap_or_default();
+    assert!(
+        !subject.contains('%'),
+        "the revision subject is resolved, got {subject:?}"
+    );
+    assert!(subject.contains("Corrections"), "{subject:?}");
 
     let (s, stored_original) =
         json_req(&app, "GET", &format!("/api/invoices/{original_id}"), None).await;
@@ -778,6 +786,23 @@ async fn correction_revisions_keep_the_original_and_supersede_it() {
         all["invoices"].as_array().unwrap().len(),
         2,
         "history keeps both"
+    );
+
+    // Every invoice is deletable: removing the superseded original leaves the
+    // revision active and drops its now-dangling `supersedes` link.
+    let (s, _) = json_req(
+        &app,
+        "DELETE",
+        &format!("/api/invoices/{original_id}"),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    let (_, revision_after) =
+        json_req(&app, "GET", &format!("/api/invoices/{revision_id}"), None).await;
+    assert!(
+        revision_after.get("supersedes").is_none(),
+        "{revision_after}"
     );
 }
 

@@ -206,6 +206,49 @@ test('invoice cards take their values and labels from the PDF suggestions', asyn
     dom.window.close();
 });
 
+test('overriding Subtotal and Payments recomputes the import status and keeps the override', async () => {
+    const body = preview(false);
+    body.invoices[0] = {
+        ...body.invoices[0],
+        customer_id: null, original_number: '6', currency: 'USD',
+        invoice_date: '2025-05-01', period_from: '2025-05-01', period_to: '2025-05-31',
+        total_minor: 0, opening_paid_minor: 0, status: 'issued',
+        suggestions: {
+            pages: 1, text_bytes: 10, text_truncated: false, status: 'suggestions', reason: null,
+            suggestions: [
+                { field: 'customer', value: 'Acme', amount_minor: null, page: 1, evidence: '', confidence: 'low' },
+                { field: 'invoice_number', value: '6', amount_minor: null, page: 1, evidence: '', confidence: 'medium' },
+                { field: 'currency', value: 'USD', amount_minor: null, page: 1, evidence: '', confidence: 'low' },
+                { field: 'invoice_date', value: '2025-05-01', amount_minor: null, page: 1, evidence: '', confidence: 'medium' },
+                { field: 'period_from', value: '2025-05-01', amount_minor: null, page: 1, evidence: '', confidence: 'medium' },
+                { field: 'period_to', value: '2025-05-31', amount_minor: null, page: 1, evidence: '', confidence: 'medium' },
+                { field: 'amount_due', value: 'USD $0.00', amount_minor: 0, page: 1, evidence: '', confidence: 'medium' },
+                { field: 'status', value: 'issued', amount_minor: null, page: 1, evidence: '', confidence: 'medium' },
+            ],
+        },
+    };
+    const { dom } = await harness({ ready: false, previewBody: body });
+    await dom.window.openBatch(batch().id);
+    dom.window.document.getElementById('import-tab-invoices').click();
+    await waitFor(() => dom.window.document.getElementById(`import-inv-total-${SHA}`), {
+        message: 'the invoice card',
+    });
+    const document = dom.window.document;
+    const total = document.getElementById(`import-inv-total-${SHA}`);
+    const paid = document.getElementById(`import-inv-paid-${SHA}`);
+    total.value = '162.50';
+    total.dispatchEvent(new dom.window.Event('input'));
+    paid.value = '162.50';
+    paid.dispatchEvent(new dom.window.Event('input'));
+    assert.equal(document.getElementById(`import-inv-status-${SHA}`).value, 'paid');
+    const choices = JSON.parse(document.getElementById('import-choices').value);
+    const saved = choices.invoices.find((choice) => choice.sha256 === SHA);
+    assert.equal(saved.total_minor, 16250, 'the reviewed total overrides the PDF');
+    assert.equal(saved.opening_paid_minor, 16250, 'the reviewed payment overrides the PDF');
+    assert.equal(saved.status, 'paid');
+    dom.window.close();
+});
+
 test('double confirm issues one commit request', async () => {
     const { dom, calls } = await harness({ ready: true });
     await dom.window.openBatch(batch().id);

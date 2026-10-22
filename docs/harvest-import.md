@@ -181,11 +181,23 @@ keep the imports separate. Within a tab, people, customers, projects, tasks and
 expense categories can be mapped to existing records or created explicitly,
 while each invoice gets a review card labelled like the source document
 (`Invoice ID`, `Invoice for`, `Issue date`, `Period from`/`Period to`,
-`Subtotal`, `Payments`) and prefilled from the PDF suggestions. Original PDFs
-are linked directly from the member, and an externally billed row can be
-explicitly linked to an invoice PDF. One reconciliation table shows
+`Subtotal`, `Payments`, `Status`) and prefilled from the PDF suggestions.
+Original PDFs are linked directly from the member, and an externally billed row
+can be explicitly linked to an invoice PDF. One reconciliation table shows
 accepted/skipped totals for the tab's source and currency. The advanced JSON
 view remains available for operators but is no longer the primary control.
+
+The card is the review of record: the typed `Subtotal` and `Payments` are what
+the import stores, even when they disagree with the PDF's own text — a document
+that fails to print its total is reviewed once in the workspace, not patched
+afterwards — while the original PDF is still archived byte-for-byte against the
+imported invoice. The `Status` select follows the two amounts while they are
+edited (equal means *Paid*, a positive part means *Partly paid*, zero means
+*Issued*) unless the admin picks a status explicitly. Import provenance is an
+entry in the invoice's history, never a status: the register shows one status
+per invoice, its timeline says the document came from a Harvest batch and links
+the archived original, and any invoice — imported included — can be revised or
+deleted from the register.
 
 An explicit row→invoice link is reconciled, never inferred: the invoice must be
 included in the same batch, the row must be externally billed, the row currency

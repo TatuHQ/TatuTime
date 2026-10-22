@@ -65,6 +65,13 @@ function blankChoices() {
     };
 }
 
+// The `import-choices` box mirrors the in-memory mapping, so a value the admin
+// types (and the settlement it implies) is visible without a save round trip.
+function serializeChoices() {
+    const box = $('import-choices');
+    if (box) box.value = JSON.stringify(draft, null, 2);
+}
+
 function renderBatch(batch) {
     currentBatch = batch;
     $('import-batch-label').textContent = `Batch ${batch.id} · ${batch.namespace} · ${batch.state}`;
@@ -72,7 +79,7 @@ function renderBatch(batch) {
     for (const key of Object.keys(blankChoices())) {
         if (!Array.isArray(draft[key])) draft[key] = blankChoices()[key];
     }
-    $('import-choices').value = JSON.stringify(draft, null, 2);
+    serializeChoices();
     const committed = batch.state === 'committed';
     for (const id of ['import-time-upload', 'import-expenses-upload', 'import-invoices-upload',
         'import-save', 'import-preview', 'import-discard']) {
@@ -304,6 +311,21 @@ function invoiceDefaults(row) {
     };
 }
 
+// Keep the reviewed settlement in step with the two amounts while the admin
+// edits the card: equal means paid, a positive part means partly paid, zero
+// means issued. An explicit status choice wins (`data-touched`).
+function syncInvoiceSettlement(choice, sha) {
+    const select = $(`import-inv-status-${sha}`);
+    if (!select) return;
+    const total = choice.total_minor;
+    const paid = choice.opening_paid_minor ?? 0;
+    if (total != null && select.dataset.touched !== '1') {
+        select.value = paid === total ? 'paid' : paid > 0 ? 'partly_paid' : 'issued';
+        choice.status = select.value;
+    }
+    serializeChoices();
+}
+
 function ensureInvoice(row) {
     const defaults = invoiceDefaults(row);
     let choice = draft.invoices.find((entry) => entry.sha256 === row.pdf_sha256);
@@ -356,7 +378,7 @@ function renderMapping(preview) {
     }
     if (importSource === 'invoices') {
         renderInvoices(host, preview);
-        $('import-choices').value = JSON.stringify(draft, null, 2);
+        serializeChoices();
         return;
     }
     const timeRows = importSource === 'time' ? (preview.time || []) : [];
@@ -367,7 +389,7 @@ function renderMapping(preview) {
             cls: 'p-form-help-text',
             text: `No ${SOURCE_TABS[importSource].label.toLowerCase()} rows in this batch.`,
         }));
-        $('import-choices').value = JSON.stringify(draft, null, 2);
+        serializeChoices();
         return;
     }
 
@@ -524,7 +546,7 @@ function renderMapping(preview) {
         })));
     }
 
-    $('import-choices').value = JSON.stringify(draft, null, 2);
+    serializeChoices();
 }
 
 function renderInvoices(host, preview) {
@@ -565,14 +587,23 @@ function renderInvoices(host, preview) {
                 el('div', {}, [labelFor(`import-inv-to-${row.pdf_sha256}`, 'Period to'),
                 textControl(`import-inv-to-${row.pdf_sha256}`, choice.period_to || '', (value) => { choice.period_to = value || null; }, 'date')]),
                 el('div', {}, [labelFor(`import-inv-total-${row.pdf_sha256}`, 'Subtotal'),
-                moneyInput(`import-inv-total-${row.pdf_sha256}`, choice.total_minor, (value) => { choice.total_minor = value; })]),
+                moneyInput(`import-inv-total-${row.pdf_sha256}`, choice.total_minor, (value) => {
+                    choice.total_minor = value;
+                    syncInvoiceSettlement(choice, row.pdf_sha256);
+                })]),
                 el('div', {}, [labelFor(`import-inv-paid-${row.pdf_sha256}`, 'Payments'),
-                moneyInput(`import-inv-paid-${row.pdf_sha256}`, choice.opening_paid_minor, (value) => { choice.opening_paid_minor = value ?? 0; })]),
+                moneyInput(`import-inv-paid-${row.pdf_sha256}`, choice.opening_paid_minor, (value) => {
+                    choice.opening_paid_minor = value ?? 0;
+                    syncInvoiceSettlement(choice, row.pdf_sha256);
+                })]),
                 el('div', {}, [labelFor(`import-inv-status-${row.pdf_sha256}`, 'Status'),
                 selectControl(`import-inv-status-${row.pdf_sha256}`, choice.status || '',
                     [['', 'Select status…'], ['issued', 'Issued'], ['partly_paid', 'Partly paid'],
                     ['paid', 'Paid'], ['written_off', 'Written off']],
-                    (value) => { choice.status = value || null; })]),
+                    (value) => {
+                        choice.status = value || null;
+                        $(`import-inv-status-${row.pdf_sha256}`).dataset.touched = '1';
+                    })]),
                 el('div', {}, [labelFor(`import-inv-exclude-${row.pdf_sha256}`, 'Exclude'),
                 checkboxControl(`import-inv-exclude-${row.pdf_sha256}`, choice.excluded,
                     (checked) => { choice.excluded = checked; })]),
@@ -670,7 +701,7 @@ async function saveMapping() {
     if (!id) return;
     clearError();
     try {
-        $('import-choices').value = JSON.stringify(draft, null, 2);
+        serializeChoices();
         renderBatch(await api.put(`${BASE}/${id}/review`, draft));
         $('import-ready').textContent = 'Mapping saved. Recompute the preview.';
         $('import-commit').disabled = true;
@@ -697,7 +728,7 @@ function linkRow(preview, sourceKey, invoiced) {
                 const sha = select.value;
                 draft.invoice_links = draft.invoice_links.filter((link) => link.source_key !== sourceKey);
                 if (sha) draft.invoice_links.push({ source_key: sourceKey, invoice_sha256: sha });
-                $('import-choices').value = JSON.stringify(draft, null, 2);
+                serializeChoices();
                 announce(sha ? 'Row linked; recompute the preview.' : 'Link removed; recompute the preview.');
             },
         },
@@ -834,7 +865,7 @@ async function previewBatch() {
     if (!id) return;
     clearError();
     try {
-        $('import-choices').value = JSON.stringify(draft, null, 2);
+        serializeChoices();
         renderBatch(await api.put(`${BASE}/${id}/review`, draft));
         const sent = JSON.stringify(draft);
         renderPreview(await api.post(`${BASE}/${id}/preview`));
@@ -920,6 +951,13 @@ export function wireImports() {
     if (wired || !$('import-new')) return;
     wired = true;
     wireImportTabs();
+    // Every mapping control edits `draft` in place; mirror it into the box so
+    // the visible JSON never lags behind a typed amount or a derived status.
+    for (const type of ['input', 'change']) {
+        $('import-mapping').addEventListener(type, () => {
+            if (draft) serializeChoices();
+        });
+    }
     $('import-new').addEventListener('click', newBatch);
     $('settings-tab-import').addEventListener('click', () => {
         refreshImports();

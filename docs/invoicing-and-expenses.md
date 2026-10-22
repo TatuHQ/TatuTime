@@ -10,11 +10,15 @@ An invoice moves through these statuses:
 
 | Status | Meaning | Editable? |
 | --- | --- | --- |
-| `draft` | Generated or created manually, not yet issued | Yes; it locks nothing and can be deleted |
+| `draft` | Generated or created manually, not yet issued | Yes; it locks nothing |
 | `issued` | Issued and delivered; the archived document is the record | No; its entries and expenses are frozen |
 | `partly_paid` | Some payments recorded, balance still open | No; frozen |
 | `paid` | The ledger covers the total | No; frozen |
 | `written_off` | The remaining balance was forgiven with a reason | No; frozen |
+
+Any status can still be **corrected** through a revision or **deleted** outright
+(see [Corrections and resending](#corrections-and-resending) and
+[Frozen records](#frozen-records)).
 
 ### Generate a draft
 
@@ -153,8 +157,19 @@ Saving a template explicitly replaces those defaults; a saved template with
 An issued invoice freezes its entries and expenses permanently. Settling
 (`paid`/`partly_paid`) or writing off (`written_off`) does **not** release them:
 the archived invoice is the evidence of what was billed and the timesheet must
-never drift from it. The only editable state is before issue. Drafts lock
-nothing and can be deleted.
+never drift from it. The only editable state is before issue; drafts lock
+nothing.
+
+**Every invoice is deletable.** `DELETE /api/invoices/{id}` (admin tier, `204`)
+works on a draft, an issued, a settled, a written-off or an imported invoice —
+the register offers *Delete* on every row. One writer-locked operation removes
+the document, its archived PDF (an imported original included), its payment
+ledger and its timeline sidecar; a superseded original's revision (or a deleted
+revision's original) has the dangling link cleared, and `audit.log` records
+`invoice_deleted`. Because the lock provider only sees invoices that exist,
+deleting a non-draft invoice releases the entries and expenses it locked — the
+deliberate escape hatch, which is why the GUI confirms first and names what will
+be removed.
 
 The GUI hides edit/delete actions on invoiced rows and shows a lock that links to
 the invoice. The API answers `409` with a reason for an attempted change, and
@@ -181,7 +196,9 @@ status may carry payments above the corrected total.
 
 A draft invoice is still edited in place with `PUT /api/invoices/{id}`; the
 revision endpoint refuses it (`409`). Only the active revision can be revised
-again; the superseded original cannot.
+again; the superseded original cannot. A revision's subject is interpolated
+exactly as issuing resolves it, so a raw `%customer_name%` placeholder from the
+org template is never frozen onto a revision or its PDF.
 
 ## PDFs, email and reminders
 

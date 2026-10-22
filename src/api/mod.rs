@@ -23,8 +23,8 @@ use crate::auth::{
 use crate::domain::{
     Category, CategoryInput, ClaimInput, ClaimState, Currency, Customer, CustomerInput, Entry,
     EntryInput, Expense, ExpenseClaim, ExpenseInput, FieldError, Hours, Invoice, InvoiceError,
-    InvoiceStatus, Project, ProjectCode, ProjectInput, Source, StartTimerInput, Task, TaskInput,
-    Timer, elapsed_hundredths, generate_invoice, validate_category_input, validate_customer_input,
+    Project, ProjectCode, ProjectInput, Source, StartTimerInput, Task, TaskInput, Timer,
+    elapsed_hundredths, generate_invoice, validate_category_input, validate_customer_input,
     validate_entry_input, validate_expense_input, validate_project_input, validate_task_input,
 };
 use crate::domain::{Submission, SubmissionState};

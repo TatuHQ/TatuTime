@@ -140,8 +140,9 @@ answers `403` with `{"error":{"code":"csrf","message":"missing X-CSRF-Protection
   `/api/invoices/{id}/pay`, `/api/timer/stop` and `/api/claims/{id}/submit`.
 - **204 No Content** where the operation returns no body, for example setting a
   secret.
-- A delete of a non-draft invoice, or any other state transition the current
-  status forbids, answers **409**.
+- `DELETE /api/invoices/{id}` deletes an invoice in **any** status and answers
+  **204**; any other state transition the current status forbids — including
+  revising an original that already has a correction — answers **409**.
 
 ## Invoice document fields
 
@@ -180,6 +181,24 @@ defaults: `payment_terms = {"kind": "net_30"}` and the subject
 `%customer_name% invoice for %period_month_padded% %period_year%`. The template
 variable set now also includes `%period_month%`, `%period_month_number%`,
 `%period_month_padded%` and `%period_year%`, derived from the invoice period.
+
+## Correction revisions
+
+`POST /api/invoices/{id}/revise` (admin tier) corrects a sent or imported
+invoice without rewriting it. The body is `InvoiceEditInput` — now also
+accepting an optional `status` — and answers **201** with the new revision:
+
+- `Invoice.supersedes` / `Invoice.superseded_by` are nullable ids. A revision
+  carries `supersedes = <original id>`; the original is left untouched and
+  marked `superseded_by = <revision id>`. Both stay readable and downloadable;
+  only the revision is counted by the summary, reports, CSV and reminders.
+- The revision reuses the number, gets its own id and its own archived PDF
+  (`409` for a draft revision, which has no PDF until it is issued). A revision
+  whose `status` is `draft` locks nothing, is edited in place through the usual
+  draft endpoint and is issued again with the same number.
+- `409` for a draft invoice (edit it in place instead) and for an original that
+  already has a correction; `422` when the status contradicts the recorded
+  payments.
 
 ## Errors
 

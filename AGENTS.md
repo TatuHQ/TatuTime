@@ -122,9 +122,16 @@ the `v0.1.8` release notes is no longer needed.
   issuing freezes them and settling (`paid`) or writing off (`written_off`)
   does **not** release them, because the archived invoice document is the
   record of what was billed and the timesheet must never drift from it. The
-  only way back to editable is before issue: drafts lock nothing and can be
-  deleted; the GUI reflects this by hiding the actions of invoiced rows and
-  showing a lock that links to the invoice), `SubmissionLock` (entries in a
+  only way back to editable is before issue (drafts lock nothing). The one
+  explicit escape hatch is deleting the invoice itself: `DELETE
+  /api/invoices/{id}` works on **any** status (admin tier, every register row
+  offers it), removes the document, its archived PDF (an imported original
+  included), its payment ledger and its timeline sidecar under one
+  writer-lock, clears the opposite `supersedes`/`superseded_by` link, records
+  `invoice_deleted` in the audit log, and therefore releases the entries it
+  locked. The GUI reflects all of it by hiding the actions of invoiced rows,
+  showing a lock that links to the invoice, and confirming before a delete),
+  `SubmissionLock` (entries in a
   submitted/approved week, #16), `ClaimLock` (expenses on a
   submitted/approved reimbursement claim, #24 — the #190 follow-up, no longer
   a direct scan in `api::expenses`) and `ImportLock` (#398: entries/expenses
@@ -181,6 +188,15 @@ the `v0.1.8` release notes is no longer needed.
   returns 404, not 403, to avoid leaking existence). Customers/projects/tasks/
   categories are shared org-wide reference data (any authenticated user).
 - **Invoices (#8):** generated from a period's billable, not-yet-invoiced entries; each line snapshots the resolved rate at generation, so a later rate change never rewrites an issued invoice. Issuing sets `status=issued`, which the `InvoiceLock` (a `lock::EntryLock` provider wired in `AppState`) uses to reject edits/deletes of referenced entries with 409. Draft invoices do not lock. Every builder (the API draft/preview pipeline and the recurring scheduler) resolves already-invoiced lines through one shared predicate, `domain::already_invoiced`, which excludes **every non-draft** invoice: settling (`paid`/`partly_paid`) or writing off an invoice releases its entries from the edit lock but never re-bills them (#248). Invoice number is sequential (`INV-0001`).
+  Editing a sent or imported invoice never rewrites it: `POST
+  /api/invoices/{id}/revise` creates a **correction revision** with its own id,
+  the same number and its own PDF, `supersedes` on the revision and
+  `superseded_by` on the untouched original — which stays in the register and
+  out of every active aggregate. The reviewed `status` may return the revision
+  to draft. Import provenance is **not** a status: the register shows one
+  status per invoice and the import is a history entry on the timeline; the
+  import review's `Subtotal`/`Payments` overrides win over the PDF's own text
+  while the original PDF is archived byte-for-byte.
 - **Getting paid is provider-free (by design):** there is **no** hosted-checkout
   or payment-provider integration — no Stripe, no PayPal, no webhook receiver,
   no demo-flag env vars. An invoice answers "how does this client pay us" from
