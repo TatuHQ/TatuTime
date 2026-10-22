@@ -161,6 +161,19 @@ If those host ports are already in use, set `MAILHOG_UI_HOST_PORT` and
 Vault-stored `smtp.*` settings still win, so use a fresh data volume (or clear
 the SMTP settings in **Settings → Email**) when switching to MailHog.
 
+A hardened [Mailpit](https://github.com/axllent/mailpit) overlay is also
+available when you prefer its inbox or need to keep captured mail across
+restarts:
+
+```sh
+docker compose -f docker-compose.yml -f docker-compose.email.yml up -d
+```
+
+Its web inbox is at <http://127.0.0.1:8025> and it accepts SMTP on 1025 inside
+the compose network. The same `TUCANO_HOST_ADDR`, `TUCANO_MAILPIT_UI_PORT` and
+`TUCANO_MAILPIT_SMTP_PORT` variables control the published ports. Use one
+overlay at a time — both bind the same default host ports.
+
 ### Integrations
 
 | Variable | Default | Purpose | Secret / file variant |
