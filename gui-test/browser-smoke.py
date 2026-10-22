@@ -1437,18 +1437,19 @@ class Gate:
             "the bespoke .field/.hint/.form-error markup is gone and the official "
             "form vocabulary is in place (#232 phase 2b)",
             counts["field"] == 0 and counts["hint"] == 0 and counts["formError"] == 0
-            # 167/167: the Settings split's rows plus the ten Document label
+            # 168/168: the Settings split's rows plus the ten Document label
             # rows (#354), the Company legal id and its label row, the template
-            # notes row, the invoice editor status row and the accountant-email
-            # row. Mirrors the shell census in gui-test/forms.test.mjs:68, so
-            # the two suites cannot drift.
-            # 175 groups: those rows plus the composed fieldsets, the Contacts
+            # notes row, the invoice editor status row, the accountant-email
+            # row and the email dialog's receipt row. Mirrors the shell census
+            # in gui-test/forms.test.mjs:68, so the two suites cannot drift.
+            # 176 groups: those rows plus the composed fieldsets, the Contacts
             # row and the Expense-categories dialog's name field.
-            and counts["groups"] == 175 and counts["labels"] == 167
-            and counts["controls"] == 167
-            # 68: the previous 55 plus the template footer and notes hints,
-            # one per Harvest import source tab, and the accountant-email hint.
-            and counts["help"] == 68
+            and counts["groups"] == 176 and counts["labels"] == 168
+            and counts["controls"] == 168
+            # 70: the previous 55 plus the template footer and notes hints,
+            # one per Harvest import source tab, the accountant-email hint,
+            # the wizard preview status and the email dialog's receipt list.
+            and counts["help"] == 70
             # 28: the previous 27 plus the vault card's #vault-error.
             and counts["messages"] == counts["errorGroups"] == 28,
             f"counts={counts}",
@@ -2305,7 +2306,7 @@ class Gate:
             ("/projects", "project-new", "project-dialog"),
             ("/tasks", "task-new", "task-dialog"),
             ("/expenses", "expense-new", "expense-dialog"),
-            ("/invoices", "invoice-new", "invoice-editor"),
+            ("/invoices", "invoice-new", "invoice-wizard"),
             ("/settings/users", "user-new", "user-dialog"),
         )
         original = self.marionette.call("WebDriver:GetWindowRect")
@@ -2538,9 +2539,13 @@ class Gate:
             self.navigate("/invoices")
             self.wait_script("document.documentElement.dataset.booted === 'ready'", "invoice workspace boot")
             self.marionette.script("document.getElementById('invoice-new').click(); return true;")
-            self.wait_script("document.getElementById('invoice-editor').open", "new invoice workspace")
-            self.check("New invoice enters one editor without a mandatory wizard",
-                       self.marionette.script("return !document.getElementById('invoice-wizard').open && document.getElementById('manual-new').hidden;"))
+            self.wait_script("document.getElementById('invoice-wizard').open", "new invoice wizard")
+            self.check("New invoice starts the creation wizard",
+                       self.marionette.script("return document.getElementById('invoice-wizard').open && !document.getElementById('invoice-editor').open && !document.getElementById('manual-new').hidden;"))
+            self.marionette.script("document.getElementById('invoice-wizard').close(); document.getElementById('manual-new').click(); return true;")
+            self.wait_script("document.getElementById('invoice-editor').open", "manual invoice editor")
+            self.check("Manual invoice remains available beside the wizard",
+                       self.marionette.script("return document.getElementById('invoice-editor').open && !document.getElementById('invoice-wizard').open;"))
             menus = json.loads(self.marionette.script("""
                 const controls = [document.getElementById('ed-customer'), document.getElementById('ed-terms'),
                     document.querySelector('#ed-lines [aria-label="Linked project"]')];
@@ -2620,7 +2625,7 @@ class Gate:
                                && document.getElementById('ed-notes').value.includes('this invoice only')
                                && !document.querySelector('#ed-lines [aria-label="Product or service"]');
                        """))
-            self.marionette.script("document.getElementById('invoice-editor').close(); document.getElementById('invoice-new').click(); return true;")
+            self.marionette.script("document.getElementById('invoice-editor').close(); document.getElementById('manual-new').click(); return true;")
             self.wait_script("document.getElementById('invoice-editor').open", "new import workspace")
             self.marionette.script("document.getElementById('ed-import').click(); return true;")
             self.wait_script("document.getElementById('invoice-wizard').open", "optional tracked import")

@@ -107,14 +107,30 @@ the existing pre-1.0 API rather than introducing a new route version.
 The existing invoice endpoints remain under `/api/invoices`. The closed
 `ManualInvoiceInput` and `InvoiceEditInput` schemas now explicitly accept an
 optional `document` object: `po_number`, `invoice_date`, `due_date`,
-`payment_terms`, `subject` and `notes`. `InvoiceEditInput` also accepts currency
-changes for wholly manual drafts. Omitted edit fields preserve stored values;
-null nested overrides restore inheritance, while an empty notes string suppresses
-default notes. Unknown nested fields, invalid dates/terms/template variables and
-oversized text are rejected before writes. Tracked lines cannot be removed,
-duplicated or changed. Non-draft updates remain 409.
+`payment_terms`, `subject`, `notes` and `line_grouping`. `InvoiceEditInput` also
+accepts currency changes for wholly manual drafts. Omitted edit fields preserve
+stored values; null nested overrides restore inheritance, while an empty notes
+string suppresses default notes. Unknown nested fields, invalid dates/terms/
+template variables and oversized text are rejected before writes. Tracked lines
+cannot be removed, duplicated or changed. Non-draft updates remain 409.
 
-This is an additive pre-1.0 contract revision shipped in application 0.1.48,
+`InvoiceInput` (used by `POST /api/invoices` and `POST /api/invoices/preview`)
+also accepts optional `line_grouping`: `single`, `project`, `task` or `line`
+(default). It is a **presentation** setting frozen on the invoice document: the
+stored lines stay one entry-referencing row per tracked record, so rate
+snapshots, locks and staleness checks are unchanged. The PDF folds time rows
+accordingly; expenses and manual lines always keep their own rows.
+`POST /api/invoices/preview/pdf` runs the same stateless selection and returns
+the candidate document as a PDF (200, nothing persisted) for the creation
+wizard's live preview.
+
+`POST /api/invoices/{id}/email` accepts optional `include_receipts` (default
+false) to attach the stored receipt files of the invoice's expense lines. The
+response's `receipt_count` says how many were attached, and the `email_sent`
+timeline entry records their names. `GET /api/invoices/{id}/receipts` returns
+those names only (never the bytes) for the recipient dialog.
+
+This is an additive pre-1.0 contract revision shipped in application 0.1.65,
 not a new URL version. Existing request bodies remain valid. Consumers that
 validate responses against a closed schema must use the matching checked-in
 OpenAPI revision before relying on the new optional `Invoice.document` field.

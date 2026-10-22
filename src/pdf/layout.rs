@@ -206,6 +206,13 @@ pub(super) fn layout(doc: &Doc) -> Vec<Vec<Op>> {
         y: p.y + 28,
         bytes: title,
     });
+    // The subject is the document's subtitle: it sits directly under the title,
+    // separated by one blank line. Its label keeps the template override while
+    // the value starts right after the measured label (not in the wide
+    // key/value column used by the metadata rows).
+    let subject_block =
+        (doc.subject.is_some() && !doc.meta.is_empty()).then(|| doc.meta[0].clone());
+    let subject_rows = usize::from(subject_block.is_some());
     let recipient = doc
         .header
         .iter()
@@ -217,14 +224,28 @@ pub(super) fn layout(doc: &Doc) -> Vec<Vec<Op>> {
         for block in &doc.header[..index] {
             emit_block_in(&mut p, block, 10, META_X - MARGIN, CONTENT_W);
         }
+        let from_bottom = p.y;
+        if let Some(block) = &subject_block {
+            p.y = MARGIN + 28 + 13; // one blank line below the title
+            emit_subject(&mut p, block, 10);
+            p.y = p.y.max(from_bottom);
+        } else {
+            p.y = from_bottom;
+        }
         p.y = p.y.max(MARGIN + 65);
-        p.advance(22);
+        // With a subject subtitle the invoice identity follows one line below
+        // it; without one the title keeps its historical gap.
+        p.advance(if subject_rows == 1 { 14 } else { 22 });
         &doc.header[index..]
     } else {
+        if let Some(block) = &subject_block {
+            p.y = MARGIN + 28 + 13;
+            emit_subject(&mut p, block, 10);
+            p.advance(8);
+        }
         p.advance(44);
         &doc.header[..]
     };
-    let subject_rows = usize::from(doc.subject.is_some() && !doc.meta.is_empty());
     let top = p.y;
     let pages_before = p.pages.len();
     let meta_bottom = emit_meta(&mut p, &doc.meta[subject_rows..], top);
@@ -235,10 +256,6 @@ pub(super) fn layout(doc: &Doc) -> Vec<Vec<Op>> {
     // break has already moved it back to the page top).
     if p.pages.len() == pages_before && p.y < meta_bottom {
         p.y = meta_bottom;
-    }
-    p.advance(8);
-    for block in &doc.meta[..subject_rows] {
-        emit_block(&mut p, block, 10, 0);
     }
     p.advance(8);
 
@@ -550,6 +567,41 @@ fn push_dashed_rule(p: &mut Pager, max_w: i32) {
         });
         x += 6;
     }
+}
+
+/// The subject subtitle directly under the document title. Unlike the metadata
+/// `Key: value` rows, the value starts immediately after the measured label, so
+/// `Subject: October services` reads as one phrase instead of two distant
+/// columns. Wraps inside the left column so it never runs under the issuer
+/// block.
+fn emit_subject(p: &mut Pager, block: &Block, size: i32) {
+    let Block::KeyVal { key, spans } = block else {
+        return;
+    };
+    let key_bytes = winansi(&format!("{key}:"));
+    let label_w = measure(Face::Bold, size, &key_bytes) + 6;
+    // The subtitle shares the top band with the issuer block on the right, so
+    // it wraps inside the left column rather than running under `From`.
+    let avail = HEADER_W - label_w;
+    let mut lines = wrap_spans(spans, size, avail, false);
+    if lines.is_empty() {
+        lines.push(vec![]);
+    }
+    let height = 13 * lines.len() as i32;
+    p.need(height);
+    let base = p.y + size;
+    p.cur.push(Op::Text {
+        face: Face::Bold,
+        size,
+        x: MARGIN,
+        y: base,
+        bytes: key_bytes,
+    });
+    let xv = MARGIN + label_w;
+    for (i, line) in lines.into_iter().enumerate() {
+        emit_line_ops(p, &line, size, xv, base + 13 * i as i32);
+    }
+    p.advance(height);
 }
 
 /// A `Key: value` line: bold key in a fixed label column, value wrapped.
@@ -948,6 +1000,35 @@ mod tests {
         let street_first = y_of(page, "Exceedingly").expect("issuer street start");
         let street_last = y_of(page, "Well,").expect("issuer street end");
         assert!(street_first < street_last, "the issuer address line wraps");
+    }
+
+    #[test]
+    fn subject_subtitle_sits_under_the_title_with_one_blank_line() {
+        let mut inv = sample_invoice();
+        inv.subject = "October services".into();
+        let pages = layout(&doc_for(&inv, &customer(), &org()));
+        let page = &pages[0];
+        let title = y_of(page, "INVOICE").expect("title");
+        let subject = y_of(page, "Subject:").expect("subject label");
+        assert_eq!(
+            subject - title,
+            23,
+            "one 13pt blank line plus the 10pt body"
+        );
+        // The value starts just after the label, not in the 110pt metadata column.
+        let value = page
+            .iter()
+            .find_map(|op| match op {
+                Op::Text { x, bytes, y, .. } if *y == subject && bytes.starts_with(b"October") => {
+                    Some(*x)
+                }
+                _ => None,
+            })
+            .expect("subject value");
+        assert!(
+            value < MARGIN + 80,
+            "value {value} stays close to the label"
+        );
     }
 
     #[test]

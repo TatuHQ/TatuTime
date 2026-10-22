@@ -4,7 +4,8 @@
 
 import { api, fetchAll } from './api.js';
 import { $, addDays, announce, askConfirm, askPrompt, clearFormError, el, formatMoney, isoDate, mondayOf, rowAction, showFormError, singleFlight, statusChip } from './dom.js';
-import { ed, edOpen, parseHundredths, refreshInvoices } from './invoices.js';
+import { parseHundredths, refreshInvoices } from './invoices.js';
+import { pdfDeadline, renderPdfDocument } from './pdf.js';
 import { customerName, state } from './state.js';
 
 // ------------------------------------------------ advanced billing gate ----
@@ -33,6 +34,103 @@ if (advancedBilling) advancedBilling.hidden = !ADVANCED_BILLING_ENABLED;
 // separate explicit actions on the table.
 
 export const iw = { step: 1, from: '', to: '', preview: null };
+
+// Live candidate-document preview state. A new render supersedes the previous
+// one by sequence, and every blob URL / PDF.js document is released exactly
+// once — the same discipline as the invoice detail panel (#133/#349).
+let iwPreviewSeq = 0;
+let iwPreviewDispose = null;
+let iwPreviewUrl = '';
+
+export function iwGrouping() {
+  return $('iw-grouping')?.value || 'project';
+}
+
+function iwPreviewPayload() {
+  return {
+    customer_id: $('iw-customer').value,
+    from: iw.from || $('iw-from').value,
+    to: iw.to || $('iw-to').value,
+    include_expenses: $('iw-expenses').checked,
+    project_codes: iwSelectedProjects(),
+    line_grouping: iwGrouping(),
+  };
+}
+
+function releaseIwPreview() {
+  iwPreviewDispose?.();
+  iwPreviewDispose = null;
+  if (iwPreviewUrl) URL.revokeObjectURL(iwPreviewUrl);
+  iwPreviewUrl = '';
+}
+
+/// Whether a response is a real PDF before handing it to the viewer (a proxy
+/// error page under a 200 must not paint a blank frame).
+function iwIsPdf(blob, bytes) {
+  if (blob && typeof blob.type === 'string' && blob.type && blob.type !== 'application/pdf') return false;
+  const sig = [0x25, 0x50, 0x44, 0x46, 0x2d]; // "%PDF-"
+  return bytes.length >= sig.length && sig.every((b, i) => bytes[i] === b);
+}
+
+/// Render the candidate invoice — the exact selection and grouping the wizard
+/// will save — beside the review list. Stateless: POST /invoices/preview/pdf
+/// persists nothing.
+export async function iwRefreshPreview() {
+  const host = $('iw-preview');
+  const status = $('iw-preview-state');
+  if (!host || !status || iw.step !== 3) return;
+  const seq = ++iwPreviewSeq;
+  const current = () => seq === iwPreviewSeq && iw.step === 3;
+  releaseIwPreview();
+  host.textContent = '';
+  const payload = iwPreviewPayload();
+  if (!payload.customer_id || !payload.from || !payload.to || payload.from > payload.to) {
+    status.hidden = false;
+    status.textContent = 'Pick a customer and a valid period to preview the document.';
+    return;
+  }
+  status.hidden = false;
+  status.textContent = 'Rendering preview…';
+  try {
+    const result = await pdfDeadline(
+      api.requestBlob('POST', '/invoices/preview/pdf', payload),
+      20000,
+      'The preview request timed out. Change a choice to retry.',
+    );
+    if (!current()) return;
+    const blob = result.blob;
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    if (!current()) return;
+    if (!iwIsPdf(blob, bytes)) {
+      status.textContent = 'Preview unavailable — the server did not return a PDF.';
+      return;
+    }
+    const url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
+    if (!current()) {
+      URL.revokeObjectURL(url);
+      return;
+    }
+    iwPreviewUrl = url;
+    const viewer = el('div', { cls: 'pdf-viewer' });
+    const open = el('a', {
+      text: 'Open PDF',
+      attrs: { href: url, target: '_blank', rel: 'noopener' },
+    });
+    host.replaceChildren(viewer, el('div', { cls: 'pdf-actions' }, [open]));
+    const dispose = await renderPdfDocument(viewer, bytes, current);
+    if (!current()) {
+      dispose();
+      return;
+    }
+    iwPreviewDispose = dispose;
+    status.hidden = true;
+    status.textContent = '';
+  } catch (error) {
+    if (!current()) return;
+    status.hidden = false;
+    status.textContent = `Preview unavailable — ${error.message}`;
+  }
+}
 
 export function iwPresetRange(preset) {
   const today = isoDate(new Date());
@@ -109,6 +207,7 @@ export async function iwLoadProjects() {
 
 export function iwShow() {
   for (const n of [1, 2, 3]) $(`iw-step${n}`).hidden = n !== iw.step;
+  if (iw.step !== 3) releaseIwPreview();
   const titles = ['customer and source', 'period and projects', 'review and save'];
   $('iw-title').textContent = `Create from tracked work — ${iw.step} of 3: ${titles[iw.step - 1]}`;
   $('iw-back').hidden = iw.step === 1;
@@ -139,6 +238,7 @@ export function iwOpen() {
   }
   const first = iw.step === 2 ? $('iw-preset') : iw.step === 3 ? $('iw-save') : $('iw-customer');
   first.focus();
+  if (iw.step === 3) iwRefreshPreview().catch?.(() => {});
   announce(`Invoice wizard open — step ${iw.step} of 3.`);
 }
 
@@ -150,6 +250,7 @@ export function iwOpen() {
 // state change to announce, and the successful save below must be free to
 // announce the draft it created.
 export function iwClose() {
+  releaseIwPreview();
   const dlg = $('invoice-wizard');
   if (typeof dlg.close === 'function') dlg.close();
   else dlg.removeAttribute('open');
@@ -185,10 +286,12 @@ export async function iwNext() {
         to: iw.to,
         include_expenses: $('iw-expenses').checked,
         project_codes: picks,
+        line_grouping: iwGrouping(),
       });
       iwRenderReview();
       iw.step = 3;
       iwShow();
+      iwRefreshPreview().catch?.(() => {});
     } catch (err) {
       showFormError($('iw-error'), err);
     }
@@ -198,7 +301,7 @@ export async function iwNext() {
 export function iwRenderReview() {
   const d = iw.preview;
   if (!d) return;
-  const grouping = $('iw-grouping').value;
+  const grouping = iwGrouping();
   const dl = $('iw-summary');
   dl.textContent = '';
   const sum = (label, v) => {
@@ -214,11 +317,13 @@ export function iwRenderReview() {
   ul.textContent = '';
   const groups = new Map();
   for (const l of d.lines || []) {
-    const key = grouping === 'project'
-      ? (l.project_code || 'general')
-      : grouping === 'task'
-        ? `${l.project_code || 'general'}${l.task_code ? ` / ${l.task_code}` : ''}`
-        : `${l.date} ${l.project_code || ''} ${l.note || l.kind}`;
+    const key = grouping === 'single'
+      ? 'All time entries'
+      : grouping === 'project'
+        ? (l.project_code || 'general')
+        : grouping === 'task'
+          ? `${l.project_code || 'general'}${l.task_code ? ` / ${l.task_code}` : ''}`
+          : `${l.date} ${l.project_code || ''} ${l.note || l.kind}`;
     if (!groups.has(key)) groups.set(key, { h: 0, amount: 0, n: 0 });
     const g = groups.get(key);
     g.h += l.hours || 0;
@@ -226,7 +331,7 @@ export function iwRenderReview() {
     g.n += 1;
   }
   for (const [key, g] of groups) {
-    const detail = grouping === 'detailed'
+    const detail = grouping === 'line'
       ? `${g.n} line(s)`
       : `${(g.h / 100).toFixed(2)} h · ${g.n} line(s)`;
     ul.appendChild(el('li', { text: `${key}: ${detail} — ${formatMoney(g.amount)} ${d.currency}` }));
@@ -248,14 +353,16 @@ async function iwSaveBody() {
       to: iw.to,
       include_expenses: $('iw-expenses').checked,
       project_codes: picks,
+      line_grouping: iwGrouping(),
     });
     iw.step = 1;
     iw.preview = null;
     iwShow();
     iwClose();
     await refreshInvoices();
-    edOpen(created);
-    announce(`Draft ${created.number} created from ${created.lines.length} line(s) — review, then Issue to lock and document it.`);
+    // Saving returns to the invoice register instead of opening the editor:
+    // the draft is listed there and can be previewed or issued from its row.
+    announce(`Draft ${created.number} created from ${created.lines.length} line(s) — preview it, then Issue to lock and document it.`);
   } catch (err) {
     showFormError($('iw-error'), err);
   }
@@ -275,7 +382,13 @@ export function iwInit() {
   });
   $('iw-from').addEventListener('change', () => iwLoadProjects().catch?.(() => { }));
   $('iw-to').addEventListener('change', () => iwLoadProjects().catch?.(() => { }));
-  $('iw-grouping').addEventListener('change', iwRenderReview);
+  $('iw-grouping').addEventListener('change', () => {
+    iwRenderReview();
+    iwRefreshPreview().catch?.(() => {});
+  });
+  $('iw-expenses').addEventListener('change', () => {
+    if (iw.step === 3) iwRefreshPreview().catch?.(() => {});
+  });
   iwPresetRange('this-month');
   iwShow();
 }

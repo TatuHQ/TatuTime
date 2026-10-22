@@ -191,7 +191,7 @@ pub async fn admin_email_test(
         text: "This is a test email from TucanoTime. If you can read it, SMTP delivery works.\n"
             .into(),
         html: None,
-        attachment: None,
+        attachments: vec![],
         from_name: None,
         reply_to: None,
     };

@@ -125,7 +125,7 @@ async fn email_copy_sends_pdf_to_third_party_with_audit_trail() {
     // The cover names the requester (session user "Admin") and the note.
     assert!(m.text.contains("Admin"), "{}", m.text);
     assert!(m.text.contains("for the October books"), "{}", m.text);
-    let (name, bytes) = m.attachment.as_ref().expect("PDF copy attached");
+    let (name, bytes) = m.attachments.first().expect("PDF copy attached");
     assert_eq!(*name, format!("{}.pdf", issued["number"].as_str().unwrap()));
     assert_eq!(*bytes, pdf, "the attached copy is the archived document");
 
@@ -278,7 +278,7 @@ async fn email_copy_accepts_paid_invoices() {
     assert_eq!(status, StatusCode::OK, "{body}");
     let msgs = app.email.messages();
     assert_eq!(msgs.len(), 1);
-    assert!(msgs[0].attachment.is_some());
+    assert!(!msgs[0].attachments.is_empty());
 }
 
 #[tokio::test]

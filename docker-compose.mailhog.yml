@@ -1,0 +1,26 @@
+# Local email testing with MailHog.
+#
+# Start the app and MailHog together on one Docker network:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.mailhog.yml up -d
+#
+# MailHog's web UI is at http://127.0.0.1:8025; it accepts SMTP on 1025.
+# Change the host-side ports with MAILHOG_UI_HOST_PORT / MAILHOG_SMTP_HOST_PORT
+# if those are already taken (the app always talks to the container on 1025).
+# The app gets a plaintext local relay (port 1025 is outside the TLS ports),
+# so every invoice/reminder email is delivered to MailHog instead of the
+# outside world. Vault-stored smtp.* settings still win over these env vars:
+# on a fresh test volume nothing is stored, so this overlay is enough.
+services:
+  tucanotime:
+    environment:
+      TUCANO_SMTP_HOST: mailhog
+      TUCANO_SMTP_PORT: "1025"
+      TUCANO_SMTP_FROM: invoices@tucanotime.local
+
+  mailhog:
+    image: mailhog/mailhog:v1.0.1
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${MAILHOG_SMTP_HOST_PORT:-1025}:1025"
+      - "127.0.0.1:${MAILHOG_UI_HOST_PORT:-8025}:8025"

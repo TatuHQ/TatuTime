@@ -37,6 +37,38 @@ pub enum LineKind {
     Fixed,
 }
 
+/// How the **document** presents tracked time on the invoice table.
+///
+/// This is a presentation choice only: the stored [`Invoice::lines`] keep one
+/// entry-referencing line per tracked record, so the rate snapshot, the
+/// edit/issue lock and `draft_is_stale` all continue to work on the original
+/// records. The PDF renderer folds those lines into the requested rows.
+///
+/// * `Line` (default / "By line") — one row per time entry.
+/// * `Single` — every time entry in the period as one row.
+/// * `Project` — one row per project.
+/// * `Task` — one row per project + task.
+///
+/// Expenses and manual lines are never folded: they are separate billable
+/// items and keep their own rows.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LineGrouping {
+    Single,
+    Project,
+    Task,
+    #[default]
+    Line,
+}
+
+impl LineGrouping {
+    /// The historical presentation: every tracked line stays its own row.
+    #[must_use]
+    pub fn is_line(&self) -> bool {
+        matches!(self, Self::Line)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct InvoiceLine {
     pub kind: LineKind,
@@ -310,6 +342,11 @@ pub struct InvoiceDocument {
     pub subject: Option<String>,
     #[serde(default)]
     pub notes: Option<String>,
+    /// How the PDF folds tracked time into the line table (#new). Presentation
+    /// only: the stored lines stay one-per-entry. `line` is the default and is
+    /// omitted from the serialised document, so legacy documents are unchanged.
+    #[serde(default, skip_serializing_if = "LineGrouping::is_line")]
+    pub line_grouping: LineGrouping,
 }
 
 impl InvoiceDocument {

@@ -42,7 +42,7 @@ export function el(tag, opts = {}, children = []) {
     for (const button of node.querySelectorAll('button[data-icon]')) {
       const label = button.textContent.trim();
       const id = `action-tooltip-${++actionTooltipSequence}`;
-      button.classList.add('icon-action', 'p-tooltip--top-right');
+      button.classList.add('icon-action', 'p-tooltip--top-center');
       button.setAttribute('aria-label', label);
       button.setAttribute('aria-describedby', id);
       if (!button.title) button.title = label;
@@ -112,11 +112,10 @@ export function rowAction(cls, text, fn, title, icon) {
   });
 }
 
-// The Actions cell of a register. The icon buttons sit in one wrapping flex
-// row: a crowded register breaks them over a second line instead of letting
-// them spill past the cell. The spill used to widen the scroll area by the
-// trailing icon margin (a phantom horizontal bar under the table) and push
-// invoice actions out of the register on narrower windows.
+// The Actions cell of a register. Other registers use the shared wrapping flex
+// row; the invoice register overrides it to a fixed 4-column grid so eight
+// actions read as two rows of four (web/styles.css). The cell keeps its
+// tooltips in reach and never spills past the register's scroll area.
 export function iconActionsCell(buttons, attrs = {}) {
   return el('td', {
     cls: 'actions-col',

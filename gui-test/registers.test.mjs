@@ -105,7 +105,7 @@ test('icon actions retain accessible names, official tooltips and keyboard dismi
     assert.deepEqual(buttons.map(button => button.getAttribute('aria-label')), ['Edit', 'Deactivate', 'Change password', 'Delete']);
     for (const button of buttons) {
         assert.ok(button.classList.contains('icon-action'));
-        assert.ok(button.classList.contains('p-tooltip--top-right'));
+        assert.ok(button.classList.contains('p-tooltip--top-center'));
         assert.ok(button.title);
         assert.ok(button.querySelector(`i.p-icon--${button.dataset.icon}[aria-hidden="true"]`));
         assert.equal([...button.childNodes].some(node => node.nodeType === 3 && node.textContent.trim()), false, 'no visible text node remains');

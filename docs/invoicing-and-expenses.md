@@ -67,9 +67,12 @@ entries and expenses:
   change never rewrites the invoice.
 - An invoice is single-currency. Selecting projects or expenses in different
   currencies is refused with a clear error instead of converting silently.
-- The tracked-work wizard lets you narrow generation to specific projects and
-  shows the uninvoiced hours per project. A preview endpoint renders the draft
-  without saving it; the draft is saved only after review.
+- The tracked-work wizard (`+ Invoice`) is the creation path: choose the
+  customer, the period (defaulting to the first and last day of the current
+  month), the projects with uninvoiced work and how time is grouped on the
+  document (`single`, `project`, `task` or `line`). The review step renders the
+  candidate PDF live beside the summary; `POST /api/invoices/preview/pdf`
+  persists nothing. The draft is saved only after review.
 - If the timesheet changes between saving a draft and issuing it, issue is
   refused with `409 draft_out_of_date`; regenerate the draft and issue again.
 
@@ -122,6 +125,11 @@ Issuing:
   and without a `(Net N)` suffix;
 - archives the rendered PDF at `invoices/<id>.pdf`, which is never rewritten;
 - makes the invoice immutable and freezes every entry and expense it references.
+
+In the GUI, a successful **Issue** opens the invoice email recipient dialog
+pre-filled with the customer's on-file billing address, so the document can be
+sent straight away. Sending is still an explicit choice: closing the dialog
+leaves the invoice issued.
 
 A fresh install resolves an absent `invoice_template.json` to seeded defaults:
 the subject `%customer_name% invoice for %period_month_padded% %period_year%`
@@ -204,16 +212,26 @@ org template is never frozen onto a revision or its PDF.
 
 - `GET /api/invoices/{id}/pdf` downloads the archived PDF; the preview endpoint
   renders the same document without an archive.
-- The document layout is: the `INVOICE` title with the `Subject` row and the
-  invoice metadata (`Invoice ID`, `Issue date`, `Due date`, `Period`) beside it;
-  a `From` block (name, one line per address line, the org legal id under its
-  configured label); an `Invoice for` block (customer name, one line per address
-  line, `Company number`); a `Total hours` line over the time lines; the
-  `Item type | Description | Quantity | Unit price | Amount` table; the totals
-  (`Subtotal`, plus `Payments`/`Amount due` once money was received, otherwise the
-  bold `Total`); and `Page N of M` on every page. A document with no subject and
-  no label overrides keeps the historical `Invoice <number>` title and prints no
-  Subject row.
+- The document layout is: the `INVOICE` title with the `Subject` row directly
+  beneath it (one blank line, the value close to its label); the invoice
+  metadata (`Invoice ID`, `Issue date`, `Due date`, `Period`) beside the
+  `From` block (name, one line per address line, the org legal id under its
+  configured label — `Tax ID` by default); an `Invoice for` block (customer
+  name, one line per address line, `Company number`); a `Total hours` line over
+  the time lines; the `Item type | Description | Quantity | Unit price | Amount`
+  table; the totals (`Subtotal`, plus `Payments`/`Amount due` once money was
+  received, otherwise the bold `Total`); and `Page N of M` on every page. A
+  document with no subject and no label overrides keeps the historical
+  `Invoice <number>` title and prints no Subject row.
+- Time rows in the table follow the invoice's frozen `line_grouping`:
+  `single` prints one `Time entries` row for the period, `project` one row per
+  project, `task` one row per project and task, and `line` (the default and the
+  legacy behaviour) one row per time entry. A grouped row prints the shared
+  resolved rate (the project rate in the normal case) in **Unit price**; when
+  its entries resolved different rates, no single price applies and the column
+  prints `-`. Expenses and manual lines are never folded into a time row. The
+  stored invoice lines remain one per tracked entry, so locks, rate snapshots
+  and `draft_is_stale` are unaffected.
 - Below the totals, the footer prints in this order:
   1. the template **footer**;
   2. the **Notes** section — the template `notes`, then the customer's
@@ -234,8 +252,15 @@ org template is never frozen onto a revision or its PDF.
   document are `dd/mm/yyyy`, and an issued invoice's due date carries the terms
   suffix from its own snapshot (`(Net 30)`, `(Due on receipt)`).
 - `POST /api/invoices/{id}/email` sends the invoice with the PDF attached to the
-  customer. `POST /api/invoices/{id}/email-copy` sends an ad-hoc copy to a third
-  party such as an accountant; it is audited but is not a customer delivery.
+  customer. When the invoice includes expense lines whose expense has a stored
+  receipt, the recipient dialog offers **Include expense receipts (N)**; ticking
+  it attaches those files (at most 20 and 25 MB total) alongside the invoice PDF.
+  The delivery's timeline entry (`email_sent`) records the receipt names and
+  count, and **View message** shows them, so the history says exactly what left
+  the building. `GET /api/invoices/{id}/receipts` returns the names only, for
+  that dialog; the bytes never leave the server until an email is sent.
+  `POST /api/invoices/{id}/email-copy` sends an ad-hoc copy to a third party
+  such as an accountant; it is audited but is not a customer delivery.
 - **The accountant copy is one click.** *Settings → Company* stores
   `OrgProfile.accountant_email`, and the register's **Email copy** action opens
   its dialog pre-filled with that address (editable, with a visible Cancel).

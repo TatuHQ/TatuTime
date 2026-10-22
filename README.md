@@ -141,7 +141,25 @@ The tables below cover the variables a container can use. The full reference, in
 | `TUCANO_SMTP_USERNAME` | unset | Username for optional `AUTH LOGIN` | Vault: `smtp.username` |
 | `TUCANO_SMTP_PASSWORD` | unset | Password for optional `AUTH LOGIN` | Vault: `smtp.password` |
 
-The SMTP client is plaintext only (no TLS or STARTTLS); use a local relay when your provider requires TLS.
+Ports 465 (implicit TLS) and 587 (STARTTLS) use verified TLS; any other port uses
+the plaintext local-relay mode (for a local relay such as MailHog on 1025).
+
+#### Testing email locally with MailHog
+
+The `docker-compose.mailhog.yml` overlay starts the app together with
+[MailHog](https://github.com/mailhog/MailHog) and points the app at it:
+
+```sh
+docker compose -f docker-compose.yml -f docker-compose.mailhog.yml up -d
+```
+
+Open <http://127.0.0.1:8025> for the inbox. MailHog accepts SMTP on port 1025;
+the app is configured with `TUCANO_SMTP_HOST=mailhog`,
+`TUCANO_SMTP_PORT=1025` and `TUCANO_SMTP_FROM=invoices@tucanotime.local`.
+If those host ports are already in use, set `MAILHOG_UI_HOST_PORT` and
+`MAILHOG_SMTP_HOST_PORT` — the app still reaches the container on 1025.
+Vault-stored `smtp.*` settings still win, so use a fresh data volume (or clear
+the SMTP settings in **Settings → Email**) when switching to MailHog.
 
 ### Integrations
 

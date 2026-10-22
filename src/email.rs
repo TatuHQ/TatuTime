@@ -20,8 +20,9 @@ pub struct EmailMessage {
     pub text: String,
     /// Optional HTML part.
     pub html: Option<String>,
-    /// Optional attachment filename + bytes.
-    pub attachment: Option<(String, Vec<u8>)>,
+    /// Attachments in send order: the invoice PDF first, then any expense
+    /// receipts the admin chose to include.
+    pub attachments: Vec<(String, Vec<u8>)>,
     /// Sender display name override (#146); None keeps the built-in
     /// "TucanoTime" — resolved from the org profile by the API layer.
     pub from_name: Option<String>,
@@ -123,15 +124,18 @@ pub fn guard_headers(msg: &EmailMessage) -> Result<(), EmailError> {
         ("subject", Some(msg.subject.as_str())),
         ("reply-to", msg.reply_to.as_deref()),
         ("sender name", msg.from_name.as_deref()),
-        (
-            "attachment filename",
-            msg.attachment.as_ref().map(|(name, _)| name.as_str()),
-        ),
     ];
     for (field, value) in fields {
         if value.is_some_and(has_control_characters) {
             return Err(EmailError::Header(field));
         }
+    }
+    if msg
+        .attachments
+        .iter()
+        .any(|(name, _)| has_control_characters(name))
+    {
+        return Err(EmailError::Header("attachment filename"));
     }
     Ok(())
 }
@@ -628,14 +632,14 @@ fn build_mime_with_sender(msg: &EmailMessage, sender: Option<&str>) -> Result<St
     if let Some(reply) = msg.reply_to.as_deref().filter(|r| !r.trim().is_empty()) {
         h.push_str(&format!("Reply-To: {}\r\n", encode_header(reply.trim())));
     }
-    match (&msg.html, &msg.attachment) {
-        (None, None) => {
+    match (&msg.html, msg.attachments.is_empty()) {
+        (None, true) => {
             h.push_str(
                 "MIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n",
             );
             h.push_str(&msg.text);
         }
-        (Some(html), None) => {
+        (Some(html), true) => {
             h.push_str("MIME-Version: 1.0\r\nContent-Type: text/html; charset=utf-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n");
             h.push_str(html);
         }
@@ -651,16 +655,10 @@ fn build_mime_with_sender(msg: &EmailMessage, sender: Option<&str>) -> Result<St
                 h.push_str("\r\n--tt\r\nContent-Type: text/html; charset=utf-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n");
                 h.push_str(html);
             }
-            if let Some((name, bytes)) = &msg.attachment {
+            for (name, bytes) in &msg.attachments {
                 use base64::Engine;
                 let enc = base64::engine::general_purpose::STANDARD.encode(bytes);
-                // #113: an invoice PDF must be labelled as such — clients key
-                // their preview/save behaviour off this type.
-                let ctype = if name.to_ascii_lowercase().ends_with(".pdf") {
-                    "application/pdf"
-                } else {
-                    "application/octet-stream"
-                };
+                let ctype = attachment_content_type(name);
                 h.push_str(&format!(
                     "\r\n--tt\r\nContent-Type: {ctype}\r\nContent-Disposition: attachment; filename=\"{name}\"\r\nContent-Transfer-Encoding: base64\r\n\r\n"
                 ));
@@ -673,6 +671,27 @@ fn build_mime_with_sender(msg: &EmailMessage, sender: Option<&str>) -> Result<St
         }
     }
     Ok(h)
+}
+
+/// The MIME type for an attachment, from the only hint storage keeps: the
+/// filename extension. Unknown types are opaque and download safely.
+fn attachment_content_type(name: &str) -> &'static str {
+    let ext = name
+        .rsplit_once('.')
+        .map(|(_, ext)| ext.to_ascii_lowercase())
+        .unwrap_or_default();
+    match ext.as_str() {
+        "pdf" => "application/pdf",
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "bmp" => "image/bmp",
+        "svg" => "image/svg+xml",
+        "tif" | "tiff" => "image/tiff",
+        "heic" => "image/heic",
+        _ => "application/octet-stream",
+    }
 }
 
 // ------------------------------------------------------------- templates ---
@@ -810,7 +829,7 @@ mod tests {
             subject: "s".into(),
             text: "t".into(),
             html: None,
-            attachment: None,
+            attachments: vec![],
             from_name: None,
             reply_to: None,
         });
@@ -820,7 +839,7 @@ mod tests {
             subject: "s".into(),
             text: "t".into(),
             html: None,
-            attachment: None,
+            attachments: vec![],
             from_name: None,
             reply_to: None,
         });
@@ -903,7 +922,7 @@ mod tests {
             subject: "S".into(),
             text: "body".into(),
             html: None,
-            attachment: Some(("inv.csv".into(), b"hi".to_vec())),
+            attachments: vec![("inv.csv".into(), b"hi".to_vec())],
             from_name: None,
             reply_to: None,
         };
@@ -928,7 +947,7 @@ mod tests {
             subject: "Café München".into(),
             text: "body".into(),
             html: None,
-            attachment: None,
+            attachments: vec![],
             from_name: None,
             reply_to: None,
         };
@@ -947,7 +966,7 @@ mod tests {
             subject: "S".into(),
             text: "b".into(),
             html: None,
-            attachment: None,
+            attachments: vec![],
             from_name: None,
             reply_to: None,
         };
@@ -996,7 +1015,7 @@ mod tests {
             subject: "S".into(),
             text: "body".into(),
             html: None,
-            attachment: Some(("INV-0001.PDF".into(), b"%PDF-1.4".to_vec())),
+            attachments: vec![("INV-0001.PDF".into(), b"%PDF-1.4".to_vec())],
             from_name: None,
             reply_to: None,
         };
@@ -1013,7 +1032,7 @@ mod tests {
             subject: "Invoice INV-0001 from Tucano".into(),
             text: "b".into(),
             html: None,
-            attachment: None,
+            attachments: vec![],
             from_name: Some("Tucano Time".into()),
             reply_to: Some("billing@tucano.test".into()),
         };
@@ -1047,7 +1066,7 @@ mod tests {
             subject: "S".into(),
             text: "b".into(),
             html: None,
-            attachment: None,
+            attachments: vec![],
             from_name: None,
             reply_to: None,
         };
@@ -1090,7 +1109,7 @@ mod tests {
             Err(EmailError::Header("sender name"))
         ));
         let m = EmailMessage {
-            attachment: Some(("inv\r\nBcc: x.pdf".into(), b"%PDF-1.4".to_vec())),
+            attachments: vec![("inv\r\nBcc: x.pdf".into(), b"%PDF-1.4".to_vec())],
             ..base.clone()
         };
         assert!(matches!(
@@ -1115,7 +1134,7 @@ mod tests {
             subject: "S\r\nBcc: attacker@evil.example".into(),
             text: "b".into(),
             html: None,
-            attachment: None,
+            attachments: vec![],
             from_name: None,
             reply_to: None,
         };
@@ -1249,7 +1268,7 @@ mod tests {
                 subject: "Local fixture".into(),
                 text: "No external mail".into(),
                 html: None,
-                attachment: None,
+                attachments: vec![],
                 from_name: None,
                 reply_to: None,
             };
@@ -1272,7 +1291,7 @@ mod tests {
             subject: "Invoice".into(),
             text: "Body".into(),
             html: None,
-            attachment: None,
+            attachments: vec![],
             from_name: Some("Example Billing".into()),
             reply_to: None,
         };
@@ -1326,7 +1345,7 @@ mod tests {
             subject: "test".into(),
             text: "body".into(),
             html: None,
-            attachment: None,
+            attachments: vec![],
             from_name: None,
             reply_to: None,
         };
@@ -1350,7 +1369,7 @@ mod tests {
             subject: "S".into(),
             text: "b".into(),
             html: None,
-            attachment: None,
+            attachments: vec![],
             from_name: None,
             reply_to: None,
         };

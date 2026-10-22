@@ -22,12 +22,14 @@ pub use document::{
     invoice_document, invoice_pdf, invoice_pdf_preview, invoice_template_get, invoice_template_put,
 };
 pub use email::{
-    EmailCopyInput, InvoiceEmailInput, money_for_email, send_invoice_email, send_invoice_email_copy,
+    EmailCopyInput, InvoiceEmailInput, invoice_receipts_handler, money_for_email,
+    send_invoice_email, send_invoice_email_copy,
 };
 pub use lifecycle::{
     PayInput, WriteOffInput, create_invoice, delete_invoice, get_invoice_handler,
     invoice_export_csv, invoice_report_handler, invoice_summary, invoice_timeline, issue_invoice,
-    list_invoices, mark_invoice_sent, pay_invoice, preview_invoice, write_off_invoice,
+    list_invoices, mark_invoice_sent, pay_invoice, preview_invoice, preview_invoice_pdf,
+    write_off_invoice,
 };
 pub use manual::{
     InvoiceEditInput, InvoiceLineInput, ManualInvoiceInput, create_manual_invoice, revise_invoice,
@@ -57,6 +59,11 @@ pub struct InvoiceInput {
     /// empty = every project with eligible work in the period.
     #[serde(default)]
     pub project_codes: Vec<crate::domain::ProjectCode>,
+    /// How the invoice document folds tracked time into its line table
+    /// (#new). Presentation only; the stored lines stay one-per-entry. Absent
+    /// keeps the historical "one row per entry" document.
+    #[serde(default)]
+    pub line_grouping: crate::domain::LineGrouping,
 }
 
 /// Shared selection pipeline for POST /invoices and /invoices/preview:
@@ -69,6 +76,7 @@ fn build_draft(
     to: chrono::NaiveDate,
     include_expenses: bool,
     project_codes: &[crate::domain::ProjectCode],
+    line_grouping: crate::domain::LineGrouping,
 ) -> Result<Invoice, ApiError> {
     // #256: one directory walk of the customer's projects, reused for both the
     // unknown-code check and the selection filter (the staged wizard hit it
@@ -111,6 +119,10 @@ fn build_draft(
         restrict_projects: !project_codes.is_empty(),
     };
     generate_invoice(String::new(), customer, &sources, from, to, app.clock.now())
+        .map(|mut draft| {
+            draft.document.line_grouping = line_grouping;
+            draft
+        })
         .map_err(invoice_error)
 }
 

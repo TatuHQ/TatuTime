@@ -1402,7 +1402,7 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
     tpl.labels.total === 'Amount due' && tpl.labels.description === 'Work performed');
   window.document.getElementById('tab-invoices').dispatchEvent(new window.Event('click', { bubbles: true }));
   await waitFor(() => !byId('panel-invoices').hidden, { message: 'the Invoices section to show' });
-  window.document.getElementById('invoice-new').dispatchEvent(new window.Event('click', { bubbles: true }));
+  window.document.getElementById('manual-new').dispatchEvent(new window.Event('click', { bubbles: true }));
   await waitFor(() => dialogOpen(byId('invoice-editor'))
     && window.document.querySelector('#ed-lines tbody tr') !== null, {
     message: 'the manual invoice modal to open with a line row',
@@ -1442,7 +1442,7 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
   // #349: the legacy generator that used to prefill this value is gone; the
   // editor's own customer picker carries the choice.
   byId('ed-customer').value = custOpt.value;
-  byId('invoice-new').dispatchEvent(new window.Event('click', { bubbles: true }));
+  byId('manual-new').dispatchEvent(new window.Event('click', { bubbles: true }));
   await waitFor(() => dialogOpen(byId('invoice-editor')) && byId('invoice-editor').querySelectorAll('tbody tr').length === 1, {
     message: 'the manual editor modal to open with one line row',
   });

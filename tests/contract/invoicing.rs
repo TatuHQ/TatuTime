@@ -508,8 +508,8 @@ async fn invoice_email_carries_the_archived_pdf_attachment() {
     let msgs = app.email.messages();
     assert_eq!(msgs.len(), 1);
     let (name, bytes) = msgs[0]
-        .attachment
-        .as_ref()
+        .attachments
+        .first()
         .expect("the invoice email carries the PDF (#113)");
     assert_eq!(*name, format!("{}.pdf", issued["number"].as_str().unwrap()));
     assert_eq!(*bytes, pdf, "the attachment is the archived document");
@@ -529,6 +529,113 @@ async fn invoice_email_carries_the_archived_pdf_attachment() {
     let mime = tucano_time::email::build_mime(&msgs[0]).expect("the message builds");
     assert!(mime.contains("Content-Type: application/pdf"));
     assert!(mime.contains("base64"));
+}
+
+#[tokio::test]
+async fn invoice_email_can_attach_expense_receipts_and_records_them_in_history() {
+    let (app, _d) = app().await;
+    let c = new_customer(&app, "Receipt Co", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap();
+    let (se, expense) = json_req(
+        &app,
+        "POST",
+        "/api/expenses",
+        Some(json!({
+            "date":"2026-10-02","customer_id":cid,"amount_minor":500,"currency":"EUR",
+            "receipt_name":"hotel.png","receipt_b64":"aGVsbG8="
+        })),
+    )
+    .await;
+    assert_eq!(se, StatusCode::CREATED, "{expense}");
+    let (si, invoice) = json_req(
+        &app,
+        "POST",
+        "/api/invoices",
+        Some(json!({"customer_id":cid,"from":"2026-10-01","to":"2026-10-31"})),
+    )
+    .await;
+    assert_eq!(si, StatusCode::CREATED, "{invoice}");
+    let iid = invoice["id"].as_str().unwrap().to_string();
+    let (s_issue, issued) =
+        json_req(&app, "POST", &format!("/api/invoices/{iid}/issue"), None).await;
+    assert_eq!(s_issue, StatusCode::OK, "{issued}");
+
+    // The dialog's summary endpoint names the receipt, never its bytes.
+    let (sr, receipts) =
+        json_req(&app, "GET", &format!("/api/invoices/{iid}/receipts"), None).await;
+    assert_eq!(sr, StatusCode::OK, "{receipts}");
+    assert_eq!(receipts["receipts"].as_array().unwrap().len(), 1);
+    assert_eq!(receipts["receipts"][0]["name"], "hotel.png");
+    assert!(
+        receipts["receipts"][0].get("receipt_b64").is_none(),
+        "the summary must not ship the file"
+    );
+
+    // Opting in attaches both the invoice PDF and the receipt.
+    let (semail, sent) = json_req(
+        &app,
+        "POST",
+        &format!("/api/invoices/{iid}/email"),
+        Some(json!({"recipients":["billing@receipt.test"],"include_receipts":true})),
+    )
+    .await;
+    assert_eq!(semail, StatusCode::OK, "{sent}");
+    assert_eq!(sent["receipt_count"], 1);
+    let messages = app.email.messages();
+    let msg = messages.last().expect("the email was recorded");
+    assert_eq!(msg.attachments.len(), 2, "invoice PDF + one receipt");
+    let (_, receipt_bytes) = msg
+        .attachments
+        .iter()
+        .find(|(name, _)| name == "hotel.png")
+        .expect("the receipt rides along");
+    assert_eq!(receipt_bytes, b"hello");
+    assert!(
+        msg.text.contains("1 expense receipt attached"),
+        "{}",
+        msg.text
+    );
+    let mime = tucano_time::email::build_mime(msg).expect("multi-attachment MIME builds");
+    assert!(mime.contains("Content-Type: image/png"), "{mime}");
+    assert!(mime.contains("filename=\"hotel.png\""), "{mime}");
+    assert!(mime.contains("Content-Type: application/pdf"), "{mime}");
+
+    // The delivery is history: the timeline names the receipt, so the admin can
+    // prove later what left the building.
+    let (st, timeline) =
+        json_req(&app, "GET", &format!("/api/invoices/{iid}/timeline"), None).await;
+    assert_eq!(st, StatusCode::OK, "{timeline}");
+    let event = timeline["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["kind"] == "email_sent")
+        .expect("email_sent history entry");
+    assert!(
+        event["description"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("with 1 expense receipt"),
+        "{event}"
+    );
+    assert_eq!(event["meta"]["receipts"][0], "hotel.png");
+    assert_eq!(event["meta"]["receipt_count"], 1);
+
+    // Without the option the historical PDF-only email is unchanged.
+    let (splain, plain) = json_req(
+        &app,
+        "POST",
+        &format!("/api/invoices/{iid}/email"),
+        Some(json!({"recipients":["billing@receipt.test"]})),
+    )
+    .await;
+    assert_eq!(splain, StatusCode::OK, "{plain}");
+    assert_eq!(plain["receipt_count"], 0);
+    assert_eq!(
+        app.email.messages().last().unwrap().attachments.len(),
+        1,
+        "receipts are opt-in"
+    );
 }
 
 #[tokio::test]
@@ -561,7 +668,7 @@ async fn legacy_draft_stamp_is_removed_only_from_the_delivery_copy() {
         json_req(&app, "POST", &format!("/api/invoices/{iid}/email"), None).await;
     assert_eq!(status, StatusCode::OK, "{response}");
     let messages = app.email.messages();
-    let (_, attachment) = messages[0].attachment.as_ref().unwrap();
+    let (_, attachment) = messages[0].attachments.first().unwrap();
     assert!(
         !has_stamp(attachment, "DRAFT"),
         "legacy DRAFT stamp must not reach the customer"
@@ -637,8 +744,8 @@ async fn org_profile_round_trips_and_prints_on_the_document() {
         "profile name replaces the config default"
     );
     assert!(
-        joined.contains("VAT / company id:"),
-        "empty legal_id_label keeps the historical wording"
+        joined.contains("Tax ID:"),
+        "empty legal_id_label prints the default Tax ID wording"
     );
     assert!(joined.contains("BE0123456789"), "legal id on the PDF");
     assert!(joined.contains("Markt 1,"), "address line on the PDF");
@@ -1257,6 +1364,101 @@ async fn invoice_preview_projects_and_paid_exclusion() {
     )
     .await;
     assert_eq!(s3, StatusCode::CONFLICT);
+}
+
+// ------------------------------------------------------------------ #new ---
+
+/// The creation wizard's grouping choice is a document-presentation setting:
+/// the stateless PDF preview and the saved draft both honour it, while the
+/// stored lines keep one entry-referencing row per tracked record.
+#[tokio::test]
+async fn preview_pdf_and_creation_apply_line_grouping() {
+    let (app, _d) = app().await;
+    let c = new_customer(&app, "Grouping Co", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap().to_string();
+    new_project(&app, &cid, "PA", json!({"rate_minor": 5000})).await;
+    new_project(&app, &cid, "PB", json!({"rate_minor": 7000})).await;
+    for (proj, day, hours) in [("PA", "2026-10-02", 2), ("PB", "2026-10-03", 1)] {
+        json_req(
+            &app,
+            "POST",
+            "/api/entries",
+            Some(json!({"date":day,"customer_id":cid.clone(),"project_code":proj,"hours":hours})),
+        )
+        .await;
+    }
+    let body = |grouping: &str| {
+        json!({
+            "customer_id": cid.clone(),
+            "from": "2026-10-01",
+            "to": "2026-10-31",
+            "line_grouping": grouping
+        })
+    };
+
+    // Single line: one "Time entries" row, no project codes in the table.
+    let (single_status, single_headers, single_pdf) =
+        raw_json_req(&app, "POST", "/api/invoices/preview/pdf", body("single")).await;
+    assert_eq!(single_status, StatusCode::OK);
+    assert_eq!(
+        single_headers[header::CONTENT_TYPE],
+        "application/pdf",
+        "the wizard preview is a PDF body"
+    );
+    assert!(single_pdf.starts_with(b"%PDF-"));
+    let single_text = pdf_joined(&single_pdf);
+    assert!(single_text.contains("Time entries"), "{single_text}");
+    assert!(
+        !single_text.contains("PA") && !single_text.contains("PB"),
+        "a single row must not name the projects: {single_text}"
+    );
+
+    // By project: both project codes appear as their own rows.
+    let (project_status, _, project_pdf) =
+        raw_json_req(&app, "POST", "/api/invoices/preview/pdf", body("project")).await;
+    assert_eq!(project_status, StatusCode::OK);
+    let project_text = pdf_joined(&project_pdf);
+    assert!(project_text.contains("PA"), "{project_text}");
+    assert!(project_text.contains("PB"), "{project_text}");
+    // A grouped row keeps the project rate as its unit price.
+    assert!(
+        project_text.contains("EUR \u{20ac}50.00"),
+        "PA's 50.00 unit price: {project_text}"
+    );
+    assert!(
+        project_text.contains("EUR \u{20ac}70.00"),
+        "PB's 70.00 unit price: {project_text}"
+    );
+
+    // Nothing was persisted by either render.
+    let (_ls, list) = json_req(&app, "GET", "/api/invoices", None).await;
+    assert!(list["invoices"].as_array().unwrap().is_empty());
+
+    // Saving keeps the per-entry lines (rate snapshot/lock semantics) but
+    // freezes the chosen presentation on the document.
+    let (created_status, created) =
+        json_req(&app, "POST", "/api/invoices", Some(body("single"))).await;
+    assert_eq!(created_status, StatusCode::CREATED, "{created}");
+    assert_eq!(created["document"]["line_grouping"], "single");
+    assert_eq!(created["lines"].as_array().unwrap().len(), 2);
+    let iid = created["id"].as_str().unwrap();
+    let (preview_status, _, preview_pdf) =
+        raw_req(&app, "GET", &format!("/api/invoices/{iid}/pdf/preview")).await;
+    assert_eq!(preview_status, StatusCode::OK);
+    assert!(pdf_joined(&preview_pdf).contains("Time entries"));
+
+    // A period with no billable work answers the same 409 as the real call,
+    // and still persists nothing.
+    let (empty_status, _, empty_body) = raw_json_req(
+        &app,
+        "POST",
+        "/api/invoices/preview/pdf",
+        json!({"customer_id":cid.clone(),"from":"2030-01-01","to":"2030-01-31"}),
+    )
+    .await;
+    assert_eq!(empty_status, StatusCode::CONFLICT);
+    let empty: Value = serde_json::from_slice(&empty_body).expect("error shape");
+    assert_eq!(empty["error"]["code"], "conflict");
 }
 
 // ------------------------------------------------------------------ #147 ---

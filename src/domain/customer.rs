@@ -625,7 +625,7 @@ pub struct OrgProfile {
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub accent: String,
     /// Display prefix for [`OrgProfile::legal_id`] (`Tax ID`, `VAT`,
-    /// `Company number`). Empty keeps today's `VAT / company id` wording.
+    /// `Company number`). Empty keeps the default `Tax ID` wording.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub legal_id_label: String,
     /// The company accountant's address (#112 follow-up). Prefills the
