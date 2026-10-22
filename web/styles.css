@@ -297,15 +297,34 @@ button.icon-action {
 }
 button.icon-action > [class*="p-icon--"] { margin: 0; width: 20px; height: 20px; flex-basis: 20px; }
 button.icon-action.is-tooltip-dismissed > .p-tooltip__message { display: none; }
-/* Actions cell content: one wrapping row. The cell keeps `overflow: visible`
-   so its tooltips are not clipped, which also means anything that spills past
-   the cell widens the register's scroll area — the trailing icon margin did
-   exactly that and added a phantom horizontal bar under the table. Spacing is
-   the row's `gap` now, so the last icon ends flush with the cell edge, and a
-   crowded register (an issued invoice offers six actions) breaks over a
-   second line instead of pushing the buttons out of the column. */
+/* Actions cell content. Other registers use a wrapping flex row; the invoice
+   register uses the fixed four-column grid below. The cell keeps
+   `overflow: visible` so its tooltips are not clipped, which also means
+   anything that spills past the cell widens the register's scroll area — the
+   trailing icon margin did exactly that and added a phantom horizontal bar
+   under the table. Spacing is the row's `gap` now, so the last icon ends flush
+   with the cell edge. */
 .row-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .25rem; }
 .row-actions > button { margin: 0; }
+/* The invoice register offers up to eight actions on an issued row. A fixed
+   four-column grid makes that two clear rows of four instead of an arbitrary
+   5 + 3 wrap decided by the cell width. Other registers keep the flex row. */
+#invoice-table .row-actions {
+  display: grid;
+  grid-template-columns: repeat(4, 44px);
+  gap: .25rem;
+  justify-content: start;
+}
+/* Icon tooltips point at the button they describe: `top-center` centres both
+   the bubble and its arrow on the icon. Long action labels wrap inside a
+   bounded bubble instead of running off the register. */
+button.icon-action > .p-tooltip__message {
+  width: max-content;
+  max-width: 16rem;
+  white-space: normal;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
 /* The Users register offers four actions; 4 x 44px + three 4px gaps + the cell
    padding is 13.25rem, so its row stays on one line instead of breaking 3 + 1. */
 #user-table .actions-col { width: 13.25rem; }
@@ -855,7 +874,7 @@ caption { padding-bottom: .35rem; }
 .invoice-register-column #invoice-table th:nth-child(4),
 .invoice-register-column #invoice-table th:nth-child(5) { width: 10%; }
 .invoice-register-column #invoice-table th:nth-child(6) { width: 10%; }
-.invoice-register-column #invoice-table .actions-col { width: 32%; }
+.invoice-register-column #invoice-table .actions-col { width: 13.75rem; }
 .invoice-register-column #invoice-table td { overflow-wrap: anywhere; }
 /* The invoice actions are the shared 44px icon buttons now: their margin and
    padding come from `.icon-action`/`.row-actions`, so the old compact
