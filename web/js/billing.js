@@ -4,7 +4,7 @@
 
 import { api, fetchAll } from './api.js';
 import { $, addDays, announce, askConfirm, askPrompt, clearFormError, el, formatMoney, isoDate, mondayOf, rowAction, showFormError, singleFlight, statusChip } from './dom.js';
-import { ed, edOpen, parseHundredths, refreshInvoices } from './invoices.js';
+import { parseHundredths, refreshInvoices } from './invoices.js';
 import { pdfDeadline, renderPdfDocument } from './pdf.js';
 import { customerName, state } from './state.js';
 
@@ -360,8 +360,9 @@ async function iwSaveBody() {
     iwShow();
     iwClose();
     await refreshInvoices();
-    edOpen(created);
-    announce(`Draft ${created.number} created from ${created.lines.length} line(s) — review, then Issue to lock and document it.`);
+    // Saving returns to the invoice register instead of opening the editor:
+    // the draft is listed there and can be previewed or issued from its row.
+    announce(`Draft ${created.number} created from ${created.lines.length} line(s) — preview it, then Issue to lock and document it.`);
   } catch (err) {
     showFormError($('iw-error'), err);
   }
