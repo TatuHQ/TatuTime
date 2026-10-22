@@ -966,6 +966,7 @@ api.requestBlob = async (method, url, body) => {
   document.getElementById('iw-projects').appendChild(project);
   document.getElementById('iw-expenses').checked = true;
   document.getElementById('iw-grouping').value = 'task';
+  context.iwInit();
   context.iw.from = '2026-10-01';
   context.iw.to = '2026-10-31';
   context.iw.step = 3;
