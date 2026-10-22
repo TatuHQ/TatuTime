@@ -324,7 +324,10 @@ export function wireWeekGrid() {
   // #349: the two creation actions lead the section — `+ Invoice` reveals the
   // tracked-work wizard (#134), `+ Manual Invoice` opens the manual editor
   // (#143) as a p-modal popup.
-  $('invoice-new').addEventListener('click', () => edOpen(null));
+  // #349/#new: `+ Invoice` starts the creation wizard (customer → period →
+  // grouping, with a live PDF preview); the manual editor stays reachable from
+  // the wizard's tracked-import path and when editing an existing draft.
+  $('invoice-new').addEventListener('click', iwOpen);
   $('manual-new').addEventListener('click', () => edOpen(null));
   $('ed-import').addEventListener('click', async () => {
     if (ed.id) return;

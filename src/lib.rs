@@ -189,6 +189,7 @@ pub const API_ROUTES: &[(&str, &str, Tier)] = &[
     ("POST", "/api/invoices", Tier::Admin),
     ("POST", "/api/invoices/manual", Tier::Admin),
     ("POST", "/api/invoices/preview", Tier::Admin),
+    ("POST", "/api/invoices/preview/pdf", Tier::Admin),
     ("GET", "/api/invoices/{id}", Tier::Admin),
     ("PUT", "/api/invoices/{id}", Tier::Admin),
     ("DELETE", "/api/invoices/{id}", Tier::Admin),

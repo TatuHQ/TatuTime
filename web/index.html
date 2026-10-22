@@ -591,7 +591,7 @@
           <div class="ts-head">
             <div class="hierarchy-actions" role="group" aria-label="Invoice actions">
               <button type="button" id="invoice-new" data-icon="plus" data-positive="1">Invoice</button>
-              <button type="button" id="manual-new" class="secondary" data-icon="plus" hidden>Manual Invoice</button>
+              <button type="button" id="manual-new" class="secondary" data-icon="plus">Manual Invoice</button>
             </div>
           </div>
           <!-- #135: the draft/issued/paid status line that used to head the left-hand
@@ -910,14 +910,22 @@
                 </fieldset>
               </div>
               <div id="iw-step3" hidden>
-                <div class="p-form__group"><label class="p-form__label" for="iw-grouping">Group lines by</label><select
-                    class="p-form__control" id="iw-grouping">
-                    <option value="project" selected>Project</option>
-                    <option value="task">Task</option>
-                    <option value="detailed">Every line</option>
+                <div class="p-form__group"><label class="p-form__label" for="iw-grouping">Time entries on the
+                    invoice</label><select class="p-form__control" id="iw-grouping">
+                    <option value="single">Single line — one row for the whole period</option>
+                    <option value="project" selected>By project — one row per project</option>
+                    <option value="task">By task — one row per project and task</option>
+                    <option value="line">By line — one row per time entry</option>
                   </select></div>
                 <dl id="iw-summary" class="ip-facts"></dl>
                 <ul id="iw-lines"></ul>
+                <div class="iw-preview" aria-labelledby="iw-preview-title">
+                  <h3 id="iw-preview-title" class="iw-preview__title">Document preview</h3>
+                  <p id="iw-preview-state" class="p-form-help-text" role="status" aria-live="polite">Loading
+                    preview…</p>
+                  <div id="iw-preview" class="pdf-viewer" role="region"
+                    aria-label="Invoice PDF preview for the current selection"></div>
+                </div>
               </div>
               <div class="p-form-validation is-error">
                 <p class="p-form-validation__message" id="iw-error" role="alert" hidden></p>
@@ -1785,14 +1793,14 @@
                   <legend>Company legal details</legend>
                   <p class="p-form-help-text">The company name, the address lines below and this id appear in the
                     invoice <strong>From</strong> block.</p>
-                  <div class="p-form__group"><label class="p-form__label" for="org-legal">VAT / company id</label><input
+                  <div class="p-form__group"><label class="p-form__label" for="org-legal">Tax ID</label><input
                       type="text" class="p-form__control" id="org-legal" maxlength="60" autocomplete="off"
                       placeholder="BE0123456789"></div>
                   <div class="p-form__group"><label class="p-form__label" for="org-legal-label">Legal / registration id
                       label</label><input type="text" class="p-form__control" id="org-legal-label" maxlength="40"
                       autocomplete="off" placeholder="Tax ID" aria-describedby="org-legal-group-help"></div>
                   <p class="p-form-help-text" id="org-legal-group-help">Prints before the id. Leave it empty to print
-                    the default <code>VAT / company id</code>.</p>
+                    the default <code>Tax ID</code>.</p>
                 </fieldset>
                 <div class="p-form__group"><label class="p-form__label" for="org-street">Street</label><input
                     type="text" class="p-form__control" id="org-street" maxlength="120" autocomplete="off"></div>
@@ -2253,7 +2261,7 @@
             <input type="text" class="p-form__control" id="aw-org-name" maxlength="120" autocomplete="organization">
           </div>
           <div class="p-form__group">
-            <label class="p-form__label" for="aw-org-legal">Legal / VAT id (optional)</label>
+            <label class="p-form__label" for="aw-org-legal">Tax ID (optional)</label>
             <input type="text" class="p-form__control" id="aw-org-legal" maxlength="60">
           </div>
           <div class="p-form__group">

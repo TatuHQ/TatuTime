@@ -181,6 +181,10 @@ pub fn build_router(state: AppState) -> Router {
             axum::routing::post(api::preview_invoice),
         )
         .route(
+            "/invoices/preview/pdf",
+            axum::routing::post(api::preview_invoice_pdf),
+        )
+        .route(
             "/invoices/{id}",
             get(api::get_invoice_handler)
                 .delete(api::delete_invoice)

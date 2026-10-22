@@ -67,9 +67,12 @@ entries and expenses:
   change never rewrites the invoice.
 - An invoice is single-currency. Selecting projects or expenses in different
   currencies is refused with a clear error instead of converting silently.
-- The tracked-work wizard lets you narrow generation to specific projects and
-  shows the uninvoiced hours per project. A preview endpoint renders the draft
-  without saving it; the draft is saved only after review.
+- The tracked-work wizard (`+ Invoice`) is the creation path: choose the
+  customer, the period (defaulting to the first and last day of the current
+  month), the projects with uninvoiced work and how time is grouped on the
+  document (`single`, `project`, `task` or `line`). The review step renders the
+  candidate PDF live beside the summary; `POST /api/invoices/preview/pdf`
+  persists nothing. The draft is saved only after review.
 - If the timesheet changes between saving a draft and issuing it, issue is
   refused with `409 draft_out_of_date`; regenerate the draft and issue again.
 
@@ -204,16 +207,23 @@ org template is never frozen onto a revision or its PDF.
 
 - `GET /api/invoices/{id}/pdf` downloads the archived PDF; the preview endpoint
   renders the same document without an archive.
-- The document layout is: the `INVOICE` title with the `Subject` row and the
-  invoice metadata (`Invoice ID`, `Issue date`, `Due date`, `Period`) beside it;
-  a `From` block (name, one line per address line, the org legal id under its
-  configured label); an `Invoice for` block (customer name, one line per address
-  line, `Company number`); a `Total hours` line over the time lines; the
-  `Item type | Description | Quantity | Unit price | Amount` table; the totals
-  (`Subtotal`, plus `Payments`/`Amount due` once money was received, otherwise the
-  bold `Total`); and `Page N of M` on every page. A document with no subject and
-  no label overrides keeps the historical `Invoice <number>` title and prints no
-  Subject row.
+- The document layout is: the `INVOICE` title with the `Subject` row directly
+  beneath it (one blank line, the value close to its label); the invoice
+  metadata (`Invoice ID`, `Issue date`, `Due date`, `Period`) beside the
+  `From` block (name, one line per address line, the org legal id under its
+  configured label — `Tax ID` by default); an `Invoice for` block (customer
+  name, one line per address line, `Company number`); a `Total hours` line over
+  the time lines; the `Item type | Description | Quantity | Unit price | Amount`
+  table; the totals (`Subtotal`, plus `Payments`/`Amount due` once money was
+  received, otherwise the bold `Total`); and `Page N of M` on every page. A
+  document with no subject and no label overrides keeps the historical
+  `Invoice <number>` title and prints no Subject row.
+- Time rows in the table follow the invoice's frozen `line_grouping`:
+  `single` prints one `Time entries` row for the period, `project` one row per
+  project, `task` one row per project and task, and `line` (the default and the
+  legacy behaviour) one row per time entry. Expenses and manual lines are never
+  folded into a time row. The stored invoice lines remain one per tracked entry,
+  so locks, rate snapshots and `draft_is_stale` are unaffected.
 - Below the totals, the footer prints in this order:
   1. the template **footer**;
   2. the **Notes** section — the template `notes`, then the customer's

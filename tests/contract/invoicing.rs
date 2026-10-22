@@ -637,8 +637,8 @@ async fn org_profile_round_trips_and_prints_on_the_document() {
         "profile name replaces the config default"
     );
     assert!(
-        joined.contains("VAT / company id:"),
-        "empty legal_id_label keeps the historical wording"
+        joined.contains("Tax ID:"),
+        "empty legal_id_label prints the default Tax ID wording"
     );
     assert!(joined.contains("BE0123456789"), "legal id on the PDF");
     assert!(joined.contains("Markt 1,"), "address line on the PDF");
@@ -1257,6 +1257,92 @@ async fn invoice_preview_projects_and_paid_exclusion() {
     )
     .await;
     assert_eq!(s3, StatusCode::CONFLICT);
+}
+
+// ------------------------------------------------------------------ #new ---
+
+/// The creation wizard's grouping choice is a document-presentation setting:
+/// the stateless PDF preview and the saved draft both honour it, while the
+/// stored lines keep one entry-referencing row per tracked record.
+#[tokio::test]
+async fn preview_pdf_and_creation_apply_line_grouping() {
+    let (app, _d) = app().await;
+    let c = new_customer(&app, "Grouping Co", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap().to_string();
+    new_project(&app, &cid, "PA", json!({"rate_minor": 5000})).await;
+    new_project(&app, &cid, "PB", json!({"rate_minor": 7000})).await;
+    for (proj, day, hours) in [("PA", "2026-10-02", 2), ("PB", "2026-10-03", 1)] {
+        json_req(
+            &app,
+            "POST",
+            "/api/entries",
+            Some(json!({"date":day,"customer_id":cid.clone(),"project_code":proj,"hours":hours})),
+        )
+        .await;
+    }
+    let body = |grouping: &str| {
+        json!({
+            "customer_id": cid.clone(),
+            "from": "2026-10-01",
+            "to": "2026-10-31",
+            "line_grouping": grouping
+        })
+    };
+
+    // Single line: one "Time entries" row, no project codes in the table.
+    let (single_status, single_headers, single_pdf) =
+        raw_json_req(&app, "POST", "/api/invoices/preview/pdf", body("single")).await;
+    assert_eq!(single_status, StatusCode::OK);
+    assert_eq!(
+        single_headers[header::CONTENT_TYPE],
+        "application/pdf",
+        "the wizard preview is a PDF body"
+    );
+    assert!(single_pdf.starts_with(b"%PDF-"));
+    let single_text = pdf_joined(&single_pdf);
+    assert!(single_text.contains("Time entries"), "{single_text}");
+    assert!(
+        !single_text.contains("PA") && !single_text.contains("PB"),
+        "a single row must not name the projects: {single_text}"
+    );
+
+    // By project: both project codes appear as their own rows.
+    let (project_status, _, project_pdf) =
+        raw_json_req(&app, "POST", "/api/invoices/preview/pdf", body("project")).await;
+    assert_eq!(project_status, StatusCode::OK);
+    let project_text = pdf_joined(&project_pdf);
+    assert!(project_text.contains("PA"), "{project_text}");
+    assert!(project_text.contains("PB"), "{project_text}");
+
+    // Nothing was persisted by either render.
+    let (_ls, list) = json_req(&app, "GET", "/api/invoices", None).await;
+    assert!(list["invoices"].as_array().unwrap().is_empty());
+
+    // Saving keeps the per-entry lines (rate snapshot/lock semantics) but
+    // freezes the chosen presentation on the document.
+    let (created_status, created) =
+        json_req(&app, "POST", "/api/invoices", Some(body("single"))).await;
+    assert_eq!(created_status, StatusCode::CREATED, "{created}");
+    assert_eq!(created["document"]["line_grouping"], "single");
+    assert_eq!(created["lines"].as_array().unwrap().len(), 2);
+    let iid = created["id"].as_str().unwrap();
+    let (preview_status, _, preview_pdf) =
+        raw_req(&app, "GET", &format!("/api/invoices/{iid}/pdf/preview")).await;
+    assert_eq!(preview_status, StatusCode::OK);
+    assert!(pdf_joined(&preview_pdf).contains("Time entries"));
+
+    // A period with no billable work answers the same 409 as the real call,
+    // and still persists nothing.
+    let (empty_status, _, empty_body) = raw_json_req(
+        &app,
+        "POST",
+        "/api/invoices/preview/pdf",
+        json!({"customer_id":cid.clone(),"from":"2030-01-01","to":"2030-01-31"}),
+    )
+    .await;
+    assert_eq!(empty_status, StatusCode::CONFLICT);
+    let empty: Value = serde_json::from_slice(&empty_body).expect("error shape");
+    assert_eq!(empty["error"]["code"], "conflict");
 }
 
 // ------------------------------------------------------------------ #147 ---

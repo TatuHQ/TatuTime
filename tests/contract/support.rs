@@ -352,6 +352,36 @@ pub(crate) async fn raw_req(
     (status, headers, bytes)
 }
 
+/// Authenticated JSON request that keeps the raw response bytes — used for
+/// endpoints whose success body is a binary document (the stateless invoice PDF
+/// preview) but whose failures are the app's JSON error shape.
+pub(crate) async fn raw_json_req(
+    client: &Client,
+    method: &str,
+    uri: &str,
+    body: Value,
+) -> (StatusCode, axum::http::HeaderMap, Vec<u8>) {
+    let req = Request::builder()
+        .method(method)
+        .uri(uri)
+        .header(header::COOKIE, &client.cookie)
+        .header("x-csrf-protection", "1")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    let res = client.router.clone().oneshot(req).await.expect("oneshot");
+    let status = res.status();
+    let headers = res.headers().clone();
+    let bytes = res
+        .into_body()
+        .collect()
+        .await
+        .expect("body")
+        .to_bytes()
+        .to_vec();
+    (status, headers, bytes)
+}
+
 /// Seed a customer (with billing email), one project and an entry, then
 /// generate + issue an invoice. Returns the issued invoice JSON and the
 /// invoice id. Shared by the #113 PDF tests.

@@ -1790,6 +1790,10 @@ async function edSaveBody(preview = false) {
       payment_terms: $('ed-terms').value ? ($('ed-terms').value === 'custom' ? ed.termsOverride : { kind: $('ed-terms').value }) : null,
       subject: $('ed-subject').value || ($('ed-subject').dataset.touched || ed.documentOverrides.subject != null ? '' : null),
       notes: $('ed-notes').value || ($('ed-notes').dataset.touched || ed.documentOverrides.notes != null ? '' : null),
+      // The editor has no grouping control: keep the presentation frozen when
+      // the tracked-work wizard created the draft, and default to one row per
+      // entry for a wholly manual invoice.
+      line_grouping: ed.documentOverrides?.line_grouping || 'line',
     };
     const currency = $('ed-currency').value.trim().toUpperCase();
     let saved;

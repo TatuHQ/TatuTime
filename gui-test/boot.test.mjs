@@ -32,7 +32,7 @@ window.bootTest = {
   // editor are wired by the focused wire*() functions; expose them so a test
   // drives the same listeners the app registers at boot.
   dash, dashFilter, setInvoicePeriod, refreshInvoiceSummary, wireInvoiceDashboard, wireWeekGrid,
-  iwInit, iwOpen, edOpen, edLoadDefaults, edSave, edCancel, ed, catalogItems, enhanceSelect, initSelectMenus,
+  iwInit, iwOpen, iwShow, iwGrouping, iwRefreshPreview, iw, edOpen, edLoadDefaults, edSave, edCancel, ed, catalogItems, enhanceSelect, initSelectMenus,
   peekLockCache: () => weekLockCache,
   liveText: () => document.getElementById('live-region').textContent,
   api,
@@ -900,7 +900,7 @@ api.get = async () => ({events:[]});
 // actually moving the year, and the unset-base-currency honesty for a mixed
 // set. Every assertion reads a real property of the rendered DOM.
 
-test('New invoice enters the workspace and tracked work is an optional import', async () => {
+test('New invoice starts the creation wizard and tracked work is the default flow', async () => {
   const { dom, context, document } = makeDom(`
 api.get = async path => path === '/admin/invoice-template' ? {template:{}}
   : path === '/invoices' ? {invoices:[]}
@@ -915,13 +915,20 @@ api.get = async path => path === '/admin/invoice-template' ? {template:{}}
   const wizardOpen = () => wizard.open === true || wizard.hasAttribute('open');
   const editor = document.getElementById('invoice-editor');
   document.getElementById('invoice-new').dispatchEvent(new dom.window.Event('click', { bubbles: true }));
+  assert.equal(wizardOpen(), true, 'Invoice starts the creation wizard');
+  assert.equal(editor.open, false, 'the manual editor does not open first');
+  assert.equal(document.getElementById('iw-step1').hidden, false, 'customer is the first step');
+  assert.equal(document.getElementById('iw-grouping').value, 'project');
+  assert.equal(document.getElementById('manual-new').hidden, false, 'manual creation stays available');
+  wizard.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  assert.equal(wizardOpen(), false);
+  // The secondary action still starts a manual draft.
+  document.getElementById('manual-new').dispatchEvent(new dom.window.Event('click', { bubbles: true }));
   assert.equal(editor.open, true);
-  assert.equal(wizardOpen(), false, 'creation has no mandatory wizard');
   assert.equal(document.getElementById('ed-title').textContent, 'New invoice');
   assert.equal(document.getElementById('ed-lines').querySelectorAll('tbody tr').length, 1);
-  assert.equal(document.getElementById('manual-new').hidden, true, 'one visible creation entry point');
   document.getElementById('ed-import').click();
-  await waitFor(wizardOpen, { message: 'optional tracked import' });
+  await waitFor(wizardOpen, { message: 'tracked import' });
   assert.equal(editor.open, false);
   assert.equal(document.getElementById('iw-customer').value, 'c1');
   assert.equal(document.getElementById('iw-step2').hidden, false, 'import starts with work selection');
@@ -930,6 +937,56 @@ api.get = async path => path === '/admin/invoice-template' ? {template:{}}
   assert.equal(document.getElementById('iw-step2').hidden, false, 'import selection is preserved');
   wizard.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
   assert.equal(wizardOpen(), false);
+  dom.window.close();
+});
+
+test('the creation wizard previews the document with the selected time grouping', async () => {
+  const { dom, context, document } = makeDom(`
+window.previewCalls = [];
+window.URL.createObjectURL = () => 'blob:preview';
+window.URL.revokeObjectURL = () => {};
+api.requestBlob = async (method, url, body) => {
+  window.previewCalls.push({ method, url, body });
+  return { notModified: false, etag: null, status: 200,
+    blob: new Blob([new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31])], { type: 'application/pdf' }) };
+};
+`);
+  const customer = document.getElementById('iw-customer');
+  const option = document.createElement('option');
+  option.value = 'c1';
+  option.textContent = 'Tucano Time';
+  customer.appendChild(option);
+  customer.value = 'c1';
+  const project = document.createElement('input');
+  project.type = 'checkbox';
+  project.value = 'P1';
+  project.checked = true;
+  document.getElementById('iw-projects').appendChild(project);
+  document.getElementById('iw-expenses').checked = true;
+  document.getElementById('iw-grouping').value = 'task';
+  context.iw.from = '2026-10-01';
+  context.iw.to = '2026-10-31';
+  context.iw.step = 3;
+  context.iwShow();
+  await context.iwRefreshPreview();
+  assert.equal(window.previewCalls.length, 1, 'one stateless preview request');
+  assert.equal(window.previewCalls[0].method, 'POST');
+  assert.equal(window.previewCalls[0].url, '/invoices/preview/pdf');
+  assert.deepEqual(window.previewCalls[0].body, {
+    customer_id: 'c1',
+    from: '2026-10-01',
+    to: '2026-10-31',
+    include_expenses: true,
+    project_codes: ['P1'],
+    line_grouping: 'task',
+  });
+  assert.match(document.getElementById('iw-preview').textContent, /Rendered invoice/);
+  assert.equal(document.getElementById('iw-preview-state').hidden, true);
+  // Changing the grouping re-renders the same candidate with the new choice.
+  document.getElementById('iw-grouping').value = 'single';
+  document.getElementById('iw-grouping').dispatchEvent(new dom.window.Event('change', { bubbles: true }));
+  await waitFor(() => window.previewCalls.length === 2, { message: 'grouping change to refresh the preview' });
+  assert.equal(window.previewCalls[1].body.line_grouping, 'single');
   dom.window.close();
 });
 

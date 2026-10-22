@@ -2305,7 +2305,7 @@ class Gate:
             ("/projects", "project-new", "project-dialog"),
             ("/tasks", "task-new", "task-dialog"),
             ("/expenses", "expense-new", "expense-dialog"),
-            ("/invoices", "invoice-new", "invoice-editor"),
+            ("/invoices", "invoice-new", "invoice-wizard"),
             ("/settings/users", "user-new", "user-dialog"),
         )
         original = self.marionette.call("WebDriver:GetWindowRect")
@@ -2538,9 +2538,13 @@ class Gate:
             self.navigate("/invoices")
             self.wait_script("document.documentElement.dataset.booted === 'ready'", "invoice workspace boot")
             self.marionette.script("document.getElementById('invoice-new').click(); return true;")
-            self.wait_script("document.getElementById('invoice-editor').open", "new invoice workspace")
-            self.check("New invoice enters one editor without a mandatory wizard",
-                       self.marionette.script("return !document.getElementById('invoice-wizard').open && document.getElementById('manual-new').hidden;"))
+            self.wait_script("document.getElementById('invoice-wizard').open", "new invoice wizard")
+            self.check("New invoice starts the creation wizard",
+                       self.marionette.script("return document.getElementById('invoice-wizard').open && !document.getElementById('invoice-editor').open && !document.getElementById('manual-new').hidden;"))
+            self.marionette.script("document.getElementById('invoice-wizard').close(); document.getElementById('manual-new').click(); return true;")
+            self.wait_script("document.getElementById('invoice-editor').open", "manual invoice editor")
+            self.check("Manual invoice remains available beside the wizard",
+                       self.marionette.script("return document.getElementById('invoice-editor').open && !document.getElementById('invoice-wizard').open;"))
             menus = json.loads(self.marionette.script("""
                 const controls = [document.getElementById('ed-customer'), document.getElementById('ed-terms'),
                     document.querySelector('#ed-lines [aria-label="Linked project"]')];
@@ -2620,7 +2624,7 @@ class Gate:
                                && document.getElementById('ed-notes').value.includes('this invoice only')
                                && !document.querySelector('#ed-lines [aria-label="Product or service"]');
                        """))
-            self.marionette.script("document.getElementById('invoice-editor').close(); document.getElementById('invoice-new').click(); return true;")
+            self.marionette.script("document.getElementById('invoice-editor').close(); document.getElementById('manual-new').click(); return true;")
             self.wait_script("document.getElementById('invoice-editor').open", "new import workspace")
             self.marionette.script("document.getElementById('ed-import').click(); return true;")
             self.wait_script("document.getElementById('invoice-wizard').open", "optional tracked import")

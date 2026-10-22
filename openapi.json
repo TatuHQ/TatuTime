@@ -1281,6 +1281,9 @@
               "null"
             ],
             "maxLength": 4000
+          },
+          "line_grouping": {
+            "$ref": "#/components/schemas/LineGrouping"
           }
         }
       },
@@ -1515,10 +1518,24 @@
               "$ref": "#/components/schemas/ProjectCode"
             },
             "description": "Restrict billing to these projects of the customer; empty = all eligible projects."
+          },
+          "line_grouping": {
+            "$ref": "#/components/schemas/LineGrouping"
           }
         },
         "additionalProperties": false,
         "description": "Generate a draft from a period's billable work."
+      },
+      "LineGrouping": {
+        "type": "string",
+        "enum": [
+          "single",
+          "project",
+          "task",
+          "line"
+        ],
+        "default": "line",
+        "description": "How the document folds tracked time into its line table. Presentation only: the stored lines stay one per entry. `single` = one row for the period, `project` = one row per project, `task` = one row per project and task, `line` = one row per time entry. Expenses and manual lines always keep their own rows."
       },
       "Category": {
         "type": "object",
@@ -2516,7 +2533,7 @@
           "legal_id_label": {
             "type": "string",
             "maxLength": 40,
-            "description": "Display prefix for legal_id on documents (Tax ID, VAT, Company number). Empty keeps the built-in 'VAT / company id' wording."
+            "description": "Display prefix for legal_id on documents (Tax ID, VAT, Company number). Empty keeps the built-in 'Tax ID' wording."
           },
           "accountant_email": {
             "type": "string",
@@ -9695,6 +9712,66 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Invoice"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          }
+        }
+      }
+    },
+    "/api/invoices/preview/pdf": {
+      "post": {
+        "operationId": "previewInvoicePdf",
+        "x-admin-only": true,
+        "tags": [
+          "invoices"
+        ],
+        "summary": "Stateless candidate-document PDF preview",
+        "description": "Runs the exact POST /api/invoices pipeline (customer, period, project selection and line grouping) and renders the resulting document as a PDF. Persists nothing: no invoice, number, archive or timeline. Used by the creation wizard's live preview; a document with no billable work answers 409 like the real call.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InvoiceInput"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
+        "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "200": {
+            "description": "Rendered candidate document (not archived).",
+            "content": {
+              "application/pdf": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
                 }
               }
             }

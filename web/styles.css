@@ -874,6 +874,13 @@ caption { padding-bottom: .35rem; }
 #send-email-recipients .send-email-contact-meta { opacity: .75; }
 #send-email-invoice { margin-top: 0; }
 #iw-projects { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .2rem .75rem; }
+/* Live candidate-document preview inside the creation wizard. The PDF is
+   rendered client-side by the same bundled viewer as the invoice panel, so the
+   region only supplies the frame and a scrollable page area. */
+.iw-preview { margin-top: .75rem; border-top: 1px solid var(--line); padding-top: .5rem; }
+.iw-preview__title { margin: .2rem 0 .35rem; font-size: 1rem; }
+.iw-preview .pdf-pages { max-height: 55dvh; }
+.iw-preview .pdf-viewer:empty { display: none; }
 /* #F: the year stepper (.day-nav), the chart and its one-line note are a
    single column, so the caption and the rate line stay aligned with the chart
    in both themes. */

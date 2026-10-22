@@ -26,8 +26,50 @@ pub async fn preview_invoice(
         to,
         input.include_expenses,
         &input.project_codes,
+        input.line_grouping,
     )?;
     Ok(Json(draft).into_response())
+}
+
+/// `POST /invoices/preview/pdf` — the same stateless generation as
+/// `/invoices/preview`, rendered as the document PDF (no watermark, nothing
+/// persisted). The wizard uses it for the live preview beside the grouping
+/// choice; it is a preview of the *candidate* document, never an archive.
+pub async fn preview_invoice_pdf(
+    State(app): State<AppState>,
+    ValidJson(input): ValidJson<InvoiceInput>,
+) -> ApiResult {
+    let customer = get_customer(&app.store, input.customer_id)?;
+    let from = parse_date(&input.from)?;
+    let to = parse_date(&input.to)?;
+    if from > to {
+        return Err(ApiError::bad_request("'from' must not be after 'to'"));
+    }
+    let draft = build_draft(
+        &app,
+        &customer,
+        from,
+        to,
+        input.include_expenses,
+        &input.project_codes,
+        input.line_grouping,
+    )?;
+    let bytes = super::render_pdf_now(&app, &draft)?;
+    Ok((
+        StatusCode::OK,
+        [
+            (
+                axum::http::header::CONTENT_TYPE,
+                "application/pdf".to_string(),
+            ),
+            (
+                axum::http::header::CONTENT_DISPOSITION,
+                "inline; filename=\"invoice-preview.pdf\"".to_string(),
+            ),
+        ],
+        bytes,
+    )
+        .into_response())
 }
 
 pub async fn list_invoices(State(app): State<AppState>) -> ApiResult {
@@ -54,6 +96,7 @@ pub async fn create_invoice(
         to,
         input.include_expenses,
         &input.project_codes,
+        input.line_grouping,
     )?;
     let invoice = app.store.create_invoice(draft)?;
     record_timeline(
