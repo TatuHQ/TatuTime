@@ -14,6 +14,8 @@
 
 use std::sync::OnceLock;
 
+use skrifa::prelude::*;
+
 use super::layout::Face;
 
 /// Ubuntu Regular (weight 400).
@@ -61,34 +63,37 @@ fn fonts() -> &'static [FontMetrics; 4] {
 
 /// Parse one bundled face into the small metric set the PDF writer needs.
 fn parse(data: &'static [u8]) -> FontMetrics {
-    let face =
-        ttf_parser::Face::parse(data, 0).expect("bundled Ubuntu font is a valid TrueType face");
-    let upem = u32::from(face.units_per_em()).max(1);
-    let scale = |value: i16| value as f32 * 1000.0 / upem as f32;
+    let font = FontRef::new(data).expect("bundled Ubuntu font is a valid TrueType face");
+    let metrics = font.metrics(Size::unscaled(), LocationRef::default());
+    let upem = u32::from(metrics.units_per_em).max(1);
+    let scale = |value: f32| value * 1000.0 / upem as f32;
+    let glyphs = font.glyph_metrics(Size::unscaled(), LocationRef::default());
+    let charmap = font.charmap();
     let mut widths = [0u32; 224];
     for code in 32..=255u8 {
         let ch = winansi_char(code).unwrap_or('?');
-        let glyph = face.glyph_index(ch).or_else(|| face.glyph_index('?'));
+        let glyph = charmap
+            .map(u32::from(ch))
+            .or_else(|| charmap.map(u32::from('?')));
         let advance = glyph
-            .and_then(|g| face.glyph_hor_advance(g))
-            .map(u32::from)
-            .unwrap_or(upem / 2);
+            .and_then(|g| glyphs.advance_width(g))
+            .unwrap_or(upem as f32 / 2.0);
         // 1/1000 text units; a zero advance is a rendering bug, not a font.
-        widths[(code - 32) as usize] = (advance * 1000 / upem).max(1);
+        widths[(code - 32) as usize] = (scale(advance).round() as u32).max(1);
     }
-    let bbox = face.global_bounding_box();
+    let bbox = metrics.bounds.unwrap_or_default();
     FontMetrics {
         widths,
-        ascent: scale(face.ascender()),
-        descent: scale(face.descender()),
-        cap_height: scale(face.capital_height().unwrap_or(face.ascender())),
+        ascent: scale(metrics.ascent),
+        descent: scale(metrics.descent),
+        cap_height: scale(metrics.cap_height.unwrap_or(metrics.ascent)),
         bbox: [
             scale(bbox.x_min),
             scale(bbox.y_min),
             scale(bbox.x_max),
             scale(bbox.y_max),
         ],
-        italic_angle: face.italic_angle(),
+        italic_angle: metrics.italic_angle,
     }
 }
 
