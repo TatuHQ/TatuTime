@@ -126,6 +126,11 @@ Issuing:
 - archives the rendered PDF at `invoices/<id>.pdf`, which is never rewritten;
 - makes the invoice immutable and freezes every entry and expense it references.
 
+In the GUI, a successful **Issue** opens the invoice email recipient dialog
+pre-filled with the customer's on-file billing address, so the document can be
+sent straight away. Sending is still an explicit choice: closing the dialog
+leaves the invoice issued.
+
 A fresh install resolves an absent `invoice_template.json` to seeded defaults:
 the subject `%customer_name% invoice for %period_month_padded% %period_year%`
 (e.g. `Tucano Time invoice for 08 2026`) and `net_30` payment terms.

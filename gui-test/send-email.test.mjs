@@ -92,7 +92,7 @@ function setup({
     window.eval(`${app}\n${prelude}\nwindow.t = {
       state, openSendEmailDialog, closeSendEmailDialog, confirmSendEmail,
       emailCandidates, parseExtraEmails, sendInvoiceEmail, emailInvoiceCopy,
-      offerAccountantCopy, EMAIL_SETTINGS_ROUTE,
+      offerAccountantCopy, issueInvoice, EMAIL_SETTINGS_ROUTE,
       setPreview: (inv) => window.__setPreview(inv),
       seed: () => window.__setCustomer(),
       calls: () => window.calls,
@@ -137,6 +137,32 @@ test('clicking #ip-send opens the recipient dialog and sends nothing', async () 
     }));
     await waitFor(() => !isOpen(dlgOf(document)), { message: 'Escape to close the dialog' });
     assert.equal(document.activeElement.id, 'ip-send', 'focus returns to the opener');
+    dom.window.close();
+});
+
+test('issuing a draft opens the recipient dialog for the issued invoice', async () => {
+    const { dom, document, window, t } = setup();
+    await settleBoot(document);
+    const issued = { ...INVOICE, status: 'issued' };
+    window.eval(`
+      askConfirm = async () => true;
+      dueDatePreview = async () => null;
+      refreshInvoices = async () => {};
+      api.post = async (path, body) => {
+        window.calls.push({ path, body });
+        return ${JSON.stringify(issued)};
+      };
+    `);
+    await t.issueInvoice(INVOICE);
+    await waitFor(() => isOpen(dlgOf(document)), { message: 'the recipient dialog after issue' });
+    assert.equal(t.calls().length, 1, 'issuing posts once and never sends');
+    assert.equal(t.calls()[0].path, '/invoices/i1/issue');
+    assert.match(document.getElementById('send-email-invoice').textContent, /INV-0001/);
+    assert.deepEqual(checked(document), ['ada@tucanotime.test'],
+        'the issued invoice dialog pre-ticks the billing address');
+    click(window, document.getElementById('send-email-close'));
+    await waitFor(() => !isOpen(dlgOf(document)), { message: 'closing the dialog after issue' });
+    assert.equal(t.calls().length, 1, 'closing the dialog sends nothing');
     dom.window.close();
 });
 

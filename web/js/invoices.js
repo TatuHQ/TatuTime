@@ -299,13 +299,18 @@ export async function issueInvoice(inv) {
   const due = preview
     ? ` It will be due ${preview.date} (${preview.label}).`
     : '';
-  if (!(await askConfirm(`Issue this invoice?${due} Its entries will be locked from editing.`))) return;
+  if (!(await askConfirm(`Issue this invoice?${due} Its entries will be locked from editing, then the email dialog opens.`))) return;
   const id = inv.id;
   try {
-    await api.post(`/invoices/${id}/issue`);
+    const issued = await api.post(`/invoices/${id}/issue`);
     invalidateLockCache(); // issuing locks its entries
     announce('Invoice issued.');
     await refreshInvoices();
+    // Issuing is the moment the customer needs the document: open the same
+    // recipient dialog the Email action uses, pre-filled from the customer's
+    // on-file addresses. Sending stays an explicit choice; closing it leaves
+    // the invoice issued.
+    await openSendEmailDialog(issued && issued.id ? issued : { ...inv, status: 'issued' });
   } catch (err) {
     announce(err.message);
   }
