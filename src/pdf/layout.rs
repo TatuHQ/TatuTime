@@ -29,8 +29,6 @@ const COLUMN_W: i32 = (CONTENT_W - COLUMN_GAP) / 2;
 const META_LABEL_W: i32 = 72;
 const META_SIZE: i32 = 9;
 const META_LINE: i32 = 13;
-/// The left identity column also wraps the subject subtitle under the title.
-const HEADER_W: i32 = COLUMN_W;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Face {
@@ -277,10 +275,16 @@ pub(super) fn layout(doc: &Doc) -> Vec<Vec<Op>> {
 
     // Footer.
     for b in &doc.footer {
-        if matches!(b, Block::Heading { .. }) {
+        let heading = matches!(b, Block::Heading { .. });
+        if heading {
             p.need(52);
         }
         emit_block(&mut p, b, 9, 0);
+        // A little breathing room between a section heading (Payment details,
+        // Notes) and its first row; the rows themselves keep the tight rhythm.
+        if heading {
+            p.advance(4);
+        }
     }
 
     let mut pages = p.finish();
@@ -624,9 +628,9 @@ fn emit_subject(p: &mut Pager, block: &Block, size: i32) {
     };
     let key_bytes = winansi(&format!("{key}:"));
     let label_w = measure(Face::Bold, size, &key_bytes) + 6;
-    // The subtitle shares the top band with the issuer block on the right, so
-    // it wraps inside the left column rather than running under `From`.
-    let avail = HEADER_W - label_w;
+    // The subtitle sits above the identity columns, so it can use the whole
+    // content width instead of wrapping inside the left column.
+    let avail = CONTENT_W - label_w;
     let mut lines = wrap_spans(spans, size, avail, false);
     if lines.is_empty() {
         lines.push(vec![]);
@@ -1206,6 +1210,31 @@ mod tests {
         assert!(
             value < MARGIN + 80,
             "value {value} stays close to the label"
+        );
+    }
+
+    #[test]
+    fn long_subject_uses_the_full_width_instead_of_wrapping_into_the_columns() {
+        let subject = "October services across several projects and additional work for the month";
+        let label = measure(Face::Bold, 10, b"Subject:") + 6;
+        let width = measure(Face::Regular, 10, &winansi(subject));
+        assert!(
+            width > COLUMN_W - label,
+            "the fixture must exceed the old left-column width ({width}pt)"
+        );
+        assert!(
+            width <= CONTENT_W - label,
+            "the fixture must fit the full content width ({width}pt)"
+        );
+        let mut inv = sample_invoice();
+        inv.subject = subject.into();
+        let pages = layout(&doc_for(&inv, &customer(), &org()));
+        let page = &pages[0];
+        let subject_y = y_of(page, "Subject:").expect("subject label");
+        assert_eq!(
+            y_of(page, "additional"),
+            Some(subject_y),
+            "the subject continues on the label's line"
         );
     }
 

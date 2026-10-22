@@ -2716,7 +2716,7 @@ if (recBtn) {
     .find((r) => r.textContent.includes('W1'));
   check('project, task and notes share one work column',
     [...window.document.querySelectorAll('#day-table thead th')].map((th) => th.textContent).join(',')
-    === 'Project / customer · notes,Hours,Actions'
+    === 'Tracked time,Hours,Actions'
     && dayNoteRow.cells.length === 3
     && /legal research/.test(dayNoteRow.cells[0].textContent));
 
