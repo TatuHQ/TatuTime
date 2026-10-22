@@ -66,6 +66,8 @@ function preview(ready) {
 
 async function harness({
     ready = false, commitStatus = 200, getBatch = batch(), previewBody = null,
+    customers = [{ id: 'c1', name: 'Acme' }],
+    projectsByCustomer = { c1: [{ code: 'WEB', name: 'Website' }] },
 } = {}) {
     const calls = { commit: 0, preview: 0, discard: 0, uploads: [] };
     const dom = new JSDOM(html, {
@@ -80,11 +82,12 @@ async function harness({
         const method = opts.method || 'GET';
         const path = String(url);
         if (path.endsWith('/api/users')) return response(200, { users: [{ id: 'u1', name: 'Ada', email: 'ada@test.local' }] });
-        if (path.endsWith('/api/customers')) return response(200, { customers: [{ id: 'c1', name: 'Acme' }, { id: 'c2', name: 'Beta' }] });
+        if (path.endsWith('/api/customers')) return response(200, { customers });
         if (path.endsWith('/api/categories')) return response(200, { categories: [{ id: 'cat1', name: 'Travel' }] });
-        if (path.includes('/customers/c1/projects') && path.endsWith('/projects')) return response(200, { projects: [{ code: 'WEB', name: 'Website' }] });
-        if (path.includes('/customers/c2/projects') && path.endsWith('/projects')) return response(200, { projects: [{ code: 'APP', name: 'App' }] });
-        if (path.endsWith('/projects')) return response(200, { projects: [{ code: 'WEB', name: 'Website' }] });
+        if (path.endsWith('/projects')) {
+            const customerId = path.match(/customers\/([^/]+)\/projects$/)?.[1];
+            return response(200, { projects: projectsByCustomer[customerId] || [] });
+        }
         if (path.endsWith('/tasks')) return response(200, { tasks: [{ code: 'DESIGN', name: 'Design' }] });
         if (path.includes('/imports/harvest?limit=')) return response(200, { total: 0, items: [] });
         if (path.endsWith('/admin/imports/harvest') && method === 'POST') return response(201, batch());
@@ -163,59 +166,42 @@ test('source tabs build only their own mapping and link the original PDF', async
     dom.window.close();
 });
 
-test('expense mapping offers existing customers and filters projects by the mapped customer', async () => {
-    const body = preview(false);
-    body.time = [];
-    body.totals = [];
-    body.expenses = [{
-        source_key: 'expense:1', record: 1, line: 2, decision: 'unresolved',
-        source_client: 'Acme', source_project: 'Website', source_code: 'WEB',
-        source_person: 'Ada Lovelace', source_employee_id: 'E1',
-        source_category: 'Travel', invoiced: false, issues: [],
-    }];
+test('project choices are limited to the customer mapped for that source client', async () => {
     const { dom } = await harness({
-        previewBody: body,
-        getBatch: batch({
-            files: {
-                expenses: {
-                    name: 'expenses.csv', sha256: 'a'.repeat(64), bytes: 10,
-                    uploaded_at: '2026-01-01T00:00:00Z',
-                },
-            },
-        }),
+        customers: [{ id: 'c1', name: 'Acme' }, { id: 'c2', name: 'Beta' }],
+        projectsByCustomer: {
+            c1: [{ code: 'WEB', name: 'Website' }],
+            c2: [{ code: 'APP', name: 'App' }],
+        },
     });
     await dom.window.openBatch(batch().id);
-    await waitFor(() => dom.window.document.getElementById('import-customer-Acme'), {
-        message: 'the expense customer mapping',
+    await waitFor(() => dom.window.document.querySelector('#import-mapping h3'), {
+        message: 'mapping controls to render',
     });
     const document = dom.window.document;
     const customer = document.getElementById('import-customer-Acme');
-    const customerValues = [...customer.options].map((option) => option.value);
-    assert.ok(customerValues.includes('c1') && customerValues.includes('c2'),
-        'existing customers are offered');
-    const project = document.getElementById('import-project-Acme|Website|WEB');
-    assert.ok(project, 'the source project has a mapping control');
-    let projectValues = [...project.options].map((option) => option.value);
-    assert.ok(!projectValues.includes('c1|WEB'), 'a customer must be mapped before its projects appear');
-    assert.ok(!projectValues.includes('c2|APP'), 'another customer\'s project is not offered');
+    assert.deepEqual([...customer.options].map((option) => option.value),
+        ['', '__create', 'c1', 'c2'], 'existing customers are offered');
+    let project = document.getElementById('import-project-Acme|Website|WEB');
+    assert.deepEqual([...project.options].map((option) => option.value),
+        ['', '__skip', '__create'], 'no existing project is offered before the customer is mapped');
 
-    // Mapping the client to Acme immediately narrows the list to Acme projects.
     customer.value = 'c1';
-    customer.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
-    projectValues = [...project.options].map((option) => option.value);
-    assert.ok(projectValues.includes('c1|WEB'), 'the mapped customer\'s project is offered');
-    assert.ok(!projectValues.includes('c2|APP'), 'another customer\'s project is not offered');
+    customer.dispatchEvent(new dom.window.Event('change'));
+    project = document.getElementById('import-project-Acme|Website|WEB');
+    assert.deepEqual([...project.options].map((option) => option.value),
+        ['', '__skip', '__create', 'c1|WEB'], 'only the mapped customer projects appear');
+    assert.match(project.textContent, /Acme — WEB Website/);
+    assert.doesNotMatch(project.textContent, /Beta|APP/, 'another customer project never leaks in');
 
-    // Changing the customer immediately narrows the project list and drops a
-    // selection that belonged to the previous customer.
     project.value = 'c1|WEB';
-    project.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
+    project.dispatchEvent(new dom.window.Event('change'));
     customer.value = 'c2';
-    customer.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
-    projectValues = [...project.options].map((option) => option.value);
-    assert.ok(projectValues.includes('c2|APP'), 'the newly mapped customer\'s project appears');
-    assert.ok(!projectValues.includes('c1|WEB'), 'the previous customer\'s project disappears');
-    assert.equal(project.value, '', 'a stale project selection is reset');
+    customer.dispatchEvent(new dom.window.Event('change'));
+    project = document.getElementById('import-project-Acme|Website|WEB');
+    assert.equal(project.value, '', 'a project from the previous customer is cleared');
+    assert.deepEqual([...project.options].map((option) => option.value),
+        ['', '__skip', '__create', 'c2|APP'], 'the picker follows the new customer');
     dom.window.close();
 });
 
