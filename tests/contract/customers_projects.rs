@@ -804,3 +804,44 @@ async fn control_characters_are_refused_on_write_without_persisting() {
         "nothing persisted: {list}"
     );
 }
+
+/// The active/inactive switch is an ordinary persisted field: retired records
+/// stay in their collections (history keeps resolving them) and can be
+/// reactivated, which is what the GUI's pickers rely on.
+#[tokio::test]
+async fn active_status_round_trips_for_customers_and_projects() {
+    let (app, _dir) = app().await;
+    let customer = json!({
+        "name": "Retired Co", "currency": "EUR", "default_rate_minor": 6000, "active": false
+    });
+    let (status, retired) = json_req(&app, "POST", "/api/customers", Some(customer.clone())).await;
+    assert_eq!(status, StatusCode::CREATED, "{retired}");
+    assert_eq!(retired["active"], false);
+    let cid = retired["id"].as_str().unwrap();
+
+    // The register lists retired records: deactivation is not a delete.
+    let (_, list) = json_req(&app, "GET", "/api/customers", None).await;
+    assert_eq!(list["customers"][0]["active"], false, "{list}");
+
+    let mut active = customer;
+    active["active"] = json!(true);
+    let (status, customer) =
+        json_req(&app, "PUT", &format!("/api/customers/{cid}"), Some(active)).await;
+    assert_eq!(status, StatusCode::OK, "{customer}");
+    assert_eq!(customer["active"], true);
+
+    let project = new_project(&app, cid, "P1", json!({"active": false})).await;
+    assert_eq!(project["active"], false);
+    let (status, project) = json_req(
+        &app,
+        "PUT",
+        &format!("/api/customers/{cid}/projects/P1"),
+        Some(json!({
+            "code": "P1", "name": "P1", "currency": "EUR",
+            "rate_minor": 6000, "active": true
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{project}");
+    assert_eq!(project["active"], true);
+}

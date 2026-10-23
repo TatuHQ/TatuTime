@@ -75,7 +75,11 @@ export function wizPrepareProject() {
   if (needsPick) {
     fillSelect(
       $('wz-project-customer'),
-      state.customers.map((c) => ({ value: c.id, text: c.name })),
+      // A new project belongs to an active customer; retired ones stay in
+      // history, not in the creation flow.
+      state.customers
+        .filter((c) => c.active !== false)
+        .map((c) => ({ value: c.id, text: c.name })),
     ); // #189: third fillSelect argument was silently ignored
   }
   wizPrefillFromCustomer(); // #11 prefill rule: currency + rate from the customer

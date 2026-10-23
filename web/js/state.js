@@ -39,17 +39,26 @@ export function customerName(id) {
 
 // ------------------------------------------------------------- customer ---
 
-export function fillCustomerSelect(select, selectedId, includePlaceholder) {
-  const opts = state.customers.map((c) => ({
-    value: c.id,
-    text: c.active ? c.name : `${c.name} (inactive)`,
-    selected: c.id === selectedId,
-  }));
+// Inactive reference data is retired from the pickers for NEW records: the
+// lists stay short while the records themselves remain in place for history
+// (entries, expenses and invoices still reference them). `includeInactive`
+// opts a filter (where "all" must stay reachable) back into the full list;
+// otherwise the value a form is already editing is always kept selectable, so
+// an old entry can be opened and saved even when its customer/project/task was
+// retired afterwards.
+export function fillCustomerSelect(select, selectedId, includePlaceholder, includeInactive = false) {
+  const opts = state.customers
+    .filter((c) => includeInactive || c.active !== false || c.id === selectedId)
+    .map((c) => ({
+      value: c.id,
+      text: c.active !== false ? c.name : `${c.name} (inactive)`,
+      selected: c.id === selectedId,
+    }));
   if (includePlaceholder) opts.unshift({ value: '', text: 'Choose a customer…' });
   fillSelect(select, opts);
 }
 
-export async function fillProjectSelect(select, customerId, selectedCode) {
+export async function fillProjectSelect(select, customerId, selectedCode, includeInactive = false) {
   const sequence = (select.__projectSequence || 0) + 1;
   select.__projectSequence = sequence;
   select.textContent = '';
@@ -61,16 +70,18 @@ export async function fillProjectSelect(select, customerId, selectedCode) {
   if (select.__projectSequence !== sequence) return;
   fillSelect(select, [
     { value: '', text: 'Choose a project…' },
-    ...projects.map((p) => ({
-      value: p.code,
-      text: p.active ? `${p.code} — ${p.name}` : `${p.code} — ${p.name} (inactive)`,
-      selected: p.code === selectedCode,
-    })),
+    ...projects
+      .filter((p) => includeInactive || p.active !== false || p.code === selectedCode)
+      .map((p) => ({
+        value: p.code,
+        text: p.active !== false ? `${p.code} — ${p.name}` : `${p.code} — ${p.name} (inactive)`,
+        selected: p.code === selectedCode,
+      })),
   ]);
 }
 
 // Loads a project's tasks into the given select, with a leading "None".
-export async function fillTaskSelect(select, customerId, projectCode, selectedCode) {
+export async function fillTaskSelect(select, customerId, projectCode, selectedCode, includeInactive = false) {
   // #188: per-select sequence guard (same pattern as fillProjectSelect) — an
   // older task list must never overwrite a newer one when the project picker
   // changes quickly.
@@ -83,9 +94,10 @@ export async function fillTaskSelect(select, customerId, projectCode, selectedCo
     );
     if (select.__taskSequence !== sequence) return;
     for (const t of data.tasks || []) {
+      if (!(includeInactive || t.active !== false || t.code === selectedCode)) continue;
       opts.push({
         value: t.code,
-        text: t.active ? `${t.code} — ${t.name}` : `${t.code} — ${t.name} (inactive)`,
+        text: t.active !== false ? `${t.code} — ${t.name}` : `${t.code} — ${t.name} (inactive)`,
         selected: t.code === selectedCode,
       });
     }

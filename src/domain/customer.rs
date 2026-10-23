@@ -12,6 +12,8 @@ pub struct Customer {
     pub name: String,
     pub currency: Currency,
     pub default_rate_minor: u64,
+    /// Retired reference data: the GUI hides it from new-entry pickers, while
+    /// historical entries, expenses and invoices keep resolving it.
     pub active: bool,
     /// Optional billing email for invoice delivery (#35).
     #[serde(default)]

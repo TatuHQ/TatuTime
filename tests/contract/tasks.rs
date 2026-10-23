@@ -290,3 +290,35 @@ async fn task_rename_then_delete_after_unreferencing() {
         StatusCode::NOT_FOUND
     );
 }
+
+/// Tasks carry the same retired-but-retained flag as their parents: the list
+/// keeps an inactive task so historical entries still resolve, and a later
+/// update can restore it.
+#[tokio::test]
+async fn inactive_task_round_trips_and_stays_listed() {
+    let (app, _d) = app().await;
+    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap();
+    new_project(&app, cid, "P1", json!({})).await;
+
+    let task = new_task(&app, cid, "P1", "OLD", json!({"active": false})).await;
+    assert_eq!(task["active"], false);
+    let (_, list) = json_req(
+        &app,
+        "GET",
+        &format!("/api/customers/{cid}/projects/P1/tasks"),
+        None,
+    )
+    .await;
+    assert_eq!(list["tasks"][0]["active"], false, "{list}");
+
+    let (status, restored) = json_req(
+        &app,
+        "PUT",
+        &format!("/api/customers/{cid}/projects/P1/tasks/OLD"),
+        Some(json!({"code": "OLD", "name": "Old", "active": true})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{restored}");
+    assert_eq!(restored["active"], true);
+}
