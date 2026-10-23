@@ -323,6 +323,13 @@ pub async fn list_notifications(State(app): State<AppState>, actor: AuthUser) ->
                 || (notification.created_at.date_naive() == today && !has_time_today)
         });
     }
+    // #16's Approvals view is hidden in the GUI, so a stored submission nudge
+    // would still send the user to a process that does not exist. Stop listing
+    // it alongside the reminder job that stops creating it; the record stays on
+    // disk for the release that exposes the approval workflow.
+    if !crate::reminders::APPROVALS_AVAILABLE {
+        list.retain(|notification| notification.kind != "submit_timesheet");
+    }
     list.sort_by_key(|n| std::cmp::Reverse(n.created_at));
     let unread = list.iter().filter(|n| !n.read).count();
     Ok(Json(serde_json::json!({ "notifications": list, "unread": unread })).into_response())

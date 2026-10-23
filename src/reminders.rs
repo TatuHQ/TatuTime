@@ -10,12 +10,19 @@ use crate::domain::Notification;
 use crate::scheduler::Job;
 use crate::store::Store;
 
+/// Whether the Approvals view is exposed in the GUI. The #16 panel and API
+/// exist, but `web/index.html` keeps the rail entry hidden until the approval
+/// process ships; a reminder must never advertise an action the user cannot
+/// take. Flip this in the same change that unhides the tab.
+pub const APPROVALS_AVAILABLE: bool = false;
+
 /// The reminder decisions given what happened for a user on `now`'s day/week.
 pub fn decide(
     now: NaiveDate,
     has_entries_today: bool,
     week_has_entries: bool,
     week_submitted: bool,
+    approvals_available: bool,
 ) -> Vec<(&'static str, &'static str, &'static str)> {
     let mut out = Vec::new();
     if !has_entries_today {
@@ -25,7 +32,7 @@ pub fn decide(
             "You haven't recorded any time yet today.",
         ));
     }
-    if now.weekday() == Weekday::Fri && week_has_entries && !week_submitted {
+    if approvals_available && now.weekday() == Weekday::Fri && week_has_entries && !week_submitted {
         out.push((
             "submit_timesheet",
             "Submit your timesheet",
@@ -83,7 +90,9 @@ impl Job for ReminderJob {
                             | crate::domain::SubmissionState::Approved
                     )
             });
-            for (kind, title, body) in decide(today, has_today, week_has, submitted) {
+            for (kind, title, body) in
+                decide(today, has_today, week_has, submitted, APPROVALS_AVAILABLE)
+            {
                 let n = Notification {
                     id: uuid::Uuid::new_v4(),
                     kind: kind.to_string(),
@@ -108,7 +117,7 @@ mod tests {
 
     #[test]
     fn no_time_triggers_daily() {
-        let r = decide(date(2026, 10, 1), false, true, true); // Thu
+        let r = decide(date(2026, 10, 1), false, true, true, true); // Thu
         assert_eq!(r.len(), 1);
         assert_eq!(r[0].0, "no_time_today");
     }
@@ -117,11 +126,24 @@ mod tests {
     fn friday_submission_reminder_only_when_needed() {
         let fri = date(2026, 10, 2); // a Friday
         // has time today, week has entries, not submitted -> submit reminder
-        let r = decide(fri, true, true, false);
+        let r = decide(fri, true, true, false, true);
         assert!(r.iter().any(|x| x.0 == "submit_timesheet"));
         // already submitted -> no submit reminder
-        let r2 = decide(fri, true, true, true);
+        let r2 = decide(fri, true, true, true, true);
         assert!(!r2.iter().any(|x| x.0 == "submit_timesheet"));
+    }
+
+    #[test]
+    fn submission_reminder_is_suppressed_while_approvals_are_hidden() {
+        // #16's Approvals view is hidden in the GUI, so the Friday nudge would
+        // point at a process the user cannot reach. Only the habit reminder
+        // remains until the rail entry returns.
+        let fri = date(2026, 10, 2);
+        let r = decide(fri, true, true, false, false);
+        assert!(r.is_empty());
+        let r2 = decide(fri, false, true, false, false);
+        assert_eq!(r2.len(), 1);
+        assert_eq!(r2[0].0, "no_time_today");
     }
 
     #[test]

@@ -138,7 +138,7 @@ An in-process scheduler runs the recurring jobs; no external cron is needed.
 
 | Job | Cadence | What it does |
 | --- | --- | --- |
-| Reminders | daily | Pushes "no time logged today" and Friday "submit your timesheet" notifications |
+| Reminders | daily | Pushes "no time logged today" notifications; the Friday "submit your timesheet" nudge stays off while the Approvals view is hidden (#16) |
 | Recurring invoices | per schedule | Creates draft invoices from the configured recurring schedules; drafts still need an explicit issue |
 | Budget alerts | daily | Checks project budget burn and raises notifications |
 | Overdue email reminders | daily | Emails customers about issued, unpaid invoices past their due date, honouring `reminder_days` |
