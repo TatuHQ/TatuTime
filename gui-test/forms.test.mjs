@@ -119,10 +119,8 @@ test('every p-form__group pairs its label with its own control (#232 phase 2b)',
         assert.ok(label.textContent.trim().length > 0, `${control.id} keeps an accessible name`);
         paired += 1;
     }
-    // 153: the Settings split's 141 plus the ten Document label rows (#354)
-    // and the template notes row; the Expense-categories dialog, the invoice
-    // editor status row, the accountant-email row and the email dialog's
-    // receipt row add one each.
+    // 171: the previous 168 plus the three Settings → Backup rows (enable,
+    // cadence, time). Every row has a direct label/control pair.
     assert.equal(paired, 171, 'all 171 label/control pairs were verified');
     assert.equal(composed.length, 8, 'eight composed rows have no label of their own');
     assert.equal(composed.filter((row) => row.tag === 'FIELDSET').length, 7, 'seven grouped fieldsets');
@@ -293,12 +291,12 @@ test('decoration is attribute-only and every rendered button states what it need
     for (const b of icons) vocab[b.dataset.icon] = (vocab[b.dataset.icon] || 0) + 1;
     // The newest plus is Settings → Expense categories' heading action.
     assert.deepEqual(vocab, { plus: 15, copy: 2, play: 2, stop: 1, history: 1, file: 1 }, 'the shell icon vocabulary is pinned');
-    // 37: the previous 36 plus that same + Category heading action.
+    // 39: the previous 37 plus Settings → Backup's Save and Back up now.
     // The count is pinned so a new positive action updates this guard on
     // purpose: `+ Manual Invoice` is the secondary action and deliberately
     // carries no data-positive, and each dialog's `Cancel`/`Close` is a plain
     // secondary button, so neither adds to it.
-    assert.equal(document.querySelectorAll('button[data-positive]').length, 39,
+    assert.equal(document.querySelectorAll('button[data-positive]').length, 41,
         'every positive shell button states data-positive');
 
     // The deleted label-mutation leaves no trace: no rendered label keeps a "+".

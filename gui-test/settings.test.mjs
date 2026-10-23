@@ -308,6 +308,7 @@ const setValue = (document, id, value) => {
 const ROUTES = [
     ['/settings/users', 'settings-tab-users', 'settings-panel-users'],
     ['/settings/company', 'settings-tab-company', 'settings-panel-company'],
+    ['/settings/backup', 'settings-tab-backup', 'settings-panel-backup'],
     ['/settings/invoice-template', 'settings-tab-invoice-template', 'settings-panel-invoice-template'],
     ['/settings/catalog', 'settings-tab-catalog', 'settings-panel-catalog'],
     ['/settings/expenses', 'settings-tab-expenses', 'settings-panel-expenses'],
@@ -318,12 +319,12 @@ const ROUTES = [
 
 // ------------------------------------------------------------- tab order ----
 
-test('Settings lists the eight focused tabs in order for an admin', () => {
+test('Settings lists the nine focused tabs in order for an admin', () => {
     const { dom, document } = setup();
     assert.deepEqual(tabs(document).map((tab) => tab.id), ROUTES.map(([, tab]) => tab));
     assert.deepEqual(
         tabs(document).map(collapsedText),
-        ['Users', 'Company', 'Invoice template', 'Catalog', 'Expense categories', 'Email', 'Harvest import', 'Security & runtime'],
+        ['Users', 'Company', 'Backup', 'Invoice template', 'Catalog', 'Expense categories', 'Email', 'Harvest import', 'Security & runtime'],
     );
     for (const [tab, panelId] of ROUTES.map(([, tab, panel]) => [tab, panel])) {
         const panel = document.getElementById(panelId);
