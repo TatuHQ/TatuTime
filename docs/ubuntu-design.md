@@ -1,5 +1,17 @@
 # Ubuntu and Vanilla Design Review (#181)
 
+> **Tucano Technology brand refresh (0.1.77).** The GUI now carries the Tucano
+> Time product identity: the pixel toucan mark and wordmark in the rail and the
+> sign-in card, the brand favicon, and the warm paper / ink / toucan-orange
+> palette in both themes. The component layer is still Canonical's Vanilla
+> Framework and the Ubuntu variable font; only the colour tokens and the brand
+> lockup changed. The app's own `--bg`, `--surface`, `--fg`, `--brand`,
+> `--accent`, `--brand-deep` and form tokens now resolve to the Tucano palette,
+> and the same values are mapped onto Vanilla's `--vf-color-*` variables so
+> cards, tables, inputs, modals and positive buttons inherit them. The earlier
+> Ubuntu-aubergine palette notes in this design record describe the preceding
+> iteration; the accessibility rules below still apply unchanged.
+
 All single-choice select fields now use the shared anchored adapter in
 `web/js/select.js` (#388), including dynamic fields and native modal dialogs.
 The underlying select keeps its values, form events, validation and reset
@@ -344,7 +356,7 @@ moved under `/api` and every view gained a stable path (`spa_page` in
 
 - Ubuntu variable body font, 16px text, restrained heading weights and no
   negative letter spacing or viewport-scaled type.
-- Official neutral/positive buttons; Ubuntu orange remains a navigation accent.
+- Official neutral/positive buttons; the Tucano orange is the primary action, the burnt orange a navigation accent, and the rail carries the toucan wordmark.
 - Official navigation, previous/next, play/stop, edit/delete, copy and lock/note
   icons with decorative `aria-hidden` markup and preserved control labels.
 - Stronger field boundaries, stable control sizes, clear selected states,

@@ -1,4 +1,4 @@
-// WCAG 2.1 contrast auditor for the Ubuntu-palette GUI (#132).
+// WCAG 2.1 contrast auditor for the Tucano-palette GUI (#132).
 //
 // Parses the :root custom properties out of web/styles.css (light block and
 // the prefers-color-scheme:dark override), then checks every TEXT pairing the
@@ -51,7 +51,7 @@ const PAIRS = [
   ['link/wordmark on surface', '--brand-deep', '--surface', 4.5],
   ['link/wordmark on page', '--brand-deep', '--bg', 4.5],
   // #257: the first-run wizard h2 and the first-admin .auth-title sit on the
-  // same Vanilla p-card surface as the wordmark (white light / #411934 dark).
+  // same Vanilla p-card surface as the wordmark (warm white light / #221b16 dark).
   // They ship at 1.3rem / weight 400 — below the large-text exemption — so the
   // bar is 4.5:1, and the pair is pinned here to leave no silent blind spot.
   ['wizard/auth title on surface', '--brand-deep', '--surface', 4.5],
@@ -65,7 +65,7 @@ const PAIRS = [
   // is the classic contrast gap a tab migration can open, so both states are
   // pinned rather than trusted: the inactive tab is app ink (--fg) on the rail
   // (--sidebar-bg), its hover tint is --row-alt, and the selected tab is
-  // --brand-deep on the --accent-soft fill (8.4:1 light / 6.1:1 dark). The two
+  // --brand-deep on the --accent-soft fill (5.5:1 light / 6.3:1 dark). The two
   // in-view strips take Vanilla's own tokens (checked in a11y.test.mjs).
   ['nav tab ink on the rail', '--fg', '--sidebar-bg', 4.5],
   ['nav tab ink on rail hover', '--fg', '--row-alt', 4.5],
@@ -96,7 +96,8 @@ for (const [theme, vars] of [['light', LIGHT], ['dark', DARK]]) {
   }
 }
 // The #126 faint add-note glyph: opacity multiplies the contrast — assert the
-// composited colour instead of the raw pair (muted @55% over surface).
+// composited colour instead of the raw pair (muted @70% over surface; #191
+// lifted the affordance from 0.55 to 0.7).
 function composite(fg, bg, alpha) {
   const hex = (x) => x.replace('#', '');
   const ch = (h, i) => parseInt(hex(h).slice(i * 2, i * 2 + 2), 16);
@@ -104,7 +105,7 @@ function composite(fg, bg, alpha) {
   return '#' + out.map((v) => v.toString(16).padStart(2, '0')).join('');
 }
 for (const [theme, vars] of [['light', LIGHT], ['dark', DARK]]) {
-  const mix = composite(vars['--muted'], vars['--surface'], 0.55);
+  const mix = composite(vars['--muted'], vars['--surface'], 0.7);
   const r = ratio(mix, vars['--surface']);
   const ok = r >= 3.0; // #126 chose the faint pencil as a UI affordance
   if (!ok) failures += 1;

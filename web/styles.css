@@ -1,34 +1,35 @@
-/* TucanoTime design system (#10), Ubuntu-branded (#110). Layout unchanged —
-   the tokens now come from the official Ubuntu colour palette
-   (https://design.ubuntu.com/brand/colour-palette): Ubuntu orange for action
-   and accent, Canonical aubergine for brand and destructive fills, cool/text
-   grey for type, warm grey tints (official percentages, >= 10%) for lines and
-   surfaces. Light + dark, WCAG-AA contrast, visible focus.
-   Contrast notes: body ink #333 on white = 12.6:1; button ink is dark
-   aubergine on orange (white-on-orange is only 3.6:1 — fails AA small text;
-   #2C001E-on-#E95420 = 5.1:1); destructive fills use aubergine + white
-   (8.3:1); the orange focus ring meets the 3:1 UI-component minimum. */
+/* TucanoTime design system (#10), Tucano Technology brand.
+   The component layer remains Canonical's Vanilla Framework (#110) and the
+   Ubuntu variable font, but the palette is the Tucano Technology identity:
+   warm paper surfaces, ink text, toucan orange for primary action and a
+   deeper burnt orange for links and accents. Light + dark, WCAG-AA contrast,
+   visible focus. Vanilla's own colour variables are mapped onto these tokens
+   below so p-cards, tables, inputs and dialogs share the same theme.
+   Contrast notes: ink #17120f on paper #f6f0e4 = 16.4:1; button ink on
+   #f4a300 = 8.9:1; links #9d3f0c on surface #fffdf7 = 6.6:1; the focus ring
+   #9d3f0c meets the 3:1 UI-component minimum. */
 
 :root {
-  --bg: #f6f6f5;          /* warm grey 10% */
-  --surface: #ffffff;     /* white */
-  --fg: #333333;          /* cool grey — body copy */
-  --muted: #5e2750;       /* mid aubergine — secondary text (8.9:1 on white) */
-  --line: #d6d3cf;        /* warm grey 50% */
-  --brand: #e95420;       /* Ubuntu orange: primary action */
-  --brand-ink: #2c001e;   /* dark aubergine text on orange */
-  --brand-hover: #eb6536; /* orange 90% tint */
-  --accent: #e95420;      /* Ubuntu orange: active nav + today */
-  --accent-soft: #fdeee9; /* orange 10% tint */
-  --danger: #772953;      /* Canonical aubergine — destructive */
-  --brand-deep: #772953;  /* Canonical aubergine — wordmark + link text */
-  --field-bg: #ffffff;
-  --focus: #e95420;
-  --row-alt: #f6f6f5;     /* warm grey 10% */
-  --cell-active: #fdeee9; /* orange 10% */
-  --sidebar-bg: #ffffff;
+  --bg: #f6f0e4;          /* warm paper */
+  --surface: #fffdf7;     /* warm white card */
+  --fg: #17120f;          /* ink — body copy */
+  --muted: #6a6057;       /* warm grey — secondary text (6.0:1 on card) */
+  --line: #d8cdbb;        /* warm rule */
+  --brand: #f4a300;       /* toucan orange — primary action */
+  --brand-ink: #17120f;   /* ink text on orange (8.9:1) */
+  --brand-hover: #ffb31a; /* lighter orange */
+  --brand-active: #d98f00;
+  --accent: #e95420;      /* burnt orange — active nav, today, UI rules */
+  --accent-soft: #fbe6bd; /* pale orange tint */
+  --danger: #a3261c;      /* destructive text */
+  --brand-deep: #9d3f0c;  /* wordmark + link text (6.6:1 on card) */
+  --field-bg: #fffdf7;
+  --focus: #9d3f0c;
+  --row-alt: #efe6d5;     /* alternating table row */
+  --cell-active: #fbe6bd;
+  --sidebar-bg: #fffdf7;
   --radius: 2px;
-  --shadow: 0 1px 2px rgba(44, 0, 30, .06), 0 1px 3px rgba(44, 0, 30, .10);
+  --shadow: 0 1px 2px rgba(23, 18, 15, .06), 0 1px 3px rgba(23, 18, 15, .10);
   /* Shared filter-row rhythm (#F follow-up): the horizontal tool rows use one
      spacing scale and one control height instead of per-view magic numbers.
      The control height is Vanilla's underline control (1.5rem line + 2x.41rem
@@ -40,57 +41,172 @@
   --space-sm: .5rem;      /* 8px - filter-row gap */
   --space-md: .75rem;     /* 12px - heading-row gap */
   --control-height: 2.26rem;
-  --field-rule: #707070;  /* Vanilla --vf-color-border-high-contrast, light */
-  --input-bg: #f5f5f5;    /* Vanilla --vf-color-background-inputs, light */
+  --field-rule: #8a7b66;  /* underline rule on the warm input fill (3.6:1) */
+  --input-bg: #f5eee0;    /* warm input fill */
+
+  /* Vanilla component tokens, mapped onto the Tucano palette. */
+  --vf-color-text-default: var(--fg);
+  --vf-color-text-muted: var(--muted);
+  --vf-color-text-inactive: color-mix(in srgb, var(--fg) 72%, var(--bg));
+  --vf-color-link-default: var(--brand-deep);
+  --vf-color-link-visited: var(--brand-deep);
+  --vf-color-focus: var(--focus);
+  --vf-color-background-default: var(--surface);
+  --vf-color-background-alt: var(--row-alt);
+  --vf-color-background-code: rgba(23, 18, 15, .06);
+  --vf-color-background-inputs: var(--input-bg);
+  --vf-color-background-active: var(--row-alt);
+  --vf-color-background-hover: var(--row-alt);
+  --vf-color-background-overlay: rgba(23, 18, 15, .55);
+  --vf-color-border-default: var(--line);
+  --vf-color-border-high-contrast: var(--field-rule);
+  --vf-color-border-low-contrast: var(--line);
+  --vf-color-button-positive-default: var(--brand);
+  --vf-color-button-positive-hover: var(--brand-hover);
+  --vf-color-button-positive-active: var(--brand-active);
+  --vf-color-button-positive-text: var(--brand-ink);
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #2c001e;          /* dark aubergine */
-    --surface: #411934;     /* dark aubergine 90% */
-    --fg: #f1e9ed;          /* canonical aubergine 10% — near-white */
-    --muted: #d6becb;       /* light aubergine 30% */
-    --line: #56334b;        /* dark aubergine 80% */
-    --brand: #e95420;
-    --brand-ink: #2c001e;
-    --brand-hover: #eb6536;
-    --accent: #f08763;      /* orange 70% — reads on dark surfaces */
-    --accent-soft: #56334b; /* dark plum fill */
-    --danger: #cfb4c2;      /* canonical aubergine 35% */
-    --brand-deep: #d6becb;  /* light aubergine 30% — links on dark */
-    --field-bg: #2c001e;
-    --focus: #f5b29b;       /* orange 45% */
-    --row-alt: #411934;
-    --cell-active: #56334b;
-    --sidebar-bg: #411934;
+    --bg: #17120f;
+    --surface: #221b16;
+    --fg: #f1e9ed;
+    --muted: #c9bcaa;
+    --line: #43382e;
+    --brand: #f4a300;
+    --brand-ink: #17120f;
+    --brand-hover: #ffb31a;
+    --brand-active: #d98f00;
+    --accent: #ffb31a;
+    --accent-soft: #3a2f24;
+    --danger: #ff9b8f;
+    --brand-deep: #f4a300;
+    --field-bg: #17120f;
+    --focus: #ffb31a;
+    --row-alt: #221b16;
+    --cell-active: #3a2f24;
+    --sidebar-bg: #221b16;
     --shadow: none;
-    --field-rule: #939393;  /* Vanilla --vf-color-border-high-contrast, dark */
-    --input-bg: #2f2f2f;    /* Vanilla --vf-color-background-inputs, dark */
+    --field-rule: #a99b89;
+    --input-bg: #2a211b;
+
+    --vf-color-text-default: var(--fg);
+    --vf-color-text-muted: var(--muted);
+    --vf-color-text-inactive: color-mix(in srgb, var(--fg) 72%, var(--bg));
+    --vf-color-link-default: var(--brand-deep);
+    --vf-color-link-visited: var(--brand-deep);
+    --vf-color-focus: var(--focus);
+    --vf-color-background-default: var(--surface);
+    --vf-color-background-alt: var(--row-alt);
+    --vf-color-background-code: rgba(246, 240, 228, .08);
+    --vf-color-background-inputs: var(--input-bg);
+    --vf-color-background-active: var(--row-alt);
+    --vf-color-background-hover: var(--row-alt);
+    --vf-color-background-overlay: rgba(0, 0, 0, .65);
+    --vf-color-border-default: var(--line);
+    --vf-color-border-high-contrast: var(--field-rule);
+    --vf-color-border-low-contrast: var(--line);
+    --vf-color-button-positive-default: var(--brand);
+    --vf-color-button-positive-hover: var(--brand-hover);
+    --vf-color-button-positive-active: var(--brand-active);
+    --vf-color-button-positive-text: var(--brand-ink);
   }
 }
 
 :root[data-theme="dark"] {
-  --bg: #2c001e;
-  --surface: #411934;
+  --bg: #17120f;
+  --surface: #221b16;
   --fg: #f1e9ed;
-  --muted: #d6becb;
-  --line: #56334b;
-  --brand: #e95420;
-  --brand-ink: #2c001e;
-  --brand-hover: #eb6536;
-  --accent: #f08763;
-  --accent-soft: #56334b;
-  --danger: #cfb4c2;
-  --brand-deep: #d6becb;
-  --field-bg: #2c001e;
-  --focus: #f5b29b;
-  --row-alt: #411934;
-  --cell-active: #56334b;
-  --sidebar-bg: #411934;
+  --muted: #c9bcaa;
+  --line: #43382e;
+  --brand: #f4a300;
+  --brand-ink: #17120f;
+  --brand-hover: #ffb31a;
+  --brand-active: #d98f00;
+  --accent: #ffb31a;
+  --accent-soft: #3a2f24;
+  --danger: #ff9b8f;
+  --brand-deep: #f4a300;
+  --field-bg: #17120f;
+  --focus: #ffb31a;
+  --row-alt: #221b16;
+  --cell-active: #3a2f24;
+  --sidebar-bg: #221b16;
   --shadow: none;
-  --field-rule: #939393;
-  --input-bg: #2f2f2f;
+  --field-rule: #a99b89;
+  --input-bg: #2a211b;
+
+  --vf-color-text-default: var(--fg);
+  --vf-color-text-muted: var(--muted);
+  --vf-color-text-inactive: color-mix(in srgb, var(--fg) 72%, var(--bg));
+  --vf-color-link-default: var(--brand-deep);
+  --vf-color-link-visited: var(--brand-deep);
+  --vf-color-focus: var(--focus);
+  --vf-color-background-default: var(--surface);
+  --vf-color-background-alt: var(--row-alt);
+  --vf-color-background-code: rgba(246, 240, 228, .08);
+  --vf-color-background-inputs: var(--input-bg);
+  --vf-color-background-active: var(--row-alt);
+  --vf-color-background-hover: var(--row-alt);
+  --vf-color-background-overlay: rgba(0, 0, 0, .65);
+  --vf-color-border-default: var(--line);
+  --vf-color-border-high-contrast: var(--field-rule);
+  --vf-color-border-low-contrast: var(--line);
+  --vf-color-button-positive-default: var(--brand);
+  --vf-color-button-positive-hover: var(--brand-hover);
+  --vf-color-button-positive-active: var(--brand-active);
+  --vf-color-button-positive-text: var(--brand-ink);
 }
+/* Vanilla publishes its component tokens on body.is-light / body.is-dark as
+   well as :root; repeat the mapping at that specificity so p-cards, buttons
+   and inputs inherit the Tucano palette instead of the vendor defaults. */
+.is-light {
+  --vf-color-text-default: var(--fg);
+  --vf-color-text-muted: var(--muted);
+  --vf-color-text-inactive: color-mix(in srgb, var(--fg) 72%, var(--bg));
+  --vf-color-link-default: var(--brand-deep);
+  --vf-color-link-visited: var(--brand-deep);
+  --vf-color-focus: var(--focus);
+  --vf-color-background-default: var(--surface);
+  --vf-color-background-alt: var(--row-alt);
+  --vf-color-background-code: rgba(23, 18, 15, .06);
+  --vf-color-background-inputs: var(--input-bg);
+  --vf-color-background-active: var(--row-alt);
+  --vf-color-background-hover: var(--row-alt);
+  --vf-color-background-overlay: rgba(23, 18, 15, .55);
+  --vf-color-border-default: var(--line);
+  --vf-color-border-high-contrast: var(--field-rule);
+  --vf-color-border-low-contrast: var(--line);
+  --vf-color-button-positive-default: var(--brand);
+  --vf-color-button-positive-hover: var(--brand-hover);
+  --vf-color-button-positive-active: var(--brand-active);
+  --vf-color-button-positive-text: var(--brand-ink);
+}
+
+.is-dark {
+  --vf-color-text-default: var(--fg);
+  --vf-color-text-muted: var(--muted);
+  --vf-color-text-inactive: color-mix(in srgb, var(--fg) 72%, var(--bg));
+  --vf-color-link-default: var(--brand-deep);
+  --vf-color-link-visited: var(--brand-deep);
+  --vf-color-focus: var(--focus);
+  --vf-color-background-default: var(--surface);
+  --vf-color-background-alt: var(--row-alt);
+  --vf-color-background-code: rgba(246, 240, 228, .08);
+  --vf-color-background-inputs: var(--input-bg);
+  --vf-color-background-active: var(--row-alt);
+  --vf-color-background-hover: var(--row-alt);
+  --vf-color-background-overlay: rgba(0, 0, 0, .65);
+  --vf-color-border-default: var(--line);
+  --vf-color-border-high-contrast: var(--field-rule);
+  --vf-color-border-low-contrast: var(--line);
+  --vf-color-button-positive-default: var(--brand);
+  --vf-color-button-positive-hover: var(--brand-hover);
+  --vf-color-button-positive-active: var(--brand-active);
+  --vf-color-button-positive-text: var(--brand-ink);
+}
+
 .theme-switch { border: 0; border-top: 1px solid var(--line); padding: .75rem .5rem; margin: .75rem 0 0; background: none; overflow: visible; } /* Vanilla base `fieldset` (vf-b-forms) tints + clips fieldsets */
 .theme-switch legend { padding: 0 .25rem; font-size: .85rem; color: var(--muted); }
 .theme-switch label { display: inline-flex; align-items: center; gap: .3rem; margin-right: .65rem; font-weight: 400; cursor: pointer; }
@@ -113,7 +229,17 @@ body {
   border-right: 1px solid var(--line);
   padding: 1rem .75rem; display: flex; flex-direction: column; gap: 1rem;
 }
-.brand { font-size: 1.5rem; font-weight: 550; color: var(--brand-deep); padding: .25rem .5rem; letter-spacing: 0; }
+.brand { display: flex; align-items: center; gap: .5rem; padding: .25rem .5rem; min-width: 0; }
+.brand-mark { width: 32px; height: auto; flex: 0 0 auto; padding: 2px; border-radius: 5px; image-rendering: pixelated; }
+.brand-word { font-size: 1.35rem; font-weight: 600; letter-spacing: -.02em; color: var(--fg); white-space: nowrap; }
+.brand-word strong { color: var(--brand-deep); font-weight: 600; }
+/* The pixel toucan is black-bodied: on the dark theme a paper tile keeps the
+   mark legible without inverting or recolouring the artwork. */
+:root[data-theme="dark"] .brand-mark,
+.is-dark .brand-mark { background: #f6f0e4; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .brand-mark { background: #f6f0e4; }
+}
 .sidebar nav { flex: 1; display: flex; flex-direction: column; gap: .15rem; } /* #191: the utility separator + wizard button are nav siblings of the tablist now */
 /* ---- tablists: the official Vanilla p-tabs pattern (#232 increment 5) ----
    Every app tablist (the sidebar rail, Day|Week|Calendar, the settings bar)
@@ -205,6 +331,10 @@ h2 { font-size: 1.5rem; margin: 1.5rem 0 .75rem; font-weight: 400; }
 button { font: inherit; cursor: pointer; }
 input:focus-visible, select:focus-visible, textarea:focus-visible,
 button:focus-visible, a:focus-visible { outline: 3px solid var(--focus); outline-offset: 1px; }
+/* Vanilla's button/input rules set their own blue focus colour at equal or
+   higher specificity; keep the Tucano focus colour on every control. */
+.p-button--positive:focus-visible, .p-button:focus-visible,
+input:focus-visible, select:focus-visible, textarea:focus-visible { outline-color: var(--focus); }
 button.secondary { background: var(--surface); color: var(--fg); border-color: var(--line); }
 button.secondary:hover { background: var(--row-alt); }
 button.link { background: none; border: none; color: var(--brand-deep); padding: .2rem .35rem; text-decoration: underline; font-weight: 500; }
@@ -366,9 +496,27 @@ button.icon-action > .p-tooltip__message {
 /* First-admin sign-in is the twin of the first-run setup wizard (#229): a
    Vanilla p-card with a ruled header, .65rem field rhythm and the full-width
    primary action below. Vanilla owns the frame, header divider and buttons. */
-.auth-overlay { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; background: color-mix(in srgb, var(--bg) 70%, var(--fg) 30%); padding: 1rem; }
+/* The overlay covers the app, so the hidden shell must not stay in layout:
+   at narrow widths its dense timesheet used to give the sign-in screen a
+   horizontal scrollbar (the shell's 444px min-width leaked through). */
+body:has(> #auth-overlay:not([hidden])) > .app,
+body:has(> #admin-wizard[open]) > .app {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+}
+
+.auth-overlay {
+  position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; padding: 1rem;
+  background:
+    radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--fg) 14%, transparent) 1px, transparent 1.6px) 0 0 / 24px 24px,
+    color-mix(in srgb, var(--bg) 86%, var(--fg) 14%);
+}
 .auth-card { width: min(360px, 100%); margin: 0; }
-.auth-title { margin: 0 0 .25rem; font-size: 1.3rem; font-weight: 400; color: var(--brand-deep); } /* #257: brand orange failed AA (3.65:1 light / 4.07:1 dark) at this size; --brand-deep is 9.4:1 / 8.6:1 */
+.auth-brand { display: flex; align-items: center; gap: .45rem; margin-bottom: .65rem; }
+.auth-brand .brand-mark { width: 30px; }
+.auth-brand .brand-word { font-size: 1.2rem; }
+.auth-title { margin: 0 0 .25rem; font-size: 1.3rem; font-weight: 400; color: var(--brand-deep); } /* #257: the title uses the link/wordmark ink; --brand-deep is 6.6:1 light / 8.2:1 dark here. */
 #auth-sub { margin: 0; }
 #auth-submit { width: 100%; }
 /* #145-alignment: the page-level "+" buttons share one size and sit at the
