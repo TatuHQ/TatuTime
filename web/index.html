@@ -426,6 +426,17 @@
           <div class="p-card">
             <p class="p-form-help-text">Projects and tasks have their own Setup sections; the <strong>Projects</strong>
               action on a row opens that customer&#39;s projects.</p>
+            <div class="hierarchy-filters">
+              <div class="filter-field"><label class="sr-only" for="customer-filter-active">Status</label>
+                <select id="customer-filter-active">
+                  <option value="">All statuses</option>
+                  <option value="true">Active</option>
+                  <option value="false">Inactive</option>
+                </select>
+              </div>
+            </div>
+            <p id="customers-empty-state" class="workspace-empty" hidden>No customers yet. Use <strong>+ Customer</strong>
+              to add one.</p>
             <div class="table-scroll">
               <table id="customer-table" class="p-table--mobile-card">
                 <caption class="sr-only">All customers</caption>
@@ -460,6 +471,13 @@
               <div class="filter-field"><label class="sr-only" for="proj-filter-customer">Customer</label>
                 <select id="proj-filter-customer">
                   <option value="">All customers</option>
+                </select>
+              </div>
+              <div class="filter-field"><label class="sr-only" for="proj-filter-active">Status</label>
+                <select id="proj-filter-active">
+                  <option value="">All statuses</option>
+                  <option value="true">Active</option>
+                  <option value="false">Inactive</option>
                 </select>
               </div>
             </div>
@@ -507,6 +525,13 @@
               <div class="filter-field"><label class="sr-only" for="task-filter-project">Project</label>
                 <select id="task-filter-project">
                   <option value="">All projects</option>
+                </select>
+              </div>
+              <div class="filter-field"><label class="sr-only" for="task-filter-active">Status</label>
+                <select id="task-filter-active">
+                  <option value="">All statuses</option>
+                  <option value="true">Active</option>
+                  <option value="false">Inactive</option>
                 </select>
               </div>
             </div>
