@@ -11,14 +11,17 @@ export const state = {
   isAdmin: false, // #188: set from /api/auth/me; gates admin-tier panel loads at boot
   vault: null,             // last GET /admin/vault payload (settings.js)
   customers: [],           // Customer[]
+  customersStatus: '',     // '' (all) | 'true' (active) | 'false' (inactive)
   projectsByCustomer: {},  // id -> Project[]
   // #182: the Setup hierarchy is three sections with filter state instead of
   // the old shared workspace selection.
   projectsFilter: null,    // customer id | null = all customers
+  projectsStatus: '',      // '' (all) | 'true' (active) | 'false' (inactive)
   expensesCustomer: null,  // expense filters (same "all" default as Tasks)
   expensesProject: null,
   tasksCustomer: null,     // customer id | null
   tasksProject: null,      // project code | null
+  tasksStatus: '',         // '' (all) | 'true' (active) | 'false' (inactive)
 };
 
 export async function loadCustomers() {

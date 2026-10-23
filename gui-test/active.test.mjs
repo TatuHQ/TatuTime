@@ -60,7 +60,8 @@ state.customers = ${JSON.stringify(customers)};
 initTabs();
 window.h = {
   state, fillCustomerSelect, fillProjectSelect, fillTaskSelect,
-  refreshCustomerPickers, resetEntryForm, startEdit, edOpen,
+  refreshCustomerPickers, refreshCustomerTable, refreshProjectTable,
+  refreshTaskTable, resetEntryForm, startEdit, edOpen,
 };`;
   dom.window.eval(`${app}\n${stub}`);
   return { dom, h: dom.window.h, document: dom.window.document };
@@ -70,6 +71,12 @@ window.h = {
 // jsdom realm and would fail `deepStrictEqual` on prototype identity alone.
 const values = (document, id) => [...document.getElementById(id).options].map((o) => o.value);
 const texts = (document, id) => [...document.getElementById(id).options].map((o) => o.textContent);
+const rows = (document, table) => [...document.querySelectorAll(`#${table} tbody tr`)];
+const setFilter = (dom, id, value) => {
+  const select = dom.window.document.getElementById(id);
+  select.value = value;
+  select.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
+};
 
 test('new-entry pickers offer active references only', async () => {
   const { dom, h, document } = setup();
@@ -147,5 +154,84 @@ test('a new entry never inherits a retired customer from the previous edit', () 
   h.resetEntryForm();
   assert.equal(picker.value, '', 'the Add form starts without the retired customer');
   assert.deepEqual(values(document, 'entry-customer'), ['', 'c1']);
+  dom.window.close();
+});
+
+test('customers can be filtered by status', async () => {
+  const { dom, h, document } = setup();
+  await h.refreshCustomerTable();
+  assert.equal(rows(document, 'customer-table').length, 2, 'all statuses by default');
+
+  setFilter(dom, 'customer-filter-active', 'true');
+  await waitFor(() => rows(document, 'customer-table').length === 1, {
+    message: 'the customer register to show only active customers',
+  });
+  assert.equal(rows(document, 'customer-table')[0].querySelector('th').textContent, 'Active Co');
+
+  setFilter(dom, 'customer-filter-active', 'false');
+  await waitFor(() => rows(document, 'customer-table').length === 1, {
+    message: 'the customer register to show only inactive customers',
+  });
+  assert.equal(rows(document, 'customer-table')[0].querySelector('th').textContent, 'Retired Co');
+
+  setFilter(dom, 'customer-filter-active', '');
+  await waitFor(() => rows(document, 'customer-table').length === 2, {
+    message: 'the customer register to show every status again',
+  });
+  dom.window.close();
+});
+
+test('projects can be filtered by status independently of the customer', async () => {
+  const { dom, h, document } = setup();
+  h.state.projectsFilter = null;
+  await h.refreshProjectTable();
+  await waitFor(() => rows(document, 'project-table').length === 3, {
+    message: 'the project register to render every project',
+  });
+
+  setFilter(dom, 'proj-filter-active', 'true');
+  await waitFor(() => rows(document, 'project-table').length === 1, {
+    message: 'the project register to show only active projects',
+  });
+  assert.equal(rows(document, 'project-table')[0].querySelector('th').textContent.trim(), 'P1');
+
+  setFilter(dom, 'proj-filter-active', 'false');
+  await waitFor(() => rows(document, 'project-table').length === 2, {
+    message: 'the project register to show only inactive projects',
+  });
+  assert.ok(rows(document, 'project-table').every((row) => row.querySelector('th').textContent.trim() === 'P2'));
+
+  setFilter(dom, 'proj-filter-active', '');
+  await waitFor(() => rows(document, 'project-table').length === 3, {
+    message: 'the project register to show every status again',
+  });
+  dom.window.close();
+});
+
+test('tasks can be filtered by status', async () => {
+  const { dom, h, document } = setup();
+  h.state.tasksCustomer = null;
+  h.state.tasksProject = null;
+  await h.refreshTaskTable();
+  await waitFor(() => rows(document, 'task-table').length === 3, {
+    message: 'the task register to render every task',
+  });
+
+  setFilter(dom, 'task-filter-active', 'true');
+  await waitFor(() => rows(document, 'task-table').length === 1, {
+    message: 'the task register to show only active tasks',
+  });
+  assert.equal(rows(document, 'task-table')[0].querySelector('th').textContent, 'T1');
+
+  setFilter(dom, 'task-filter-active', 'false');
+  await waitFor(() => rows(document, 'task-table').length === 2, {
+    message: 'the task register to show only inactive tasks',
+  });
+  assert.ok(rows(document, 'task-table').every((row) => row.querySelector('th').textContent === 'T2'));
+
+  setFilter(dom, 'task-filter-active', '');
+  await waitFor(() => rows(document, 'task-table').length === 3, {
+    message: 'the task register to show every status again',
+  });
   dom.window.close();
 });

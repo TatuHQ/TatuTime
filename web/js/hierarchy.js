@@ -14,12 +14,20 @@ import { jumpToEntry } from './timesheet.js';
 const projectSeq = createSeqGuard();
 const taskSeq = createSeqGuard();
 
+// The Setup registers share one status filter vocabulary ('', 'true', 'false').
+// A missing `active` is active, matching the server default for legacy docs.
+const matchesStatus = (record, status) =>
+  !status || String(record.active !== false) === status;
+const statusWord = (status) => (status === 'false' ? 'inactive' : 'active');
+
 // ---------------------------------------------------------- customers ---
 
 export async function refreshCustomerTable() {
+  $('customer-filter-active').value = state.customersStatus || '';
+  const customers = state.customers.filter((c) => matchesStatus(c, state.customersStatus));
   const tbody = $('customer-table').querySelector('tbody');
   tbody.textContent = '';
-  for (const c of state.customers) {
+  for (const c of customers) {
     tbody.appendChild(
       el('tr', {}, [
         el('th', { attrs: { scope: 'row' } }, [
@@ -61,6 +69,14 @@ export async function refreshCustomerTable() {
         ]),
       ]),
     );
+  }
+  $('customer-table').hidden = customers.length === 0;
+  const empty = $('customers-empty-state');
+  empty.hidden = customers.length !== 0;
+  if (!empty.hidden) {
+    empty.textContent = state.customersStatus
+      ? `No ${statusWord(state.customersStatus)} customers.`
+      : 'No customers yet. Use + Customer to add one.';
   }
 }
 
@@ -501,6 +517,9 @@ export function fillHierarchyFilter(select, selectedId, placeholder) {
 // scoped load happens right here.
 export async function openProjectsFor(cid) {
   state.projectsFilter = cid || null;
+  // A contextual jump must show that customer's work: a status filter left
+  // behind in the Projects section would otherwise make the target look empty.
+  state.projectsStatus = '';
   switchTab('tab-projects');
   await loadCustomers();
   await refreshProjectTable();
@@ -514,12 +533,14 @@ export async function refreshProjectTable() {
   // save, filter change, tab re-show) renders in sync from here.
   const isProjectCurrent = projectSeq();
   fillHierarchyFilter($('proj-filter-customer'), state.projectsFilter, 'All customers');
+  $('proj-filter-active').value = state.projectsStatus || '';
   const cids = state.projectsFilter ? [state.projectsFilter] : state.customers.map((c) => c.id);
-  const rows = [];
+  const allRows = [];
   for (const cid of cids) {
-    for (const p of await loadProjects(cid)) rows.push({ cid, p });
+    for (const p of await loadProjects(cid)) allRows.push({ cid, p });
   }
   if (!isProjectCurrent()) return; // #219: newer render won
+  const rows = allRows.filter(({ p }) => matchesStatus(p, state.projectsStatus));
   const tbody = $('project-table').querySelector('tbody');
   tbody.textContent = '';
   for (const { cid, p } of rows) {
@@ -569,9 +590,12 @@ export async function refreshProjectTable() {
   const empty = $('projects-empty-state');
   empty.hidden = rows.length !== 0;
   if (!empty.hidden) {
-    empty.textContent = state.projectsFilter
-      ? `No projects for ${customerName(state.projectsFilter)} yet. Use + Project to add one.`
-      : 'No projects yet. Use + Project to add one.';
+    const scope = state.projectsFilter ? ` for ${customerName(state.projectsFilter)}` : '';
+    empty.textContent = state.projectsStatus
+      ? `No ${statusWord(state.projectsStatus)} projects${scope}.`
+      : state.projectsFilter
+        ? `No projects for ${customerName(state.projectsFilter)} yet. Use + Project to add one.`
+        : 'No projects yet. Use + Project to add one.';
   }
   updateHierarchyActions();
 }
@@ -712,6 +736,9 @@ export async function removeProject(cid, p) {
 export async function openTasksFor(cid, pcode) {
   state.tasksCustomer = cid || null;
   state.tasksProject = pcode || null;
+  // Same reason as openProjectsFor: the row action is a jump to that record's
+  // children, not a request to keep an unrelated status filter.
+  state.tasksStatus = '';
   switchTab('tab-tasks');
   await loadCustomers();
   await refreshTaskTable();
@@ -724,6 +751,7 @@ export async function refreshTaskTable() {
   // out across the projects it covers.
   const isTaskCurrent = taskSeq();
   fillHierarchyFilter($('task-filter-customer'), state.tasksCustomer, 'All customers');
+  $('task-filter-active').value = state.tasksStatus || '';
   const projSel = $('task-filter-project');
   // Projects belong to a customer, so concrete choices only exist once one is
   // picked; with "all customers" the pick rests on "All projects".
@@ -738,7 +766,7 @@ export async function refreshTaskTable() {
   updateHierarchyActions();
 
   const cids = state.tasksCustomer ? [state.tasksCustomer] : state.customers.map((c) => c.id);
-  const tasks = [];
+  const allTasks = [];
   for (const cid of cids) {
     for (const p of await loadProjects(cid)) {
       if (state.tasksProject && p.code !== state.tasksProject) continue;
@@ -747,7 +775,7 @@ export async function refreshTaskTable() {
       );
       for (const t of data.tasks || []) {
         // A row must know its own parents whatever the filter says (#182).
-        tasks.push({
+        allTasks.push({
           ...t,
           customer_id: t.customer_id || cid,
           project_code: t.project_code || p.code,
@@ -757,6 +785,7 @@ export async function refreshTaskTable() {
   }
   if (!isTaskCurrent()) return; // #219: a newer filter won
 
+  const tasks = allTasks.filter((t) => matchesStatus(t, state.tasksStatus));
   const tbody = $('task-table').querySelector('tbody');
   tbody.textContent = '';
   // The scope spans projects, so each row names its parent project; project
@@ -795,9 +824,14 @@ export async function refreshTaskTable() {
   const empty = $('tasks-empty-state');
   empty.hidden = tasks.length !== 0;
   if (tasks.length === 0) {
-    empty.textContent = state.tasksProject
-      ? 'No tasks on this project yet. Use + Task to add one.'
-      : 'No tasks yet. Use + Task to add one.';
+    const scope = state.tasksProject
+      ? ' on this project'
+      : state.tasksCustomer ? ` for ${customerName(state.tasksCustomer)}` : '';
+    empty.textContent = state.tasksStatus
+      ? `No ${statusWord(state.tasksStatus)} tasks${scope}.`
+      : state.tasksProject
+        ? 'No tasks on this project yet. Use + Task to add one.'
+        : 'No tasks yet. Use + Task to add one.';
   }
 }
 
@@ -877,6 +911,27 @@ export async function removeTask(t) {
 }
 
 // #182: section filters. Changing/clearing a parent resets its children.
+$('customer-filter-active').addEventListener('change', async () => {
+  state.customersStatus = $('customer-filter-active').value;
+  await refreshCustomerTable();
+  announce(state.customersStatus
+    ? `Showing ${statusWord(state.customersStatus)} customers.`
+    : 'Showing all customers.');
+});
+$('proj-filter-active').addEventListener('change', async () => {
+  state.projectsStatus = $('proj-filter-active').value;
+  await refreshProjectTable();
+  announce(state.projectsStatus
+    ? `Showing ${statusWord(state.projectsStatus)} projects.`
+    : 'Showing all projects.');
+});
+$('task-filter-active').addEventListener('change', async () => {
+  state.tasksStatus = $('task-filter-active').value;
+  await refreshTaskTable();
+  announce(state.tasksStatus
+    ? `Showing ${statusWord(state.tasksStatus)} tasks.`
+    : 'Showing all tasks.');
+});
 $('proj-filter-customer').addEventListener('change', async () => {
   state.projectsFilter = $('proj-filter-customer').value || null;
   await refreshProjectTable();
