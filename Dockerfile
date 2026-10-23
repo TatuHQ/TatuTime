@@ -60,7 +60,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
 # Harden at runtime (compose does this by default):
 #   --read-only --cap-drop ALL --security-opt no-new-privileges --tmpfs /tmp
 # ---------------------------------------------------------------------------
-FROM gcr.io/distroless/cc-debian13:nonroot@sha256:e792ab3d241a468a4fd7519ddbbebe66b49b5f365771716ea688ad40b6c6f1c2
+FROM gcr.io/distroless/cc-debian13:nonroot@sha256:83b9b50586253821cf63ffcec87d3d94265a093ad30da232039af962dd8f4edf
 
 LABEL org.opencontainers.image.title="TucanoTime" \
   org.opencontainers.image.description="TucanoTime timesheet server (API, GUI and contract in one binary)" \
