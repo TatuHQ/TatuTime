@@ -8,9 +8,9 @@
 // prose was wrong and is corrected with this increment.
 //
 // This offline suite pins (a) the static contract — the sortable columns and
-// their order, the `data-col` keys, and the initial `aria-sort` (Number
-// ascending, the rest `none`) — and (b) the sort semantics `dashFilter` owns:
-// default by Number ascending, numeric columns compared numerically, string
+// their order, the `data-col` keys, and the initial `aria-sort` (Period
+// descending, the rest `none`) — and (b) the sort semantics `dashFilter` owns:
+// default by Period descending, numeric columns compared numerically, string
 // columns by resolved value, and direction toggling. The end-to-end click
 // behaviour is driven live in gui.mjs and the real-browser gate.
 import { test } from 'node:test';
@@ -41,8 +41,8 @@ test('the invoice register uses Vanilla\'s real sortable pattern (#232 phase 2d)
     assert.equal(ths[6].querySelector('button'), null, 'the Actions column is not sortable');
     assert.deepEqual(
         ths.map((th) => th.getAttribute('aria-sort')),
-        ['ascending', 'none', 'none', 'none', 'none', 'none', null],
-        'the initial aria-sort reflects the default sort (Number ascending) and marks the rest none',
+        ['none', 'none', 'descending', 'none', 'none', 'none', null],
+        'the initial aria-sort reflects the default sort (Period descending) and marks the rest none',
     );
     dom.window.close();
 });
@@ -78,9 +78,10 @@ test('dashFilter keeps the sort contract (#232 phase 2d)', () => {
         { id: 'c1', name: 'Tucano', currency: 'EUR' },
         { id: 'c2', name: 'Zeta', currency: 'EUR' },
     ];
-    // default sort is Number ascending, toggling to descending
-    assert.equal(t.dash.sortKey, 'number');
-    assert.equal(t.dash.sortDir, 1);
+    // default sort is Period descending (latest first), toggling to ascending
+    assert.equal(t.dash.sortKey, 'period');
+    assert.equal(t.dash.sortDir, -1);
+    assert.deepEqual(sortedNumbers(t, 'period', -1), ['INV-0003', 'INV-0002', 'INV-0001']);
     assert.deepEqual(sortedNumbers(t, 'number', 1), ['INV-0001', 'INV-0002', 'INV-0003']);
     assert.deepEqual(sortedNumbers(t, 'number', -1), ['INV-0003', 'INV-0002', 'INV-0001']);
     // numeric columns compare numerically, not lexicographically

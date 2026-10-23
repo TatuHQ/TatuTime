@@ -1937,7 +1937,7 @@ class Gate:
         first = snapshot()
         self.check(
             "the invoice register is Vanilla's real sortable pattern (#232 phase 2d)",
-            first["sorts"] == ["ascending", "none", "none", "none", "none", "none", None]
+            first["sorts"] == ["none", "none", "descending", "none", "none", "none", None]
             and first["cols"] == ["number", "customer", "period", "total", "balance", "status", None]
             and first["cls"][:6] == [True, True, True, True, True, True]
             and first["cls"][6] is None,
