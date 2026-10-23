@@ -978,6 +978,41 @@ class Gate:
             f"more-tools={collapsed}",
         )
 
+    def auth_mobile_fit(self):
+        """The sign-in screen must not inherit the hidden timesheet's width.
+
+        Before the shell is hidden while the auth overlay is up, a 320px
+        window showed a horizontal scrollbar from the dense day grid behind
+        the overlay. Pin the fix at the smallest supported width.
+        """
+        original = self.marionette.call("WebDriver:GetWindowRect")
+        self.marionette.call("Marionette:SetContext", {"value": "chrome"})
+        try:
+            self.marionette.script(
+                "document.documentElement.style.setProperty('min-width', '0px', 'important');"
+                "return true;"
+            )
+        finally:
+            self.marionette.call("Marionette:SetContext", {"value": "content"})
+        try:
+            self.marionette.call("WebDriver:SetWindowRect", {"width": 320, "height": 700})
+            self.wait_script("innerWidth === 320", "320px sign-in viewport", timeout=10.0)
+            info = json.loads(self.marionette.script("""
+                const root = document.documentElement;
+                return JSON.stringify({
+                    overflow: root.scrollWidth - root.clientWidth,
+                    overlay: !document.getElementById('auth-overlay').hidden,
+                    app: getComputedStyle(document.querySelector('.app')).display,
+                });
+            """))
+            self.check(
+                "the sign-in screen has no horizontal scrollbar at 320px",
+                info["overflow"] <= 1 and info["overlay"] and info["app"] != "none",
+                json.dumps(info),
+            )
+        finally:
+            self.marionette.call("WebDriver:SetWindowRect", original)
+
     def stylesheets(self):
         sheets = self.marionette.script(
             "var out = [];"
@@ -2696,6 +2731,7 @@ class Gate:
         if not self.boot():
             return
         self.shell_state()
+        self.auth_mobile_fit()
         self.drain_console("first load")
         self.stylesheets()
         self.dialogs_closed()
