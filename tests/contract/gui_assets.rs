@@ -96,6 +96,29 @@ fn resolve_specifier(from_url: &str, spec: &str) -> String {
     format!("/{}", parts.join("/"))
 }
 
+/// The branding assets are images, not opaque bytes. A `.png` served as
+/// `application/octet-stream` relies on content sniffing and can break proxies,
+/// caches and clients that key on the declared type.
+#[tokio::test]
+async fn brand_assets_are_served_with_image_mime() {
+    let (client, _dir) = app().await;
+
+    for (path, expected) in [
+        ("/assets/tucano.png", "image/png"),
+        ("/assets/favicon-32x32.png", "image/png"),
+        ("/assets/favicon-16x16.png", "image/png"),
+        ("/favicon.ico", "image/x-icon"),
+    ] {
+        let (status, ctype, _) = asset_get(&client.router, path).await;
+        assert_eq!(status, StatusCode::OK, "{path} must be served");
+        assert_eq!(
+            ctype, expected,
+            "{path} must be served with {expected}; an octet-stream image is a sniffing \
+             dependency and breaks caches/CDNs that key on the declared type"
+        );
+    }
+}
+
 /// #264: the served GUI must be a loadable ES-module graph. Every module URL
 /// reachable from the entry point answers 200 with a JavaScript MIME type, the
 /// shell stays HTML, both stylesheets stay CSS, and a missing asset stays the
