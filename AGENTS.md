@@ -99,6 +99,14 @@ the `v0.1.8` release notes is no longer needed.
   Dot files are never documents — the collection reader skips them, so a side
   index — the timeline sidecar included — stays out of the `MAX_DOCS` count.
   Atomic writes (tmp + rename).
+- **In-app backups:** Settings → Backup writes unencrypted ZIPs of the data
+  directory (files at the archive root, so restore is extracting into the data
+  dir) to a sibling `Backup/` folder (`/Backup` in the image;
+  `TUCANO_BACKUP_DIR` overrides). Names are
+  `<datetime>_tucanotime-backup_<company>.zip`, timestamped and slugged in the
+  server's local zone. `backup_enabled` / `backup_cadence` / `backup_time` are
+  whitelisted `config.json` keys; a 60-second scheduler job reads them live.
+  No retention pass: archives are never deleted automatically.
 - **Secret vault (#77):** admin-entered integration credentials are encrypted at
   rest (AES-256-GCM) under a master key created automatically on first boot at
   `<data>/vault.key` — 24 CSPRNG bytes as 32 base64url characters (192 bits),
@@ -227,7 +235,7 @@ the `v0.1.8` release notes is no longer needed.
 | Lint (CI treats all clippy lints as errors) | `cargo clippy --all-targets -- -D warnings` |
 | Latest version of a crate | `cargo info <crate>` (or crates.io API) |
 | Container image (distroless, uid 10001, ~41 MiB) | `docker build -t tucanotime .` |
-| Container run (hardened, loopback-only) | `docker run -d --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges -p 127.0.0.1:8080:8080 -v tucanotime-data:/data tucanotime` |
+| Container run (hardened, loopback-only) | `docker run -d --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges -p 127.0.0.1:8080:8080 -v tucanotime-data:/data -v tucanotime-backups:/Backup tucanotime` |
 | Container stack (same hardening, from `docker-compose.yml`) | `docker compose up -d` |
 
 The toolchain is pinned by `rust-toolchain.toml` and the Dockerfile/CI images

@@ -77,6 +77,7 @@ Disabling is refused while any credential is stored.
 | Variable | Default | Purpose | Secret / file variant |
 | --- | --- | --- | --- |
 | `TUCANO_DATA_DIR` | `Data` locally, `/data` in the image | Directory holding every document and state file | — |
+| `TUCANO_BACKUP_DIR` | `Backup` beside the data dir | Directory where Settings → Backup writes its ZIPs; Compose also mounts it at `/Backup` | — |
 | `TUCANO_PORT` | `8080` | TCP port the server and the health probe use | — |
 | `TUCANO_ENV` | unset (`production` in Compose) | `production` enables the strict session-secret policy and Secure cookies by default | — |
 | `TUCANO_SECURE_COOKIES` | on iff `TUCANO_ENV=production` | `0`/`false` drops the cookie `Secure` flag for plain-HTTP LAN serving | — |
@@ -177,6 +178,9 @@ the admin API. A provider is enabled only when its token exists.
 | `TUCANO_REMINDER_DAYS` | `7` (1–365) | Days between overdue-invoice reminder emails | `config.json` key `reminder_days` |
 | `TUCANO_ORG_NAME` | `TucanoTime` | Fallback organisation name when the Company profile name is blank | `config.json` key `org_name` |
 | `TUCANO_BASE_CURRENCY` | unset | ISO 4217 base currency for mixed-currency invoice trends; unset disables conversion | `config.json` key `base_currency` |
+| `TUCANO_BACKUP_ENABLED` | `false` | Enable scheduled ZIP backups (Settings → Backup) | `config.json` key `backup_enabled` |
+| `TUCANO_BACKUP_CADENCE` | `daily` | `daily`, `weekly` (Monday) or `monthly` (1st) | `config.json` key `backup_cadence` |
+| `TUCANO_BACKUP_TIME` | `02:00` | Backup time (`HH:MM`) in the server's local time zone | `config.json` key `backup_time` |
 
 ### Compose-only interpolation
 
@@ -186,7 +190,6 @@ These variables are read by Docker Compose, not by the binary.
 | --- | --- | --- |
 | `TUCANO_HOST_ADDR` | `127.0.0.1` | Host address the published port binds to; `0.0.0.0` exposes the GUI on the LAN |
 | `TUCANO_HOST_PORT` | `8080` | Host port mapped to container port `8080` |
-| `TUCANO_BACKUP_DIR` | `./backups` | Host directory mounted at `/backups` in the `cli` profile |
 | `TUCANO_SECRETS_DIR` | `./secrets` | Host directory used by the commented external-key `secrets:` recipe |
 
 ### Development and test only

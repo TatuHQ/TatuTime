@@ -37,6 +37,10 @@ services:
       - "${TUCANO_HOST_ADDR:-127.0.0.1}:${TUCANO_HOST_PORT:-8080}:8080"
     volumes:
       - tucanotime-data:/data
+      # Settings → Backup writes ZIPs here (sibling of /data). Point this at a
+      # host directory to keep backups off the data volume:
+      #   TUCANO_BACKUP_DIR=/srv/tucanotime-backups docker compose up -d
+      - ${TUCANO_BACKUP_DIR:-tucanotime-backups}:/Backup
     read_only: true
     tmpfs:
       - /tmp
@@ -124,3 +128,4 @@ services:
 
 volumes:
   tucanotime-data:
+  tucanotime-backups:

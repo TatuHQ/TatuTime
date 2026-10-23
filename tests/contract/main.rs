@@ -5,6 +5,7 @@
 
 mod accounting;
 mod auth;
+mod backup;
 mod calendar;
 mod contract_parity;
 mod customers_projects;

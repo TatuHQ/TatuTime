@@ -13,7 +13,7 @@ import { markNotificationsRead, refreshNotifications } from './notifications.js'
 import { initReceiptPreview } from './receipt.js';
 import { initSelectMenus } from './select.js';
 import { applyRoute, initRouter, initSegTabs, initSettingsTabs, initTabs, normaliseRoute, refreshTimesheetView, segActiveId, showTimesheet } from './route.js';
-import { addSecret, closeUserForm, closeUserPassword, disableVault, enableVault, initTemplatePreview, newUserForm, paintAccent, refreshAuditLog, refreshSettings, regenerateVault, renderUsers, resetBuiltInLabels, saveConfig, saveEmailSettings, saveInvoiceTemplate, saveOrgProfile, saveUser, saveUserPassword, sendTestEmail } from './settings.js';
+import { addSecret, closeUserForm, closeUserPassword, disableVault, enableVault, initTemplatePreview, newUserForm, paintAccent, refreshAuditLog, refreshSettings, regenerateVault, renderUsers, resetBuiltInLabels, runBackupNow, saveBackupSettings, saveConfig, saveEmailSettings, saveInvoiceTemplate, saveOrgProfile, saveUser, saveUserPassword, sendTestEmail } from './settings.js';
 import { wireImports } from './imports.js';
 import { customerName, fillProjectSelect, fillTaskSelect, loadCustomers, state } from './state.js';
 import { discardTimer, refreshTimer, startTimer, stopTimer } from './timer.js';
@@ -596,6 +596,8 @@ export function wireSetupPanels(today) {
   }
   $('secret-form').addEventListener('submit', addSecret);
   $('config-form').addEventListener('submit', saveConfig);
+  $('backup-form').addEventListener('submit', saveBackupSettings);
+  $('backup-run').addEventListener('click', runBackupNow);
   $('email-form').addEventListener('submit', saveEmailSettings);
   $('email-test-form').addEventListener('submit', sendTestEmail);
   $('timer-open').addEventListener('click', () => {

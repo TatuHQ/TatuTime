@@ -74,13 +74,17 @@ LABEL org.opencontainers.image.title="TucanoTime" \
 # Fixed uid/gid so bind mounts and volumes have a stable owner. No passwd entry
 # is needed: the image runs with a numeric user id.
 COPY --from=builder --chown=10001:10001 /build/empty-data /data
+COPY --from=builder --chown=10001:10001 /build/empty-data /Backup
 COPY --from=builder --chown=10001:10001 /build/tucano-time /usr/local/bin/tucano-time
 
 USER 10001:10001
 ENV TUCANO_DATA_DIR=/data \
   TUCANO_PORT=8080
 EXPOSE 8080
-VOLUME ["/data"]
+# `/Backup` is where Settings → Backup writes its ZIPs (sibling of the data
+# dir). It is a volume so `--read-only` still allows backups; the operator can
+# mount a host directory there instead.
+VOLUME ["/data", "/Backup"]
 
 # Graceful shutdown on `docker stop` (the server installs its own SIGTERM
 # handler and finishes in-flight writes).

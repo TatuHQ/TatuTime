@@ -5,6 +5,12 @@
 //! app version, file list and sha256 checksums, so restores verify integrity
 //! and operators can inspect with stock tools.
 //!
+//! The same module also owns the in-app **ZIP** backups behind Settings →
+//! Backup (scheduled daily/weekly/monthly or manual): a plain ZIP of the same
+//! tree, written to a sibling `Backup/` folder with a timestamped,
+//! company-named file. Its files sit at the archive root, so restoring is
+//! "extract into the data directory" — no manifest and no encryption (yet).
+//!
 //! Refusals protect against data loss: the live server's write lock must be
 //! free, and restoring over a non-empty data dir needs `--force`. A backup
 //! containing `secrets.bin` prints a reminder to supply the original vault key,
@@ -476,6 +482,518 @@ fn octal(field: &[u8]) -> Result<u64, BackupError> {
     u64::from_str_radix(s, 8).map_err(|_| BackupError::Corrupt(format!("bad octal {s:?}")))
 }
 
+// ============================================================ ZIP backups ==
+//
+// The operator CLI above archives to `.tar.gz` with a sha256 manifest. The
+// in-app feature (Settings → Backup) writes a plain ZIP instead: every file
+// below the data directory, at the archive root, so restoring is literally
+// "extract this into the data directory". No encryption (yet) — the archive
+// contains `secrets.bin` and `vault.key` exactly like the data directory does.
+
+use std::sync::{Arc, Mutex};
+
+use chrono::{
+    DateTime, Datelike, Days, Local, LocalResult, Months, NaiveDate, NaiveDateTime, TimeZone, Utc,
+};
+
+use crate::appconfig::AppConfig;
+use crate::scheduler::Job;
+
+/// The fixed middle of a backup file name. `list_backups` uses it to recognise
+/// the files this feature owns, so unrelated ZIPs in the folder are ignored.
+pub const FILE_MARKER: &str = "_tucanotime-backup_";
+
+/// Where backups live: a `Backup` folder next to the data directory, which is
+/// the project-root `Backup/` for the default `./Data` and the volume-mounted
+/// `/Backup` in the hardened image. `TUCANO_BACKUP_DIR` overrides it.
+#[must_use]
+pub fn directory(root: &Path) -> PathBuf {
+    match root.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent.join("Backup"),
+        _ => PathBuf::from("Backup"),
+    }
+}
+
+/// Resolve the backup directory from the operator override, falling back to
+/// [`directory`]. An empty override is ignored (the environment seam treats an
+/// empty string as unset elsewhere too).
+#[must_use]
+pub fn configured_directory(root: &Path, env: &dyn Fn(&str) -> Option<String>) -> PathBuf {
+    env("TUCANO_BACKUP_DIR")
+        .filter(|value| !value.trim().is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| directory(root))
+}
+
+/// Lower-case ASCII slug of the company name for the file name, matching
+/// `capyabarasolutionsltda` from "Capyabara Solutions Ltda". Non-ASCII and
+/// punctuation are dropped; an empty name becomes `tucanotime`.
+#[must_use]
+pub fn company_slug(name: &str) -> String {
+    let slug: String = name
+        .chars()
+        .filter_map(|c| {
+            if c.is_ascii_alphanumeric() {
+                Some(c.to_ascii_lowercase())
+            } else {
+                None
+            }
+        })
+        .take(60)
+        .collect();
+    if slug.is_empty() {
+        "tucanotime".to_string()
+    } else {
+        slug
+    }
+}
+
+/// `<datetime>_tucanotime-backup_<company>.zip`, timestamped in the server's
+/// local time zone (the same zone the schedule uses). Colons are replaced by
+/// hyphens so the name is portable.
+#[must_use]
+pub fn file_name(now: DateTime<Local>, company: &str) -> String {
+    format!(
+        "{}_tucanotime-backup_{}.zip",
+        now.format("%Y-%m-%d_%H-%M-%S"),
+        company_slug(company)
+    )
+}
+
+/// Collect every regular file under `root`, skipping transient artefacts and
+/// the backup destination (which may sit inside the data directory when
+/// `TUCANO_BACKUP_DIR` points there).
+fn walk_for_zip(root: &Path, skip: &[PathBuf]) -> Result<Vec<(String, PathBuf)>, BackupError> {
+    let mut out = Vec::new();
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        for entry in std::fs::read_dir(&dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            let name = entry.file_name();
+            let name = name.to_string_lossy().to_string();
+            if path.is_dir() {
+                if !name.starts_with('.') && !skip.iter().any(|s| path.starts_with(s)) {
+                    stack.push(path);
+                }
+                continue;
+            }
+            if skip.contains(&path) {
+                continue;
+            }
+            if name.ends_with(".tmp") || name.ends_with(".lock") {
+                continue;
+            }
+            let rel = path
+                .strip_prefix(root)
+                .map_err(|_| BackupError::Io("walk escaped root".into()))?
+                .to_string_lossy()
+                .replace(std::path::MAIN_SEPARATOR, "/");
+            out.push((rel, path));
+        }
+    }
+    out.sort();
+    Ok(out)
+}
+
+/// Create a ZIP of the data directory at `out`. Returns the number of files
+/// written. The archive holds the files at its root (no `Data/` prefix), so
+/// extracting it into the data directory restores an installation.
+///
+/// The store's write lock is held for the duration, exactly like the CLI
+/// snapshot, so the archive is point-in-time consistent.
+pub fn create_zip(root: &Path, out: &Path) -> Result<usize, BackupError> {
+    if !root.is_dir() {
+        return Err(BackupError::Io(format!(
+            "data dir {} does not exist",
+            root.display()
+        )));
+    }
+    let _lock = acquire_lock(root)?;
+    let parent = out.parent().unwrap_or_else(|| Path::new("."));
+    std::fs::create_dir_all(parent)?;
+    let tmp = parent.join(format!(
+        ".{}.tmp",
+        out.file_name().unwrap_or_default().to_string_lossy()
+    ));
+    let mut skip = vec![out.to_path_buf(), tmp.clone()];
+    // If the destination is inside the data directory, never archive it (a
+    // backup must not recursively contain itself or its siblings).
+    if parent.starts_with(root) && parent != root {
+        skip.push(parent.to_path_buf());
+    }
+    let files = walk_for_zip(root, &skip)?;
+
+    let result = (|| -> Result<(), BackupError> {
+        let file = std::fs::File::create(&tmp)?;
+        let mut writer = zip::ZipWriter::new(std::io::BufWriter::new(file));
+        for (rel, abs) in &files {
+            let mut source = std::fs::File::open(abs)?;
+            // Keep key material and the vault store private after extraction;
+            // ordinary documents use the usual 0644.
+            let mode = if matches!(
+                rel.as_str(),
+                "secrets.bin" | "vault.key" | "session.key" | ".tucanotime.lock"
+            ) {
+                0o600
+            } else {
+                0o644
+            };
+            let options = zip::write::SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Deflated)
+                .unix_permissions(mode);
+            writer
+                .start_file(rel.clone(), options)
+                .map_err(|e| BackupError::Io(format!("zip entry {rel}: {e}")))?;
+            std::io::copy(&mut source, &mut writer)
+                .map_err(|e| BackupError::Io(format!("zip body {rel}: {e}")))?;
+        }
+        writer
+            .finish()
+            .map_err(|e| BackupError::Io(format!("zip finish: {e}")))?;
+        Ok(())
+    })();
+    if let Err(error) = result {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(error);
+    }
+    std::fs::rename(&tmp, out)?;
+    Ok(files.len())
+}
+
+/// A backup that was just written.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CreatedBackup {
+    pub file_name: String,
+    pub size_bytes: u64,
+    pub created_at: DateTime<Utc>,
+}
+
+/// A ZIP found in the backup directory.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BackupFile {
+    pub file_name: String,
+    pub size_bytes: u64,
+    pub created_at: DateTime<Utc>,
+}
+
+/// Write a new backup into `destination`, choosing a unique name when two runs
+/// land in the same second.
+pub fn run_in(
+    destination: &Path,
+    root: &Path,
+    company: &str,
+    now: DateTime<Utc>,
+) -> Result<CreatedBackup, BackupError> {
+    std::fs::create_dir_all(destination)?;
+    let local = now.with_timezone(&Local);
+    let base = file_name(local, company);
+    let mut name = base.clone();
+    let mut out = destination.join(&name);
+    let mut counter = 1u32;
+    while out.exists() {
+        let stem = base.trim_end_matches(".zip");
+        name = format!("{stem}-{counter}.zip");
+        out = destination.join(&name);
+        counter += 1;
+    }
+    let files = create_zip(root, &out)?;
+    let size_bytes = std::fs::metadata(&out)?.len();
+    tracing::info!(files, file = %name, "backup written");
+    Ok(CreatedBackup {
+        file_name: name,
+        size_bytes,
+        created_at: now,
+    })
+}
+
+/// List the backups in `destination`, newest first. A missing directory is
+/// empty, not an error (nothing has been backed up yet).
+pub fn list_backups_in(destination: &Path) -> Result<Vec<BackupFile>, BackupError> {
+    let entries = match std::fs::read_dir(destination) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(BackupError::Io(error.to_string())),
+    };
+    let mut out = Vec::new();
+    for entry in entries {
+        let Ok(entry) = entry else { continue };
+        let name = entry.file_name().to_string_lossy().to_string();
+        if !name.ends_with(".zip") || !name.contains(FILE_MARKER) {
+            continue;
+        }
+        let Ok(metadata) = entry.metadata() else {
+            continue;
+        };
+        if !metadata.is_file() {
+            continue;
+        }
+        let created_at = metadata
+            .modified()
+            .map(DateTime::<Utc>::from)
+            .unwrap_or_else(|_| Utc::now());
+        out.push(BackupFile {
+            file_name: name,
+            size_bytes: metadata.len(),
+            created_at,
+        });
+    }
+    out.sort_by_key(|a| std::cmp::Reverse(a.created_at));
+    Ok(out)
+}
+
+/// Backup cadence. Weekly runs on Monday and monthly on the 1st; the admin UI
+/// says so next to the picker.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Cadence {
+    Daily,
+    Weekly,
+    Monthly,
+}
+
+impl Cadence {
+    #[must_use]
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "daily" => Some(Self::Daily),
+            "weekly" => Some(Self::Weekly),
+            "monthly" => Some(Self::Monthly),
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Daily => "daily",
+            Self::Weekly => "weekly",
+            Self::Monthly => "monthly",
+        }
+    }
+}
+
+fn at(date: NaiveDate, hour: u32, minute: u32) -> NaiveDateTime {
+    date.and_hms_opt(hour, minute, 0)
+        .expect("validated 0..=23 and 0..=59")
+}
+
+fn first_of_month(date: NaiveDate) -> NaiveDate {
+    date.with_day(1).expect("every month has a first day")
+}
+
+/// The most recent scheduled occurrence at or before `now`.
+#[must_use]
+pub fn last_occurrence(
+    now: NaiveDateTime,
+    cadence: Cadence,
+    (hour, minute): (u32, u32),
+) -> NaiveDateTime {
+    let today = now.date();
+    match cadence {
+        Cadence::Daily => {
+            let today_at = at(today, hour, minute);
+            if today_at <= now {
+                today_at
+            } else {
+                at(today - Days::new(1), hour, minute)
+            }
+        }
+        Cadence::Weekly => {
+            // Monday of the current ISO week, then step back a week when this
+            // week's Monday time has not arrived yet.
+            let back = u64::from(today.weekday().num_days_from_monday());
+            let monday = today - Days::new(back);
+            let monday_at = at(monday, hour, minute);
+            if monday_at <= now {
+                monday_at
+            } else {
+                at(monday - Days::new(7), hour, minute)
+            }
+        }
+        Cadence::Monthly => {
+            let first = first_of_month(today);
+            let first_at = at(first, hour, minute);
+            if first_at <= now {
+                first_at
+            } else {
+                let previous = first - Days::new(1);
+                at(first_of_month(previous), hour, minute)
+            }
+        }
+    }
+}
+
+/// The next scheduled occurrence strictly after `now`.
+#[must_use]
+pub fn next_occurrence(
+    now: NaiveDateTime,
+    cadence: Cadence,
+    (hour, minute): (u32, u32),
+) -> NaiveDateTime {
+    let today = now.date();
+    match cadence {
+        Cadence::Daily => {
+            let today_at = at(today, hour, minute);
+            if today_at > now {
+                today_at
+            } else {
+                at(today + Days::new(1), hour, minute)
+            }
+        }
+        Cadence::Weekly => {
+            let back = u64::from(today.weekday().num_days_from_monday());
+            let monday = today - Days::new(back);
+            let monday_at = at(monday, hour, minute);
+            if monday_at > now {
+                monday_at
+            } else {
+                at(monday + Days::new(7), hour, minute)
+            }
+        }
+        Cadence::Monthly => {
+            let first = first_of_month(today);
+            let first_at = at(first, hour, minute);
+            if first_at > now {
+                first_at
+            } else {
+                let next = first
+                    .checked_add_months(Months::new(1))
+                    .expect("calendar month within range");
+                at(next, hour, minute)
+            }
+        }
+    }
+}
+
+/// Map a local wall-clock instant to UTC, tolerating a DST gap/overlap.
+/// A skipped wall time (spring-forward) resolves to the first existing instant
+/// after it, so the schedule fires once rather than once per minute while the
+/// clock is inside the gap.
+fn local_to_utc(naive: NaiveDateTime) -> Option<DateTime<Utc>> {
+    let resolve = |value: NaiveDateTime| match Local.from_local_datetime(&value) {
+        LocalResult::Single(dt) | LocalResult::Ambiguous(dt, _) => Some(dt.with_timezone(&Utc)),
+        LocalResult::None => None,
+    };
+    resolve(naive).or_else(|| {
+        [30i64, 60, 90, 120]
+            .into_iter()
+            .find_map(|minutes| resolve(naive + chrono::Duration::minutes(minutes)))
+    })
+}
+
+/// Whether a backup is due at `now`: the last one is older than the most
+/// recent scheduled occurrence. With no backup yet, the first tick runs one
+/// immediately (so enabling the feature does not wait for tomorrow).
+#[must_use]
+pub fn is_due(
+    now: DateTime<Utc>,
+    cadence: Cadence,
+    time: (u32, u32),
+    last: Option<DateTime<Utc>>,
+) -> bool {
+    let occurrence = last_occurrence(now.with_timezone(&Local).naive_local(), cadence, time);
+    match (local_to_utc(occurrence), last) {
+        (Some(occurrence), Some(last)) => occurrence > last,
+        (Some(_), None) => true,
+        // A wall-clock time the local zone skipped must not block backups, but
+        // it must not storm either: without a resolvable occurrence, at most
+        // one run per day.
+        (None, Some(last)) => now - last >= chrono::Duration::hours(23),
+        (None, None) => true,
+    }
+}
+
+/// `next_occurrence` expressed in UTC, for the admin status payload.
+#[must_use]
+pub fn next_run(now: DateTime<Utc>, cadence: Cadence, time: (u32, u32)) -> Option<DateTime<Utc>> {
+    let next = next_occurrence(now.with_timezone(&Local).naive_local(), cadence, time);
+    local_to_utc(next).or_else(|| Some(now + chrono::Duration::days(1)))
+}
+
+fn company_name(root: &Path, cfg: &AppConfig, env: &dyn Fn(&str) -> Option<String>) -> String {
+    let profile = std::fs::read(root.join("org_profile.json"))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<crate::domain::OrgProfile>(&bytes).ok())
+        .unwrap_or_default();
+    let fallback = cfg.get_str("org_name", env);
+    crate::pdf::Org::resolve(&profile, &fallback).name
+}
+
+/// Environment lookup shared with `AppState` (the job resolves the same
+/// `TUCANO_*` keys as the request handlers).
+pub type EnvLookup = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
+
+/// The scheduler job behind Settings → Backup. It fires every minute, reads the
+/// live configuration on each tick (so an edit applies without a restart) and
+/// writes at most one archive per scheduled occurrence.
+pub struct BackupJob {
+    root: PathBuf,
+    cfg: Arc<Mutex<Arc<AppConfig>>>,
+    env: EnvLookup,
+    audit: Arc<crate::audit::AuditLog>,
+}
+
+impl BackupJob {
+    #[must_use]
+    pub fn new(
+        root: impl Into<PathBuf>,
+        cfg: Arc<Mutex<Arc<AppConfig>>>,
+        env: EnvLookup,
+        audit: Arc<crate::audit::AuditLog>,
+    ) -> Self {
+        Self {
+            root: root.into(),
+            cfg,
+            env,
+            audit,
+        }
+    }
+}
+
+impl Job for BackupJob {
+    fn name(&self) -> &str {
+        "backup"
+    }
+
+    fn interval_secs(&self) -> i64 {
+        60
+    }
+
+    fn run(&self, now: DateTime<Utc>) {
+        let cfg = match self.cfg.lock() {
+            Ok(guard) => guard.clone(),
+            Err(poisoned) => poisoned.into_inner().clone(),
+        };
+        let env = |key: &str| (self.env)(key);
+        if !cfg.get_bool("backup_enabled", &env) {
+            return;
+        }
+        let cadence =
+            Cadence::parse(&cfg.get_str("backup_cadence", &env)).unwrap_or(Cadence::Daily);
+        let time = crate::appconfig::parse_time_of_day(&cfg.get_str("backup_time", &env))
+            .unwrap_or((2, 0));
+        let destination = configured_directory(&self.root, &env);
+        let last = match list_backups_in(&destination) {
+            Ok(files) => files.first().map(|file| file.created_at),
+            Err(error) => {
+                tracing::warn!(error = %error, "backup directory could not be read; skipping this tick");
+                return;
+            }
+        };
+        if !is_due(now, cadence, time, last) {
+            return;
+        }
+        let company = company_name(&self.root, &cfg, &env);
+        match run_in(&destination, &self.root, &company, now) {
+            Ok(created) => {
+                self.audit.record("backup_created", &created.file_name, now);
+                tracing::info!(file = %created.file_name, "scheduled backup created");
+            }
+            Err(error) => tracing::warn!(error = %error, "scheduled backup failed"),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -597,5 +1115,232 @@ mod tests {
             sanitize("/etc/passwd"),
             Err(BackupError::UnsafePath(_))
         ));
+    }
+
+    // ------------------------------------------------------ ZIP backups ----
+
+    #[test]
+    fn zip_round_trips_data_files_without_transient_artefacts() {
+        let src = tempfile::tempdir().unwrap();
+        let hold = tempfile::tempdir().unwrap();
+        seed_data(src.path());
+        let destination = hold.path().join("Backup");
+
+        let created = run_in(
+            &destination,
+            src.path(),
+            "Capyabara Solutions Ltda",
+            Utc::now(),
+        )
+        .unwrap();
+        assert!(
+            created.file_name.contains(FILE_MARKER)
+                && created.file_name.ends_with("_capyabarasolutionsltda.zip"),
+            "unexpected name: {}",
+            created.file_name
+        );
+        let archive = destination.join(&created.file_name);
+        assert!(archive.is_file());
+        assert_eq!(
+            created.size_bytes,
+            std::fs::metadata(&archive).unwrap().len()
+        );
+
+        let mut zip = zip::ZipArchive::new(std::fs::File::open(&archive).unwrap()).unwrap();
+        let mut names: Vec<String> = (0..zip.len())
+            .map(|i| zip.by_index(i).unwrap().name().unwrap().to_string())
+            .collect();
+        names.sort();
+        assert_eq!(
+            names,
+            vec![
+                "config.json".to_string(),
+                "invoices/INV-1.json".to_string(),
+                "secrets.bin".to_string(),
+                "users.json".to_string(),
+            ],
+            "tmp/lock files are excluded and files stay at the archive root"
+        );
+        let mut body = String::new();
+        zip.by_name("users.json")
+            .unwrap()
+            .read_to_string(&mut body)
+            .unwrap();
+        assert!(body.contains("\"a\""));
+
+        let listed = list_backups_in(&destination).unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].file_name, created.file_name);
+    }
+
+    #[test]
+    fn backups_in_the_same_second_get_distinct_names() {
+        let src = tempfile::tempdir().unwrap();
+        let hold = tempfile::tempdir().unwrap();
+        seed_data(src.path());
+        let destination = hold.path().join("Backup");
+        let now = Utc::now();
+        let first = run_in(&destination, src.path(), "Tucano", now).unwrap();
+        let second = run_in(&destination, src.path(), "Tucano", now).unwrap();
+        assert_ne!(first.file_name, second.file_name);
+        assert!(second.file_name.ends_with("-1.zip"));
+    }
+
+    #[test]
+    fn backup_names_are_slugged_and_portable() {
+        assert_eq!(
+            company_slug("Capyabara Solutions Ltda"),
+            "capyabarasolutionsltda"
+        );
+        assert_eq!(company_slug("  "), "tucanotime");
+        assert_eq!(company_slug("A/B:C"), "abc");
+        assert_eq!(directory(Path::new("Data")), PathBuf::from("Backup"));
+        assert_eq!(
+            directory(Path::new("/tmp/install/Data")),
+            PathBuf::from("/tmp/install/Backup")
+        );
+    }
+
+    #[test]
+    fn schedule_occurrences_follow_the_cadence() {
+        use chrono::NaiveDate;
+        let friday = NaiveDate::from_ymd_opt(2026, 10, 23)
+            .unwrap()
+            .and_hms_opt(10, 30, 0)
+            .unwrap();
+        // Daily: today when the time has passed, yesterday before it.
+        assert_eq!(
+            last_occurrence(friday, Cadence::Daily, (2, 0)),
+            NaiveDate::from_ymd_opt(2026, 10, 23)
+                .unwrap()
+                .and_hms_opt(2, 0, 0)
+                .unwrap()
+        );
+        let early = NaiveDate::from_ymd_opt(2026, 10, 23)
+            .unwrap()
+            .and_hms_opt(1, 0, 0)
+            .unwrap();
+        assert_eq!(
+            last_occurrence(early, Cadence::Daily, (2, 0)),
+            NaiveDate::from_ymd_opt(2026, 10, 22)
+                .unwrap()
+                .and_hms_opt(2, 0, 0)
+                .unwrap()
+        );
+        // Weekly: Monday of this week, or the previous Monday before its time.
+        assert_eq!(
+            last_occurrence(friday, Cadence::Weekly, (2, 0)),
+            NaiveDate::from_ymd_opt(2026, 10, 19)
+                .unwrap()
+                .and_hms_opt(2, 0, 0)
+                .unwrap()
+        );
+        let monday_early = NaiveDate::from_ymd_opt(2026, 10, 19)
+            .unwrap()
+            .and_hms_opt(1, 0, 0)
+            .unwrap();
+        assert_eq!(
+            last_occurrence(monday_early, Cadence::Weekly, (2, 0)),
+            NaiveDate::from_ymd_opt(2026, 10, 12)
+                .unwrap()
+                .and_hms_opt(2, 0, 0)
+                .unwrap()
+        );
+        // Monthly: the 1st of this month, or the previous month's 1st.
+        assert_eq!(
+            last_occurrence(friday, Cadence::Monthly, (2, 0)),
+            NaiveDate::from_ymd_opt(2026, 10, 1)
+                .unwrap()
+                .and_hms_opt(2, 0, 0)
+                .unwrap()
+        );
+        let first_early = NaiveDate::from_ymd_opt(2026, 10, 1)
+            .unwrap()
+            .and_hms_opt(1, 0, 0)
+            .unwrap();
+        assert_eq!(
+            last_occurrence(first_early, Cadence::Monthly, (2, 0)),
+            NaiveDate::from_ymd_opt(2026, 9, 1)
+                .unwrap()
+                .and_hms_opt(2, 0, 0)
+                .unwrap()
+        );
+        // Next run is strictly after now.
+        assert_eq!(
+            next_occurrence(friday, Cadence::Daily, (2, 0)),
+            NaiveDate::from_ymd_opt(2026, 10, 24)
+                .unwrap()
+                .and_hms_opt(2, 0, 0)
+                .unwrap()
+        );
+    }
+
+    #[test]
+    fn is_due_compares_the_last_backup_with_the_last_occurrence() {
+        let now = Utc::now();
+        assert!(is_due(now, Cadence::Daily, (2, 0), None));
+        assert!(!is_due(now, Cadence::Daily, (2, 0), Some(now)));
+        assert!(is_due(
+            now,
+            Cadence::Daily,
+            (2, 0),
+            Some(now - chrono::Duration::days(3))
+        ));
+    }
+
+    #[test]
+    fn scheduled_job_reads_live_config_and_writes_one_archive() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("data");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("config.json"),
+            r#"{"backup_enabled": true, "backup_cadence": "daily", "backup_time": "02:00"}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("org_profile.json"),
+            r#"{"name": "Capyabara Solutions Ltda"}"#,
+        )
+        .unwrap();
+        let cfg = AppConfig::load(&root).unwrap();
+        let audit = Arc::new(crate::audit::AuditLog::new(&root));
+        let env: EnvLookup = Arc::new(|_| None);
+        let job = BackupJob::new(
+            root.clone(),
+            Arc::new(Mutex::new(Arc::new(cfg))),
+            env,
+            audit,
+        );
+
+        job.run(Utc::now());
+        let files = list_backups_in(&dir.path().join("Backup")).unwrap();
+        assert_eq!(files.len(), 1, "the enabled job writes one archive");
+        assert!(
+            files[0]
+                .file_name
+                .contains("_tucanotime-backup_capyabarasolutionsltda.zip"),
+            "unexpected name: {}",
+            files[0].file_name
+        );
+
+        // Disabling the knob stops the job: a later tick writes nothing.
+        std::fs::write(
+            root.join("config.json"),
+            r#"{"backup_enabled": false, "backup_cadence": "daily", "backup_time": "02:00"}"#,
+        )
+        .unwrap();
+        let disabled = AppConfig::load(&root).unwrap();
+        let job = BackupJob::new(
+            root,
+            Arc::new(Mutex::new(Arc::new(disabled))),
+            Arc::new(|_| None),
+            Arc::new(crate::audit::AuditLog::new(dir.path())),
+        );
+        job.run(Utc::now() + chrono::Duration::minutes(1));
+        assert_eq!(
+            list_backups_in(&dir.path().join("Backup")).unwrap().len(),
+            1
+        );
     }
 }

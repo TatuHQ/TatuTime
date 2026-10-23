@@ -42,6 +42,17 @@ pub enum Kind {
     Bool {
         default: bool,
     },
+    /// One of a fixed set of lower-case tokens. File/env values are matched
+    /// case-insensitively and stored in lower case; anything else is refused.
+    Choice {
+        values: &'static [&'static str],
+        default: &'static str,
+    },
+    /// Wall-clock `HH:MM` in 24-hour form, stored zero-padded. Scheduling reads
+    /// it as a time in the server's local time zone.
+    TimeOfDay {
+        default: &'static str,
+    },
 }
 
 pub struct KeyDef {
@@ -155,6 +166,34 @@ pub const KEYS: &[KeyDef] = &[
         kind: Kind::Currency,
         description: "Optional base currency for mixed-currency invoice Trends (ISO 4217, e.g. EUR); unset disables the conversion",
     },
+    // Scheduled backups (#new): the three knobs behind Settings → Backup.
+    // `backup_enabled` gates the job; `backup_cadence` and `backup_time` say
+    // when it runs. The time is interpreted in the server's local time zone,
+    // which the admin API reports alongside these values.
+    KeyDef {
+        name: "backup_enabled",
+        writable: true,
+        env: "TUCANO_BACKUP_ENABLED",
+        kind: Kind::Bool { default: false },
+        description: "Run scheduled ZIP backups of the data directory",
+    },
+    KeyDef {
+        name: "backup_cadence",
+        writable: true,
+        env: "TUCANO_BACKUP_CADENCE",
+        kind: Kind::Choice {
+            values: &["daily", "weekly", "monthly"],
+            default: "daily",
+        },
+        description: "Backup cadence: daily, weekly (Monday) or monthly (1st)",
+    },
+    KeyDef {
+        name: "backup_time",
+        writable: true,
+        env: "TUCANO_BACKUP_TIME",
+        kind: Kind::TimeOfDay { default: "02:00" },
+        description: "Backup time of day (HH:MM) in the server's local time zone",
+    },
     // Credential-vault enablement: the key is created by default, so this knob
     // only exists so an operator (or the admin API) can turn the vault off.
     // It is not a secret and carries no key material.
@@ -246,6 +285,22 @@ impl AppConfig {
                         Value::Null
                     }),
                 Kind::Csv | Kind::Str { .. } | Kind::OptionalStr => Value::String(raw),
+                Kind::Choice { values, .. } => {
+                    let norm = raw.trim().to_ascii_lowercase();
+                    if values.contains(&norm.as_str()) {
+                        Value::String(norm)
+                    } else {
+                        tracing::warn!(key = def.name, value = %raw, "invalid choice from env, ignoring");
+                        Value::Null
+                    }
+                }
+                Kind::TimeOfDay { .. } => match parse_time_of_day(&raw) {
+                    Some((h, m)) => Value::String(format!("{h:02}:{m:02}")),
+                    None => {
+                        tracing::warn!(key = def.name, value = %raw, "invalid time from env, ignoring");
+                        Value::Null
+                    }
+                },
                 Kind::Currency => match validate_currency(&raw) {
                     Ok(norm) => Value::String(norm),
                     Err(_) => {
@@ -271,13 +326,27 @@ impl AppConfig {
             }
         }
         if let Some(v) = self.stored.get(def.name) {
-            return (v.clone(), Source::File);
+            // A hand-edited config.json is still an input: a Choice/TimeOfDay
+            // value that no longer parses falls through to the default instead
+            // of silently disabling the feature.
+            let valid = match (def.kind, v) {
+                (Kind::Choice { values, .. }, Value::String(s)) => values.contains(&s.as_str()),
+                (Kind::TimeOfDay { .. }, Value::String(s)) => parse_time_of_day(s).is_some(),
+                _ => true,
+            };
+            if valid {
+                return (v.clone(), Source::File);
+            }
+            tracing::warn!(key = def.name, value = %v, "invalid value in config.json, using default");
         }
         let d = match def.kind {
             Kind::Int { default, .. } => Value::from(default),
             Kind::Str { default } => Value::String(default.to_string()),
             Kind::OptionalStr | Kind::Csv | Kind::Currency => Value::Null,
             Kind::Bool { default } => Value::Bool(default),
+            Kind::Choice { default, .. } | Kind::TimeOfDay { default } => {
+                Value::String(default.to_string())
+            }
         };
         (d, Source::Default)
     }
@@ -378,6 +447,18 @@ impl AppConfig {
             // uppercase so `eur` and `EUR` cannot both exist. `null` clears it.
             (Kind::Currency, Value::String(s)) => validate_currency(s).map(Value::String),
             (Kind::Currency, Value::Null) => Ok(Value::Null),
+            (Kind::Choice { values, .. }, Value::String(s)) => {
+                let norm = s.trim().to_ascii_lowercase();
+                if values.contains(&norm.as_str()) {
+                    Ok(Value::String(norm))
+                } else {
+                    Err(format!("must be one of {}", values.join(", ")))
+                }
+            }
+            (Kind::TimeOfDay { .. }, Value::String(s)) => match parse_time_of_day(s) {
+                Some((h, m)) => Ok(Value::String(format!("{h:02}:{m:02}"))),
+                None => Err("must be a 24-hour time in HH:MM form".into()),
+            },
             (Kind::Bool { .. }, Value::Bool(b)) => Ok(Value::Bool(*b)),
             _ => Err(format!(
                 "{} expects {}",
@@ -387,6 +468,8 @@ impl AppConfig {
                     Kind::Csv | Kind::Str { .. } | Kind::OptionalStr => "a string",
                     Kind::Currency => "a three-letter currency code",
                     Kind::Bool { .. } => "true or false",
+                    Kind::Choice { .. } => "one of the allowed values",
+                    Kind::TimeOfDay { .. } => "a 24-hour time in HH:MM form",
                 }
             )),
         }
@@ -462,6 +545,9 @@ impl AppConfig {
                     Kind::Str { default } => Value::String(default.to_string()),
                     Kind::OptionalStr | Kind::Csv | Kind::Currency => Value::Null,
                     Kind::Bool { default } => Value::Bool(default),
+                    Kind::Choice { default, .. } | Kind::TimeOfDay { default } => {
+                        Value::String(default.to_string())
+                    }
                 };
                 serde_json::json!({
                     "key": def.name,
@@ -489,6 +575,20 @@ pub fn validate_currency(code: &str) -> Result<String, String> {
     } else {
         Err("must be exactly three ASCII letters (ISO 4217)".into())
     }
+}
+
+/// Parse a 24-hour wall-clock time in `HH:MM` (leading zero optional) and
+/// return `(hour, minute)` in `0..=23`, `0..=59`. The scheduled-backup job
+/// interprets the pair in the server's local time zone.
+#[must_use]
+pub fn parse_time_of_day(value: &str) -> Option<(u32, u32)> {
+    let (hour, minute) = value.trim().split_once(':')?;
+    if hour.is_empty() || minute.is_empty() || minute.len() > 2 {
+        return None;
+    }
+    let hour: u32 = hour.parse().ok()?;
+    let minute: u32 = minute.parse().ok()?;
+    (hour <= 23 && minute <= 59).then_some((hour, minute))
 }
 
 /// Process env adapter used at the real call sites; tests inject a map.
@@ -707,5 +807,76 @@ mod tests {
         assert_eq!(row["writable"], false);
         let days = rows.iter().find(|r| r["key"] == "reminder_days").unwrap();
         assert_eq!(days["writable"], true);
+    }
+
+    #[test]
+    fn backup_keys_are_validated_and_normalised() {
+        let env_none = env_from(&[]);
+        let cadence = key_def("backup_cadence").unwrap();
+        let time = key_def("backup_time").unwrap();
+
+        // Defaults describe the documented feature.
+        assert_eq!(
+            AppConfig::empty().resolve(cadence, &env_none).0,
+            Value::String("daily".into())
+        );
+        assert_eq!(
+            AppConfig::empty().resolve(time, &env_none).0,
+            Value::String("02:00".into())
+        );
+
+        // Case-insensitive choices and shorthand times normalise on write.
+        assert_eq!(
+            AppConfig::validate(cadence, &Value::String("WEEKLY".into())).unwrap(),
+            Value::String("weekly".into())
+        );
+        assert_eq!(
+            AppConfig::validate(time, &Value::String("3:5".into())).unwrap(),
+            Value::String("03:05".into())
+        );
+        assert!(AppConfig::validate(cadence, &Value::String("hourly".into())).is_err());
+        assert!(AppConfig::validate(time, &Value::String("24:00".into())).is_err());
+        assert!(AppConfig::validate(time, &Value::String("02:60".into())).is_err());
+        assert!(AppConfig::validate(time, &Value::String("2pm".into())).is_err());
+
+        // Env overrides parse through the same rules.
+        let env = env_from(&[
+            ("TUCANO_BACKUP_CADENCE", "Monthly"),
+            ("TUCANO_BACKUP_TIME", "07:15"),
+            ("TUCANO_BACKUP_ENABLED", "true"),
+        ]);
+        let cfg = AppConfig::empty();
+        assert_eq!(
+            cfg.resolve(cadence, &env),
+            (Value::String("monthly".into()), Source::Env)
+        );
+        assert_eq!(
+            cfg.resolve(time, &env),
+            (Value::String("07:15".into()), Source::Env)
+        );
+        assert!(cfg.get_bool("backup_enabled", &env));
+
+        // A hand-edited invalid file value degrades to the default, never to a
+        // silently broken schedule.
+        let loaded = file(r#"{"backup_cadence": "hourly", "backup_time": "99:99"}"#);
+        assert_eq!(
+            loaded.resolve(cadence, &env_none),
+            (Value::String("daily".into()), Source::Default)
+        );
+        assert_eq!(
+            loaded.resolve(time, &env_none),
+            (Value::String("02:00".into()), Source::Default)
+        );
+    }
+
+    #[test]
+    fn time_of_day_parser_bounds() {
+        assert_eq!(parse_time_of_day("00:00"), Some((0, 0)));
+        assert_eq!(parse_time_of_day("23:59"), Some((23, 59)));
+        assert_eq!(parse_time_of_day("7:5"), Some((7, 5)));
+        assert_eq!(parse_time_of_day("24:00"), None);
+        assert_eq!(parse_time_of_day("12:60"), None);
+        assert_eq!(parse_time_of_day("noon"), None);
+        assert_eq!(parse_time_of_day(""), None);
     }
 }
