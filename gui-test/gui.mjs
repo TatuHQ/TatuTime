@@ -630,22 +630,29 @@ check('each section carries its own creation toolbar',
 // #182 follow-up: the create action leads the section (top-left, alone in the
 // header) and the customer filter sits below the header where the old
 // "Projects - all customers" caption was, still naming the select.
-check('Projects leads with + Project and puts the customer filter under the header',
+check('Projects leads with + Project and puts the customer/status filters under the header',
   window.document.querySelector('#panel-projects .ts-head button')?.id === 'project-new'
   && !window.document.querySelector('#panel-projects .hierarchy-actions .filter-field')
+  && window.document.querySelectorAll('#panel-projects .hierarchy-filters .filter-field').length === 2
   && window.document.querySelector('#panel-projects .hierarchy-filters')?.nextElementSibling?.id === 'projects-empty-state'
   && /customer/i.test(window.document.querySelector('#panel-projects label[for="proj-filter-customer"]')?.textContent || '')
+  && /status/i.test(window.document.querySelector('#panel-projects label[for="proj-filter-active"]')?.textContent || '')
   && window.document.getElementById('project-scope-label') === null);
 // #182 follow-up: Tasks gets the same treatment - the action leads the header
-// and both dependent filters sit below it in place of the old scope caption.
-check('Tasks leads with + Task and puts both dependent filters under the header',
+// and its dependent filters sit below it in place of the old scope caption.
+check('Tasks leads with + Task and puts its dependent filters under the header',
   window.document.querySelector('#panel-tasks .ts-head button')?.id === 'task-new'
   && !window.document.querySelector('#panel-tasks .hierarchy-actions .filter-field')
-  && window.document.querySelectorAll('#panel-tasks .hierarchy-filters .filter-field').length === 2
+  && window.document.querySelectorAll('#panel-tasks .hierarchy-filters .filter-field').length === 3
   && window.document.querySelector('#panel-tasks .hierarchy-filters')?.nextElementSibling?.id === 'tasks-empty-state'
   && /customer/i.test(window.document.querySelector('#panel-tasks label[for="task-filter-customer"]')?.textContent || '')
   && /project/i.test(window.document.querySelector('#panel-tasks label[for="task-filter-project"]')?.textContent || '')
+  && /status/i.test(window.document.querySelector('#panel-tasks label[for="task-filter-active"]')?.textContent || '')
   && window.document.getElementById('task-scope-label') === null);
+check('Customers offers a status filter above its register',
+  window.document.querySelectorAll('#panel-customers .hierarchy-filters .filter-field').length === 1
+  && window.document.querySelector('#panel-customers .hierarchy-filters')?.nextElementSibling?.id === 'customers-empty-state'
+  && /status/i.test(window.document.querySelector('#panel-customers label[for="customer-filter-active"]')?.textContent || ''));
 // Every register's creation action sits ABOVE its card, in the same heading
 // slot Timesheets gives Track time — not inside the card background.
 check('register actions sit above the card, like Timesheets',
