@@ -224,7 +224,7 @@ async function refreshExpensesBody() {
     { value: '', text: 'All customers' },
     ...state.customers.map((c) => ({
       value: c.id,
-      text: c.active ? c.name : `${c.name} (inactive)`,
+      text: c.active !== false ? c.name : `${c.name} (inactive)`,
       selected: c.id === state.expensesCustomer,
     })),
   ]);

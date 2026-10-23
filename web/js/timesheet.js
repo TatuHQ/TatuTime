@@ -339,7 +339,10 @@ export function startEdit(e) {
   showEntryForm(true);
   $('entry-id').value = e.id;
   $('entry-date').value = e.date;
-  $('entry-customer').value = e.customer_id;
+  // Rebuild the customer list around the edited record so an entry whose
+  // customer has since been retired still opens and saves (inactive values are
+  // otherwise kept out of the picker).
+  fillCustomerSelect($('entry-customer'), e.customer_id, true);
   fillProjectSelect($('entry-project'), e.customer_id, e.project_code);
   fillTaskSelect($('entry-task'), e.customer_id, e.project_code, e.task_code);
   $('entry-hours').value = e.hours;
@@ -358,6 +361,14 @@ export function resetEntryForm() {
   $('entry-note').value = '';
   $('entry-billable').checked = true;
   $('entry-date').value = $('day-date').value || isoDate(new Date());
+  // Keep a still-active customer for the next entry, but never carry a retired
+  // one into a NEW record: the picker offers active customers only.
+  const selectedCustomer = state.customers.find((c) => c.id === $('entry-customer').value);
+  fillCustomerSelect(
+    $('entry-customer'),
+    selectedCustomer && selectedCustomer.active !== false ? selectedCustomer.id : '',
+    true,
+  );
   $('entry-project').value = '';
   fillTaskSelect($('entry-task'), '', null, null);
   $('entry-form-title').textContent = 'Add an entry';

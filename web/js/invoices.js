@@ -11,7 +11,7 @@ import { applyRoute, normaliseRoute } from './route.js';
 import { createSeqGuard } from './seq.js';
 import { closeSelectMenus, enhanceSelect } from './select.js';
 import { pdfDeadline, renderPdfDocument } from './pdf.js';
-import { customerName, state } from './state.js';
+import { customerName, fillCustomerSelect, state } from './state.js';
 import { MONTH_NAMES, invalidateLockCache } from './timesheet.js';
 
 const invoiceSeq = createSeqGuard();
@@ -1575,8 +1575,15 @@ export function edLineRow(line = null) {
   const updateProjects = () => {
     const selected = project.value || line?.project_code || '';
     project.replaceChildren(el('option', { value: '', text: 'No linked project' }));
+    // A new line offers active projects; an old line keeps the (possibly
+    // retired) project it already points at — even after a temporary switch —
+    // and labels it for clarity.
     for (const item of state.projectsByCustomer[$('ed-customer').value] || []) {
-      project.appendChild(el('option', { value: item.code, text: `${item.code} — ${item.name}` }));
+      if (!(item.active !== false || item.code === selected || item.code === line?.project_code)) continue;
+      project.appendChild(el('option', {
+        value: item.code,
+        text: item.active !== false ? `${item.code} — ${item.name}` : `${item.code} — ${item.name} (inactive)`,
+      }));
     }
     project.value = selected;
   };
@@ -1668,6 +1675,17 @@ export function edRecalc() {
 
 export function edOpen(draft) {
   ed.epoch = (ed.epoch || 0) + 1;
+  // Repopulate around the invoice being edited: its customer may have been
+  // retired since the draft was created, and an inactive customer is otherwise
+  // absent from the new-invoice picker. A fresh invoice starts from an active
+  // customer (or no selection) only.
+  const current = $('ed-customer').value;
+  const selectedCustomer = state.customers.find((c) => c.id === current);
+  fillCustomerSelect(
+    $('ed-customer'),
+    draft ? draft.customer_id : (selectedCustomer && selectedCustomer.active !== false ? current : ''),
+    true,
+  );
   if (draft) $('ed-customer').value = draft.customer_id;
   ed.id = draft ? draft.id : null;
   ed.originalStatus = draft?.status || null;

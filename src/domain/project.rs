@@ -15,6 +15,8 @@ pub struct Project {
     pub currency: Currency,
     /// The project's own hourly rate in minor units (required).
     pub rate_minor: u64,
+    /// Retired reference data: the GUI hides it from new-entry pickers, while
+    /// historical entries, expenses and invoices keep resolving it.
     pub active: bool,
     /// Optional total budget in hours (hundredths) (#30).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -79,6 +81,8 @@ pub struct Task {
     pub project_code: ProjectCode,
     pub code: ProjectCode,
     pub name: String,
+    /// Retired reference data: the GUI hides it from new-entry pickers, while
+    /// historical entries keep resolving it.
     pub active: bool,
 }
 

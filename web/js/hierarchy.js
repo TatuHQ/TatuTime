@@ -34,7 +34,7 @@ export async function refreshCustomerTable() {
         // (the `num` utility right-aligns, which left the values stranded).
         el('td', { attrs: { 'data-heading': 'Default rate' }, text: `${c.currency} ${formatMoney(c.default_rate_minor)}` }),
         el('td', { attrs: { 'data-heading': 'Status' } }, [
-          statusChip(c.active ? 'Active' : 'Inactive', c.active),
+          statusChip(c.active !== false ? 'Active' : 'Inactive', c.active !== false),
         ]),
         iconActionsCell([
           el('button', {
@@ -490,7 +490,7 @@ export function updateHierarchyActions() {
 export function fillHierarchyFilter(select, selectedId, placeholder) {
   fillSelect(select, [
     { value: '', text: placeholder },
-    ...state.customers.map((c) => ({ value: c.id, text: c.active ? c.name : `${c.name} (inactive)`, selected: c.id === selectedId })),
+    ...state.customers.map((c) => ({ value: c.id, text: c.active !== false ? c.name : `${c.name} (inactive)`, selected: c.id === selectedId })),
   ]);
   select.value = selectedId || '';
 }
@@ -537,7 +537,7 @@ export async function refreshProjectTable() {
         el('td', { attrs: { 'data-heading': 'Currency' }, text: p.currency || 'customer' }),
         el('td', { attrs: { 'data-heading': 'Rate' }, text: p.rate_minor != null ? formatMoney(p.rate_minor) : 'customer' }),
         el('td', { attrs: { 'data-heading': 'Status' } }, [
-          statusChip(p.active ? 'Active' : 'Inactive', p.active),
+          statusChip(p.active !== false ? 'Active' : 'Inactive', p.active !== false),
         ]),
         iconActionsCell([
           el('button', {
@@ -587,7 +587,12 @@ export function refreshProjectsView() {
 export function fillParentCustomers(select, selectedId) {
   fillSelect(select, [
     { value: '', text: 'Choose a customer...' },
-    ...state.customers.map((customer) => ({ value: customer.id, text: customer.name })),
+    ...state.customers
+      .filter((customer) => customer.active !== false || customer.id === selectedId)
+      .map((customer) => ({
+        value: customer.id,
+        text: customer.active !== false ? customer.name : `${customer.name} (inactive)`,
+      })),
   ]);
   select.value = selectedId || '';
 }
@@ -765,7 +770,7 @@ export async function refreshTaskTable() {
         el('td', { attrs: { 'data-heading': 'Project' }, text: parentOf(t) }),
         el('td', { attrs: { 'data-heading': 'Name' }, text: t.name }),
         el('td', { attrs: { 'data-heading': 'Status' } }, [
-          statusChip(t.active ? 'Active' : 'Inactive', t.active),
+          statusChip(t.active !== false ? 'Active' : 'Inactive', t.active !== false),
         ]),
         iconActionsCell([
           el('button', {
@@ -900,10 +905,15 @@ export async function refreshCustomerPickers() {
   // C7: every customer picker (day form, invoices, expenses, timer) refreshes
   // from one place — previously a newly added customer could not be invoiced
   // until a full page reload.
+  //
+  // The invoice-register filter is a history surface, so it keeps inactive
+  // customers; every picker that creates an operational record offers active
+  // ones only. A form already editing an inactive customer still keeps that
+  // value selectable (see fillCustomerSelect).
   for (const id of ['entry-customer', 'expense-customer', 'timer-customer', 'rec-customer', 'ed-customer', 'iw-customer', 'ret-customer', 'inv-f-customer']) {
     const picker = $(id);
     if (picker) {
-      fillCustomerSelect(picker, picker.value, true);
+      fillCustomerSelect(picker, picker.value, true, id === 'inv-f-customer');
       // #135: for the dashboard filter the placeholder means "no filter".
       if (id === 'inv-f-customer' && picker.options.length) picker.options[0].text = 'All customers';
     }

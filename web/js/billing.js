@@ -185,7 +185,7 @@ export async function iwLoadProjects() {
   const projects = (await api.get(`/customers/${cid}/projects`)).projects || [];
   let shown = 0;
   for (const p of projects) {
-    if (!p.active) continue;
+    if (p.active === false) continue;
     const hours = unbilledBy.get(p.code);
     if (!hours) continue;
     shown += 1;
