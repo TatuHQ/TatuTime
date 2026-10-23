@@ -165,6 +165,7 @@ export const TAB_ROUTES = {
     'settings-tab-users': '/settings/users',
     'settings-tab-import': '/settings/import',
     'settings-tab-company': '/settings/company',
+    'settings-tab-backup': '/settings/backup',
     'settings-tab-invoice-template': '/settings/invoice-template',
     'settings-tab-catalog': '/settings/catalog',
     'settings-tab-expenses': '/settings/expenses',
@@ -238,6 +239,7 @@ export function applyRoute(route) {
     const settingsId = {
       users: 'settings-tab-users',
       company: 'settings-tab-company',
+      backup: 'settings-tab-backup',
       'invoice-template': 'settings-tab-invoice-template',
       catalog: 'settings-tab-catalog',
       expenses: 'settings-tab-expenses',

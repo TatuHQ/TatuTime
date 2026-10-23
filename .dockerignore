@@ -16,6 +16,7 @@ target/
 # Runtime data and operator state — never bake a volume into the image.
 Data/
 data/
+Backup/
 backups/
 customers/
 entries/

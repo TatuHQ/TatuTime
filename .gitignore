@@ -6,6 +6,10 @@
 /Data/
 /data/
 
+# Scheduled/manual ZIP backups (Settings → Backup) default to a sibling folder.
+/Backup/
+/backups/
+
 # Belt-and-braces: the same documents straight in the repo root, should anyone
 # ever point TUCANO_DATA_DIR at it. Mirrors the storage layout in AGENTS.md.
 /customers/

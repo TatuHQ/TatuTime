@@ -34,6 +34,7 @@ use crate::store::{Store, StoreError};
 
 pub mod admin_email;
 pub mod auth;
+pub mod backup;
 pub mod entries_reports;
 pub mod expenses;
 pub mod fx;
@@ -761,6 +762,7 @@ pub use self::auth::{
     BootstrapInput, LoginInput, SsoAssertionInput, audit_log, auth_status, bootstrap, login,
     logout, me, sso_assertion, sso_providers,
 };
+pub use self::backup::{BackupSettingsInput, backup_settings, run_backup, update_backup_settings};
 pub use self::entries_reports::{
     budget_report, create_entry, delete_entry, export_csv, get_entry, list_entries, profitability,
     summary, update_entry,

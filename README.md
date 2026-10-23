@@ -67,6 +67,7 @@ docker run -d --name tucanotime \
   --cap-drop ALL --security-opt no-new-privileges \
   -p 127.0.0.1:8080:8080 \
   -v tucanotime-data:/data \
+  -v tucanotime-backups:/Backup \
   tucanotime
 ```
 
@@ -105,6 +106,7 @@ The tables below cover the variables a container can use. The full reference, in
 | Variable | Default | Purpose | Secret / file variant |
 | --- | --- | --- | --- |
 | `TUCANO_DATA_DIR` | `Data` locally, `/data` in the image | Directory holding every document and state file | — |
+| `TUCANO_BACKUP_DIR` | `Backup` beside the data dir | Directory where Settings → Backup writes its ZIPs; Compose also mounts it at `/Backup` (default named volume `tucanotime-backups`) | — |
 | `TUCANO_PORT` | `8080` | TCP port the server and health probe use | — |
 | `TUCANO_ENV` | unset (`production` in Compose) | `production` enables the strict session-secret policy and Secure cookies by default | — |
 | `TUCANO_SECURE_COOKIES` | on iff `TUCANO_ENV=production` | `0`/`false` drops the cookie `Secure` flag for plain-HTTP LAN serving | — |
@@ -202,6 +204,9 @@ overlay at a time — both bind the same default host ports.
 | `TUCANO_REMINDER_DAYS` | `7` (1–365) | Days between overdue-invoice email reminders | — (`config.json`: `reminder_days`) |
 | `TUCANO_ORG_NAME` | `TucanoTime` | Fallback organisation name when the Company name is blank | — (`config.json`: `org_name`) |
 | `TUCANO_BASE_CURRENCY` | unset | ISO 4217 base currency for mixed-currency invoice trends; unset disables conversion | — (`config.json`: `base_currency`) |
+| `TUCANO_BACKUP_ENABLED` | `false` | Enable scheduled ZIP backups (Settings → Backup) | — (`config.json`: `backup_enabled`) |
+| `TUCANO_BACKUP_CADENCE` | `daily` | `daily`, `weekly` (Monday) or `monthly` (1st) | — (`config.json`: `backup_cadence`) |
+| `TUCANO_BACKUP_TIME` | `02:00` | Backup time (`HH:MM`) in the server's local time zone | — (`config.json`: `backup_time`) |
 
 ### Compose-only interpolation
 
@@ -211,7 +216,6 @@ These variables are read by Docker Compose, not by the binary.
 | --- | --- | --- | --- |
 | `TUCANO_HOST_ADDR` | `127.0.0.1` | Host address the published port binds to; `0.0.0.0` exposes the GUI on the LAN | — |
 | `TUCANO_HOST_PORT` | `8080` | Host port mapped to container port `8080` | — |
-| `TUCANO_BACKUP_DIR` | `./backups` | Host directory mounted at `/backups` in the `cli` profile | — |
 | `TUCANO_SECRETS_DIR` | `./secrets` | Host directory used by the commented external-key `secrets:` recipe | — |
 
 Development and test variables (`TUCANO_WEB_DIR`, `TUCANO_FX_RATES_FILE`,

@@ -235,6 +235,7 @@ export async function refreshSettings() {
     refreshInvoiceTemplate(),
     refreshEmailSettings(),
     refreshAuditLog(),
+    refreshBackup(),
   ]);
 }
 
@@ -744,6 +745,127 @@ export async function saveOrgProfile(evt) {
       await refreshOrgProfile();
     } catch (err) {
       showFormError($('org-error'), err);
+    }
+  });
+}
+
+// ------------------------------------------------------------ backup (#new) --
+//
+// Settings → Backup: the schedule (enabled/cadence/time) plus the files the
+// server has written. The time is interpreted in the server's local time zone;
+// the API reports that zone in every payload, so the page never guesses it.
+
+export let backupStatus = null;
+
+export function formatBytes(bytes) {
+  const value = Number(bytes) || 0;
+  if (value < 1024) return `${value} B`;
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  let scaled = value / 1024;
+  let unit = 0;
+  while (scaled >= 1024 && unit < units.length - 1) {
+    scaled /= 1024;
+    unit += 1;
+  }
+  return `${scaled.toFixed(scaled >= 10 ? 0 : 1)} ${units[unit]}`;
+}
+
+function backupWhen(iso) {
+  if (!iso) return '';
+  const when = new Date(iso);
+  return Number.isNaN(when.getTime()) ? iso : when.toLocaleString();
+}
+
+export function renderBackup(data) {
+  backupStatus = data;
+  $('backup-enabled').checked = !!data.enabled;
+  $('backup-cadence').value = data.cadence || 'daily';
+  $('backup-time').value = data.time || '02:00';
+  const tz = data.timezone || {};
+  const zone = tz.abbreviation ? `${tz.label || 'UTC'} (${tz.abbreviation})` : (tz.label || 'UTC');
+  $('backup-timezone').textContent = `Server time zone: ${zone}. The scheduled time applies in this zone.`;
+  const parts = [];
+  if (data.enabled && data.next_run) {
+    const next = data.next_run_local || backupWhen(data.next_run);
+    parts.push(`Next backup: ${next} (${zone}).`);
+  } else if (!data.enabled) parts.push('Scheduled backups are off.');
+  if (data.last_backup) {
+    parts.push(`Last backup: ${backupWhen(data.last_backup.created_at)} (${data.last_backup.file_name}).`);
+  } else {
+    parts.push('No backup has been written yet.');
+  }
+  $('backup-schedule-status').textContent = parts.join(' ');
+
+  const tbody = $('backup-table').querySelector('tbody');
+  tbody.textContent = '';
+  const files = data.backups || [];
+  for (const file of files) {
+    tbody.appendChild(
+      el('tr', {}, [
+        el('th', { attrs: { scope: 'row' }, text: file.file_name }),
+        el('td', { attrs: { 'data-heading': 'Created' }, text: backupWhen(file.created_at) }),
+        el('td', { cls: 'num', attrs: { 'data-heading': 'Size' }, text: formatBytes(file.size_bytes) }),
+      ]),
+    );
+  }
+  $('backup-empty').hidden = files.length !== 0;
+}
+
+export async function refreshBackup() {
+  if (!state.isAdmin) return;
+  try {
+    const data = await api.get('/admin/backup');
+    clearFormError($('backup-error'));
+    renderBackup(data);
+    return data;
+  } catch (err) {
+    if (err.status === 403) {
+      // Member: the admin-only tab is hidden by showAccount; stay silent.
+      $('settings-tab-backup').hidden = true;
+      $('settings-panel-backup').hidden = true;
+      return null;
+    }
+    announce(`Backup settings could not be loaded: ${err.message}`);
+    return null;
+  }
+}
+
+export async function saveBackupSettings(evt) {
+  evt.preventDefault();
+  return singleFlight($('backup-save'), async () => {
+    clearFormError($('backup-error'));
+    const time = $('backup-time').value;
+    if (!/^\d{2}:\d{2}$/.test(time)) {
+      showFormError($('backup-error'), new Error('Choose a time of day.'));
+      return;
+    }
+    try {
+      const data = await api.put('/admin/backup', {
+        enabled: $('backup-enabled').checked,
+        cadence: $('backup-cadence').value,
+        time,
+      });
+      renderBackup(data);
+      announce('Backup settings saved.');
+    } catch (err) {
+      showFormError($('backup-error'), err);
+    }
+  });
+}
+
+export async function runBackupNow() {
+  return singleFlight($('backup-run'), async () => {
+    clearFormError($('backup-run-error'));
+    $('backup-run-status').textContent = 'Writing backup…';
+    try {
+      const created = await api.post('/admin/backup/run');
+      $('backup-run-status').textContent =
+        `Created ${created.file_name} (${formatBytes(created.size_bytes)}).`;
+      announce(`Backup created: ${created.file_name}.`);
+      await refreshBackup();
+    } catch (err) {
+      $('backup-run-status').textContent = '';
+      showFormError($('backup-run-error'), err);
     }
   });
 }

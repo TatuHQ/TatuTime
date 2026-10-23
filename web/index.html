@@ -1283,6 +1283,8 @@
                   aria-controls="settings-panel-users" aria-selected="true">Users</button></div>
               <div class="p-tabs__item"><button type="button" class="p-tabs__link" role="tab" id="settings-tab-company"
                   aria-controls="settings-panel-company" aria-selected="false" tabindex="-1">Company</button></div>
+              <div class="p-tabs__item"><button type="button" class="p-tabs__link" role="tab" id="settings-tab-backup"
+                  aria-controls="settings-panel-backup" aria-selected="false" tabindex="-1">Backup</button></div>
               <div class="p-tabs__item"><button type="button" class="p-tabs__link" role="tab"
                   id="settings-tab-invoice-template" aria-controls="settings-panel-invoice-template"
                   aria-selected="false" tabindex="-1">Invoice template</button></div>
@@ -1841,6 +1843,90 @@
                     info</button></div>
               </div>
             </form>
+          </section>
+
+          <section id="settings-panel-backup" class="settings-panel" role="tabpanel"
+            aria-labelledby="settings-tab-backup" tabindex="0" hidden>
+            <div class="ts-head">
+              <h2>Backup</h2>
+            </div>
+            <form id="backup-form" class="p-card">
+              <div class="p-card__header">
+                <h2>Scheduled backups</h2>
+              </div>
+              <div class="p-card__content">
+                <p class="p-form-help-text">A backup is a ZIP of everything in the data directory, stored in the
+                  <strong>Backup</strong> folder next to it. Files are named
+                  <code>&lt;datetime&gt;_tucanotime-backup_&lt;company&gt;.zip</code> using the company name from
+                  Settings → Company. Backups are <strong>not encrypted</strong> and contain the vault key and stored
+                  credentials, so protect the folder like the data directory.</p>
+                <div class="p-form__group"><label class="p-form__label" for="backup-enabled"><input
+                      class="p-form__control" id="backup-enabled" type="checkbox"> Enable scheduled backups</label></div>
+                <div class="p-form__group"><label class="p-form__label" for="backup-cadence">Cadence</label><select
+                    class="p-form__control" id="backup-cadence">
+                    <option value="daily">Daily</option>
+                    <option value="weekly">Weekly (Monday)</option>
+                    <option value="monthly">Monthly (1st)</option>
+                  </select></div>
+                <div class="p-form__group"><label class="p-form__label" for="backup-time">Time</label><input
+                    class="p-form__control" id="backup-time" type="time" required></div>
+                <p id="backup-timezone" class="p-form-help-text" role="status" aria-live="polite"></p>
+                <p id="backup-schedule-status" class="p-form-help-text" role="status" aria-live="polite"></p>
+                <div class="p-form-validation is-error">
+                  <p class="p-form-validation__message" id="backup-error" role="alert" hidden></p>
+                </div>
+                <div class="buttons"><button data-positive="1" type="submit" id="backup-save">Save backup
+                    settings</button></div>
+              </div>
+            </form>
+            <div class="p-card">
+              <div class="p-card__header">
+                <h2>Back up now</h2>
+              </div>
+              <div class="p-card__content">
+                <p class="p-form-help-text">Write a ZIP immediately, without waiting for the schedule. Scheduled and
+                  manual backups use the same naming and destination.</p>
+                <div class="buttons"><button type="button" id="backup-run" data-positive="1">Back up now</button></div>
+                <p id="backup-run-status" class="p-form-help-text" role="status" aria-live="polite"></p>
+                <div class="p-form-validation is-error">
+                  <p class="p-form-validation__message" id="backup-run-error" role="alert" hidden></p>
+                </div>
+              </div>
+            </div>
+            <div class="p-card" id="backup-list-card">
+              <div class="p-card__header">
+                <h2>Stored backups</h2>
+              </div>
+              <div class="p-card__content">
+                <p class="p-form-help-text">Newest first. Backups are never deleted automatically — remove old files
+                  from the Backup folder when you no longer need them.</p>
+                <div class="table-scroll">
+                  <table id="backup-table" class="p-table--mobile-card">
+                    <caption class="sr-only">Stored backup archives</caption>
+                    <thead>
+                      <tr>
+                        <th scope="col">File</th>
+                        <th scope="col">Created</th>
+                        <th scope="col">Size</th>
+                      </tr>
+                    </thead>
+                    <tbody></tbody>
+                  </table>
+                </div>
+                <p id="backup-empty" class="workspace-empty" hidden>No backups yet.</p>
+              </div>
+            </div>
+            <div class="p-card">
+              <div class="p-card__header">
+                <h2>Restore</h2>
+              </div>
+              <div class="p-card__content">
+                <p class="p-form-help-text">Stop the server, extract the ZIP into the data directory (the archive
+                  contains the data files at its root, not inside a <code>Data/</code> folder), then start it again.
+                  Restoring over a running server is not supported: the in-memory state would not match the
+                  restored files.</p>
+              </div>
+            </div>
           </section>
 
           <section id="settings-panel-invoice-template" class="settings-panel" role="tabpanel"

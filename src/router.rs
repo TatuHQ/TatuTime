@@ -292,6 +292,12 @@ pub fn build_router(state: AppState) -> Router {
             "/admin/config",
             get(api::admin_config).put(api::update_config),
         )
+        // In-app ZIP backups (Settings → Backup): scheduled + manual runs.
+        .route(
+            "/admin/backup",
+            get(api::backup_settings).put(api::update_backup_settings),
+        )
+        .route("/admin/backup/run", axum::routing::post(api::run_backup))
         // SMTP delivery settings (#35 follow-up): admin-read config, a test
         // send, and a vault-backed write that the dynamic transport picks up
         // without a restart.

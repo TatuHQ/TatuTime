@@ -214,6 +214,8 @@ pub const CODE_VOCABULARY: &[&str] = &[
     "vault_in_use",
     // QA-04/QA-12: a stored document did not decode.
     "corrupt_document",
+    // Settings → Backup: the ZIP could not be written (permissions, full disk).
+    "backup_failed",
 ];
 
 impl ApiError {

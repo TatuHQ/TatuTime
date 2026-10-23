@@ -35,6 +35,28 @@ summarised in [Storage and retention](storage-and-retention.md).
 
 ## Backup and restore
 
+### Scheduled and manual ZIP backups (Settings → Backup)
+
+Every authenticated admin can open **Settings → Backup** to enable scheduled
+backups, choose a cadence (`daily`, `weekly` on Monday or `monthly` on the 1st)
+and set the time. Settings shows the server's local time zone, which is what the
+time is interpreted in. **Back up now** writes an archive immediately.
+
+A backup is a plain, **unencrypted ZIP** of everything below the data directory
+(`TUCANO_DATA_DIR`). Files sit at the archive root — there is no `Data/` prefix
+— so restoring means stopping the server and extracting the ZIP into the data
+directory. Archives are written to a `Backup` folder next to the data directory
+(`/Backup` in the image) and named
+`<datetime>_tucanotime-backup_<company>.zip`, using the company name from
+Settings → Company. `TUCANO_BACKUP_DIR` overrides the location.
+
+Because the archive contains `secrets.bin` and (unless you use an external key)
+`vault.key`, treat it exactly like the data directory: protect it, and keep a
+separate copy of the key if the archive is stored off-site. Scheduled backups
+are never deleted automatically.
+
+### Operator CLI
+
 The image ships an operator CLI on the same binary:
 
 ```sh
@@ -69,6 +91,11 @@ docker compose up -d tucanotime
 `/backups` maps to `TUCANO_BACKUP_DIR` (default `./backups`) and must be
 writable by uid 10001. Back up while the server is stopped, or accept a torn
 snapshot across collections.
+
+The server service mounts `${TUCANO_BACKUP_DIR:-tucanotime-backups}` at
+`/Backup`, where Settings → Backup writes its ZIPs. Setting
+`TUCANO_BACKUP_DIR=./backups` makes both the in-app ZIPs and the CLI archives
+share one host folder (mounted at `/Backup` and `/backups` respectively).
 
 **Keep the vault key with the backup.** Unless you use an external
 `TUCANO_SECRET_KEY[_FILE]`, the generated `<data>/vault.key` is inside the data

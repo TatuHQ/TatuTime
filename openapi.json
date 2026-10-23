@@ -130,7 +130,8 @@
                   "vault_already_enabled",
                   "vault_managed_externally",
                   "vault_in_use",
-                  "corrupt_document"
+                  "corrupt_document",
+                  "backup_failed"
                 ]
               },
               "message": {
@@ -3528,6 +3529,157 @@
             }
           }
         }
+      },
+      "BackupTimezone": {
+        "type": "object",
+        "description": "The server process's local time zone. Scheduled backups are evaluated in it.",
+        "required": [
+          "offset_minutes",
+          "label"
+        ],
+        "properties": {
+          "offset_minutes": {
+            "type": "integer",
+            "description": "Offset from UTC in minutes (positive east of Greenwich)."
+          },
+          "label": {
+            "type": "string",
+            "description": "Fixed-width label such as UTC+02:00 or UTC."
+          },
+          "abbreviation": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Platform zone abbreviation (CEST), when the platform provides one."
+          }
+        },
+        "additionalProperties": false
+      },
+      "BackupFile": {
+        "type": "object",
+        "required": [
+          "file_name",
+          "size_bytes",
+          "created_at"
+        ],
+        "properties": {
+          "file_name": {
+            "type": "string",
+            "description": "<datetime>_tucanotime-backup_<company>.zip"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "additionalProperties": false
+      },
+      "BackupStatus": {
+        "type": "object",
+        "description": "Backup schedule, the running app time zone, the next run and stored archives.",
+        "required": [
+          "enabled",
+          "cadence",
+          "time",
+          "timezone",
+          "next_run",
+          "next_run_local",
+          "last_backup",
+          "backups"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "cadence": {
+            "type": "string",
+            "enum": [
+              "daily",
+              "weekly",
+              "monthly"
+            ],
+            "description": "Weekly runs on Monday; monthly on the 1st."
+          },
+          "time": {
+            "type": "string",
+            "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+            "description": "Wall-clock time in the server local zone."
+          },
+          "timezone": {
+            "$ref": "#/components/schemas/BackupTimezone"
+          },
+          "next_run": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null while scheduled backups are disabled."
+          },
+          "next_run_local": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The next run as a wall-clock label in the server's local time zone (YYYY-MM-DD HH:MM), or null while disabled."
+          },
+          "last_backup": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/BackupFile"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "backups": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BackupFile"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "BackupSettingsInput": {
+        "type": "object",
+        "required": [
+          "enabled",
+          "cadence",
+          "time"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "cadence": {
+            "type": "string",
+            "enum": [
+              "daily",
+              "weekly",
+              "monthly"
+            ]
+          },
+          "time": {
+            "type": "string",
+            "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$"
+          }
+        },
+        "additionalProperties": false
       }
     },
     "responses": {
@@ -11180,6 +11332,120 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/api/admin/backup": {
+      "get": {
+        "operationId": "getBackupSettings",
+        "x-admin-only": true,
+        "tags": [
+          "admin"
+        ],
+        "summary": "Backup schedule, server time zone, next run and stored ZIP archives",
+        "description": "Backups are unencrypted ZIPs of the data directory written to the Backup folder next to it (or TUCANO_BACKUP_DIR). Files sit at the archive root so restoring is extracting them into the data directory.",
+        "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "200": {
+            "description": "Current backup status.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupStatus"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      },
+      "put": {
+        "operationId": "updateBackupSettings",
+        "x-admin-only": true,
+        "tags": [
+          "admin"
+        ],
+        "summary": "Persist the backup enabled flag, cadence and time",
+        "description": "The three knobs are written to config.json. The time is validated as HH:MM and interpreted in the server local time zone reported by GET /api/admin/backup.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BackupSettingsInput"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
+        "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "200": {
+            "description": "Persisted; the refreshed status is returned.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupStatus"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          }
+        }
+      }
+    },
+    "/api/admin/backup/run": {
+      "post": {
+        "operationId": "runBackup",
+        "x-admin-only": true,
+        "tags": [
+          "admin"
+        ],
+        "summary": "Write a ZIP backup immediately",
+        "description": "Creates the archive in the backup folder using the same timestamped, company-named scheme as the scheduler. The response describes the file; the bytes stay on the server.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfProtection"
+          }
+        ],
+        "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "200": {
+            "description": "Backup written.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupFile"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
           }
         }
       }

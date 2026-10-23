@@ -242,6 +242,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             state.store.clone(),
             state.accounting.clone(),
         )),
+        Arc::new(tucano_time::backup::BackupJob::new(
+            root.clone(),
+            state.cfg.clone(),
+            state.env.clone(),
+            state.audit.clone(),
+        )),
     ];
     let scheduler = Arc::new(tucano_time::scheduler::Scheduler::new(&root, jobs));
     scheduler.spawn(60);
