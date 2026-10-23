@@ -714,10 +714,16 @@ api.getBlob = async () => new Blob([new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d
     message: 'the register to render both invoices',
   });
   const rows = [...document.querySelectorAll('#invoice-table tbody tr')];
-  assert.equal(rows[0].querySelector('.inv-row-subject').textContent, subject,
+  // The register defaults to Period descending, so locate the rows by their
+  // content rather than by index (September's draft sorts above August here).
+  const issuedRow = rows.find((r) => r.querySelector('.inv-row-subject'));
+  const draftRow = rows.find((r) => !r.querySelector('.inv-row-subject'));
+  assert.ok(issuedRow, 'the issued invoice row is present');
+  assert.ok(draftRow, 'the draft invoice row is present');
+  assert.equal(issuedRow.querySelector('.inv-row-subject').textContent, subject,
     'the issued invoice shows its frozen subject as a subtitle');
-  assert.match(rows[0].getAttribute('aria-label'), /Tucano Time invoice for 08 2026/);
-  assert.equal(rows[1].querySelector('.inv-row-subject'), null,
+  assert.match(issuedRow.getAttribute('aria-label'), /Tucano Time invoice for 08 2026/);
+  assert.equal(draftRow.querySelector('.inv-row-subject'), null,
     'a draft has no frozen subject yet');
 
   await context.openInvoicePreview({
