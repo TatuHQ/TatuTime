@@ -49,8 +49,11 @@ async fn notifications_hide_stale_and_resolved_no_time_reminders() {
     }
     let (status, before) = json_req(&app, "GET", "/api/notifications", None).await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(before["notifications"].as_array().unwrap().len(), 2);
-    assert_eq!(before["unread"], 2);
+    // #16's Approvals view is hidden, so the stored submission nudge is not
+    // listed; only today's unresolved no-time reminder remains.
+    assert_eq!(before["notifications"].as_array().unwrap().len(), 1);
+    assert_eq!(before["notifications"][0]["kind"], "no_time_today");
+    assert_eq!(before["unread"], 1);
     let customer = new_customer(&app, "Reminder test", "EUR", 6000).await;
     let cid = customer["id"].as_str().unwrap();
     new_project(&app, cid, "REMINDER", json!({})).await;
@@ -69,9 +72,8 @@ async fn notifications_hide_stale_and_resolved_no_time_reminders() {
     assert_eq!(created, StatusCode::CREATED);
     let (_, after) = json_req(&app, "GET", "/api/notifications", None).await;
     let notifications = after["notifications"].as_array().unwrap();
-    assert_eq!(notifications.len(), 1);
-    assert_eq!(notifications[0]["kind"], "submit_timesheet");
-    assert_eq!(after["unread"], 1);
+    assert!(notifications.is_empty(), "{notifications:?}");
+    assert_eq!(after["unread"], 0);
 }
 
 #[tokio::test]
