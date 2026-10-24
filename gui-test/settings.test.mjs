@@ -25,21 +25,21 @@ const EMAIL = {
     vault_enabled: true,
     configured: true,
     transport: 'smtp',
-    host: 'smtp.tucanotime.test',
+    host: 'smtp.tatutime.test',
     port: 587,
     username: 'mailer',
-    from: 'billing@tucanotime.test',
+    from: 'billing@tatutime.test',
     has_password: true,
 };
 
 const ORG = {
-    name: 'Tucano',
+    name: 'Tatu',
     legal_id: 'BE0123456789',
     legal_id_label: 'VAT',
     address: { street: 'Harbour 9', city: 'Antwerp', postal_code: '2000', country: 'BE' },
-    from_name: 'Tucano Billing',
-    reply_to: 'billing@tucanotime.test',
-    accountant_email: 'books@tucanotime.test',
+    from_name: 'Tatu Billing',
+    reply_to: 'billing@tatutime.test',
+    accountant_email: 'books@tatutime.test',
     accent: '#e95420',
 };
 
@@ -71,7 +71,7 @@ const TEMPLATE = {
         },
     },
     variables: [
-        { name: '%customer_name%', example: 'Tucano' },
+        { name: '%customer_name%', example: 'Tatu' },
         { name: '%invoice_number%', example: 'INV-0001' },
         { name: '%invoice_issue_month%', example: 'March' },
     ],
@@ -87,8 +87,8 @@ const CONFIG = [
 
 const AUDIT = {
     events: [
-        { ts: '2026-10-18T20:00:00Z', event: 'login_ok', subject: 'admin@tucanotime.test' },
-        { ts: '2026-10-18T19:59:00Z', event: 'user_created', subject: 'qa@tucanotime.test' },
+        { ts: '2026-10-18T20:00:00Z', event: 'login_ok', subject: 'admin@tatutime.test' },
+        { ts: '2026-10-18T19:59:00Z', event: 'user_created', subject: 'qa@tatutime.test' },
     ],
 };
 
@@ -146,7 +146,7 @@ const VAULT_ENV_OVERRIDE = {
 function setup({
     email = EMAIL,
     putError = null,
-    postResult = { sent_to: 'qa@tucanotime.test', transport: 'smtp' },
+    postResult = { sent_to: 'qa@tatutime.test', transport: 'smtp' },
     postError = null,
     getError = null,
     config = CONFIG,
@@ -374,24 +374,24 @@ test('a member sees only Expense categories', () => {
 test('Company loads its identity and saves via PUT /admin/org', async () => {
     const { dom, document, t } = setup();
     await t.refreshOrgProfile();
-    assert.equal(document.getElementById('org-name').value, 'Tucano');
+    assert.equal(document.getElementById('org-name').value, 'Tatu');
     assert.equal(document.getElementById('org-city').value, 'Antwerp');
     assert.equal(document.getElementById('org-accent').value, '#e95420');
-    assert.equal(document.getElementById('org-accountant').value, 'books@tucanotime.test',
+    assert.equal(document.getElementById('org-accountant').value, 'books@tatutime.test',
         'the accountant address loads for the paid-invoice copy');
     assert.equal(document.getElementById('accent-swatch').style.background !== '', true, 'the swatch paints');
 
-    setValue(document, 'org-name', 'Tucano Invoice Co');
-    setValue(document, 'org-accountant', 'ledger@tucanotime.test');
+    setValue(document, 'org-name', 'Tatu Invoice Co');
+    setValue(document, 'org-accountant', 'ledger@tatutime.test');
     await t.saveOrgProfile({ preventDefault() { } });
     const call = t.calls().put.find((entry) => entry.path === '/admin/org');
     assert.deepEqual(JSON.parse(JSON.stringify(call.body)), {
-        name: 'Tucano Invoice Co',
+        name: 'Tatu Invoice Co',
         legal_id: 'BE0123456789',
         legal_id_label: 'VAT',
-        from_name: 'Tucano Billing',
-        reply_to: 'billing@tucanotime.test',
-        accountant_email: 'ledger@tucanotime.test',
+        from_name: 'Tatu Billing',
+        reply_to: 'billing@tatutime.test',
+        accountant_email: 'ledger@tatutime.test',
         accent: '#e95420',
         address: { street: 'Harbour 9', city: 'Antwerp', postal_code: '2000', country: 'BE' },
     });
@@ -832,14 +832,14 @@ test('Email prefill never puts the password in the DOM and shows the delivery st
     const { dom, document, t } = setup();
     await t.refreshOrgProfile();
     await t.refreshEmailSettings();
-    assert.equal(document.getElementById('email-host').value, 'smtp.tucanotime.test');
+    assert.equal(document.getElementById('email-host').value, 'smtp.tatutime.test');
     assert.equal(document.getElementById('email-port').value, '587');
     assert.equal(document.getElementById('email-username').value, 'mailer');
-    assert.equal(document.getElementById('email-from').value, 'billing@tucanotime.test');
+    assert.equal(document.getElementById('email-from').value, 'billing@tatutime.test');
     assert.equal(document.getElementById('email-password').value, '', 'the password is never rendered');
     assert.match(document.getElementById('email-password').placeholder, /stored — leave blank to keep/);
-    assert.equal(document.getElementById('email-status').textContent, 'Email delivery: SMTP smtp.tucanotime.test:587');
-    assert.equal(document.getElementById('email-test-to').value, 'billing@tucanotime.test',
+    assert.equal(document.getElementById('email-status').textContent, 'Email delivery: SMTP smtp.tatutime.test:587');
+    assert.equal(document.getElementById('email-test-to').value, 'billing@tatutime.test',
         'the test recipient defaults to the org reply-to');
     assert.equal(document.getElementById('email-form').querySelectorAll('input[disabled]').length, 0,
         'the form is editable when the vault is enabled');
@@ -861,15 +861,15 @@ test('saving Email carries changed credentials and a typed password', async () =
     const { dom, document, t } = setup();
     await t.refreshEmailSettings();
     setValue(document, 'email-username', 'other');
-    setValue(document, 'email-from', 'other@tucanotime.test');
+    setValue(document, 'email-from', 'other@tatutime.test');
     setValue(document, 'email-password', 's3cret');
     await t.saveEmailSettings({ preventDefault() { } });
     const call = t.calls().put.find((entry) => entry.path === '/admin/email');
     assert.deepEqual(JSON.parse(JSON.stringify(call.body)), {
-        host: 'smtp.tucanotime.test',
+        host: 'smtp.tatutime.test',
         port: 587,
         username: 'other',
-        from: 'other@tucanotime.test',
+        from: 'other@tatutime.test',
         password: 's3cret',
     });
     dom.window.close();
@@ -911,14 +911,14 @@ test('a 503 vault_disabled on save disables the form and explains it', async () 
 test('a test send posts once and announces the recipient', async () => {
     const { dom, document, window, t } = setup();
     await t.refreshEmailSettings();
-    setValue(document, 'email-test-to', 'qa@tucanotime.test');
+    setValue(document, 'email-test-to', 'qa@tatutime.test');
     const first = t.sendTestEmail({ preventDefault() { } });
     const second = t.sendTestEmail({ preventDefault() { } });
     await Promise.all([first, second]);
     assert.equal(t.calls().post.length, 1, 'single-flight: a double click sends once');
-    assert.deepEqual(JSON.parse(JSON.stringify(t.calls().post[0])), { path: '/admin/email/test', body: { to: 'qa@tucanotime.test' } });
-    assert.match(document.getElementById('email-test-result').textContent, /qa@tucanotime\.test/);
-    assert.match(window.document.getElementById('live-region').textContent, /qa@tucanotime\.test/);
+    assert.deepEqual(JSON.parse(JSON.stringify(t.calls().post[0])), { path: '/admin/email/test', body: { to: 'qa@tatutime.test' } });
+    assert.match(document.getElementById('email-test-result').textContent, /qa@tatutime\.test/);
+    assert.match(window.document.getElementById('live-region').textContent, /qa@tatutime\.test/);
     dom.window.close();
 });
 
@@ -927,7 +927,7 @@ test('422 email_not_configured explains the missing transport in the notice', as
         postError: { status: 422, code: 'email_not_configured', message: 'email delivery is not configured' },
     });
     await t.refreshEmailSettings();
-    setValue(document, 'email-test-to', 'qa@tucanotime.test');
+    setValue(document, 'email-test-to', 'qa@tatutime.test');
     await t.sendTestEmail({ preventDefault() { } });
     const error = document.getElementById('email-test-error');
     assert.equal(error.hidden, false);
@@ -942,7 +942,7 @@ test('502 email_failed shows the relay failure', async () => {
         postError: { status: 502, code: 'email_failed', message: 'relay refused the message' },
     });
     await t.refreshEmailSettings();
-    setValue(document, 'email-test-to', 'qa@tucanotime.test');
+    setValue(document, 'email-test-to', 'qa@tatutime.test');
     await t.sendTestEmail({ preventDefault() { } });
     const error = document.getElementById('email-test-error');
     assert.equal(error.hidden, false);
@@ -961,14 +961,14 @@ test('502 email_failed shows the relay failure', async () => {
 test('SET-01: clicking Send test email issues exactly one POST', async () => {
     const { dom, document, t } = setup();
     await t.refreshEmailSettings();
-    setValue(document, 'email-test-to', 'qa@tucanotime.test');
+    setValue(document, 'email-test-to', 'qa@tatutime.test');
     document.getElementById('email-test-send').click();
     await waitFor(() => t.calls().post.length === 1, { message: 'the clicked button to send' });
     // One event-loop turn: a stray submit listener would have fired by now.
     await new Promise((resolve) => setTimeout(resolve, 0));
     assert.equal(t.calls().post.length, 1, 'the click sends once, never twice');
     assert.deepEqual(JSON.parse(JSON.stringify(t.calls().post[0])),
-        { path: '/admin/email/test', body: { to: 'qa@tucanotime.test' } });
+        { path: '/admin/email/test', body: { to: 'qa@tatutime.test' } });
     dom.window.close();
 });
 
@@ -1009,7 +1009,7 @@ test('SET-05: the four Settings saves ignore a double submit', async () => {
     {
         const { dom, document, t } = setup();
         await t.refreshOrgProfile();
-        setValue(document, 'org-name', 'Tucano Invoice Co');
+        setValue(document, 'org-name', 'Tatu Invoice Co');
         await Promise.all([t.saveOrgProfile(evt()), t.saveOrgProfile(evt())]);
         assert.equal(t.calls().put.filter((call) => call.path === '/admin/org').length, 1,
             'a double click writes the org profile once');
@@ -1100,7 +1100,7 @@ test('SET-11: the audit card lists events, its empty state and an inline error',
     const rows = [...document.querySelectorAll('#audit-table tbody tr')];
     assert.equal(rows.length, 2, 'both events render, newest first as the API returns them');
     assert.deepEqual([...rows[0].querySelectorAll('td')].map((td) => td.textContent),
-        ['2026-10-18 20:00:00 UTC', 'login_ok', 'admin@tucanotime.test']);
+        ['2026-10-18 20:00:00 UTC', 'login_ok', 'admin@tatutime.test']);
     assert.equal(document.getElementById('audit-empty').hidden, true);
 
     window.__audit = { events: [] };

@@ -10,7 +10,7 @@ function setup({ dark = false, saved, blocked = false } = {}) {
   const dom = new JSDOM(html, { runScripts: 'outside-only', url: 'http://localhost/' });
   let listener;
   dom.window.matchMedia = () => ({ matches: dark, addEventListener: (_event, handler) => { listener = handler; } });
-  if (saved) dom.window.localStorage.setItem('tucanotime-colour-mode', saved);
+  if (saved) dom.window.localStorage.setItem('tatutime-colour-mode', saved);
   if (blocked) Object.defineProperty(dom.window, 'localStorage', { get() { throw new Error('Unavailable'); } });
   dom.window.eval(script);
   dom.window.document.dispatchEvent(new dom.window.Event('DOMContentLoaded'));
@@ -49,7 +49,7 @@ test('default follows system until manual selection', () => {
   dark.dispatchEvent(new dom.window.Event('change'));
   changeSystem(false);
   assert.equal(document.documentElement.dataset.theme, 'dark');
-  assert.equal(dom.window.localStorage.getItem('tucanotime-colour-mode'), 'dark');
+  assert.equal(dom.window.localStorage.getItem('tatutime-colour-mode'), 'dark');
   dom.window.close();
 });
 

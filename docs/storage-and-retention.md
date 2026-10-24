@@ -1,7 +1,7 @@
 # Storage and retention
 
-TucanoTime uses the filesystem as its store: one pretty-printed JSON document
-per record below `TUCANO_DATA_DIR`. There is no database. The API is the only
+TatuTime uses the filesystem as its store: one pretty-printed JSON document
+per record below `TATU_DATA_DIR`. There is no database. The API is the only
 writer, writes are atomic (temporary file + rename), and the GUI never reads
 storage — it is a presentation layer over the API.
 
@@ -36,7 +36,7 @@ The canonical layout list is the “Architecture invariants” section of
 | `scheduler.json` | Scheduler last-run state |
 | `email_reminders.json` | Overdue-invoice email reminder last-run state |
 | `.server.lock` | Single-instance guard |
-| `.tucanotime.lock` | Cross-process writer lock serialising atomic writes |
+| `.tatutime.lock` | Cross-process writer lock serialising atomic writes |
 | `archive/entries/<YYYY-MM>/<YYYY-MM-DD>/<id>.json` | Cold entry tree written only by the archival pass |
 | `archive/entries/.manifest.<UTC stamp>-<random>.json` | Per-run sha256 manifest of the documents a pass relocated |
 
@@ -111,4 +111,4 @@ mechanics and preconditions are in ADR-003.
 
 ---
 
-Last verified against TucanoTime 0.1.41.
+Last verified against TatuTime 0.1.41.

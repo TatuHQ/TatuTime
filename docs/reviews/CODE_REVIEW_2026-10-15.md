@@ -1,4 +1,4 @@
-# Code, refactor and data-layout review — TucanoTime (2026-10-15)
+# Code, refactor and data-layout review — TatuTime (2026-10-15)
 
 > *Historical snapshot — not current guidance. See the reviews index.*
 
@@ -51,9 +51,9 @@ value, and the GUI renders an empty field as the reason alone (no dangling colon
 The existing `wrong_type_is_validation_failure` asserted neither, which is why this
 survived; it now asserts both, plus three unit tests for the message shapes.
 
-### 1.4 `TUCANO_WEB_DIR` let a running server serve a GUI newer than its own contract · OPERABILITY · S
+### 1.4 `TATU_WEB_DIR` let a running server serve a GUI newer than its own contract · OPERABILITY · S
 Not a code defect, but the failure mode that produced the report that started this
-work: with `TUCANO_WEB_DIR` set (`src/lib.rs:745-791`) the served modules are the
+work: with `TATU_WEB_DIR` set (`src/lib.rs:745-791`) the served modules are the
 working tree while the Rust is fixed at compile time, so a process started before
 a pull hands out today's dialog over yesterday's API — which reads as
 `original_amount_minor: unknown field`. Reproduced end to end (the running process
@@ -132,7 +132,7 @@ expected, with the same atomicity rules as the rest of the store.
   mtimes, fail-closed `503 lock_unavailable`, and the shared
   `domain::already_invoiced` predicate are used consistently on the paths this
   change touched.
-- **Secrets and identity:** the vault fails closed without `TUCANO_SECRET_KEY`
+- **Secrets and identity:** the vault fails closed without `TATU_SECRET_KEY`
   (#77), SSO's `allowed_domains` is a fail-closed allow-list (#260), and
   `password_hash` never reaches a response.
 - **Money and time:** minor units and hundredths only; the receipt is the single

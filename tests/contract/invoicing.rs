@@ -96,7 +96,7 @@ fn decode_pdf_strings(bytes: &[u8], chunks: &mut Vec<String>) {
 #[tokio::test]
 async fn invoice_sums_billable_and_ignores_nonbillable() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
+    let c = new_customer(&app, "TatuTime", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
     // 3h billable @60 = 180.00
@@ -127,7 +127,7 @@ async fn invoice_sums_billable_and_ignores_nonbillable() {
 #[tokio::test]
 async fn issuing_invoice_locks_its_entries() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
+    let c = new_customer(&app, "TatuTime", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
     let (_, e) = json_req(
@@ -193,7 +193,7 @@ async fn issuing_invoice_locks_its_entries() {
 #[tokio::test]
 async fn regeneration_excludes_invoiced_entries() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
+    let c = new_customer(&app, "TatuTime", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
     json_req(
@@ -231,7 +231,7 @@ async fn regeneration_excludes_invoiced_entries() {
 #[tokio::test]
 async fn invoice_rejects_mixed_currencies() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
+    let c = new_customer(&app, "TatuTime", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({"currency":"EUR","rate_minor":6000})).await;
     new_project(&app, cid, "P2", json!({"currency":"USD","rate_minor":3000})).await;
@@ -268,7 +268,7 @@ async fn invoice_rejects_mixed_currencies() {
 #[tokio::test]
 async fn invoice_includes_billable_expenses_and_locks_them() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
+    let c = new_customer(&app, "TatuTime", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
     // 2h billable time @60 = 12000
@@ -322,7 +322,7 @@ async fn invoice_includes_billable_expenses_and_locks_them() {
 #[tokio::test]
 async fn invoice_can_exclude_expenses() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
+    let c = new_customer(&app, "TatuTime", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
     json_req(
@@ -538,7 +538,7 @@ async fn invoice_email_carries_the_archived_pdf_attachment() {
     // The MIME builder labels the part as a PDF. `build_mime` now returns a
     // Result -- it refuses a header-bound control character at the sink (#S1)
     // -- so the same two assertions run on the unwrapped body.
-    let mime = tucano_time::email::build_mime(&msgs[0]).expect("the message builds");
+    let mime = tatu_time::email::build_mime(&msgs[0]).expect("the message builds");
     assert!(mime.contains("Content-Type: application/pdf"));
     assert!(mime.contains("base64"));
 }
@@ -607,7 +607,7 @@ async fn invoice_email_can_attach_expense_receipts_and_records_them_in_history()
         "{}",
         msg.text
     );
-    let mime = tucano_time::email::build_mime(msg).expect("multi-attachment MIME builds");
+    let mime = tatu_time::email::build_mime(msg).expect("multi-attachment MIME builds");
     assert!(mime.contains("Content-Type: image/png"), "{mime}");
     assert!(mime.contains("filename=\"hotel.png\""), "{mime}");
     assert!(mime.contains("Content-Type: application/pdf"), "{mime}");
@@ -735,14 +735,14 @@ async fn org_profile_round_trips_and_prints_on_the_document() {
         &app,
         "PUT",
         "/api/admin/org",
-        Some(json!({"name":"Tucano BV","legal_id":"BE0123456789",
-          "accountant_email":"books@tucano.test",
+        Some(json!({"name":"Tatu BV","legal_id":"BE0123456789",
+          "accountant_email":"books@tatu.test",
           "address":{"street":"Markt 1","city":"Brugge","postal_code":"8000","country":"BE"}})),
     )
     .await;
     assert_eq!(sp, StatusCode::OK, "{saved}");
-    assert_eq!(saved["name"], "Tucano BV");
-    assert_eq!(saved["accountant_email"], "books@tucano.test");
+    assert_eq!(saved["name"], "Tatu BV");
+    assert_eq!(saved["accountant_email"], "books@tatu.test");
 
     // The identity prints on the issued document (uncompressed streams, so
     // the bytes are greppable — the determinism contract of #113 in use).
@@ -752,7 +752,7 @@ async fn org_profile_round_trips_and_prints_on_the_document() {
     // Phase 2: the identity lives in the issuer block — one paragraph per
     // address line and the legal id under its resolved label.
     assert!(
-        joined.contains("Tucano BV"),
+        joined.contains("Tatu BV"),
         "profile name replaces the config default"
     );
     assert!(
@@ -1290,7 +1290,7 @@ async fn manual_line_bounds_reject_identically_on_both_endpoints() {
 #[tokio::test]
 async fn invoice_preview_projects_and_paid_exclusion() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
+    let c = new_customer(&app, "TatuTime", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap().to_string();
     new_project(&app, &cid, "PA", json!({"rate_minor": 5000})).await;
     new_project(&app, &cid, "PB", json!({"rate_minor": 7000})).await;
@@ -1616,12 +1616,12 @@ async fn appearance_and_messages_are_honored_not_inert() {
         &app,
         "PUT",
         "/api/admin/org",
-        Some(json!({"name":"Tucano BV","from_name":"Tucano Invoicing",
-                    "reply_to":"billing@tucano.test","accent":"#E95420"})),
+        Some(json!({"name":"Tatu BV","from_name":"Tatu Invoicing",
+                    "reply_to":"billing@tatu.test","accent":"#E95420"})),
     )
     .await;
     assert_eq!(s, StatusCode::OK, "{saved}");
-    assert_eq!(saved["from_name"], "Tucano Invoicing");
+    assert_eq!(saved["from_name"], "Tatu Invoicing");
 
     // The mail adapter honors the sender identity (#146): the recorded
     // message carries it and build_mime would render From/Reply-To.
@@ -1630,8 +1630,8 @@ async fn appearance_and_messages_are_honored_not_inert() {
     let (se, _b) = json_req(&app, "POST", &format!("/api/invoices/{iid}/email"), None).await;
     assert_eq!(se, StatusCode::OK);
     let msg = &app.email.messages()[0];
-    assert_eq!(msg.from_name.as_deref(), Some("Tucano Invoicing"));
-    assert_eq!(msg.reply_to.as_deref(), Some("billing@tucano.test"));
+    assert_eq!(msg.from_name.as_deref(), Some("Tatu Invoicing"));
+    assert_eq!(msg.reply_to.as_deref(), Some("billing@tatu.test"));
 
     // The accent paints the newly issued document: color ops exist, and
     // re-rendering is byte-identical (the #113 determinism contract).
@@ -1645,7 +1645,7 @@ async fn appearance_and_messages_are_honored_not_inert() {
         &app,
         "PUT",
         "/api/admin/org",
-        Some(json!({"name":"Tucano BV","from_name":"","reply_to":"","accent":""})),
+        Some(json!({"name":"Tatu BV","from_name":"","reply_to":"","accent":""})),
     )
     .await;
     let c = new_customer(&app, "PLAIN", "EUR", 6000).await;
@@ -1679,7 +1679,7 @@ async fn appearance_and_messages_are_honored_not_inert() {
 #[tokio::test]
 async fn invoice_issue_empty_period_conflicts_and_double_issue_is_refused() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
+    let c = new_customer(&app, "TatuTime", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
 
@@ -1763,7 +1763,7 @@ async fn invoice_timeline_records_create_issue_and_email_newest_first() {
     assert_eq!(events.as_array().unwrap().len(), 3, "{events}");
     assert_eq!(events[0]["kind"], "email_sent");
     assert_eq!(events[0]["actor_name"], "Admin");
-    assert_eq!(events[0]["meta"]["to"], "billing@tucanotime.test");
+    assert_eq!(events[0]["meta"]["to"], "billing@tatutime.test");
     assert_eq!(events[0]["meta"]["transport"], "recording");
     assert!(events[0]["meta"]["subject"].is_string());
     assert!(events[0]["meta"]["from_name"].is_string());
@@ -1895,7 +1895,7 @@ async fn invoice_timeline_unknown_id_and_access_control() {
 #[tokio::test]
 async fn invoice_timeline_sidecar_is_a_lenient_dot_file() {
     let (app, d) = app().await;
-    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
+    let c = new_customer(&app, "TatuTime", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
     json_req(
@@ -2214,7 +2214,7 @@ fn has_stamp(bytes: &[u8], stamp: &str) -> bool {
 async fn invoice_pdf_preview_renders_a_draft_and_never_archives() {
     let (app, d) = app().await;
     // A DRAFT with billable work: `/pdf` refuses it, the preview must not.
-    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
+    let c = new_customer(&app, "TatuTime", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
     json_req(
@@ -2365,14 +2365,14 @@ async fn invoice_pdf_preview_unknown_id_and_access_control() {
 /// issued, the same period previews empty rather than re-billing the cold day.
 #[tokio::test]
 async fn an_archived_unbilled_period_still_previews_and_issues() {
-    use tucano_time::lock::NoLocks;
-    use tucano_time::store::Store;
+    use tatu_time::lock::NoLocks;
+    use tatu_time::store::Store;
 
     let day = "2026-08-03";
     let cutoff = chrono::NaiveDate::from_ymd_opt(2026, 9, 1).unwrap();
 
     let (app, d) = app().await;
-    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
+    let c = new_customer(&app, "TatuTime", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap().to_string();
     new_project(&app, &cid, "P1", json!({"rate_minor": 6000})).await;
     let (_, entry) = json_req(
@@ -2448,7 +2448,7 @@ async fn an_archived_unbilled_period_still_previews_and_issues() {
 #[tokio::test]
 async fn issuing_refuses_a_draft_the_timesheet_moved_past() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
+    let c = new_customer(&app, "TatuTime", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
     let (s_e, e) = json_req(
@@ -2542,7 +2542,7 @@ async fn issuing_refuses_a_draft_the_timesheet_moved_past() {
 #[tokio::test]
 async fn an_unchanged_draft_still_issues_and_a_second_invoice_is_refused() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
+    let c = new_customer(&app, "TatuTime", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
     json_req(
@@ -2589,7 +2589,7 @@ async fn customer_legal_id_round_trips_and_oversize_is_refused() {
         "POST",
         "/api/customers",
         Some(json!({
-            "name": "Tucano Time",
+            "name": "TatuTime",
             "currency": "EUR",
             "default_rate_minor": 6000,
             "legal_id": "  99999999  "
@@ -2609,7 +2609,7 @@ async fn customer_legal_id_round_trips_and_oversize_is_refused() {
         "PUT",
         &format!("/api/customers/{cid}"),
         Some(json!({
-            "name": "Tucano Time",
+            "name": "TatuTime",
             "currency": "EUR",
             "default_rate_minor": 6000,
             "legal_id": "1".repeat(61)
@@ -2630,7 +2630,7 @@ async fn org_profile_round_trips_legal_id_label() {
         "PUT",
         "/api/admin/org",
         Some(json!({
-            "name": "Tucano Time",
+            "name": "TatuTime",
             "legal_id": "00.000.000/0000-00",
             "legal_id_label": "Tax ID"
         })),
@@ -2648,7 +2648,7 @@ async fn org_profile_round_trips_legal_id_label() {
         "PUT",
         "/api/admin/org",
         Some(json!({
-            "name": "Tucano Time",
+            "name": "TatuTime",
             "legal_id": "00.000.000/0000-00",
             "legal_id_label": "x".repeat(41)
         })),
@@ -2666,13 +2666,13 @@ async fn payment_rails_round_trip_through_the_customer_surface() {
     let rails = json!([
         {
             "currency": "EUR",
-            "account_name": "Tucano Time",
+            "account_name": "TatuTime",
             "iban": "EX000000000000000000",
             "bic": "EXAMPLEB"
         },
         {
             "currency": "USD",
-            "account_name": "Tucano Time",
+            "account_name": "TatuTime",
             "routing_number": "000000000",
             "swift": "EXAMPLEB"
         }
@@ -2782,7 +2782,7 @@ async fn invoice_template_get_returns_the_seeded_defaults() {
 async fn issuing_freezes_subject_and_terms_in_the_invoice_document() {
     let (app, _d) = app().await;
     let (issued, iid) = seed_issued_invoice(&app).await;
-    assert_eq!(issued["subject"], "Tucano Time invoice for 10 2026");
+    assert_eq!(issued["subject"], "TatuTime invoice for 10 2026");
     assert_eq!(issued["terms"]["kind"], "net_30");
     // A later template edit cannot rewrite the issued snapshot, while the live
     // document endpoint reads the snapshot instead of the new template.
@@ -2800,11 +2800,11 @@ async fn issuing_freezes_subject_and_terms_in_the_invoice_document() {
     .await;
     assert_eq!(st, StatusCode::OK);
     let (_, after) = json_req(&app, "GET", &format!("/api/invoices/{iid}"), None).await;
-    assert_eq!(after["subject"], "Tucano Time invoice for 10 2026");
+    assert_eq!(after["subject"], "TatuTime invoice for 10 2026");
     assert_eq!(after["terms"]["kind"], "net_30");
     let (sd, doc) = json_req(&app, "GET", &format!("/api/invoices/{iid}/document"), None).await;
     assert_eq!(sd, StatusCode::OK);
-    assert_eq!(doc["subject"], "Tucano Time invoice for 10 2026");
+    assert_eq!(doc["subject"], "TatuTime invoice for 10 2026");
 }
 
 // ------------------------------------- document rendering (phase 2) ---
@@ -2820,10 +2820,10 @@ async fn invoice_pdf_prints_the_document_sections_and_terms_suffix() {
         "POST",
         "/api/customers",
         Some(json!({
-            "name": "Tucano Time",
+            "name": "TatuTime",
             "currency": "EUR",
             "default_rate_minor": 6000,
-            "email": "billing@tucanotime.example",
+            "email": "billing@tatutime.example",
             "address": {
                 "street": "9 Placeholder Road",
                 "city": "Testville",
@@ -2855,7 +2855,7 @@ async fn invoice_pdf_prints_the_document_sections_and_terms_suffix() {
     let (si, issued) = json_req(&app, "POST", &format!("/api/invoices/{iid}/issue"), None).await;
     assert_eq!(si, StatusCode::OK, "{issued}");
     assert_eq!(issued["terms"]["kind"], "net_30");
-    assert_eq!(issued["subject"], "Tucano Time invoice for 08 2026");
+    assert_eq!(issued["subject"], "TatuTime invoice for 08 2026");
 
     let (_sp, _h, pdf) = raw_req(&app, "GET", &format!("/api/invoices/{iid}/pdf")).await;
     let joined = pdf_joined(&pdf);
@@ -2863,7 +2863,7 @@ async fn invoice_pdf_prints_the_document_sections_and_terms_suffix() {
     // Subject row (the document name is the plain title).
     assert!(joined.contains("Subject:"), "subject label: {joined}");
     assert!(
-        joined.contains("Tucano Time invoice for 08 2026"),
+        joined.contains("TatuTime invoice for 08 2026"),
         "subject text: {joined}"
     );
     // Invoice-for block: heading, name, one line per address part, company id.
@@ -2908,7 +2908,7 @@ async fn invoice_pdf_prints_the_document_sections_and_terms_suffix() {
 #[tokio::test]
 async fn draft_pdf_preview_prints_the_live_subject() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
+    let c = new_customer(&app, "TatuTime", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
     json_req(
@@ -2931,7 +2931,7 @@ async fn draft_pdf_preview_prints_the_live_subject() {
     let (sd, doc) = json_req(&app, "GET", &format!("/api/invoices/{iid}/document"), None).await;
     assert_eq!(sd, StatusCode::OK, "{doc}");
     let subject = doc["subject"].as_str().unwrap();
-    assert_eq!(subject, "Tucano Time invoice for 08 2026");
+    assert_eq!(subject, "TatuTime invoice for 08 2026");
 
     let (_sp, _h, pdf) = raw_req(&app, "GET", &format!("/api/invoices/{iid}/pdf/preview")).await;
     let joined = pdf_joined(&pdf);
@@ -2991,21 +2991,21 @@ async fn invoice_pdf_prints_one_block_per_payment_rail() {
         "POST",
         "/api/customers",
         Some(json!({
-            "name": "Tucano Time",
+            "name": "TatuTime",
             "currency": "EUR",
             "default_rate_minor": 6000,
-            "email": "rails@tucano.test",
+            "email": "rails@tatu.test",
             "payment_details": {
                 "rails": [
                     {
                         "currency": "EUR",
-                        "account_name": "Tucano Time",
+                        "account_name": "TatuTime",
                         "iban": "EX000000000000000000",
                         "bic": "EXAMPLEB"
                     },
                     {
                         "currency": "USD",
-                        "account_name": "Tucano Time",
+                        "account_name": "TatuTime",
                         "account_number": "000000000000",
                         "routing_number": "000000000",
                         "swift": "EXAMPLEB"
@@ -3056,7 +3056,7 @@ async fn invoice_pdf_prints_one_block_per_payment_rail() {
     assert!(joined.contains("000000000"), "{joined}");
     // The credit line is the last footer line.
     assert!(
-        joined.contains("Generated by TucanoTime on TucanoTime. Page 1 of 1"),
+        joined.contains("Generated by TatuTime on TatuTime. Page 1 of 1"),
         "{joined}"
     );
 

@@ -1,4 +1,4 @@
-// calendar.js — TucanoTime GUI module (ES-module split of web/app.js, #264).
+// calendar.js — TatuTime GUI module (ES-module split of web/app.js, #264).
 // Moved from the original monolithic app.js; behaviour is unchanged.
 
 

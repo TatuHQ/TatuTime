@@ -79,7 +79,7 @@ await postJson(BASE + '/api/auth/bootstrap', { name: 'Admin', email: 'admin@test
 const loginRes = await postJson(BASE + '/api/auth/login', { email: 'admin@test.local', password: 'supersecret1' });
 SESSION_COOKIE = (loginRes.headers.get('set-cookie') || '').split(';')[0];
 // NOTE: no API seeding of customers/projects here — the first-run setup
-// wizard (#111) creates Tucano Time + P-9 through the real UI below, exercising the
+// wizard (#111) creates TatuTime + P-9 through the real UI below, exercising the
 // trigger, the steps and the prefill rule end-to-end.
 
 // Helpers for the waiting convention (#265).
@@ -210,8 +210,8 @@ await waitFor(() => !byId('wz-step-1').hidden && byId('wz-step-0').hidden, {
 check('Next advances to the customer step', !window.document.getElementById('wz-step-1').hidden && window.document.getElementById('wz-step-0').hidden);
 // #229: the first-customer field is prefilled with the example name, so a
 // fresh setup needs no typing (still editable).
-check('customer name is prefilled with the Tucano Time example',
-  window.document.getElementById('wz-cust-name').value === 'Tucano Time');
+check('customer name is prefilled with the TatuTime example',
+  window.document.getElementById('wz-cust-name').value === 'TatuTime');
 // Clear the prefill and submit: an empty name must refuse to save.
 window.document.getElementById('wz-cust-name').value = '';
 window.document.getElementById('wz-next').dispatchEvent(new window.Event('click', { bubbles: true }));
@@ -221,12 +221,12 @@ await waitFor(() => !byId('wz-error').hidden && !byId('wz-step-1').hidden, {
 check('empty customer name shows an inline error (no silent partial save)',
   !window.document.getElementById('wz-error').hidden
   && !window.document.getElementById('wz-step-1').hidden);
-window.document.getElementById('wz-cust-name').value = 'Tucano Time';
+window.document.getElementById('wz-cust-name').value = 'TatuTime';
 window.document.getElementById('wz-cust-currency').value = 'eur';
 window.document.getElementById('wz-cust-rate').value = '60.00';
 window.document.getElementById('wz-next').dispatchEvent(new window.Event('click', { bubbles: true }));
 await waitFor(() => !byId('wz-step-2').hidden && byId('wz-project-currency').value === 'EUR', {
-  message: 'the wizard to save Tucano Time and prefill the project step',
+  message: 'the wizard to save TatuTime and prefill the project step',
 });
 check('wizard advanced to the project step', !window.document.getElementById('wz-step-2').hidden);
 check('project currency/rate prefilled from the customer default (#11)',
@@ -235,11 +235,11 @@ check('project currency/rate prefilled from the customer default (#11)',
 window.document.getElementById('wz-project-code').value = 'p-9';
 window.document.getElementById('wz-project-name').value = 'Portal';
 window.document.getElementById('wz-next').dispatchEvent(new window.Event('click', { bubbles: true }));
-await waitFor(() => !byId('wz-step-3').hidden && byId('wz-done-text').textContent.includes('Tucano Time'), {
+await waitFor(() => !byId('wz-step-3').hidden && byId('wz-done-text').textContent.includes('TatuTime'), {
   message: 'the wizard to create the project and reach the done step',
 });
 const custs111 = (await (await fetch(BASE + '/api/customers', { headers: { Cookie: SESSION_COOKIE } })).json()).customers;
-const cust111 = custs111.find((c) => c.name === 'Tucano Time');
+const cust111 = custs111.find((c) => c.name === 'TatuTime');
 const projs111 = cust111
   ? (await (await fetch(`${BASE}/api/customers/${cust111.id}/projects`, { headers: { Cookie: SESSION_COOKIE } })).json()).projects
   : [];
@@ -248,7 +248,7 @@ check('wizard created customer + project through the real routes',
   && projs111.some((p) => p.code === 'P-9' && p.currency === 'EUR' && p.rate_minor === 6000));
 check('done step names what was set up',
   !window.document.getElementById('wz-step-3').hidden
-  && window.document.getElementById('wz-done-text').textContent.includes('Tucano Time'));
+  && window.document.getElementById('wz-done-text').textContent.includes('TatuTime'));
 // #141: the last step used to hide the wizard's only dismiss button.
 check('the wizard keeps a visible Cancel on its last step (#141)',
   (() => {
@@ -291,16 +291,16 @@ check('wizard never auto-opens again once a customer exists',
     || dom2.window.document.getElementById('wizard-dialog').hasAttribute('open')));
 dom2.window.close();
 
-// ---- picker shows the Tucano Time the wizard just created ----
+// ---- picker shows the TatuTime the wizard just created ----
 const customerSelect = window.document.getElementById('entry-customer');
-check('customer picker populated', [...customerSelect.options].some((o) => o.textContent.includes('Tucano Time')));
+check('customer picker populated', [...customerSelect.options].some((o) => o.textContent.includes('TatuTime')));
 
-// ---- pick Tucano Time, load its project, fill the entry form and submit ----
-const custOpt = [...customerSelect.options].find((o) => o.textContent.includes('Tucano Time'));
+// ---- pick TatuTime, load its project, fill the entry form and submit ----
+const custOpt = [...customerSelect.options].find((o) => o.textContent.includes('TatuTime'));
 customerSelect.value = custOpt.value;
 customerSelect.dispatchEvent(new window.Event('change', { bubbles: true }));
 await waitFor(() => [...byId('entry-project').options].some((o) => o.value === 'P-9'), {
-  message: 'the project picker to load the Tucano Time projects',
+  message: 'the project picker to load the TatuTime projects',
 });
 
 const projectSelect = window.document.getElementById('entry-project');
@@ -436,7 +436,7 @@ const mainCell = rows[0].querySelector('.entry-main');
 // a diary entry instead of two parallel columns.
 check(
   'entry row combines project / customer, task and notes in one cell',
-  mainCell.textContent.includes('P-9') && mainCell.textContent.includes('Tucano Time')
+  mainCell.textContent.includes('P-9') && mainCell.textContent.includes('TatuTime')
   && mainCell.textContent.includes('gui-test entry'),
 );
 const stripDays = window.document.querySelectorAll('#week-strip .ws-day');
@@ -543,11 +543,11 @@ window.document.getElementById('week-date').value = '2026-11-11';
 window.document.getElementById('week-date').dispatchEvent(new window.Event('change', { bubbles: true }));
 await waitFor(() => {
   const row = window.document.querySelector('#week-table tbody tr');
-  return !!row && row.textContent.includes('Tucano Time') && row.textContent.includes('P-9');
-}, { message: 'the week grid to render the Tucano Time / P-9 row' });
+  return !!row && row.textContent.includes('TatuTime') && row.textContent.includes('P-9');
+}, { message: 'the week grid to render the TatuTime / P-9 row' });
 const wkRows = window.document.querySelectorAll('#week-table tbody tr');
 const wkRowText = wkRows[0] ? wkRows[0].textContent : '';
-check('week grid renders the Tucano Time / P-9 row', wkRowText.includes('Tucano Time') && wkRowText.includes('P-9'));
+check('week grid renders the TatuTime / P-9 row', wkRowText.includes('TatuTime') && wkRowText.includes('P-9'));
 const cellOf = (date) => window.document.querySelector(`#week-table input.cell-input[data-date="${date}"]`);
 const filledCell = cellOf('2026-11-11');
 check('filled cell is an editable input holding 4.25', filledCell && filledCell.value === '4.25');
@@ -669,13 +669,13 @@ check('panels lead with their action, not a duplicate H2',
   && window.document.querySelector('#panel-reports h2') === null
   && window.document.querySelector('#panel-expenses .ts-head button').id === 'expense-new'
   && window.document.querySelector('#panel-settings > .settings-head h2') === null);
-// Click "Projects" on the Tucano Time row: cross-navigation filters the Projects
+// Click "Projects" on the TatuTime row: cross-navigation filters the Projects
 // section (#182) — no shared selection state anymore. Scope the button to that
 // row: the table is sorted by name and Globex comes first, so a document-wide
 // first match would open Globex's projects instead.
-const tucanoRow = [...window.document.querySelectorAll('#customer-table tbody tr')]
-  .find((row) => row.textContent.includes('Tucano Time'));
-const projBtn = [...tucanoRow.querySelectorAll('button')].find((b) => b.textContent === 'Projects');
+const tatuRow = [...window.document.querySelectorAll('#customer-table tbody tr')]
+  .find((row) => row.textContent.includes('TatuTime'));
+const projBtn = [...tatuRow.querySelectorAll('button')].find((b) => b.textContent === 'Projects');
 projBtn.dispatchEvent(new window.Event('click', { bubbles: true }));
 // The checks below read the *rendered* scoped list (scope label, empty state and
 // rows). Waiting only for the panel and the picker raced the table re-render the
@@ -689,9 +689,9 @@ const projectsScopedToCustomer = () => !byId('panel-projects').hidden
   && byId('project-scope-label') === null
   && byId('projects-empty-state').hidden
   && scopedProjectRows().length >= 1
-  && scopedProjectRows().every((r) => r.cells[1].textContent === 'Tucano Time');
+  && scopedProjectRows().every((r) => r.cells[1].textContent === 'TatuTime');
 await waitFor(projectsScopedToCustomer, {
-  message: 'the Projects section to render rows scoped to Tucano Time',
+  message: 'the Projects section to render rows scoped to TatuTime',
 });
 check('row action opens the Projects section scoped to that customer',
   !window.document.getElementById('panel-projects').hidden
@@ -699,11 +699,11 @@ check('row action opens the Projects section scoped to that customer',
   && window.document.getElementById('project-scope-label') === null);
 check('scoped list renders that customer only (empty state replaced by rows)',
   window.document.getElementById('projects-empty-state').hidden
-  && [...window.document.querySelectorAll('#project-table tbody tr')].every((r) => r.cells[1].textContent === 'Tucano Time'));
+  && [...window.document.querySelectorAll('#project-table tbody tr')].every((r) => r.cells[1].textContent === 'TatuTime'));
 const projectDialog = window.document.getElementById('project-dialog');
 window.document.getElementById('project-new').click();
 check('+ Project opens its popup with selected customer context',
-  projectDialog.open && window.document.getElementById('project-dialog-parent').textContent === 'Tucano Time'
+  projectDialog.open && window.document.getElementById('project-dialog-parent').textContent === 'TatuTime'
   && window.document.activeElement.id === 'project-code');
 const projectParent = window.document.getElementById('project-parent-customer');
 check('project popup preselects its customer dropdown', projectParent.value === custOpt.value && !projectParent.disabled);
@@ -762,7 +762,7 @@ const tasksScopedToMkt2 = () => !byId('panel-tasks').hidden
   && byId('task-scope-label') === null
   && !byId('tasks-empty-state').hidden;
 await waitFor(tasksScopedToMkt2, {
-  message: 'the Tasks section to render scoped to Tucano Time / MKT-2',
+  message: 'the Tasks section to render scoped to TatuTime / MKT-2',
 });
 check('project row Tasks action opens the Tasks section with both filters set',
   !window.document.getElementById('panel-tasks').hidden
@@ -803,11 +803,11 @@ check('project row Tasks action opens the Tasks section with both filters set',
 }
 const taskDialog = window.document.getElementById('task-dialog');
 window.document.getElementById('task-new').click();
-await waitFor(() => dialogOpen(taskDialog) && byId('task-dialog-parent').textContent === 'Tucano Time / MKT-2', {
+await waitFor(() => dialogOpen(taskDialog) && byId('task-dialog-parent').textContent === 'TatuTime / MKT-2', {
   message: 'the task popup to open with its customer and project path',
 });
 check('+ Task opens its popup with the customer/project path',
-  taskDialog.open && window.document.getElementById('task-dialog-parent').textContent === 'Tucano Time / MKT-2'
+  taskDialog.open && window.document.getElementById('task-dialog-parent').textContent === 'TatuTime / MKT-2'
   && window.document.activeElement.id === 'task-code');
 const taskCustomer = window.document.getElementById('task-parent-customer');
 const taskProject = window.document.getElementById('task-parent-project');
@@ -823,7 +823,7 @@ check('changing task customer clears unrelated project options',
 taskCustomer.value = custOpt.value;
 taskCustomer.dispatchEvent(new window.Event('change', { bubbles: true }));
 await waitFor(() => [...taskProject.options].some((option) => option.value === 'MKT-2'), {
-  message: 're-selecting Tucano Time to restore the MKT-2 project option',
+  message: 're-selecting TatuTime to restore the MKT-2 project option',
 });
 taskProject.value = 'MKT-2';
 window.document.getElementById('task-code').value = 't1';
@@ -871,7 +871,7 @@ await settle('the task-based entry to save');
 const dec = (await (await fetch(BASE + '/api/entries?date=2026-12-01')).json()).entries;
 check('entry logged against task T1', dec.some((e) => e.task_code === 'T1'));
 
-// ---- INVOICES (#8): create a draft for Tucano Time's billable work with the
+// ---- INVOICES (#8): create a draft for TatuTime's billable work with the
 // tracked-work wizard -- the legacy direct draft generator is gone (#349) --
 // then issue it and confirm the invoiced entry is locked.
 const tabInv = window.document.getElementById('tab-invoices');
@@ -899,7 +899,7 @@ byId('iw-next').dispatchEvent(new window.Event('click', { bubbles: true }));
 await waitFor(() => !byId('iw-step3').hidden, { message: 'the wizard to reach the review step' });
 byId('iw-save').dispatchEvent(new window.Event('click', { bubbles: true }));
 await waitFor(() => !dialogOpen(byId('invoice-wizard')), {
-  message: 'the wizard to close after saving the Tucano Time draft',
+  message: 'the wizard to close after saving the TatuTime draft',
 });
 await settle('the saved draft to reach the invoice register');
 const invs = (await (await fetch(BASE + '/api/invoices')).json()).invoices;
@@ -1037,20 +1037,20 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
 {
   window.document.getElementById('tab-customers').dispatchEvent(new window.Event('click', { bubbles: true }));
   await waitFor(() => [...window.document.querySelectorAll('#customer-table tbody button')]
-    .some((b) => b.textContent === 'Edit' && b.closest('tr').textContent.includes('Tucano Time')), {
-    message: 'the customer table to render Tucano Time with its Edit button',
+    .some((b) => b.textContent === 'Edit' && b.closest('tr').textContent.includes('TatuTime')), {
+    message: 'the customer table to render TatuTime with its Edit button',
   });
   const custEdit = [...window.document.querySelectorAll('#customer-table tbody button')]
-    .find((b) => b.textContent === 'Edit' && b.closest('tr').textContent.includes('Tucano Time'));
+    .find((b) => b.textContent === 'Edit' && b.closest('tr').textContent.includes('TatuTime'));
   custEdit.dispatchEvent(new window.Event('click', { bubbles: true }));
   await waitFor(() => dialogOpen(byId('customer-dialog')), { message: 'the customer edit dialog to open' });
-  window.document.getElementById('pay-bank-name').value = 'Tucano Bank';
+  window.document.getElementById('pay-bank-name').value = 'Tatu Bank';
   window.document.getElementById('pay-iban').value = 'EX000000000000000000';
   window.document.getElementById('pay-reference').value = 'Invoice number';
   window.document.getElementById('pay-instructions').value = 'Bank transfer in EUR, please.';
   window.document.getElementById('customer-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
-  await settle('the payment details on Tucano Time to save');
-  const custAfter = (await (await fetch(BASE + '/api/customers', { headers: { Cookie: SESSION_COOKIE } })).json()).customers.find((c) => c.name === 'Tucano Time');
+  await settle('the payment details on TatuTime to save');
+  const custAfter = (await (await fetch(BASE + '/api/customers', { headers: { Cookie: SESSION_COOKIE } })).json()).customers.find((c) => c.name === 'TatuTime');
   check('customer form saved payment details',
     !!custAfter && !!custAfter.payment_details && custAfter.payment_details.iban === 'EX000000000000000000');
 }
@@ -1125,7 +1125,7 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
     window.document.getElementById('ip-getpaid-facts').textContent.includes('Outstanding'));
   const payBox = window.document.getElementById('ip-getpaid-pay').textContent;
   check('Get paid box pulls in the customer payment details',
-    payBox.includes('Tucano Bank') && payBox.includes('IBAN') && payBox.includes('EX000000000000000000')
+    payBox.includes('Tatu Bank') && payBox.includes('IBAN') && payBox.includes('EX000000000000000000')
     && window.document.getElementById('ip-getpaid-instr').textContent.includes('Bank transfer in EUR'));
   check('Get paid box offers manual settlement, never a provider button',
     window.document.getElementById('ip-record-payment').hidden === false
@@ -1842,7 +1842,7 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
 // re-pulling left `state.customers` without any address, so the dialog opened
 // with no candidates and this smoke failed.
 const custObj = (await (await fetch(BASE + `/api/customers/${custOpt.value}`, { headers: { Cookie: SESSION_COOKIE } })).json());
-custObj.email = 'billing@tucanotime.test';
+custObj.email = 'billing@tatutime.test';
 const putC = await fetch(`${BASE}/api/customers/${custOpt.value}`, {
   method: 'PUT',
   headers: { 'content-type': 'application/json', Cookie: SESSION_COOKIE },
@@ -1851,18 +1851,18 @@ const putC = await fetch(`${BASE}/api/customers/${custOpt.value}`, {
     currency: custObj.currency,
     default_rate_minor: custObj.default_rate_minor,
     active: custObj.active,
-    email: 'billing@tucanotime.test',
-    contacts: [{ name: 'Accounts', role: 'Billing', email: 'billing@tucanotime.test', billing: true }],
+    email: 'billing@tatutime.test',
+    contacts: [{ name: 'Accounts', role: 'Billing', email: 'billing@tatutime.test', billing: true }],
   }),
 });
 const putBody = await putC.json();
-check('customer email round-trips via API', putC.status === 200 && putBody.email === 'billing@tucanotime.test');
+check('customer email round-trips via API', putC.status === 200 && putBody.email === 'billing@tatutime.test');
 check('the email smoke seeds a billing contact (#139)',
   putBody.contacts.length === 1 && putBody.contacts[0].billing === true
-  && putBody.contacts[0].email === 'billing@tucanotime.test');
+  && putBody.contacts[0].email === 'billing@tatutime.test');
 const emailRes = await fetch(`${BASE}/api/invoices/${custInv.id}/email`, { method: 'POST', headers: { Cookie: SESSION_COOKIE } });
 const emailBody = await emailRes.json();
-check('invoice email endpoint sends to the billing address', emailRes.status === 200 && emailBody.sent_to === 'billing@tucanotime.test');
+check('invoice email endpoint sends to the billing address', emailRes.status === 200 && emailBody.sent_to === 'billing@tatutime.test');
 
 // The GUI shows an Email button on the issued invoice. It is now a two-step
 // flow (#139): the row action opens the recipient dialog with the customer's
@@ -1890,7 +1890,7 @@ if (emailBtn) {
   const recipients = [...byId('send-email-recipients').querySelectorAll('input[type="checkbox"]')];
   check('the Email action opens the recipient dialog with the billing address checked (#139)',
     recipients.length === 1
-    && recipients[0].value === 'billing@tucanotime.test'
+    && recipients[0].value === 'billing@tatutime.test'
     && recipients[0].checked === true);
   check('opening the recipient dialog sends nothing (#139)',
     byId('live-region').textContent === liveBefore);
@@ -1939,7 +1939,7 @@ if (emailBtn) {
     await waitFor(() => dialogOpen(byId('message-dialog')), { message: 'the delivery-record popup to open' });
     const rec = byId('message-fields').textContent;
     check('View message shows the retained recipient, subject and From (#349)',
-      rec.includes('billing@tucanotime.test') && rec.includes('Subject') && rec.includes('From'));
+      rec.includes('billing@tatutime.test') && rec.includes('Subject') && rec.includes('From'));
     check('View message never pretends to show the message body (#349)',
       /message body is not retained/.test(byId('message-note').textContent));
     check('the delivery record is text only, never injected markup (#349)',
@@ -2385,7 +2385,7 @@ await waitFor(() => window.document.querySelector('#week-table input.cell-input[
   message: 'the submitted week to render its locked cell',
 });
 const janRow = [...window.document.querySelectorAll('#week-table tbody tr')].find(
-  (r) => r.textContent.includes('P-9') && r.textContent.includes('Tucano Time'),
+  (r) => r.textContent.includes('P-9') && r.textContent.includes('TatuTime'),
 );
 const lockedCell = janRow && janRow.querySelector('input.cell-input[data-date="2027-01-05"]');
 check('submitted-week cell holds the hours', !!lockedCell && lockedCell.value === '2.00');
@@ -2441,19 +2441,19 @@ window.document.getElementById('settings-tab-invoice-template').dispatchEvent(ne
 // ---- APPEARANCE & MESSAGES (#146) ----
 {
   const set = (id, v) => { const el = window.document.getElementById(id); el.value = v; };
-  set('org-from', 'Tucano Billing Desk');
-  set('org-reply', 'invoices@tucanotime.test');
+  set('org-from', 'Tatu Billing Desk');
+  set('org-reply', 'invoices@tatutime.test');
   set('org-accent', '#e95420');
   window.document.getElementById('org-accent').dispatchEvent(new window.Event('input', { bubbles: true }));
   check('accent swatch paints from validated hex (#146)',
     window.document.getElementById('accent-swatch').style.background.includes('233') ||
     window.document.getElementById('accent-swatch').style.background !== '');
-  window.document.getElementById('org-name').value = 'Tucano Invoice Co';
+  window.document.getElementById('org-name').value = 'Tatu Invoice Co';
   window.document.getElementById('org-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
   await settle('the organisation sender settings to save');
   const o = await (await fetch(BASE + '/api/admin/org', { headers: { Cookie: SESSION_COOKIE } })).json();
   check('sender display name + reply-to + accent persist (#146)',
-    o.from_name === 'Tucano Billing Desk' && o.reply_to === 'invoices@tucanotime.test' && o.accent === '#e95420');
+    o.from_name === 'Tatu Billing Desk' && o.reply_to === 'invoices@tatutime.test' && o.accent === '#e95420');
   // Invalid reply-to refuses with an inline error and stores nothing.
   set('org-reply', 'not-an-email');
   window.document.getElementById('org-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
@@ -2464,19 +2464,19 @@ window.document.getElementById('settings-tab-invoice-template').dispatchEvent(ne
   check('invalid Reply-To shows inline error and persists nothing (#146)',
     !window.document.getElementById('org-error').hidden
     && /reply/i.test(window.document.getElementById('org-error').textContent)
-    && o2.reply_to === 'invoices@tucanotime.test');
-  set('org-reply', 'invoices@tucanotime.test');
+    && o2.reply_to === 'invoices@tatutime.test');
+  set('org-reply', 'invoices@tatutime.test');
 }
 
 check('company identity form saves and reloads (#138)', await (async () => {
-  window.document.getElementById('org-name').value = 'Tucano SRL';
+  window.document.getElementById('org-name').value = 'Tatu SRL';
   window.document.getElementById('org-legal').value = 'BE0987654321';
   window.document.getElementById('org-city').value = 'Milan';
   window.document.getElementById('org-country').value = 'IT';
   window.document.getElementById('org-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
   await settle('the company identity form to save');
   const o = await (await fetch(BASE + '/api/admin/org', { headers: { Cookie: SESSION_COOKIE } })).json();
-  return o.name === 'Tucano SRL' && o.legal_id === 'BE0987654321' && o.address.country === 'IT'
+  return o.name === 'Tatu SRL' && o.legal_id === 'BE0987654321' && o.address.country === 'IT'
     && !window.document.getElementById('org-error').hidden === false;
 })());
 const tplCleared = await fetch(BASE + '/api/admin/org', { method: 'PUT', headers: { 'content-type': 'application/json', Cookie: SESSION_COOKIE, 'X-CSRF-Protection': '1' }, body: JSON.stringify({ name: '', legal_id: '', address: null }) });

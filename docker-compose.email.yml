@@ -2,8 +2,8 @@
 #
 #   docker compose -f docker-compose.yml -f docker-compose.email.yml up -d --build
 #
-# Adds Mailpit, a local SMTP sink with a web inbox, and points TucanoTime at
-# it through `TUCANO_SMTP_*`. Every message the app sends (test email, invoice
+# Adds Mailpit, a local SMTP sink with a web inbox, and points TatuTime at
+# it through `TATU_SMTP_*`. Every message the app sends (test email, invoice
 # copy, reminders) is captured instead of delivered:
 #
 #   SMTP (from the app): mailpit:1025   (no auth, plaintext — fine on the
@@ -15,11 +15,11 @@
 # defaults, so clear the stored SMTP settings if the app still sends elsewhere.
 # The base compose file is unchanged; drop this overlay to return to real SMTP.
 services:
-  tucanotime:
+  tatutime:
     environment:
-      TUCANO_SMTP_HOST: ${TUCANO_SMTP_HOST:-mailpit}
-      TUCANO_SMTP_PORT: ${TUCANO_SMTP_PORT:-1025}
-      TUCANO_SMTP_FROM: ${TUCANO_SMTP_FROM:-noreply@tucanotime.local}
+      TATU_SMTP_HOST: ${TATU_SMTP_HOST:-mailpit}
+      TATU_SMTP_PORT: ${TATU_SMTP_PORT:-1025}
+      TATU_SMTP_FROM: ${TATU_SMTP_FROM:-noreply@tatutime.local}
 
   mailpit:
     image: axllent/mailpit:v1.31.6
@@ -27,8 +27,8 @@ services:
     ports:
       # Loopback only: the inbox holds every captured message, including any
       # invitation or invoice copy. Change to 0.0.0.0 only on a trusted LAN.
-      - "${TUCANO_HOST_ADDR:-127.0.0.1}:${TUCANO_MAILPIT_UI_PORT:-8025}:8025"
-      - "${TUCANO_HOST_ADDR:-127.0.0.1}:${TUCANO_MAILPIT_SMTP_PORT:-1025}:1025"
+      - "${TATU_HOST_ADDR:-127.0.0.1}:${TATU_MAILPIT_UI_PORT:-8025}:8025"
+      - "${TATU_HOST_ADDR:-127.0.0.1}:${TATU_MAILPIT_SMTP_PORT:-1025}:1025"
     # Same hardening stance as the app: read-only rootfs, /tmp for the
     # message store, no capabilities, no privilege escalation.
     read_only: true

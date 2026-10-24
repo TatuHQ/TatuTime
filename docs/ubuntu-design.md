@@ -1,12 +1,15 @@
 # Ubuntu and Vanilla Design Review (#181)
 
-> **Tucano Technology brand refresh (0.1.77).** The GUI now carries the Tucano
-> Time product identity: the pixel toucan mark and wordmark in the rail and the
-> sign-in card, the brand favicon, and the warm paper / ink / toucan-orange
-> palette in both themes. The component layer is still Canonical's Vanilla
+> **TatuHQ brand refresh (0.2.0, interim).** The GUI now carries the TatuTime product
+> identity: the pixel tatu mark and wordmark in the rail and the sign-in card,
+> the brand favicon, and the warm paper / ink / tatu-blue palette in both themes.
+> The logo is not final: the pixel tatu is the TatuHQ organisation avatar, used as
+> a placeholder until the official mark is drawn, and the blue accent is derived
+> from it. Replace `web/assets/tatu.png`, the favicons and the palette together
+> when the final artwork lands. The component layer is still Canonical's Vanilla
 > Framework and the Ubuntu variable font; only the colour tokens and the brand
 > lockup changed. The app's own `--bg`, `--surface`, `--fg`, `--brand`,
-> `--accent`, `--brand-deep` and form tokens now resolve to the Tucano palette,
+> `--accent`, `--brand-deep` and form tokens now resolve to the Tatu palette,
 > and the same values are mapped onto Vanilla's `--vf-color-*` variables so
 > cards, tables, inputs, modals and positive buttons inherit them. The earlier
 > Ubuntu-aubergine palette notes in this design record describe the preceding
@@ -315,7 +318,7 @@ moved under `/api` and every view gained a stable path (`spa_page` in
    field rhythm and full-width `p-button--positive` action (#229). The
    wizard's native dialog keeps its modal behaviour and backdrop but is left
    chromeless so the inner `p-card` is the single frame, matching the auth
-   overlay exactly. Its first-customer field is prefilled with the `Tucano
+   overlay exactly. Its first-customer field is prefilled with the `Tatu
    Time` example. Element ids are unchanged, so the jsdom + wizard smoke
    suites stay the gate. The **remaining `.card` sites followed in phase 2c**
    (see the phase-2c note above): all 15 are `p-card`, the Day entry form is
@@ -356,7 +359,7 @@ moved under `/api` and every view gained a stable path (`spa_page` in
 
 - Ubuntu variable body font, 16px text, restrained heading weights and no
   negative letter spacing or viewport-scaled type.
-- Official neutral/positive buttons; the Tucano orange is the primary action, the burnt orange a navigation accent, and the rail carries the toucan wordmark.
+- Official neutral/positive buttons; the tatu blue is the primary action, the deep blue a navigation accent, and the rail carries the pixel tatu wordmark.
 - Official navigation, previous/next, play/stop, edit/delete, copy and lock/note
   icons with decorative `aria-hidden` markup and preserved control labels.
 - Stronger field boundaries, stable control sizes, clear selected states,

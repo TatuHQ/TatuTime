@@ -5,21 +5,21 @@ use axum::http::Request;
 use axum::http::StatusCode;
 use serde_json::json;
 use std::sync::Arc;
+use tatu_time::api::AppState;
+use tatu_time::auth::Session;
+use tatu_time::store::Store;
 use tower::ServiceExt;
-use tucano_time::api::AppState;
-use tucano_time::auth::Session;
-use tucano_time::store::Store;
 
 #[tokio::test]
 async fn sso_jit_provisions_and_logs_in() {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(dir.path().join("data")).unwrap();
-    let idp = tucano_time::sso::SignedTokenIdp::new(
+    let idp = tatu_time::sso::SignedTokenIdp::new(
         "okta-test",
         "stub-secret",
-        vec!["tucanotime.test".into()],
+        vec!["tatutime.test".into()],
     );
-    let registry = Arc::new(tucano_time::sso::SsoRegistry::new(vec![Arc::new(idp)]));
+    let registry = Arc::new(tatu_time::sso::SsoRegistry::new(vec![Arc::new(idp)]));
     let state = AppState::with_session(
         store,
         Arc::new(Session::new(
@@ -29,7 +29,7 @@ async fn sso_jit_provisions_and_logs_in() {
         )),
     )
     .with_sso(registry);
-    let router = tucano_time::build_router(state);
+    let router = tatu_time::build_router(state);
 
     // Local admin exists FIRST — SSO runs alongside local login (#32 DoD).
     let (sa, _, _) = raw(
@@ -50,16 +50,16 @@ async fn sso_jit_provisions_and_logs_in() {
         &vec![json!("okta-test")]
     );
 
-    let idp = tucano_time::sso::SignedTokenIdp::new(
+    let idp = tatu_time::sso::SignedTokenIdp::new(
         "okta-test",
         "stub-secret",
-        vec!["tucanotime.test".into()],
+        vec!["tatutime.test".into()],
     );
 
     // A valid signed assertion JIT-creates the user (member) and logs in.
-    let claims = tucano_time::sso::TokenClaims {
+    let claims = tatu_time::sso::TokenClaims {
         sub: "u1".into(),
-        email: "Newbie@tucanotime.test".into(),
+        email: "Newbie@tatutime.test".into(),
         name: "New Bie".into(),
         groups: vec![],
         exp: chrono::Utc::now().timestamp() + 300,
@@ -74,7 +74,7 @@ async fn sso_jit_provisions_and_logs_in() {
     )
     .await;
     assert_eq!(s1, StatusCode::OK, "{user}");
-    assert_eq!(user["email"], "newbie@tucanotime.test");
+    assert_eq!(user["email"], "newbie@tatutime.test");
     assert_eq!(user["role"], "member");
 
     // The session cookie works like a local one.
@@ -120,21 +120,21 @@ async fn sso_jit_provisions_and_logs_in() {
 async fn sso_admin_group_setting_is_resolved_for_new_and_existing_users() {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(dir.path().join("data")).unwrap();
-    let idp = tucano_time::sso::SignedTokenIdp::new(
+    let idp = tatu_time::sso::SignedTokenIdp::new(
         "okta-test",
         "stub-secret",
-        vec!["tucanotime.test".into()],
+        vec!["tatutime.test".into()],
     );
     std::fs::write(
         store.root().join("config.json"),
         r#"{"sso_admin_group":"tt-admins"}"#,
     )
     .unwrap();
-    let registry = Arc::new(tucano_time::sso::SsoRegistry::new(vec![Arc::new(
-        tucano_time::sso::SignedTokenIdp::new(
+    let registry = Arc::new(tatu_time::sso::SsoRegistry::new(vec![Arc::new(
+        tatu_time::sso::SignedTokenIdp::new(
             "okta-test",
             "stub-secret",
-            vec!["tucanotime.test".into()],
+            vec!["tatutime.test".into()],
         ),
     )]));
     let state = AppState::with_session(
@@ -147,10 +147,10 @@ async fn sso_admin_group_setting_is_resolved_for_new_and_existing_users() {
     )
     .with_sso(registry)
     .with_env(Arc::new(|_| None));
-    let router = tucano_time::build_router(state);
-    let claims = |groups: Vec<String>| tucano_time::sso::TokenClaims {
+    let router = tatu_time::build_router(state);
+    let claims = |groups: Vec<String>| tatu_time::sso::TokenClaims {
         sub: "u1".into(),
-        email: "member@tucanotime.test".into(),
+        email: "member@tatutime.test".into(),
         name: "Member".into(),
         groups,
         exp: chrono::Utc::now().timestamp() + 300,
@@ -189,8 +189,8 @@ async fn sso_empty_allowed_domains_denies_and_provisions_nothing() {
     // rejected and no account is JIT-provisioned (the old allow-all is gone).
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(dir.path().join("data")).unwrap();
-    let idp = tucano_time::sso::SignedTokenIdp::new("okta-test", "stub-secret", vec![]);
-    let registry = Arc::new(tucano_time::sso::SsoRegistry::new(vec![Arc::new(idp)]));
+    let idp = tatu_time::sso::SignedTokenIdp::new("okta-test", "stub-secret", vec![]);
+    let registry = Arc::new(tatu_time::sso::SsoRegistry::new(vec![Arc::new(idp)]));
     let state = AppState::with_session(
         store,
         Arc::new(Session::new(
@@ -200,7 +200,7 @@ async fn sso_empty_allowed_domains_denies_and_provisions_nothing() {
         )),
     )
     .with_sso(registry);
-    let router = tucano_time::build_router(state);
+    let router = tatu_time::build_router(state);
 
     let (sa, _, _) = raw(
         &router,
@@ -215,10 +215,10 @@ async fn sso_empty_allowed_domains_denies_and_provisions_nothing() {
 
     // A correctly-signed assertion but an empty allow-list: rejected, never
     // provisioned.
-    let idp = tucano_time::sso::SignedTokenIdp::new("okta-test", "stub-secret", vec![]);
-    let claims = tucano_time::sso::TokenClaims {
+    let idp = tatu_time::sso::SignedTokenIdp::new("okta-test", "stub-secret", vec![]);
+    let claims = tatu_time::sso::TokenClaims {
         sub: "u1".into(),
-        email: "Intruder@tucanotime.test".into(),
+        email: "Intruder@tatutime.test".into(),
         name: "Intruder".into(),
         groups: vec![],
         exp: chrono::Utc::now().timestamp() + 300,

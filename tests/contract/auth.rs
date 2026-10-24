@@ -5,9 +5,9 @@ use axum::http::header;
 use serde_json::Value;
 use serde_json::json;
 use std::sync::Arc;
-use tucano_time::api::AppState;
-use tucano_time::auth::Session;
-use tucano_time::store::Store;
+use tatu_time::api::AppState;
+use tatu_time::auth::Session;
+use tatu_time::store::Store;
 
 // ------------------------------------------------------------------- auth --
 
@@ -566,7 +566,7 @@ async fn revocation_is_visible_immediately_across_instances() {
     assert_eq!(s1, StatusCode::OK, "session works before any revocation");
 
     // Second instance (its own in-memory revocations) sharing the data dir.
-    let b = app_locked(dir.path(), Arc::new(tucano_time::lock::NoLocks)).await;
+    let b = app_locked(dir.path(), Arc::new(tatu_time::lock::NoLocks)).await;
     let (s2, _, _) = raw(&b.router, "POST", "/api/auth/logout", None, Some(&a.cookie)).await;
     assert_eq!(s2, StatusCode::NO_CONTENT);
 
@@ -594,7 +594,7 @@ async fn auth_status_is_public_and_reports_initialisation() {
 async fn bootstrap_weak_password_is_422_through_the_endpoint() {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(dir.path().join("data")).unwrap();
-    let router = tucano_time::build_router(AppState::with_session(
+    let router = tatu_time::build_router(AppState::with_session(
         store,
         Arc::new(Session::new(
             b"test-session-secret-0000000000000032".to_vec(),
@@ -628,7 +628,7 @@ async fn an_undecodable_user_document_does_not_lock_the_instance_out() {
     std::fs::create_dir_all(root.join("users")).unwrap();
     std::fs::write(root.join("users").join("broken.json"), b"not json").unwrap();
     let store = Store::open(&root).unwrap();
-    let router = tucano_time::build_router(AppState::with_session(
+    let router = tatu_time::build_router(AppState::with_session(
         store,
         Arc::new(Session::new(
             b"test-session-secret-0000000000000032".to_vec(),

@@ -104,7 +104,7 @@ async fn brand_assets_are_served_with_image_mime() {
     let (client, _dir) = app().await;
 
     for (path, expected) in [
-        ("/assets/tucano.png", "image/png"),
+        ("/assets/tatu.png", "image/png"),
         ("/assets/favicon-32x32.png", "image/png"),
         ("/assets/favicon-16x16.png", "image/png"),
         ("/favicon.ico", "image/x-icon"),

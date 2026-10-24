@@ -213,7 +213,7 @@ mod tests {
         store
             .put_customer(&Customer {
                 id: cid,
-                name: "Tucano Time".into(),
+                name: "TatuTime".into(),
                 currency: Currency("EUR".into()),
                 default_rate_minor: 6000,
                 active: true,
@@ -265,7 +265,7 @@ mod tests {
         let (cid, p) = proj(Some(1000)); // budget 10h
         let customer = Customer {
             id: cid,
-            name: "Tucano Time".into(),
+            name: "TatuTime".into(),
             currency: Currency("EUR".into()),
             default_rate_minor: 6000,
             active: true,
@@ -312,7 +312,7 @@ mod tests {
         p.budget_amount_minor = Some(10_000); // 100.00 in minor units
         let customer = Customer {
             id: cid,
-            name: "Tucano Time".into(),
+            name: "TatuTime".into(),
             currency: Currency("EUR".into()),
             default_rate_minor: 6000, // 60.00/h
             active: true,

@@ -9,10 +9,10 @@
         "args": [
           "build",
           "--bin",
-          "tucano-time"
+          "tatu-time"
         ],
         "filter": {
-          "name": "tucano-time",
+          "name": "tatu-time",
           "kind": "bin"
         }
       },
@@ -20,8 +20,8 @@
       "cwd": "${workspaceFolder}",
       "env": {
         "RUST_BACKTRACE": "1",
-        "TUCANO_DATA_DIR": "${workspaceFolder}/Data",
-        "TUCANO_PORT": "8080"
+        "TATU_DATA_DIR": "${workspaceFolder}/Data",
+        "TATU_PORT": "8080"
       },
       "sourceLanguages": [
         "rust"
@@ -44,7 +44,7 @@
           "--lib"
         ],
         "filter": {
-          "name": "tucano-time",
+          "name": "tatu-time",
           "kind": "lib"
         }
       },

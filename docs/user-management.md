@@ -40,7 +40,7 @@ Enable a provider with its vault secret (`oidc.client_secret` or
 with `sso_allowed_domains`. That setting resolves **environment >
 `config.json` > vault**:
 
-1. `TUCANO_SSO_ALLOWED_DOMAINS`;
+1. `TATU_SSO_ALLOWED_DOMAINS`;
 2. `sso_allowed_domains` in `config.json`;
 3. the vault key `sso.allowed_domains` as the fallback.
 
@@ -56,13 +56,13 @@ A verified assertion for a new user provisions a member account just in time;
 the IdP is the password store, so the local password is unusable. Provider
 secrets resolve from the vault first and the environment second.
 
-**Admin-group limitation.** `TUCANO_SSO_ADMIN_GROUP` is not read uniformly. A
+**Admin-group limitation.** `TATU_SSO_ADMIN_GROUP` is not read uniformly. A
 newly provisioned user takes the value through the configuration resolver
 (environment > `config.json` > default), while an existing user signing in again
 has their role refreshed from the **environment variable only**. Set
-`TUCANO_SSO_ADMIN_GROUP` if the mapping must apply to existing SSO users. See
+`TATU_SSO_ADMIN_GROUP` if the mapping must apply to existing SSO users. See
 [Configuration](configuration.md#known-limitations).
 
 ---
 
-Last verified against TucanoTime 0.1.41.
+Last verified against TatuTime 0.1.41.

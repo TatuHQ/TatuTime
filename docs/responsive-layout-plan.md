@@ -1,6 +1,6 @@
 # Responsive GUI delivery plan
 
-Tracking issue: [#376](https://github.com/TucanoTechnology/TucanoTime/issues/376).
+Tracking issue: [#376](https://github.com/TatuHQ/TatuTime/issues/376).
 Status: implemented on `feature/responsive-layout-plan`; awaiting visual review and merge.
 The issue owns scope and completion; this document records implementation guidance.
 
@@ -87,8 +87,8 @@ invoices' hidden advanced-billing sections in the visibility regression checks,
 not in a feature-enablement exercise. Apply the same rule to Reports/Approvals.
 
 First implementation tickets:
-- [R1: baselines and regression gates (#377)](https://github.com/TucanoTechnology/TucanoTime/issues/377)
-- [R2: accessible drawer and collapsible navigation (#378)](https://github.com/TucanoTechnology/TucanoTime/issues/378), blocked by #377
+- [R1: baselines and regression gates (#377)](https://github.com/TatuHQ/TatuTime/issues/377)
+- [R2: accessible drawer and collapsible navigation (#378)](https://github.com/TatuHQ/TatuTime/issues/378), blocked by #377
 
 ## Preventing realignment churn
 

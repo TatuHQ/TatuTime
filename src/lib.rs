@@ -291,7 +291,7 @@ pub fn acquire_server_lock(root: &std::path::Path) -> Result<std::fs::File, Stri
     match f.try_lock_exclusive() {
         Ok(()) => Ok(f),
         Err(_) => Err(
-            "another tucano-time instance is running against this data dir \
+            "another tatu-time instance is running against this data dir \
              (stale .server.lock?) — refusing to start a second scheduler"
                 .to_owned(),
         ),

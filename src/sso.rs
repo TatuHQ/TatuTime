@@ -197,7 +197,7 @@ impl IdentityProvider for SignedTokenIdp {
 /// is no protection — a fingerprint is public metadata, so anyone holding the
 /// IdP certificate could sign arbitrary assertions. The adapter therefore
 /// **requires a deployment-shared HMAC secret** (`saml.signing_secret` /
-/// `TUCANO_SAML_SIGNING_SECRET`, vault or env), and the registry refuses to
+/// `TATU_SAML_SIGNING_SECRET`, vault or env), and the registry refuses to
 /// enable SAML without it. When a real XML-DSig verifier attaches to this
 /// port the fingerprint becomes the pin input; the port, JIT provisioning and
 /// endpoints do not change.
@@ -310,7 +310,7 @@ pub fn registry_from_vault(
     let domains = || {
         let c = cfg.get_csv("sso_allowed_domains", &crate::appconfig::process_env);
         if c.is_empty() {
-            domains_from(get("sso.allowed_domains", "TUCANO_SSO_ALLOWED_DOMAINS"))
+            domains_from(get("sso.allowed_domains", "TATU_SSO_ALLOWED_DOMAINS"))
         } else {
             c
         }
@@ -327,9 +327,9 @@ pub fn registry_from_vault(
     // for a partial SSO misconfiguration would take the timesheet offline.
     // Registering nothing also keeps `/auth/sso/providers` honest — the login
     // screen never advertises a provider that can only reject.
-    let oidc_secret = get("oidc.client_secret", "TUCANO_OIDC_CLIENT_SECRET");
-    let saml_fingerprint = get("saml.cert_fingerprint", "TUCANO_SAML_CERT_FINGERPRINT");
-    let saml_secret = get("saml.signing_secret", "TUCANO_SAML_SIGNING_SECRET");
+    let oidc_secret = get("oidc.client_secret", "TATU_OIDC_CLIENT_SECRET");
+    let saml_fingerprint = get("saml.cert_fingerprint", "TATU_SAML_CERT_FINGERPRINT");
+    let saml_secret = get("saml.signing_secret", "TATU_SAML_SIGNING_SECRET");
     if allowed.is_empty() {
         if oidc_secret.is_some() || saml_fingerprint.is_some() {
             tracing::error!(
@@ -337,7 +337,7 @@ pub fn registry_from_vault(
                  sso_allowed_domains is empty — ALL identity providers are DISABLED \
                  (fail-closed, #260): no email domain is trusted, so no account will be \
                  just-in-time provisioned. Set at least one allowed domain via \
-                 TUCANO_SSO_ALLOWED_DOMAINS, config.json 'sso_allowed_domains', or the \
+                 TATU_SSO_ALLOWED_DOMAINS, config.json 'sso_allowed_domains', or the \
                  vault key 'sso.allowed_domains'."
             );
         }
@@ -345,7 +345,7 @@ pub fn registry_from_vault(
     }
 
     if let Some(secret) = oidc_secret {
-        let issuer = get("oidc.issuer", "TUCANO_OIDC_ISSUER").unwrap_or_else(|| "oidc".to_string());
+        let issuer = get("oidc.issuer", "TATU_OIDC_ISSUER").unwrap_or_else(|| "oidc".to_string());
         providers.push(std::sync::Arc::new(SignedTokenIdp::new(
             issuer,
             secret,
@@ -357,7 +357,7 @@ pub fn registry_from_vault(
         match saml_secret {
             Some(secret) => {
                 let issuer =
-                    get("saml.issuer", "TUCANO_SAML_ISSUER").unwrap_or_else(|| "saml".to_string());
+                    get("saml.issuer", "TATU_SAML_ISSUER").unwrap_or_else(|| "saml".to_string());
                 providers.push(std::sync::Arc::new(SamlIdp::new(issuer, secret, allowed)));
             }
             None => tracing::error!(
@@ -386,18 +386,18 @@ mod tests {
 
     #[test]
     fn signed_token_roundtrip_and_rejections() {
-        let idp = SignedTokenIdp::new("okta", "test-secret", vec!["tucanotime.test".into()])
+        let idp = SignedTokenIdp::new("okta", "test-secret", vec!["tatutime.test".into()])
             .with_clock(move || Utc.timestamp_opt(1_000_000, 0).unwrap());
         let claims = TokenClaims {
             sub: "u1".into(),
-            email: "Alice@tucanotime.test".into(),
+            email: "Alice@tatutime.test".into(),
             name: "Alice".into(),
             groups: vec!["timesheet-admins".into()],
             exp: 1_000_600,
         };
         let token = idp.issue(&claims);
         let id = idp.verify(&token, "").unwrap();
-        assert_eq!(id.email, "alice@tucanotime.test");
+        assert_eq!(id.email, "alice@tatutime.test");
         assert_eq!(id.groups, vec!["timesheet-admins".to_string()]);
 
         // Tampered payload fails the signature.
@@ -498,7 +498,7 @@ mod tests {
         let deny_all = SignedTokenIdp::new("okta", "test-secret", vec![]);
         let claims = TokenClaims {
             sub: "u1".into(),
-            email: "alice@tucanotime.test".into(),
+            email: "alice@tatutime.test".into(),
             name: "Alice".into(),
             groups: vec![],
             exp: chrono::Utc::now().timestamp() + 300,
@@ -509,9 +509,9 @@ mod tests {
         ));
 
         // A configured matching domain still succeeds (behaviour preserved).
-        let allow = SignedTokenIdp::new("okta", "test-secret", vec!["tucanotime.test".into()]);
+        let allow = SignedTokenIdp::new("okta", "test-secret", vec!["tatutime.test".into()]);
         let id = allow.verify(&allow.issue(&claims), "").unwrap();
-        assert_eq!(id.email, "alice@tucanotime.test");
+        assert_eq!(id.email, "alice@tatutime.test");
     }
 
     #[test]
@@ -532,7 +532,7 @@ mod tests {
         );
 
         // Once a domain is configured the provider is enabled as before.
-        vault.put("sso.allowed_domains", "tucanotime.test").unwrap();
+        vault.put("sso.allowed_domains", "tatutime.test").unwrap();
         let registry = registry_from_vault(Some(&vault), &cfg);
         assert!(registry.enabled());
         assert_eq!(registry.names(), vec!["oidc".to_string()]);

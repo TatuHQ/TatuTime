@@ -1,6 +1,6 @@
 # Security
 
-This page describes how TucanoTime authenticates users, protects records,
+This page describes how TatuTime authenticates users, protects records,
 stores provider credentials and records security-relevant events. Configuration
 names and precedence are in [Configuration](configuration.md).
 
@@ -10,13 +10,13 @@ names and precedence are in [Configuration](configuration.md).
   `tt_session` cookie: `HttpOnly`, `Path=/`, `SameSite=Lax`, with a 24-hour
   `Max-Age`.
 - The `Secure` attribute is controlled independently by
-  `TUCANO_SECURE_COOKIES`. It defaults to on when `TUCANO_ENV=production` and off
-  otherwise. Set `TUCANO_SECURE_COOKIES=0` for a plain-HTTP LAN deployment, or
+  `TATU_SECURE_COOKIES`. It defaults to on when `TATU_ENV=production` and off
+  otherwise. Set `TATU_SECURE_COOKIES=0` for a plain-HTTP LAN deployment, or
   the browser discards the cookie and login loops.
-- The signing key is `TUCANO_SESSION_SECRET`, else
-  `TUCANO_SESSION_SECRET_FILE`, else the auto-created `<data>/session.key`.
-  In production, `TUCANO_SESSION_SECRET` shorter than 32 bytes is a hard
-  failure. A too-short or unreadable `TUCANO_SESSION_SECRET_FILE` is ignored
+- The signing key is `TATU_SESSION_SECRET`, else
+  `TATU_SESSION_SECRET_FILE`, else the auto-created `<data>/session.key`.
+  In production, `TATU_SESSION_SECRET` shorter than 32 bytes is a hard
+  failure. A too-short or unreadable `TATU_SESSION_SECRET_FILE` is ignored
   and the auto-created key is used instead; production refuses to start if that
   file cannot be persisted. Outside production shorter values are accepted with
   a warning. The generated key keeps sessions valid across restarts and
@@ -56,11 +56,11 @@ account with history instead.
 SSO is additive to local password login.
 
 - **OIDC / signed-token** is enabled by `oidc.client_secret` (vault) or
-  `TUCANO_OIDC_CLIENT_SECRET`. The provider name is `oidc.issuer` /
-  `TUCANO_OIDC_ISSUER`.
+  `TATU_OIDC_CLIENT_SECRET`. The provider name is `oidc.issuer` /
+  `TATU_OIDC_ISSUER`.
 - **SAML** is a stub adapter. It requires both a pinned fingerprint
-  (`saml.cert_fingerprint` / `TUCANO_SAML_CERT_FINGERPRINT`) and a shared signing
-  secret (`saml.signing_secret` / `TUCANO_SAML_SIGNING_SECRET`); a fingerprint
+  (`saml.cert_fingerprint` / `TATU_SAML_CERT_FINGERPRINT`) and a shared signing
+  secret (`saml.signing_secret` / `TATU_SAML_SIGNING_SECRET`); a fingerprint
   alone does not enable it.
 - **Allowed domains** are a fail-closed allow-list. Only listed email domains
   are trusted; an empty or unset list trusts no domain. In that state the server
@@ -91,9 +91,9 @@ The fail-closed rules are deliberately asymmetric:
   directory) disables the vault for that boot and the server continues running.
   Nothing is stored in plaintext; fix the directory and restart.
 
-`TUCANO_SECRET_KEY` / `TUCANO_SECRET_KEY_FILE` are an optional external override
+`TATU_SECRET_KEY` / `TATU_SECRET_KEY_FILE` are an optional external override
 that always wins and is never copied into the data directory. While an external
-key or a valid `TUCANO_VAULT_ENABLED` is set, the vault is operator-managed: the
+key or a valid `TATU_VAULT_ENABLED` is set, the vault is operator-managed: the
 enable, disable and regenerate endpoints refuse with
 `409 vault_managed_externally`. The key is never returned to a client or
 logged; Settings shows only its source, the fixed file name `vault.key` and a
@@ -158,10 +158,10 @@ because the check was inconclusive.
 ## Transport and deployment
 
 - Put a TLS reverse proxy in front of the GUI when it is reachable beyond a
-  trusted network, then leave `TUCANO_SECURE_COOKIES` at its production default.
+  trusted network, then leave `TATU_SECURE_COOKIES` at its production default.
 - The container is hardened by default: read-only root, `/tmp` tmpfs, all
   capabilities dropped, `no-new-privileges`, non-root uid/gid 10001, and a
-  loopback-only published port unless `TUCANO_HOST_ADDR=0.0.0.0` is set.
+  loopback-only published port unless `TATU_HOST_ADDR=0.0.0.0` is set.
 - The server holds `<data>/.server.lock`; a second instance against the same data
   directory refuses to start, so two schedulers cannot fire the same jobs.
 - There is no hosted-checkout or payment-provider integration. Invoice payment
@@ -170,4 +170,4 @@ because the check was inconclusive.
 
 ---
 
-Last verified against TucanoTime 0.1.41.
+Last verified against TatuTime 0.1.41.

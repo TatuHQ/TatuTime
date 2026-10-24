@@ -300,7 +300,7 @@ fn read_string(body: &[u8], start: usize) -> Option<(String, usize)> {
     None
 }
 
-/// The environment lookup injected into [`AppState`]: `TUCANO_*` reads at
+/// The environment lookup injected into [`AppState`]: `TATU_*` reads at
 /// request time use this seam instead of `std::env`, so tests can exercise
 /// operator-managed settings without mutating process-wide state.
 pub type EnvLookup = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
@@ -330,7 +330,7 @@ pub struct AppState {
     /// A `Mutex` swap so `PUT /admin/config` can hot-update request-time knobs.
     pub cfg: Arc<std::sync::Mutex<Arc<crate::appconfig::AppConfig>>>,
     /// Environment lookup used by request-time resolution (the vault lifecycle
-    /// reads `TUCANO_VAULT_ENABLED` / `TUCANO_SECRET_KEY(_FILE)` the same way
+    /// reads `TATU_VAULT_ENABLED` / `TATU_SECRET_KEY(_FILE)` the same way
     /// boot does). Defaults to the process environment; tests inject a map so
     /// operator-managed 409s are exercised without mutating process env.
     pub env: EnvLookup,
@@ -365,8 +365,8 @@ impl AppState {
         let enabled = cfg.get_bool("vault_enabled", &crate::appconfig::process_env);
         let vault = crate::vault::open_for_boot(
             store.root(),
-            std::env::var("TUCANO_SECRET_KEY").ok(),
-            std::env::var("TUCANO_SECRET_KEY_FILE").ok(),
+            std::env::var("TATU_SECRET_KEY").ok(),
+            std::env::var("TATU_SECRET_KEY_FILE").ok(),
             enabled,
         )
         .unwrap_or_else(|e| {

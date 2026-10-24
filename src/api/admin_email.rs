@@ -187,8 +187,8 @@ pub async fn admin_email_test(
     let to = input.to.trim().to_string();
     let msg = crate::email::EmailMessage {
         to: vec![to.clone()],
-        subject: "TucanoTime test email".into(),
-        text: "This is a test email from TucanoTime. If you can read it, SMTP delivery works.\n"
+        subject: "TatuTime test email".into(),
+        text: "This is a test email from TatuTime. If you can read it, SMTP delivery works.\n"
             .into(),
         html: None,
         attachments: vec![],

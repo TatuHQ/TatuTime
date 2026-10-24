@@ -128,7 +128,7 @@ jobs:
       #   • :latest      (main pushes only)
       #   • :<version>   (main pushes only, the crate version = release version)
       #   • :<short-sha> (computed everywhere, pushed on main pushes only)
-      # (#263 item 7: the previous comment claimed PRs get a `tucanotime:<sha>`
+      # (#263 item 7: the previous comment claimed PRs get a `tatutime:<sha>`
       # local tag, which the metadata config never produced.)
       - name: Extract Docker metadata
         id: meta
@@ -153,7 +153,7 @@ jobs:
           # build.rs shortens the sha to the seven characters the release tag
           # uses (`v<version>+<short-sha>`).
           build-args: |
-            TUCANO_BUILD=${{ github.sha }}
+            TATU_BUILD=${{ github.sha }}
 
   actionlint:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
@@ -193,10 +193,10 @@ jobs:
           command -v firefox >/dev/null 2>&1 || missing="firefox"
           command -v python3 >/dev/null 2>&1 || missing="$missing python3"
           if [ -n "$missing" ]; then
-            echo "::error title=Real-browser gate cannot run::missing:$missing — gui-test/browser-smoke.py needs a host Firefox (Marionette) and python3. Install them on the self-hosted runner (apt-get install -y firefox python3) or point TUCANO_FIREFOX at the browser. This gate must not be skipped."
+            echo "::error title=Real-browser gate cannot run::missing:$missing — gui-test/browser-smoke.py needs a host Firefox (Marionette) and python3. Install them on the self-hosted runner (apt-get install -y firefox python3) or point TATU_FIREFOX at the browser. This gate must not be skipped."
             exit 1
           fi
-          echo "TUCANO_FIREFOX=$(command -v firefox)" >> "$GITHUB_ENV"
+          echo "TATU_FIREFOX=$(command -v firefox)" >> "$GITHUB_ENV"
           python3 --version
           firefox --version
 
@@ -223,8 +223,8 @@ jobs:
           docker rm -f "$TT_CONTAINER" 2>/dev/null || true
           docker run -d --name "$TT_CONTAINER" --network host \
             -v "$PWD:/repo:ro" -v /data \
-            -e TUCANO_DATA_DIR=/data -e TUCANO_PORT="$TT_PORT" \
-            rust:1.98.0-slim-trixie /repo/target/release/tucano-time
+            -e TATU_DATA_DIR=/data -e TATU_PORT="$TT_PORT" \
+            rust:1.98.0-slim-trixie /repo/target/release/tatu-time
 
       - name: Wait for health
         run: |

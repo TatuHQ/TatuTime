@@ -16,7 +16,7 @@ timelines. Grounded as of October 2026:
 | Italy / Poland / Romania | national systems | SDI / KSeF / e-Factura | clearance models (state platform in the loop), not Peppol |
 | EU-wide | ViDA digital reporting target ~2030 | cross-border | interoperability pressure toward EN 16931 |
 
-TucanoTime's market is a *small team billing its own tracked work* — typically a
+TatuTime's market is a *small team billing its own tracked work* — typically a
 supplier INTO these jurisdictions rather than the regulated domestic taxpayer.
 The obligation that actually bites us is: *"must be able to issue a structured
 EN 16931 e-invoice that the buyer's network can receive."*

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Real-browser smoke gate for the TucanoTime GUI — standard library only.
+"""Real-browser smoke gate for the TatuTime GUI — standard library only.
 
 Why this exists
 ---------------
@@ -20,7 +20,7 @@ This gate drives the real release binary in a real Firefox (Marionette), so a
 missing module, a boot exception, a CSP violation or a closed-but-painted
 dialog fails the build.  It speaks the Marionette wire protocol directly over a
 TCP socket — no geckodriver, no Playwright/Puppeteer, no npm package, no Rust
-crate.  Firefox is found on PATH (`TUCANO_FIREFOX` overrides).
+crate.  Firefox is found on PATH (`TATU_FIREFOX` overrides).
 
 Hermetic and safe
 -----------------
@@ -32,7 +32,7 @@ successful runs and responsive review screenshots. Nothing is left running.
 Usage
 -----
     python3 gui-test/browser-smoke.py                 # embedded/production assets
-    python3 gui-test/browser-smoke.py --dev-web-dir   # TUCANO_WEB_DIR=web + live-reload probe
+    python3 gui-test/browser-smoke.py --dev-web-dir   # TATU_WEB_DIR=web + live-reload probe
     python3 gui-test/browser-smoke.py --web-dir /tmp/copy-of-web   # scratch assets
     python3 gui-test/browser-smoke.py --verbose
 
@@ -58,7 +58,7 @@ import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WEB_DIR = os.path.join(ROOT, "web")
-DEFAULT_BINARY = os.path.join(ROOT, "target", "release", "tucano-time")
+DEFAULT_BINARY = os.path.join(ROOT, "target", "release", "tatu-time")
 
 ADMIN_NAME = "Smoke Admin"
 ADMIN_EMAIL = "smoke-admin@example.test"
@@ -68,7 +68,7 @@ ADMIN_EMAIL = "smoke-admin@example.test"
 ADMIN_PASSWORD = "smoke" + "-pass" + "-123456"
 
 # The published-reference-rates document the gate serves through
-# `TUCANO_FX_RATES_FILE`: the same EUR-based, dated, key-less shape the contract
+# `TATU_FX_RATES_FILE`: the same EUR-based, dated, key-less shape the contract
 # tests pin. Serving it keeps the GUI's conversion arithmetic deterministic — and
 # the gate offline — while still exercising the real fetch path end to end.
 ECB_SAMPLE = """<Cube time='2026-10-14'>
@@ -76,7 +76,7 @@ ECB_SAMPLE = """<Cube time='2026-10-14'>
       <Cube currency='GBP' rate='0.85210'/>
     </Cube>"""
 
-EXPECTED_TITLE = "TucanoTime — Timesheets"
+EXPECTED_TITLE = "TatuTime — Timesheets"
 # Both stylesheets the shell declares; a 404 in either must fail the run.
 EXPECTED_STYLESHEETS = ("/styles.css", "/vendor/ubuntu/components.css")
 
@@ -684,16 +684,16 @@ class Gate:
             )
         self.port = free_port()
         env = dict(os.environ)
-        env["TUCANO_DATA_DIR"] = self.data_dir
-        env["TUCANO_PORT"] = str(self.port)
-        env["TUCANO_STRIPE_FAKE"] = "1"
+        env["TATU_DATA_DIR"] = self.data_dir
+        env["TATU_PORT"] = str(self.port)
+        env["TATU_STRIPE_FAKE"] = "1"
         # Offline, deterministic reference rates for the GUI conversion.
-        env["TUCANO_FX_RATES_FILE"] = self.fx_file
-        env.pop("TUCANO_ENV", None)  # plain HTTP on the loopback: no Secure cookie
+        env["TATU_FX_RATES_FILE"] = self.fx_file
+        env.pop("TATU_ENV", None)  # plain HTTP on the loopback: no Secure cookie
         if self.web_dir:
-            env["TUCANO_WEB_DIR"] = self.web_dir  # dev mode: disk assets + live reload
+            env["TATU_WEB_DIR"] = self.web_dir  # dev mode: disk assets + live reload
         else:
-            env.pop("TUCANO_WEB_DIR", None)
+            env.pop("TATU_WEB_DIR", None)
         with open(self.fx_file, "w", encoding="utf-8") as handle:
             handle.write(ECB_SAMPLE)
         log = open(os.path.join(self.tmp, "server.log"), "wb")
@@ -1151,9 +1151,9 @@ class Gate:
             "signing in through the real UI boots the app",
             info["overlayHidden"] and not info["accountHidden"]
             and info["who"] == ADMIN_NAME
-            # The footer names the running build ("TucanoTime vX.Y.Z · build
+            # The footer names the running build ("TatuTime vX.Y.Z · build
             # abc1234"), stamped from /healthz, so both parts must be there.
-            and info["version"].startswith("TucanoTime v")
+            and info["version"].startswith("TatuTime v")
             and info["build"].startswith("· build "),
             f"{info}",
         )
@@ -1171,7 +1171,7 @@ class Gate:
         csrf = {"x-csrf-protection": "1"}
         status, _, raw = self.http(
             "POST", "/api/customers",
-            {"name": "Tucano Time", "currency": "EUR", "default_rate_minor": 6000},
+            {"name": "TatuTime", "currency": "EUR", "default_rate_minor": 6000},
             cookie=cookie, extra_headers=csrf,
         )
         if status != 201:
@@ -2714,9 +2714,9 @@ class Gate:
         self.check("icon action audit exercised real rendered rows", seen > 0, str(seen))
 
     def run(self):
-        print("=== TucanoTime browser smoke gate (Firefox + Marionette) ===", flush=True)
+        print("=== TatuTime browser smoke gate (Firefox + Marionette) ===", flush=True)
         print(f"binary   : {self.binary}")
-        print(f"assets   : {self.web_dir + ' (disk / TUCANO_WEB_DIR)' if self.web_dir else 'embedded (production)'}")
+        print(f"assets   : {self.web_dir + ' (disk / TATU_WEB_DIR)' if self.web_dir else 'embedded (production)'}")
         print(f"firefox  : {self.firefox}", flush=True)
         self.start_server()
         self.base = f"http://127.0.0.1:{self.port}"
@@ -2856,7 +2856,7 @@ def resolve_firefox(explicit):
     found = shutil.which("firefox")
     if not found:
         raise RuntimeError(
-            "Firefox is not on PATH (TUCANO_FIREFOX overrides). This gate drives a "
+            "Firefox is not on PATH (TATU_FIREFOX overrides). This gate drives a "
             "real browser through Marionette; install firefox (e.g. apt-get install "
             "firefox) on the runner — it must NOT be skipped silently."
         )
@@ -2867,14 +2867,14 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--binary", default=DEFAULT_BINARY,
                         help="path to the release server binary")
-    parser.add_argument("--firefox", default=os.environ.get("TUCANO_FIREFOX", ""),
+    parser.add_argument("--firefox", default=os.environ.get("TATU_FIREFOX", ""),
                         help="path to the firefox executable (default: PATH)")
     parser.add_argument("--dev-web-dir", action="store_true",
-                        help="serve the assets from web/ (TUCANO_WEB_DIR) and probe "
+                        help="serve the assets from web/ (TATU_WEB_DIR) and probe "
                              "the dev live-reload path as well")
     parser.add_argument("--web-dir", default="",
                         help="serve the assets from this directory instead (implies "
-                             "dev mode / TUCANO_WEB_DIR); useful for self-validation "
+                             "dev mode / TATU_WEB_DIR); useful for self-validation "
                              "against a deliberately broken copy of the tree")
     parser.add_argument("--keep", action="store_true",
                         help="keep the temp data dir/profile for debugging")

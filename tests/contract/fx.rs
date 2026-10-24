@@ -47,7 +47,7 @@ async fn fx_currency_with_itself_is_the_identity_and_needs_no_table() {
 #[tokio::test]
 async fn fx_serves_the_reference_table_and_fails_closed_without_one() {
     let (app, _d) = app().await;
-    tucano_time::fx::set_rates_document(Some(ECB_SAMPLE.to_string()));
+    tatu_time::fx::set_rates_document(Some(ECB_SAMPLE.to_string()));
     let (s, body) = json_req(&app, "GET", "/api/fx?from=USD&to=EUR", None).await;
     assert_eq!(s, StatusCode::OK, "{body}");
     assert_eq!(
@@ -69,7 +69,7 @@ async fn fx_serves_the_reference_table_and_fails_closed_without_one() {
     assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
 
     // An unusable document fails closed: a 503, not a made-up rate.
-    tucano_time::fx::set_rates_document(Some("not a rates document".to_string()));
+    tatu_time::fx::set_rates_document(Some("not a rates document".to_string()));
     let (s, body) = json_req(&app, "GET", "/api/fx?from=USD&to=EUR", None).await;
     assert_eq!(s, StatusCode::SERVICE_UNAVAILABLE, "{body}");
     assert_eq!(body["error"]["code"], "fx_unavailable");
@@ -82,5 +82,5 @@ async fn fx_serves_the_reference_table_and_fails_closed_without_one() {
     );
 
     // Leave the process as it was found for every other test.
-    tucano_time::fx::set_rates_document(None);
+    tatu_time::fx::set_rates_document(None);
 }

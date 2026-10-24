@@ -1,7 +1,7 @@
 'use strict';
 
 (() => {
-  const key = 'tucanotime-colour-mode';
+  const key = 'tatutime-colour-mode';
   const system = typeof matchMedia === 'function' ? matchMedia('(prefers-color-scheme: dark)') : null;
   let choice = null;
   try {

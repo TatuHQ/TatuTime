@@ -3,7 +3,7 @@
 //! The version is [`Cargo.toml`](Cargo.toml)'s (`CARGO_PKG_VERSION`, the release
 //! version per `AGENTS.md`). The build id is the commit the binary was compiled
 //! from: `git rev-parse` answers that for a source build, but the Docker builder
-//! never copies `.git`, so a `TUCANO_BUILD` environment variable wins when it is
+//! never copies `.git`, so a `TATU_BUILD` environment variable wins when it is
 //! set (CI's image job passes the commit as a build arg). A build that can say
 //! neither is labelled `unknown` rather than inventing an identifier.
 //!
@@ -23,13 +23,13 @@ fn main() {
     println!("cargo:rerun-if-changed=.git/refs/heads");
     println!("cargo:rerun-if-changed=.git/logs/HEAD");
     println!("cargo:rerun-if-changed=.git/packed-refs");
-    println!("cargo:rerun-if-env-changed=TUCANO_BUILD");
-    println!("cargo:rustc-env=TUCANO_BUILD={}", build_id());
+    println!("cargo:rerun-if-env-changed=TATU_BUILD");
+    println!("cargo:rustc-env=TATU_BUILD={}", build_id());
 }
 
-/// `TUCANO_BUILD` when set, else the short HEAD sha, else `unknown`.
+/// `TATU_BUILD` when set, else the short HEAD sha, else `unknown`.
 fn build_id() -> String {
-    let from_env = std::env::var("TUCANO_BUILD")
+    let from_env = std::env::var("TATU_BUILD")
         .ok()
         .map(|value| normalise(value.trim()))
         .filter(|value| !value.is_empty());

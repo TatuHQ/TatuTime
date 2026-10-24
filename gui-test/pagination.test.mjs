@@ -17,7 +17,7 @@ import { waitFor } from './wait-for.mjs';
 const html = readFileSync(new URL('../web/index.html', import.meta.url), 'utf8');
 const app = loadAppSource();
 
-const CUSTOMER = { id: 'c1', name: 'Tucano Time', currency: 'EUR', default_rate_minor: 6000, active: true };
+const CUSTOMER = { id: 'c1', name: 'TatuTime', currency: 'EUR', default_rate_minor: 6000, active: true };
 
 /// Seven expenses, served exactly as the API orders them: `(date, id)`
 /// descending, so the walk has to rely on the id tie-break inside a date.

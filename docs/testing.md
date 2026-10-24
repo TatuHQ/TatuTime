@@ -1,6 +1,6 @@
 # Testing
 
-TucanoTime has four layers of checks: Rust unit and contract tests, an offline
+TatuTime has four layers of checks: Rust unit and contract tests, an offline
 GUI suite in jsdom, a real-browser smoke gate, and the CI jobs around them.
 Run the fast Rust gates on every change and the GUI gates before touching
 `web/`.
@@ -36,7 +36,7 @@ entry point. The live smoke flow drives a running server.
 
 ```sh
 cargo build --release
-TUCANO_DATA_DIR=$(mktemp -d) TUCANO_PORT=8099 ./target/release/tucano-time &
+TATU_DATA_DIR=$(mktemp -d) TATU_PORT=8099 ./target/release/tatu-time &
 cd gui-test
 npm ci
 node contrast.mjs
@@ -75,8 +75,8 @@ directory, signs in as a throwaway admin and walks every GUI route. It asserts
 that the page loads, that no console message appears, that every module resolves
 with a JavaScript MIME type, that closed dialogs are not laid out, that both
 themes render and that every view has a layout box. `--dev-web-dir` additionally
-proves the `TUCANO_WEB_DIR` live-reload path. Firefox must be on `PATH`; set
-`TUCANO_FIREFOX` to point at a specific binary. Exit codes: `0` pass, `1`
+proves the `TATU_WEB_DIR` live-reload path. Firefox must be on `PATH`; set
+`TATU_FIREFOX` to point at a specific binary. Exit codes: `0` pass, `1`
 assertion failure, `2` the gate could not run.
 
 ## Performance
@@ -116,4 +116,4 @@ The shared testing rules are references, not duplicated here:
 
 ---
 
-Last verified against TucanoTime 0.1.41.
+Last verified against TatuTime 0.1.41.

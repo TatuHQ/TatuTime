@@ -4,7 +4,7 @@ use axum::http::StatusCode;
 use serde_json::Value;
 use serde_json::json;
 use std::sync::Arc;
-use tucano_time::store::Store;
+use tatu_time::store::Store;
 
 /// Stub transport for accounting tests: returns deterministic ids, optionally
 /// fails the first N posts to exercise the recorded-failure path.
@@ -13,12 +13,12 @@ struct StubTransport {
     fail_first: usize,
 }
 
-impl tucano_time::accounting::Transport for StubTransport {
-    fn post(&self, path: &str, body: Value) -> Result<String, tucano_time::accounting::SyncError> {
+impl tatu_time::accounting::Transport for StubTransport {
+    fn post(&self, path: &str, body: Value) -> Result<String, tatu_time::accounting::SyncError> {
         let mut posts = self.posts.lock().unwrap();
         posts.push((path.to_string(), body));
         if posts.len() <= self.fail_first {
-            return Err(tucano_time::accounting::SyncError::Transport(
+            return Err(tatu_time::accounting::SyncError::Transport(
                 "stub offline".into(),
             ));
         }
@@ -34,12 +34,12 @@ async fn accounting_sync_idempotent_with_visible_status() {
         posts: std::sync::Mutex::new(vec![]),
         fail_first: 0,
     });
-    let qbo: Arc<dyn tucano_time::accounting::AccountingSync> =
-        Arc::new(tucano_time::accounting::QboProvider::new(t.clone()));
-    let registry = tucano_time::accounting::AccountingRegistry::new(vec![qbo]);
+    let qbo: Arc<dyn tatu_time::accounting::AccountingSync> =
+        Arc::new(tatu_time::accounting::QboProvider::new(t.clone()));
+    let registry = tatu_time::accounting::AccountingRegistry::new(vec![qbo]);
     let app = Client::with_accounting(store, registry).await;
 
-    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
+    let c = new_customer(&app, "TatuTime", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
     json_req(
@@ -157,11 +157,11 @@ async fn accounting_sync_failure_is_recorded_not_fatal() {
         posts: std::sync::Mutex::new(vec![]),
         fail_first: 1, // first post fails, retry succeeds
     });
-    let qbo: Arc<dyn tucano_time::accounting::AccountingSync> =
-        Arc::new(tucano_time::accounting::QboProvider::new(t.clone()));
+    let qbo: Arc<dyn tatu_time::accounting::AccountingSync> =
+        Arc::new(tatu_time::accounting::QboProvider::new(t.clone()));
     let app = Client::with_accounting(
         store,
-        tucano_time::accounting::AccountingRegistry::new(vec![qbo]),
+        tatu_time::accounting::AccountingRegistry::new(vec![qbo]),
     )
     .await;
 

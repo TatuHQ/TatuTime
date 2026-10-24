@@ -2,11 +2,11 @@ use crate::support::*;
 use axum::http::StatusCode;
 use serde_json::json;
 use std::sync::Arc;
-use tucano_time::domain::{
+use tatu_time::domain::{
     Currency, Hours, ImportChoices, ImportOrigin, ImportProvider, ImportedTime,
 };
-use tucano_time::lock::{EntryLock, ImportLock};
-use tucano_time::store::{ImportBatch, ImportBatchState, ImportFiles, ImportKind, Store};
+use tatu_time::lock::{EntryLock, ImportLock};
+use tatu_time::store::{ImportBatch, ImportBatchState, ImportFiles, ImportKind, Store};
 use uuid::Uuid;
 
 #[tokio::test]
@@ -73,7 +73,7 @@ async fn externally_invoiced_entries_are_locked_and_unbilled_imports_keep_proven
 #[tokio::test]
 async fn imported_invoice_preview_and_download_preserve_original_bytes_and_fail_closed() {
     use sha2::{Digest, Sha256};
-    use tucano_time::domain::{ImportedInvoice, Invoice, InvoiceStatus};
+    use tatu_time::domain::{ImportedInvoice, Invoice, InvoiceStatus};
     let (app, dir) = app().await;
     let customer = new_customer(&app, "Example", "EUR", 6000).await;
     let (status, created) = json_req(&app, "POST", "/api/invoices/manual", Some(json!({"customer_id":customer["id"],"lines":[{"description":"Work","quantity_hundredths":100,"unit_price_minor":10000,"item_kind":"service"}]}))).await;
@@ -614,10 +614,10 @@ async fn import_history_sources_dedup_and_locks_survive_backup_restore_and_archi
     assert_eq!(entry_ids.len(), 2);
 
     let backup = dir.path().join("durability.tar.gz");
-    tucano_time::backup::create(&dir.path().join("data"), &backup).unwrap();
+    tatu_time::backup::create(&dir.path().join("data"), &backup).unwrap();
     let restored_dir = tempfile::tempdir().unwrap();
     let restored_root = restored_dir.path().join("data");
-    tucano_time::backup::restore(&backup, &restored_root, false).unwrap();
+    tatu_time::backup::restore(&backup, &restored_root, false).unwrap();
     let store = Arc::new(Store::open(&restored_root).unwrap());
     let batch_id = Uuid::parse_str(&id).unwrap();
 
@@ -652,7 +652,7 @@ async fn import_history_sources_dedup_and_locks_survive_backup_restore_and_archi
     let locks = ImportLock::new(store.clone());
     assert_eq!(
         locks.entry_lock(invoiced.id).unwrap(),
-        Some(tucano_time::lock::LockReason::Imported),
+        Some(tatu_time::lock::LockReason::Imported),
         "the external lock survives restore"
     );
     assert_eq!(locks.entry_lock(unbilled.id).unwrap(), None);
@@ -664,7 +664,7 @@ async fn import_history_sources_dedup_and_locks_survive_backup_restore_and_archi
         replanned
             .time
             .iter()
-            .all(|row| row.decision == tucano_time::domain::ImportDecision::Duplicate),
+            .all(|row| row.decision == tatu_time::domain::ImportDecision::Duplicate),
         "{:?}",
         replanned.time
     );
@@ -679,7 +679,7 @@ async fn import_history_sources_dedup_and_locks_survive_backup_restore_and_archi
     assert_eq!(report.skipped[0].day, "2026-01-05");
     assert_eq!(
         report.skipped[0].reason,
-        tucano_time::store::ArchiveRefusal::Locked
+        tatu_time::store::ArchiveRefusal::Locked
     );
     assert_eq!(
         store.get_entry(unbilled.id).unwrap().unwrap().id,
@@ -929,10 +929,10 @@ async fn time_expenses_and_original_invoice_pdf_commit_together() {
 
     // #404: the original bytes and provenance survive backup/restore.
     let backup = dir.path().join("import-backup.tar.gz");
-    tucano_time::backup::create(&dir.path().join("data"), &backup).unwrap();
+    tatu_time::backup::create(&dir.path().join("data"), &backup).unwrap();
     let restored_dir = tempfile::tempdir().unwrap();
     let restored_root = restored_dir.path().join("data");
-    tucano_time::backup::restore(&backup, &restored_root, false).unwrap();
+    tatu_time::backup::restore(&backup, &restored_root, false).unwrap();
     let restored = Store::open(&restored_root).unwrap();
     let restored_invoice = restored
         .find_invoice_by_number("H-1")
@@ -1027,9 +1027,9 @@ async fn imported_legal_numbers_raise_the_local_high_water_across_restart_and_de
 #[test]
 fn supplied_private_exports_parse_only_when_explicitly_enabled() {
     use sha2::{Digest, Sha256};
-    let Ok(folder) = std::env::var("TUCANOTIME_HARVEST_SAMPLES") else {
+    let Ok(folder) = std::env::var("TATUTIME_HARVEST_SAMPLES") else {
         eprintln!(
-            "skip: set TUCANOTIME_HARVEST_SAMPLES to the folder holding the private Harvest exports"
+            "skip: set TATUTIME_HARVEST_SAMPLES to the folder holding the private Harvest exports"
         );
         return;
     };
@@ -1040,12 +1040,12 @@ fn supplied_private_exports_parse_only_when_explicitly_enabled() {
     let time = read("harvest_time_report.csv");
     let expenses = read("harvest_expense_report.csv");
     let invoices = read("harvest_invoice_pack.zip");
-    let time_report = tucano_time::harvest::parse(tucano_time::harvest::ReportKind::Time, &time)
+    let time_report = tatu_time::harvest::parse(tatu_time::harvest::ReportKind::Time, &time)
         .unwrap_or_else(|issues| panic!("time export has {} issue(s)", issues.len()));
     let expense_report =
-        tucano_time::harvest::parse(tucano_time::harvest::ReportKind::Expense, &expenses)
+        tatu_time::harvest::parse(tatu_time::harvest::ReportKind::Expense, &expenses)
             .unwrap_or_else(|issues| panic!("expense export has {} issue(s)", issues.len()));
-    let sources = tucano_time::harvest_invoices::inspect_invoice_zip(&invoices)
+    let sources = tatu_time::harvest_invoices::inspect_invoice_zip(&invoices)
         .unwrap_or_else(|error| panic!("invoice pack: {}", error.message));
     assert!(!time_report.rows.is_empty(), "the time export has rows");
     assert!(

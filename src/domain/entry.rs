@@ -188,7 +188,7 @@ mod tests {
         };
         let customer = Customer {
             id: entry.customer_id,
-            name: "Tucano Time".into(),
+            name: "TatuTime".into(),
             currency: Currency("EUR".into()),
             default_rate_minor: 6000,
             active: true,

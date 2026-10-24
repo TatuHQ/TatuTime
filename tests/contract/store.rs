@@ -10,7 +10,7 @@ async fn delete_customer_refused_when_project_docs_are_unreadable() {
     // project docs. An unlistable collection must refuse the deletion and
     // leave every file intact.
     let (app, d) = app().await;
-    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
+    let c = new_customer(&app, "TatuTime", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap().to_string();
     new_project(&app, &cid, "P1", json!({})).await;
     let project_path = d
@@ -36,7 +36,7 @@ fn concurrent_writer_times_out_with_lock_busy() {
     use std::time::Duration;
     let dir = tempfile::tempdir().unwrap();
     // A store that gives up quickly when the writer lock is held.
-    let store = tucano_time::store::Store::with_lock_timeout(
+    let store = tatu_time::store::Store::with_lock_timeout(
         dir.path().join("data"),
         Duration::from_millis(50),
     )
@@ -48,14 +48,14 @@ fn concurrent_writer_times_out_with_lock_busy() {
         .truncate(false)
         .read(true)
         .write(true)
-        .open(dir.path().join("data").join(".tucanotime.lock"))
+        .open(dir.path().join("data").join(".tatutime.lock"))
         .unwrap();
     held.lock_exclusive().unwrap();
 
-    let cust = tucano_time::domain::Customer {
+    let cust = tatu_time::domain::Customer {
         id: uuid::Uuid::new_v4(),
         name: "X".into(),
-        currency: tucano_time::domain::Currency("EUR".into()),
+        currency: tatu_time::domain::Currency("EUR".into()),
         default_rate_minor: 1,
         active: true,
         email: String::new(),
@@ -73,7 +73,7 @@ fn concurrent_writer_times_out_with_lock_busy() {
     };
     let err = store.put_customer(&cust).expect_err("should time out");
     assert!(
-        matches!(err, tucano_time::store::StoreError::LockTimeout),
+        matches!(err, tatu_time::store::StoreError::LockTimeout),
         "{err:?}"
     );
 
@@ -93,7 +93,7 @@ async fn store_fault_during_entry_validation_is_500_not_422() {
     // `corrupt_document` rather than the opaque `internal` (no internals
     // leaked either way).
     let (app, d) = app().await;
-    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
+    let c = new_customer(&app, "TatuTime", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap().to_string();
     new_project(&app, &cid, "P1", json!({})).await;
     std::fs::write(
@@ -123,11 +123,11 @@ async fn store_fault_during_entry_validation_is_500_not_422() {
 #[test]
 fn server_lock_refuses_a_second_instance() {
     let dir = tempfile::tempdir().unwrap();
-    let first = tucano_time::acquire_server_lock(dir.path()).expect("first lock");
-    let second = tucano_time::acquire_server_lock(dir.path());
+    let first = tatu_time::acquire_server_lock(dir.path()).expect("first lock");
+    let second = tatu_time::acquire_server_lock(dir.path());
     assert!(second.is_err(), "a second instance must be refused");
     drop(first);
-    let third = tucano_time::acquire_server_lock(dir.path());
+    let third = tatu_time::acquire_server_lock(dir.path());
     assert!(third.is_ok(), "the lock must be reacquirable after release");
 }
 
@@ -138,7 +138,7 @@ fn server_lock_refuses_a_second_instance() {
 /// two, so the two lists could drift apart silently (review §2.3).
 ///
 /// WHAT IT PINS
-/// * the collection set, **both ways**: every [`tucano_time::store::DOC_COLLECTIONS`]
+/// * the collection set, **both ways**: every [`tatu_time::store::DOC_COLLECTIONS`]
 ///   row must be named in the bullet and every directory the bullet names must
 ///   have a row behind it — so a collection that is never documented, or a
 ///   documented directory with no `Entity::DIR`/named constant behind it, fails
@@ -154,14 +154,14 @@ fn server_lock_refuses_a_second_instance() {
 /// WHAT IT DOES NOT COVER
 /// * it pins the **mapping**, never a live filesystem snapshot: nothing reads
 ///   the developer's `data/`, and the directory walk collects folders only, so
-///   transient files (`*.tmp`, `.defaults-seeded`, `.tucanotime.lock`) cannot
+///   transient files (`*.tmp`, `.defaults-seeded`, `.tatutime.lock`) cannot
 ///   make it flaky;
 /// * the root-level single files (`audit.log`, `revoked.json`,
 ///   `scheduler.json`, `secrets.bin`, `config.json`, `session.key`,
 ///   `.server.lock`, `sync/accounting.json`, the `*.idx.*` indexes and
 ///   `invoices/.seq.json`) are not a closed enumeration here: the ones this test
 ///   materialises are checked against their documented shape, and the modules
-///   that own the rest keep their own tests. `.tucanotime.lock` (#62) is
+///   that own the rest keep their own tests. `.tatutime.lock` (#62) is
 ///   deliberately outside the guard;
 /// * `DOC_COLLECTIONS` is a hand-kept list beside the `Entity` impls: a brand
 ///   new collection is caught once it is added there. That is the deliberate act
@@ -171,18 +171,18 @@ fn server_lock_refuses_a_second_instance() {
 mod storage_layout {
     use std::path::Path;
 
-    use tucano_time::auth::{Role, User};
-    use tucano_time::domain::{
+    use tatu_time::auth::{Role, User};
+    use tatu_time::domain::{
         Currency, Customer, Entry, Hours, Invoice, InvoiceStatus, Notification, Project,
         ProjectCode, Task,
     };
-    use tucano_time::store::Store;
+    use tatu_time::store::Store;
     use uuid::Uuid;
 
     /// The repository rules file, read whole: the guard is about what it says.
     const AGENTS_MD: &str = include_str!("../../AGENTS.md");
 
-    /// The "Storage layout below `TUCANO_DATA_DIR`" bullet, from its marker to
+    /// The "Storage layout below `TATU_DATA_DIR`" bullet, from its marker to
     /// the next top-level ("- ") bullet. Panics if the bullet is gone — itself
     /// the drift the guard exists to refuse.
     fn layout_bullet() -> &'static str {
@@ -283,7 +283,7 @@ mod storage_layout {
     #[test]
     fn collections_match_agents_md() {
         let documented = documented_collections();
-        let mut store_side: Vec<String> = tucano_time::store::DOC_COLLECTIONS
+        let mut store_side: Vec<String> = tatu_time::store::DOC_COLLECTIONS
             .iter()
             .map(|dir| (*dir).to_string())
             .collect();
@@ -349,7 +349,7 @@ mod storage_layout {
         };
         store.put_customer(&customer).unwrap();
 
-        let code = "TUCANO-1";
+        let code = "TATU-1";
         store
             .put_project(&Project {
                 customer_id: customer.id,
@@ -554,8 +554,8 @@ mod entries_archive {
     use axum::http::StatusCode;
     use serde_json::{Value, json};
     use sha2::{Digest, Sha256};
-    use tucano_time::lock::{EntryLock, LockReason, LockUnavailable, NoLocks};
-    use tucano_time::store::{ArchiveRefusal, Store};
+    use tatu_time::lock::{EntryLock, LockReason, LockUnavailable, NoLocks};
+    use tatu_time::store::{ArchiveRefusal, Store};
     use uuid::Uuid;
 
     use crate::support::{Client, LockOne, app, entry_body, json_req, new_customer, new_project};
@@ -625,7 +625,7 @@ mod entries_archive {
     /// The shared fixture: a customer with project `P1`, returned as the customer
     /// token the entry and invoice payloads need.
     async fn fixture(client: &Client) -> String {
-        let customer = new_customer(client, "Tucano Time", "EUR", 6000).await;
+        let customer = new_customer(client, "TatuTime", "EUR", 6000).await;
         let token = customer["id"].as_str().expect("customer id").to_string();
         new_project(client, &token, "P1", json!({})).await;
         token
@@ -719,7 +719,7 @@ mod entries_archive {
         let manifest: Value =
             serde_json::from_slice(&std::fs::read(data.join(&rel)).expect("manifest file"))
                 .expect("manifest json");
-        assert_eq!(manifest["app"], "tucano-time");
+        assert_eq!(manifest["app"], "tatu-time");
         assert_eq!(manifest["cutoff"], CUTOFF);
         let rows = manifest["files"].as_array().expect("files").clone();
         assert_eq!(rows.len(), 2, "{manifest}");
@@ -1082,9 +1082,9 @@ mod cold_tree_reads {
 
     use axum::http::StatusCode;
     use serde_json::{Value, json};
-    use tucano_time::domain::Entry;
-    use tucano_time::lock::NoLocks;
-    use tucano_time::store::{ArchiveRefusal, Store};
+    use tatu_time::domain::Entry;
+    use tatu_time::lock::NoLocks;
+    use tatu_time::store::{ArchiveRefusal, Store};
     use uuid::Uuid;
 
     use crate::support::{
@@ -1152,7 +1152,7 @@ mod cold_tree_reads {
 
     /// A customer with project `P1`, as the customer token payloads need.
     async fn fixture(client: &Client) -> String {
-        let customer = new_customer(client, "Tucano Time", "EUR", 6000).await;
+        let customer = new_customer(client, "TatuTime", "EUR", 6000).await;
         let token = customer["id"].as_str().expect("customer id").to_string();
         new_project(client, &token, "P1", json!({})).await;
         token
@@ -1415,7 +1415,7 @@ mod cold_tree_reads {
     #[tokio::test]
     async fn budget_totals_and_the_deletion_guards_still_see_archived_history() {
         let (client, d) = app().await;
-        let customer = new_customer(&client, "Tucano Time", "EUR", 6000).await;
+        let customer = new_customer(&client, "TatuTime", "EUR", 6000).await;
         let cid = customer["id"].as_str().expect("customer id").to_string();
         new_project(&client, &cid, "P1", json!({"budget_hours": 10})).await;
         let (s_task, task) = json_req(
@@ -1454,7 +1454,7 @@ mod cold_tree_reads {
             .as_array()
             .expect("budget rows")
             .iter()
-            .find(|r| r["customer"] == "Tucano Time")
+            .find(|r| r["customer"] == "TatuTime")
             .expect("the budgeted project");
         assert_eq!(
             row["burn_hours"].as_f64(),
@@ -1842,7 +1842,7 @@ mod cold_tree_reads {
 #[tokio::test]
 async fn the_document_cap_refuses_a_write_past_it_and_persists_nothing() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let store = tucano_time::store::Store::open(dir.path().join("data"))
+    let store = tatu_time::store::Store::open(dir.path().join("data"))
         .expect("store")
         .with_max_docs(3);
     let client = Client::new(store, None).await;
@@ -1871,14 +1871,14 @@ async fn the_document_cap_refuses_a_write_past_it_and_persists_nothing() {
 async fn a_pre_seeded_over_cap_collection_still_lists_what_is_there() {
     let dir = tempfile::tempdir().expect("tempdir");
     let data = dir.path().join("data");
-    let seeded = Client::new(tucano_time::store::Store::open(&data).expect("store"), None).await;
+    let seeded = Client::new(tatu_time::store::Store::open(&data).expect("store"), None).await;
     for name in ["A", "B", "C", "D"] {
         new_customer(&seeded, name, "EUR", 6000).await;
     }
 
     // Reopen the same data dir under a cap of two: the directory already holds
     // four documents.
-    let capped = tucano_time::store::Store::open(&data)
+    let capped = tatu_time::store::Store::open(&data)
         .expect("store")
         .with_max_docs(2);
     let capped = Client::new(capped, None).await;

@@ -28,7 +28,7 @@ async fn second_retainer_close_is_409_not_500() {
 // ------------------------------------------------------------------ #144 ---
 
 async fn seed_retainer(app: &Client, opening: u64) -> String {
-    let c = new_customer(app, "Tucano Time", "EUR", 6000).await;
+    let c = new_customer(app, "TatuTime", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap().to_string();
     new_project(app, &cid, "WEB", json!({"rate_minor": 6000})).await;
     let (s, r) = json_req(

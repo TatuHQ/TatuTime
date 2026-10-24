@@ -29,7 +29,7 @@
       "options": {
         "env": {
           "RUST_BACKTRACE": "1",
-          "TUCANO_DATA_DIR": "${workspaceFolder}/Data"
+          "TATU_DATA_DIR": "${workspaceFolder}/Data"
         }
       }
     },
@@ -112,7 +112,7 @@
       "options": {
         "env": {
           "RUST_BACKTRACE": "1",
-          "TUCANO_DATA_DIR": "${workspaceFolder}/Data"
+          "TATU_DATA_DIR": "${workspaceFolder}/Data"
         }
       },
       "presentation": {

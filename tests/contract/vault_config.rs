@@ -5,15 +5,15 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use serde_json::json;
 use std::sync::Arc;
+use tatu_time::api::AppState;
+use tatu_time::auth::Session;
+use tatu_time::clock::SystemClock;
+use tatu_time::store::Store;
 use tower::ServiceExt;
-use tucano_time::api::AppState;
-use tucano_time::auth::Session;
-use tucano_time::clock::SystemClock;
-use tucano_time::store::Store;
 
 #[tokio::test]
 async fn secret_vault_endpoints_mask_and_authorize() {
-    use tucano_time::vault::SecretVault;
+    use tatu_time::vault::SecretVault;
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(dir.path().join("data")).unwrap();
     let root = store.root().to_path_buf();
@@ -27,34 +27,34 @@ async fn secret_vault_endpoints_mask_and_authorize() {
         3600,
         false,
     ));
-    let boot = tucano_time::vault::VaultBoot::from_vault(
+    let boot = tatu_time::vault::VaultBoot::from_vault(
         vault,
-        tucano_time::vault::KeySource::Env,
+        tatu_time::vault::KeySource::Env,
         None,
         true,
     );
     let state = AppState {
         store: std::sync::Arc::new(store),
         clock: std::sync::Arc::new(SystemClock),
-        locks: std::sync::Arc::new(tucano_time::lock::NoLocks),
+        locks: std::sync::Arc::new(tatu_time::lock::NoLocks),
         session,
-        rate: std::sync::Arc::new(tucano_time::ratelimit::RateLimiter::new(
+        rate: std::sync::Arc::new(tatu_time::ratelimit::RateLimiter::new(
             8,
             std::time::Duration::from_secs(300),
         )),
-        audit: std::sync::Arc::new(tucano_time::audit::AuditLog::new(&root)),
-        revocations: std::sync::Arc::new(tucano_time::revoke::Revocations::new(&root)),
-        vault: tucano_time::vault::VaultSlot::new(boot),
-        email: std::sync::Arc::new(tucano_time::email::DisabledEmailSender),
-        accounting: std::sync::Arc::new(tucano_time::accounting::AccountingRegistry::default()),
-        sso: std::sync::Arc::new(tucano_time::sso::SsoRegistry::default()),
-        oauth_flows: std::sync::Arc::new(tucano_time::calendar_oauth::OAuthFlows::new()),
+        audit: std::sync::Arc::new(tatu_time::audit::AuditLog::new(&root)),
+        revocations: std::sync::Arc::new(tatu_time::revoke::Revocations::new(&root)),
+        vault: tatu_time::vault::VaultSlot::new(boot),
+        email: std::sync::Arc::new(tatu_time::email::DisabledEmailSender),
+        accounting: std::sync::Arc::new(tatu_time::accounting::AccountingRegistry::default()),
+        sso: std::sync::Arc::new(tatu_time::sso::SsoRegistry::default()),
+        oauth_flows: std::sync::Arc::new(tatu_time::calendar_oauth::OAuthFlows::new()),
         cfg: std::sync::Arc::new(std::sync::Mutex::new(std::sync::Arc::new(
-            tucano_time::appconfig::AppConfig::empty(),
+            tatu_time::appconfig::AppConfig::empty(),
         ))),
-        env: std::sync::Arc::new(tucano_time::appconfig::process_env),
+        env: std::sync::Arc::new(tatu_time::appconfig::process_env),
     };
-    let router = tucano_time::build_router(state);
+    let router = tatu_time::build_router(state);
     // bootstrap admin
     raw(
         &router,
@@ -80,7 +80,7 @@ async fn secret_vault_endpoints_mask_and_authorize() {
     let (s, _, _) = raw(
         &router,
         "PUT",
-        "/api/admin/secrets/tucano.api_token",
+        "/api/admin/secrets/tatu.api_token",
         Some(json!({"value":"dummy-secret-value-1234"})),
         Some(&admin),
     )
@@ -90,7 +90,7 @@ async fn secret_vault_endpoints_mask_and_authorize() {
     let (s2, list, _) = raw(&router, "GET", "/api/admin/secrets", None, Some(&admin)).await;
     assert_eq!(s2, StatusCode::OK);
     let text = serde_json::to_string(&list).unwrap();
-    assert!(text.contains("tucano.api_token"), "{text}");
+    assert!(text.contains("tatu.api_token"), "{text}");
     assert!(
         !text.contains("dummy-secret-value-1234"),
         "value leaked in list: {text}"
@@ -114,7 +114,7 @@ async fn secret_vault_endpoints_mask_and_authorize() {
     let (s4, _, _) = raw(
         &router,
         "DELETE",
-        "/api/admin/secrets/tucano.api_token",
+        "/api/admin/secrets/tatu.api_token",
         None,
         Some(&admin),
     )
@@ -242,15 +242,15 @@ async fn config_values_are_trimmed_and_blank_org_name_is_refused() {
         "PUT",
         "/api/admin/config",
         Some(json!({
-            "org_name": "  Tucano Ltd  ",
-            "sso_allowed_domains": " tucanotime.test , other.test "
+            "org_name": "  Tatu Ltd  ",
+            "sso_allowed_domains": " tatutime.test , other.test "
         })),
     )
     .await;
     assert_eq!(s_trim, StatusCode::OK, "{body_trim}");
     let persisted = std::fs::read_to_string(&cfg_path).unwrap();
-    assert!(persisted.contains("\"Tucano Ltd\""), "{persisted}");
-    assert!(!persisted.contains("  Tucano"), "{persisted}");
+    assert!(persisted.contains("\"Tatu Ltd\""), "{persisted}");
+    assert!(!persisted.contains("  Tatu"), "{persisted}");
     let (_s_eff, eff) = json_req(&app, "GET", "/api/admin/config", None).await;
     let org = eff["config"]
         .as_array()
@@ -258,14 +258,14 @@ async fn config_values_are_trimmed_and_blank_org_name_is_refused() {
         .iter()
         .find(|c| c["key"] == "org_name")
         .unwrap();
-    assert_eq!(org["value"], "Tucano Ltd");
+    assert_eq!(org["value"], "Tatu Ltd");
     let domains = eff["config"]
         .as_array()
         .unwrap()
         .iter()
         .find(|c| c["key"] == "sso_allowed_domains")
         .unwrap();
-    assert_eq!(domains["value"], "tucanotime.test , other.test");
+    assert_eq!(domains["value"], "tatutime.test , other.test");
 
     // `null` still clears an optional currency key.
     let (s_set, _) = json_req(
@@ -443,7 +443,7 @@ async fn demo_flags_cannot_be_persisted_via_config() {
 
 /// Build a router with a real (temp-dir) vault for the secret-endpoint tests.
 async fn vault_router(dir: &std::path::Path) -> (Router, String) {
-    use tucano_time::vault::SecretVault;
+    use tatu_time::vault::SecretVault;
     let store = Store::open(dir.join("data")).unwrap();
     let root = store.root().to_path_buf();
     let vault = Arc::new(
@@ -451,38 +451,38 @@ async fn vault_router(dir: &std::path::Path) -> (Router, String) {
             .unwrap()
             .unwrap(),
     );
-    let boot = tucano_time::vault::VaultBoot::from_vault(
+    let boot = tatu_time::vault::VaultBoot::from_vault(
         vault,
-        tucano_time::vault::KeySource::Env,
+        tatu_time::vault::KeySource::Env,
         None,
         true,
     );
     let state = AppState {
         store: Arc::new(store),
         clock: Arc::new(SystemClock),
-        locks: Arc::new(tucano_time::lock::NoLocks),
+        locks: Arc::new(tatu_time::lock::NoLocks),
         session: Arc::new(Session::new(
             b"test-session-secret-0000000000000032".to_vec(),
             3600,
             false,
         )),
-        rate: Arc::new(tucano_time::ratelimit::RateLimiter::new(
+        rate: Arc::new(tatu_time::ratelimit::RateLimiter::new(
             8,
             std::time::Duration::from_secs(300),
         )),
-        audit: Arc::new(tucano_time::audit::AuditLog::new(&root)),
-        revocations: Arc::new(tucano_time::revoke::Revocations::new(&root)),
-        vault: tucano_time::vault::VaultSlot::new(boot),
-        email: Arc::new(tucano_time::email::DisabledEmailSender),
-        accounting: Arc::new(tucano_time::accounting::AccountingRegistry::default()),
-        sso: Arc::new(tucano_time::sso::SsoRegistry::default()),
-        oauth_flows: Arc::new(tucano_time::calendar_oauth::OAuthFlows::new()),
+        audit: Arc::new(tatu_time::audit::AuditLog::new(&root)),
+        revocations: Arc::new(tatu_time::revoke::Revocations::new(&root)),
+        vault: tatu_time::vault::VaultSlot::new(boot),
+        email: Arc::new(tatu_time::email::DisabledEmailSender),
+        accounting: Arc::new(tatu_time::accounting::AccountingRegistry::default()),
+        sso: Arc::new(tatu_time::sso::SsoRegistry::default()),
+        oauth_flows: Arc::new(tatu_time::calendar_oauth::OAuthFlows::new()),
         cfg: Arc::new(std::sync::Mutex::new(Arc::new(
-            tucano_time::appconfig::AppConfig::empty(),
+            tatu_time::appconfig::AppConfig::empty(),
         ))),
-        env: Arc::new(tucano_time::appconfig::process_env),
+        env: Arc::new(tatu_time::appconfig::process_env),
     };
-    let router = tucano_time::build_router(state);
+    let router = tatu_time::build_router(state);
     let _ = raw(
         &router,
         "POST",
@@ -547,7 +547,7 @@ async fn vault_status_enabled_reports_key_file_without_leaking() {
     let root = store.root().to_path_buf();
     let boot = vault_boot_enabled(&root);
     let key = std::fs::read_to_string(root.join("vault.key")).unwrap();
-    let client = app_with_vault(store, boot, tucano_time::appconfig::AppConfig::empty()).await;
+    let client = app_with_vault(store, boot, tatu_time::appconfig::AppConfig::empty()).await;
 
     let (status, body) = json_req(&client, "GET", "/api/admin/vault", None).await;
     assert_eq!(status, StatusCode::OK, "{body}");
@@ -591,7 +591,7 @@ async fn vault_status_disabled_is_200_and_offers_enable() {
     let client = app_with_vault(
         store,
         vault_boot_disabled(),
-        tucano_time::appconfig::AppConfig::empty(),
+        tatu_time::appconfig::AppConfig::empty(),
     )
     .await;
 
@@ -615,7 +615,7 @@ async fn vault_enable_mints_a_key_then_refuses_a_second_call() {
     let client = app_with_vault(
         store,
         vault_boot_disabled(),
-        tucano_time::appconfig::AppConfig::empty(),
+        tatu_time::appconfig::AppConfig::empty(),
     )
     .await;
 
@@ -652,7 +652,7 @@ async fn vault_enable_reuses_an_existing_valid_key() {
     let client = app_with_vault(
         store,
         vault_boot_disabled(),
-        tucano_time::appconfig::AppConfig::empty(),
+        tatu_time::appconfig::AppConfig::empty(),
     )
     .await;
     let (status, body) = json_req(&client, "POST", "/api/admin/vault/enable", None).await;
@@ -676,7 +676,7 @@ async fn vault_disable_persists_the_flag_and_deletes_the_key() {
     let boot = vault_boot_enabled(&root);
     let key_path = root.join("vault.key");
     let key = std::fs::read_to_string(&key_path).unwrap();
-    let client = app_with_vault(store, boot, tucano_time::appconfig::AppConfig::empty()).await;
+    let client = app_with_vault(store, boot, tatu_time::appconfig::AppConfig::empty()).await;
 
     let (status, body) = json_req(
         &client,
@@ -716,7 +716,7 @@ async fn vault_disable_and_regenerate_refuse_while_a_secret_is_stored() {
     let store_path = root.join("secrets.bin");
     let key_bytes = std::fs::read(&key_path).unwrap();
     let secret_bytes = std::fs::read(&store_path).unwrap();
-    let client = app_with_vault(store, boot, tucano_time::appconfig::AppConfig::empty()).await;
+    let client = app_with_vault(store, boot, tatu_time::appconfig::AppConfig::empty()).await;
 
     let (s1, b1) = json_req(
         &client,
@@ -748,7 +748,7 @@ async fn vault_regenerate_changes_the_fingerprint_when_empty() {
     let store = Store::open(dir.path().join("data")).unwrap();
     let root = store.root().to_path_buf();
     let boot = vault_boot_enabled(&root);
-    let client = app_with_vault(store, boot, tucano_time::appconfig::AppConfig::empty()).await;
+    let client = app_with_vault(store, boot, tatu_time::appconfig::AppConfig::empty()).await;
 
     let (_, before) = json_req(&client, "GET", "/api/admin/vault", None).await;
     let (status, body) = json_req(
@@ -770,20 +770,20 @@ async fn vault_disable_and_regenerate_refuse_an_external_override() {
     let store = Store::open(dir.path().join("data")).unwrap();
     let root = store.root().to_path_buf();
     let vault = Arc::new(
-        tucano_time::vault::SecretVault::open_with(
+        tatu_time::vault::SecretVault::open_with(
             &root,
             FIXED_KEY,
-            tucano_time::vault::KeySource::Env,
+            tatu_time::vault::KeySource::Env,
         )
         .unwrap(),
     );
-    let boot = tucano_time::vault::VaultBoot::from_vault(
+    let boot = tatu_time::vault::VaultBoot::from_vault(
         vault,
-        tucano_time::vault::KeySource::Env,
+        tatu_time::vault::KeySource::Env,
         None,
         true,
     );
-    let client = app_with_vault(store, boot, tucano_time::appconfig::AppConfig::empty()).await;
+    let client = app_with_vault(store, boot, tatu_time::appconfig::AppConfig::empty()).await;
 
     let (s1, b1) = json_req(
         &client,
@@ -814,7 +814,7 @@ async fn vault_lifecycle_rejects_invalid_confirmation_shapes() {
     let client = app_with_vault(
         store,
         vault_boot_enabled(&root),
-        tucano_time::appconfig::AppConfig::empty(),
+        tatu_time::appconfig::AppConfig::empty(),
     )
     .await;
 
@@ -867,7 +867,7 @@ async fn vault_lifecycle_rejects_invalid_confirmation_shapes() {
     assert_eq!(status["secrets_count"], 0);
 }
 
-/// M1: a valid `TUCANO_VAULT_ENABLED=false` is an operator override. The admin
+/// M1: a valid `TATU_VAULT_ENABLED=false` is an operator override. The admin
 /// API must refuse to enable the vault instead of flipping the flag behind the
 /// environment's back (which the next boot would simply reverse).
 #[tokio::test]
@@ -875,8 +875,8 @@ async fn vault_enable_refuses_when_the_environment_disables_it() {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(dir.path().join("data")).unwrap();
     let root = store.root().to_path_buf();
-    let env: tucano_time::api::EnvLookup = Arc::new(|key: &str| {
-        if key == "TUCANO_VAULT_ENABLED" {
+    let env: tatu_time::api::EnvLookup = Arc::new(|key: &str| {
+        if key == "TATU_VAULT_ENABLED" {
             Some("false".to_string())
         } else {
             None
@@ -885,7 +885,7 @@ async fn vault_enable_refuses_when_the_environment_disables_it() {
     let client = app_with_vault_env(
         store,
         vault_boot_disabled(),
-        tucano_time::appconfig::AppConfig::empty(),
+        tatu_time::appconfig::AppConfig::empty(),
         env,
     )
     .await;
@@ -911,15 +911,15 @@ async fn vault_disable_refuses_when_the_environment_enables_it() {
     let root = store.root().to_path_buf();
     let boot = vault_boot_enabled(&root);
     let key_path = root.join("vault.key");
-    let env: tucano_time::api::EnvLookup = Arc::new(|key: &str| {
-        if key == "TUCANO_VAULT_ENABLED" {
+    let env: tatu_time::api::EnvLookup = Arc::new(|key: &str| {
+        if key == "TATU_VAULT_ENABLED" {
             Some("true".to_string())
         } else {
             None
         }
     });
     let client =
-        app_with_vault_env(store, boot, tucano_time::appconfig::AppConfig::empty(), env).await;
+        app_with_vault_env(store, boot, tatu_time::appconfig::AppConfig::empty(), env).await;
 
     let (status, body) = json_req(
         &client,
@@ -992,7 +992,7 @@ async fn vault_disable_persistence_failure_keeps_the_key_and_enabled_state() {
     let root = store.root().to_path_buf();
     let boot = vault_boot_enabled(&root);
     let key_path = root.join("vault.key");
-    let client = app_with_vault(store, boot, tucano_time::appconfig::AppConfig::empty()).await;
+    let client = app_with_vault(store, boot, tatu_time::appconfig::AppConfig::empty()).await;
 
     // A directory at the config write's temp path makes persistence fail
     // deterministically, regardless of the uid running the tests.

@@ -1,8 +1,8 @@
-# TucanoTime on Unraid
+# TatuTime on Unraid
 
-A production-grade Unraid Docker template and runbook for **TucanoTime**, the
+A production-grade Unraid Docker template and runbook for **TatuTime**, the
 self-hosted timesheet server. The template is
-[`my-TucanoTime.xml`](my-TucanoTime.xml); it runs the same distroless image the
+[`my-TatuTime.xml`](my-TatuTime.xml); it runs the same distroless image the
 project publishes from CI, with the same hardening the repository verifies:
 read-only root filesystem, every capability dropped, no privilege escalation,
 non-root uid **10001**, and only `/data` writable.
@@ -28,16 +28,16 @@ non-root uid **10001**, and only `/data` writable.
 
 | Item | Value |
 |---|---|
-| Image | `ghcr.io/tucanotechnology/tucanotime:latest` (published by CI; pin a release with `:<version>`) |
+| Image | `ghcr.io/tatuhq/tatutime:latest` (published by CI; pin a release with `:<version>`) |
 | Runtime base | `gcr.io/distroless/cc-debian13:nonroot` — **no shell**, no package manager |
 | User | `10001:10001` (numeric, fixed in the image) |
 | Writable paths | `/data` (bind mount) and `/tmp` (tmpfs); nothing else |
 | Port | container `8080`, host `8080` |
-| State | JSON documents on `/mnt/user/appdata/tucanotime` — no database |
+| State | JSON documents on `/mnt/user/appdata/tatutime` — no database |
 
 Because the image has no shell, Unraid's **Console** button will not open a
 terminal. That is expected and is part of the hardening. Use
-`docker logs TucanoTime` from an Unraid terminal or the Unraid log viewer.
+`docker logs TatuTime` from an Unraid terminal or the Unraid log viewer.
 
 > This repository cannot reach your Unraid host. Everything below that touches
 > `/boot` or `/mnt/user` is a copy/paste step you perform on the server
@@ -55,21 +55,21 @@ terminal. That is expected and is part of the hardening. Use
    \\192.168.2.252\flash
    ```
 
-2. Copy [`my-TucanoTime.xml`](my-TucanoTime.xml) into:
+2. Copy [`my-TatuTime.xml`](my-TatuTime.xml) into:
 
    ```
-   \\192.168.2.252\flash\config\plugins\dockerMan\templates-user\my-TucanoTime.xml
+   \\192.168.2.252\flash\config\plugins\dockerMan\templates-user\my-TatuTime.xml
    ```
 
 3. In the Unraid web UI open **Docker → Add Container**, choose
-   **TucanoTime** from the **Template** drop-down, review the values, and
+   **TatuTime** from the **Template** drop-down, review the values, and
    click **Apply**.
 
 On the Unraid terminal the same copy is:
 
 ```sh
-cp /path/to/my-TucanoTime.xml \
-   /boot/config/plugins/dockerMan/templates-user/my-TucanoTime.xml
+cp /path/to/my-TatuTime.xml \
+   /boot/config/plugins/dockerMan/templates-user/my-TatuTime.xml
 ```
 
 ### Option B — paste into the editor you already have open
@@ -87,19 +87,19 @@ These are the literal values for the Unraid *Add Container* / *Edit* page.
 
 | Unraid field | Type | Name / Target | Value |
 |---|---|---|---|
-| Name | — | container name | `TucanoTime` |
-| Repository | — | image | `ghcr.io/tucanotechnology/tucanotime:latest` |
+| Name | — | container name | `TatuTime` |
+| Repository | — | image | `ghcr.io/tatuhq/tatutime:latest` |
 | Network Type | — | — | `Bridge` |
 | Console shell command | — | — | `None` (the image has no shell) |
 | Privileged | — | — | `false` (off) |
 | Extra Parameters | — | — | `--read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges` |
 | WebUI | — | — | `http://[IP]:[PORT:8080]/` |
-| Data | Path | `/data` | `/mnt/user/appdata/tucanotime` (read/write) |
+| Data | Path | `/data` | `/mnt/user/appdata/tatutime` (read/write) |
 | WebUI port | Port | `8080` (TCP) | `8080` |
-| Data dir (internal) | Variable | `TUCANO_DATA_DIR` | `/data` |
-| Listen port (internal) | Variable | `TUCANO_PORT` | `8080` |
-| Plain-HTTP cookies | Variable | `TUCANO_SECURE_COOKIES` | `0` |
-| Vault key file | Variable | `TUCANO_SECRET_KEY_FILE` | *(optional; leave empty)* |
+| Data dir (internal) | Variable | `TATU_DATA_DIR` | `/data` |
+| Listen port (internal) | Variable | `TATU_PORT` | `8080` |
+| Plain-HTTP cookies | Variable | `TATU_SECURE_COOKIES` | `0` |
+| Vault key file | Variable | `TATU_SECRET_KEY_FILE` | *(optional; leave empty)* |
 
 Notes:
 
@@ -109,15 +109,15 @@ Notes:
 - The **Vault key file** variable is an **optional external override**. Empty
   means the app generates and manages `/data/vault.key` itself (see
   [section 4](#4-prepare-the-appdata-folder-and-the-vault-key)).
-- While an override is set (`TUCANO_SECRET_KEY_FILE`, `TUCANO_SECRET_KEY` or a
-  valid `TUCANO_VAULT_ENABLED`), the environment owns the vault lifecycle: the
+- While an override is set (`TATU_SECRET_KEY_FILE`, `TATU_SECRET_KEY` or a
+  valid `TATU_VAULT_ENABLED`), the environment owns the vault lifecycle: the
   Settings enable/disable/regenerate actions are unavailable and the API
   answers **409 `vault_managed_externally`**. Remove the variable to hand the
   lifecycle back to the app.
-- `TUCANO_DATA_DIR` and `TUCANO_PORT` are already baked into the image
+- `TATU_DATA_DIR` and `TATU_PORT` are already baked into the image
   (`ENV` in the [`Dockerfile`](../../Dockerfile)); they are surfaced in the
   template so the mapping is visible and a port change stays consistent.
-- There is **no** `TUCANO_SECRET_KEY_FILE` mount point in the template UI; when
+- There is **no** `TATU_SECRET_KEY_FILE` mount point in the template UI; when
   you use the override, mount the key file yourself and give its path *inside*
   the container.
 
@@ -131,19 +131,19 @@ CI publishes on every push to `main`
 ([`.github/workflows/ci.yml`](../../.github/workflows/ci.yml)):
 
 ```
-ghcr.io/tucanotechnology/tucanotime:latest
-ghcr.io/tucanotechnology/tucanotime:<version>
-ghcr.io/tucanotechnology/tucanotime:sha-<short-sha>
+ghcr.io/tatuhq/tatutime:latest
+ghcr.io/tatuhq/tatutime:<version>
+ghcr.io/tatuhq/tatutime:sha-<short-sha>
 ```
 
-Published at `ghcr.io/tucanotechnology/tucanotime` as `:latest`, `:<version>`
+Published at `ghcr.io/tatuhq/tatutime` as `:latest`, `:<version>`
 (the crate version of the release, the same number as the `v<version>` git tag)
 and `:sha-<short>`. Check the registry package visibility: when it is public, an
 anonymous `docker manifest inspect` succeeds and Unraid does **not** need
 registry credentials to pull `:latest`. Example reproducible pin:
 
 ```
-ghcr.io/tucanotechnology/tucanotime:<version>
+ghcr.io/tatuhq/tatutime:<version>
 ```
 
 Use `:<version>` to follow releases, or the `sha-`-prefixed tag (never a bare
@@ -153,7 +153,7 @@ If the package is private, authenticate on Unraid once and pull:
 
 ```sh
 docker login ghcr.io -u <github-user> -p <PAT-with-read:packages>
-docker pull ghcr.io/tucanotechnology/tucanotime:latest
+docker pull ghcr.io/tatuhq/tatutime:latest
 ```
 
 ### B. Build the image on Unraid from source
@@ -163,25 +163,25 @@ compile time), so the build only needs Docker and network access:
 
 ```sh
 cd /mnt/user/appdata   # or any scratch dir large enough for target/
-git clone https://github.com/TucanoTechnology/TucanoTime.git
-cd TucanoTime
-docker build -t tucanotime:unraid .
+git clone https://github.com/TatuHQ/TatuTime.git
+cd TatuTime
+docker build -t tatutime:unraid .
 ```
 
-Measure the result with `docker image ls tucanotime:unraid` if you need the
-compressed size. Then set the template **Repository** to `tucanotime:unraid`.
+Measure the result with `docker image ls tatutime:unraid` if you need the
+compressed size. Then set the template **Repository** to `tatutime:unraid`.
 Unraid refuses to start a container if it cannot resolve
 the image in a registry, so keep the local tag present (build before *Apply*,
-or `docker tag tucanotime:unraid tucanotime:latest`) and use **Apply** without
+or `docker tag tatutime:unraid tatutime:latest`) and use **Apply** without
 forcing a pull.
 
 ### C. Offline transfer
 
 ```sh
 # on a machine that can pull/build
-docker save ghcr.io/tucanotechnology/tucanotime:latest -o tucanotime.tar
+docker save ghcr.io/tatuhq/tatutime:latest -o tatutime.tar
 # on Unraid
-docker load -i tucanotime.tar
+docker load -i tatutime.tar
 ```
 
 ---
@@ -192,18 +192,18 @@ The image runs as uid/gid **10001** and never changes identity, so the host
 folder must be owned by that uid. Run this once, before the first start:
 
 ```sh
-mkdir -p /mnt/user/appdata/tucanotime
-chown -R 10001:10001 /mnt/user/appdata/tucanotime
+mkdir -p /mnt/user/appdata/tatutime
+chown -R 10001:10001 /mnt/user/appdata/tatutime
 ```
 
 **No manual key is needed.** The **credential vault** (Settings → Email and
 every other integration secret) is encrypted at rest with AES-256-GCM under a
 master key the app generates automatically on first boot at
-`/mnt/user/appdata/tucanotime/vault.key`: 24 random bytes as 32 base64url
+`/mnt/user/appdata/tatutime/vault.key`: 24 random bytes as 32 base64url
 characters (192 bits), written atomically with mode 0600 by uid 10001. The
 `chown` above is the only preparation the key needs.
 
-The **Vault key file** field in the template (`TUCANO_SECRET_KEY_FILE`) is an
+The **Vault key file** field in the template (`TATU_SECRET_KEY_FILE`) is an
 *optional* external override and is empty by default. Set it only when the key
 must live outside the data directory — for example a Docker secret mounted
 into the container. The file it names must hold exactly 32 bytes (the generated
@@ -211,7 +211,7 @@ key is 32 base64url characters; a trailing newline is trimmed); an external key
 always wins and is never copied
 into `/data`. With no override, the app uses the key file it generated.
 
-While either key variable (or a valid `TUCANO_VAULT_ENABLED`) is set, the
+While either key variable (or a valid `TATU_VAULT_ENABLED`) is set, the
 vault is **operator-managed**: the Settings actions do not change the key and
 the API refuses them with **409 `vault_managed_externally`**. Remove the
 variable to restore the Settings controls.
@@ -240,7 +240,7 @@ start** rather than silently showing an empty Settings tab.
 > folder, so a copy of that folder contains both the ciphertext
 > (`secrets.bin`) and its key. Protect that backup like the credentials it
 > contains, keep an extra copy of `vault.key` elsewhere, or supply the key
-> externally (`TUCANO_SECRET_KEY_FILE` mounted from outside `/data`) and store
+> externally (`TATU_SECRET_KEY_FILE` mounted from outside `/data`) and store
 > that copy with the backup. Without the key the stored credentials are
 > permanently unreadable.
 
@@ -268,7 +268,7 @@ contract at `/openapi.json`.
 
 ## 6. SMTP on Unraid
 
-TucanoTime's SMTP client is deliberately **plaintext**: it opens a raw TCP
+TatuTime's SMTP client is deliberately **plaintext**: it opens a raw TCP
 connection and supports optional `AUTH LOGIN`, with **no TLS and no
 STARTTLS** (see [`src/email.rs`](../../src/email.rs)). A hosted provider on
 port 465 (implicit TLS) or 587 (STARTTLS) therefore will **not** work when
@@ -278,11 +278,11 @@ You have two practical options.
 
 ### Option A — a local relay that adds TLS (production)
 
-Run a relay container on Unraid that accepts plaintext SMTP from TucanoTime and
+Run a relay container on Unraid that accepts plaintext SMTP from TatuTime and
 forwards with TLS to your provider. `boky/postfix` is a common choice:
 
 ```sh
-docker run -d --name tucano-relay --restart unless-stopped \
+docker run -d --name tatu-relay --restart unless-stopped \
   -p 2525:25 \
   -e RELAYHOST='[smtp.your-provider.tld]:587' \
   -e RELAYHOST_USERNAME='your-provider-username' \
@@ -305,8 +305,8 @@ use:
 | Username / password | usually blank — the relay authenticates upstream |
 
 If you prefer environment variables over the vault, the equivalent names are
-`TUCANO_SMTP_HOST`, `TUCANO_SMTP_PORT`, `TUCANO_SMTP_FROM`,
-`TUCANO_SMTP_USERNAME` and `TUCANO_SMTP_PASSWORD` (the vault wins when both
+`TATU_SMTP_HOST`, `TATU_SMTP_PORT`, `TATU_SMTP_FROM`,
+`TATU_SMTP_USERNAME` and `TATU_SMTP_PASSWORD` (the vault wins when both
 are set; see [section 11](#11-environment-variables-on-unraid)).
 
 ### Option B — MailHog (testing only)
@@ -338,11 +338,11 @@ the invoice/reminder flows without touching a real mailbox.
   creates the first administrator, so start it on a trusted network, create
   the admin immediately, and firewall the port if the LAN is not trusted.
 - **TLS.** Put a TLS reverse proxy in front of the WebUI when it is exposed
-  beyond a trusted LAN, and then set **both** `TUCANO_ENV=production` and
-  `TUCANO_SECURE_COOKIES=1`. The template's `TUCANO_SECURE_COOKIES=0` overrides
-  the Secure-cookie default that `TUCANO_ENV=production` would otherwise enable.
-  Over plain HTTP keep `TUCANO_SECURE_COOKIES=0` (the template default) and do
-  not set `TUCANO_ENV=production`, otherwise the browser discards the session
+  beyond a trusted LAN, and then set **both** `TATU_ENV=production` and
+  `TATU_SECURE_COOKIES=1`. The template's `TATU_SECURE_COOKIES=0` overrides
+  the Secure-cookie default that `TATU_ENV=production` would otherwise enable.
+  Over plain HTTP keep `TATU_SECURE_COOKIES=0` (the template default) and do
+  not set `TATU_ENV=production`, otherwise the browser discards the session
   cookie and login loops.
 - **Read-only root.** `--read-only` is intentional. Only the `/data` bind
   mount and the `/tmp` tmpfs accept writes; the binary itself needs nothing
@@ -359,7 +359,7 @@ the invoice/reminder flows without touching a real mailbox.
   first boot, and tightens a restored copy to 0600 if it is group/world-readable
   (refusing to boot when it cannot). Anyone who can read both `secrets.bin` and
   `vault.key` can decrypt every integration credential, so protect the appdata
-  share and any backup; use the external `TUCANO_SECRET_KEY_FILE` override if
+  share and any backup; use the external `TATU_SECRET_KEY_FILE` override if
   the key must live elsewhere — that also makes the Settings key actions
   unavailable (409 `vault_managed_externally`).
 
@@ -370,7 +370,7 @@ the invoice/reminder flows without touching a real mailbox.
 Everything the installation knows lives in one folder:
 
 ```
-/mnt/user/appdata/tucanotime
+/mnt/user/appdata/tatutime
 ```
 
 That includes the JSON documents (customers, projects, entries, invoices,
@@ -379,37 +379,37 @@ scheduler state, and the encrypted vault `secrets.bin` together with the
 generated `vault.key`. A copy of the folder is a complete backup **including
 the key** — protect it accordingly. **Keep an extra copy of `vault.key`
 separately**: losing it makes `secrets.bin` permanently unreadable. If you
-supply the key externally with `TUCANO_SECRET_KEY[_FILE]`, back that file up
+supply the key externally with `TATU_SECRET_KEY[_FILE]`, back that file up
 instead; it is not part of the appdata folder.
 
 The image ships an operator backup/restore CLI on the same binary. Back up
 while the server is stopped (or accept a torn snapshot across collections):
 
 ```sh
-docker stop TucanoTime
+docker stop TatuTime
 
 docker run --rm \
-  -v /mnt/user/appdata/tucanotime:/data \
+  -v /mnt/user/appdata/tatutime:/data \
   -v /mnt/user/backups:/backups \
-  ghcr.io/tucanotechnology/tucanotime:latest \
-  --backup /backups/tucanotime-$(date +%F).tar.gz
+  ghcr.io/tatuhq/tatutime:latest \
+  --backup /backups/tatutime-$(date +%F).tar.gz
 
-docker start TucanoTime
+docker start TatuTime
 ```
 
 Restore (stop the server first; the CLI refuses a non-empty data dir unless
 `--force` is given):
 
 ```sh
-docker stop TucanoTime
+docker stop TatuTime
 
 docker run --rm \
-  -v /mnt/user/appdata/tucanotime:/data \
+  -v /mnt/user/appdata/tatutime:/data \
   -v /mnt/user/backups:/backups \
-  ghcr.io/tucanotechnology/tucanotime:latest \
-  --restore /backups/tucanotime-2026-10-19.tar.gz
+  ghcr.io/tatuhq/tatutime:latest \
+  --restore /backups/tatutime-2026-10-19.tar.gz
 
-docker start TucanoTime
+docker start TatuTime
 ```
 
 Archives carry a `manifest.json` with a version and per-file sha256, and
@@ -425,8 +425,8 @@ writable by uid 10001.
   `/data` survives. On the terminal:
 
   ```sh
-  docker pull ghcr.io/tucanotechnology/tucanotime:latest
-  # then recreate TucanoTime with the same template values
+  docker pull ghcr.io/tatuhq/tatutime:latest
+  # then recreate TatuTime with the same template values
   ```
 
 - **Pinned**: set the Repository to a `sha-<short-sha>` tag and change it
@@ -441,14 +441,14 @@ writable by uid 10001.
 
 | Symptom | Cause and fix |
 |---|---|
-| Unraid shows the container as **unhealthy** | The image HEALTHCHECK runs `tucano-time --health`, which probes `http://127.0.0.1:8080/healthz` **inside** the container. Check `docker logs TucanoTime`; verify the internal `TUCANO_PORT` is still `8080`. From the Unraid host, `curl -i http://127.0.0.1:8080/healthz` (or the host port you mapped). |
-| **Login loops** back to the sign-in page after an upgrade | The session cookie carries `Secure` but the browser is on plain `http://`. Set `TUCANO_SECURE_COOKIES=0` (the template default), recreate, and log in again. |
-| **Permission denied** writing `/data` | The bind mount is not owned by uid 10001. Run `chown -R 10001:10001 /mnt/user/appdata/tucanotime`. Unraid's *New Permissions* tool can reset ownership to `nobody:users`; re-run the chown after it. |
-| **`vault_disabled`** in Settings → Email | The vault is disabled by configuration (`TUCANO_VAULT_ENABLED=false` or `vault_enabled: false` in `config.json`), or the app could not write `/data/vault.key` because the data directory is not writable by uid 10001. Check the *Vault key* card in Settings → Security: `config`/`env` means it was switched off deliberately; `write_failed` means fix ownership/permissions and restart. |
-| **Vault actions disabled / 409 `vault_managed_externally`** | `TUCANO_VAULT_ENABLED`, `TUCANO_SECRET_KEY` or `TUCANO_SECRET_KEY_FILE` is set, so the environment owns the lifecycle. Change or remove that variable (or the external key file) — the Settings enable/disable/regenerate actions only work when the app manages `/data/vault.key`. |
-| Container **refuses to start** with "vault store found on disk ... key is missing" | `secrets.bin` exists but no key can open it. Restore the original `vault.key` (or the backup that contains it), or point `TUCANO_SECRET_KEY_FILE` at the original external key; do not delete `secrets.bin` unless you accept losing the stored credentials. |
-| Container **refuses to start** with "TUCANO_SECRET_KEY is configured but invalid" | An external key is not exactly 32 bytes. Generated keys are 32 base64url characters; for a manual one, `openssl rand -hex 16` prints 32 characters (`-hex 32` prints 64 and is rejected). |
-| **Console / `docker exec` fails** | Expected: distroless has no shell. Use `docker logs -f TucanoTime`. |
+| Unraid shows the container as **unhealthy** | The image HEALTHCHECK runs `tatu-time --health`, which probes `http://127.0.0.1:8080/healthz` **inside** the container. Check `docker logs TatuTime`; verify the internal `TATU_PORT` is still `8080`. From the Unraid host, `curl -i http://127.0.0.1:8080/healthz` (or the host port you mapped). |
+| **Login loops** back to the sign-in page after an upgrade | The session cookie carries `Secure` but the browser is on plain `http://`. Set `TATU_SECURE_COOKIES=0` (the template default), recreate, and log in again. |
+| **Permission denied** writing `/data` | The bind mount is not owned by uid 10001. Run `chown -R 10001:10001 /mnt/user/appdata/tatutime`. Unraid's *New Permissions* tool can reset ownership to `nobody:users`; re-run the chown after it. |
+| **`vault_disabled`** in Settings → Email | The vault is disabled by configuration (`TATU_VAULT_ENABLED=false` or `vault_enabled: false` in `config.json`), or the app could not write `/data/vault.key` because the data directory is not writable by uid 10001. Check the *Vault key* card in Settings → Security: `config`/`env` means it was switched off deliberately; `write_failed` means fix ownership/permissions and restart. |
+| **Vault actions disabled / 409 `vault_managed_externally`** | `TATU_VAULT_ENABLED`, `TATU_SECRET_KEY` or `TATU_SECRET_KEY_FILE` is set, so the environment owns the lifecycle. Change or remove that variable (or the external key file) — the Settings enable/disable/regenerate actions only work when the app manages `/data/vault.key`. |
+| Container **refuses to start** with "vault store found on disk ... key is missing" | `secrets.bin` exists but no key can open it. Restore the original `vault.key` (or the backup that contains it), or point `TATU_SECRET_KEY_FILE` at the original external key; do not delete `secrets.bin` unless you accept losing the stored credentials. |
+| Container **refuses to start** with "TATU_SECRET_KEY is configured but invalid" | An external key is not exactly 32 bytes. Generated keys are 32 base64url characters; for a manual one, `openssl rand -hex 16` prints 32 characters (`-hex 32` prints 64 and is rejected). |
+| **Console / `docker exec` fails** | Expected: distroless has no shell. Use `docker logs -f TatuTime`. |
 | **Port already in use** | Change the host side of the WebUI port mapping (for example `8081`), keep the container side at `8080`, and update the WebUI URL. |
 | Second container on the same appdata exits immediately | The single-instance guard (`.server.lock`) refuses a second server on the same data directory. Run one container per appdata folder. |
 | Emails are logged but never sent | No SMTP host is configured, or the host/port is wrong. The app speaks plaintext SMTP only; use the relay from section 6. |
@@ -456,9 +456,9 @@ writable by uid 10001.
 Useful commands (Unraid terminal):
 
 ```sh
-docker logs --tail 200 TucanoTime
-docker inspect --format '{{.State.Health.Status}}' TucanoTime
-docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' TucanoTime
+docker logs --tail 200 TatuTime
+docker inspect --format '{{.State.Health.Status}}' TatuTime
+docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' TatuTime
 ```
 
 ---
@@ -473,28 +473,28 @@ catalogue, defaults and `_FILE` recipes are in
 
 | Variable | Template value | Why it is in the template |
 | --- | --- | --- |
-| `TUCANO_DATA_DIR` | `/data` | Must match the `Data` path target |
-| `TUCANO_PORT` | `8080` | Must match the WebUI port target and the healthcheck |
-| `TUCANO_SECURE_COOKIES` | `0` | Plain-HTTP LAN login; set `1` for HTTPS. This template value overrides the production Secure-cookie default |
-| `TUCANO_SECRET_KEY_FILE` | empty | Optional external vault-key override; empty means the app manages `/data/vault.key` |
+| `TATU_DATA_DIR` | `/data` | Must match the `Data` path target |
+| `TATU_PORT` | `8080` | Must match the WebUI port target and the healthcheck |
+| `TATU_SECURE_COOKIES` | `0` | Plain-HTTP LAN login; set `1` for HTTPS. This template value overrides the production Secure-cookie default |
+| `TATU_SECRET_KEY_FILE` | empty | Optional external vault-key override; empty means the app manages `/data/vault.key` |
 
 Common optional additions:
 
 | Variable | Use |
 | --- | --- |
-| `TUCANO_ENV` | Set `production` when serving over HTTPS; it enables the strict session-secret policy. For HTTPS set **both** `TUCANO_ENV=production` and `TUCANO_SECURE_COOKIES=1` — the template's `0` overrides the Secure-cookie default |
-| `TUCANO_SESSION_SECRET_FILE` | Mount an external session key instead of the auto-created `/data/session.key` |
-| `TUCANO_VAULT_ENABLED` | `false` disables the vault; any valid value makes the lifecycle operator-managed |
-| `TUCANO_MAX_DOCS` | Per-collection document cap (default 50,000) |
-| `TUCANO_SSO_ALLOWED_DOMAINS` | Comma-separated SSO domains; empty is fail-closed |
-| `TUCANO_SMTP_HOST` / `_PORT` / `_FROM` / `_USERNAME` / `_PASSWORD` | SMTP relay; prefer configuring these in **Settings → Email** so they live in the vault |
+| `TATU_ENV` | Set `production` when serving over HTTPS; it enables the strict session-secret policy. For HTTPS set **both** `TATU_ENV=production` and `TATU_SECURE_COOKIES=1` — the template's `0` overrides the Secure-cookie default |
+| `TATU_SESSION_SECRET_FILE` | Mount an external session key instead of the auto-created `/data/session.key` |
+| `TATU_VAULT_ENABLED` | `false` disables the vault; any valid value makes the lifecycle operator-managed |
+| `TATU_MAX_DOCS` | Per-collection document cap (default 50,000) |
+| `TATU_SSO_ALLOWED_DOMAINS` | Comma-separated SSO domains; empty is fail-closed |
+| `TATU_SMTP_HOST` / `_PORT` / `_FROM` / `_USERNAME` / `_PASSWORD` | SMTP relay; prefer configuring these in **Settings → Email** so they live in the vault |
 | `RUST_LOG` | Tracing filter (default `info`) |
 
 Neither vault key variable is required: the app generates and manages
 `<data>/vault.key` on its own. When an external key is wanted, prefer
-`TUCANO_SECRET_KEY_FILE` over `TUCANO_SECRET_KEY` (and likewise
-`TUCANO_SESSION_SECRET_FILE` over `TUCANO_SESSION_SECRET`): the value never
+`TATU_SECRET_KEY_FILE` over `TATU_SECRET_KEY` (and likewise
+`TATU_SESSION_SECRET_FILE` over `TATU_SESSION_SECRET`): the value never
 appears in the Unraid template XML or `docker inspect`. Setting either (or
-`TUCANO_VAULT_ENABLED`) makes the vault operator-managed: the Settings
+`TATU_VAULT_ENABLED`) makes the vault operator-managed: the Settings
 enable/disable/regenerate actions are refused with 409
 `vault_managed_externally` until the variable is removed.

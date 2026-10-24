@@ -111,11 +111,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let vault = vault_with(dir.path(), "svc.token", "from-vault");
         assert_eq!(
-            resolve_secret(Some(&vault), "svc.token", "TUCANO_262_UNSET_TOKEN"),
+            resolve_secret(Some(&vault), "svc.token", "TATU_262_UNSET_TOKEN"),
             Some("from-vault".to_owned())
         );
         assert_eq!(
-            resolve_secret(None, "svc.token", "TUCANO_262_UNSET_TOKEN"),
+            resolve_secret(None, "svc.token", "TATU_262_UNSET_TOKEN"),
             None,
             "no vault and no env is None, never an empty string"
         );
@@ -144,7 +144,7 @@ mod tests {
                 Some(&vault),
                 "qbo_base_url",
                 "qbo.base_url",
-                "TUCANO_QBO_BASE_URL"
+                "TATU_QBO_BASE_URL"
             ),
             Some("https://cfg.example".to_owned()),
             "config.json outranks the vault fallback"
@@ -156,7 +156,7 @@ mod tests {
                 Some(&vault),
                 "qbo_base_url",
                 "qbo.base_url",
-                "TUCANO_QBO_BASE_URL"
+                "TATU_QBO_BASE_URL"
             ),
             Some("https://vault.example".to_owned())
         );

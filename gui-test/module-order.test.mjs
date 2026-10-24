@@ -119,7 +119,7 @@ test('#264: the GUI module graph resolves and evaluates in browser order', () =>
     const source = order
         .map((rel) => `// ── web/${rel}\n${read(rel).replace(/^import\b[^\n]*\n/gm, '').replace(/^export[ \t]+/gm, '')}`)
         .join('\n')
-        + '\nglobalThis.__tucanoGraphEvaluated = true;\n';
+        + '\nglobalThis.__tatuGraphEvaluated = true;\n';
 
     const problems = [];
     const vc = new VirtualConsole();
@@ -142,7 +142,7 @@ test('#264: the GUI module graph resolves and evaluates in browser order', () =>
         `the module graph must evaluate cleanly in browser order; failed at:\n${(failure && failure.stack) || ''}`,
     );
     assert.equal(
-        dom.window.__tucanoGraphEvaluated,
+        dom.window.__tatuGraphEvaluated,
         true,
         'evaluation must reach the end of the graph (a module threw part-way)',
     );

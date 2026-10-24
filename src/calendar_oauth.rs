@@ -355,7 +355,7 @@ pub fn configured_provider(vault: Option<&crate::vault::SecretVault>) -> Option<
     let get = |key: &str, env: &str| -> Option<String> {
         crate::providers::resolve_secret(vault, key, env)
     };
-    get("calendar.provider", "TUCANO_CALENDAR_PROVIDER")
+    get("calendar.provider", "TATU_CALENDAR_PROVIDER")
         .map(|p| p.trim().to_ascii_lowercase())
         .filter(|p| p == "google" || p == "microsoft")
 }
@@ -372,18 +372,12 @@ pub fn source_for(
     };
     match provider {
         "google" => {
-            let token = get("calendar.google.access_token", "TUCANO_GOOGLE_TOKEN")?;
-            let cal = get("calendar.google.id", "TUCANO_GOOGLE_CALENDAR")
+            let token = get("calendar.google.access_token", "TATU_GOOGLE_TOKEN")?;
+            let cal = get("calendar.google.id", "TATU_GOOGLE_CALENDAR")
                 .unwrap_or_else(|| "primary".into());
-            let refresh = get(
-                "calendar.google.refresh_token",
-                "TUCANO_GOOGLE_REFRESH_TOKEN",
-            );
-            let client_id = get("calendar.google.client_id", "TUCANO_GOOGLE_CLIENT_ID");
-            let client_secret = get(
-                "calendar.google.client_secret",
-                "TUCANO_GOOGLE_CLIENT_SECRET",
-            );
+            let refresh = get("calendar.google.refresh_token", "TATU_GOOGLE_REFRESH_TOKEN");
+            let client_id = get("calendar.google.client_id", "TATU_GOOGLE_CLIENT_ID");
+            let client_secret = get("calendar.google.client_secret", "TATU_GOOGLE_CLIENT_SECRET");
             Some(Arc::new(GoogleCalendar::new(
                 Arc::new(BearerFetch::new(
                     "google",
@@ -396,16 +390,10 @@ pub fn source_for(
             )))
         }
         "microsoft" => {
-            let token = get("calendar.microsoft.access_token", "TUCANO_MS_TOKEN")?;
-            let refresh = get(
-                "calendar.microsoft.refresh_token",
-                "TUCANO_MS_REFRESH_TOKEN",
-            );
-            let client_id = get("calendar.microsoft.client_id", "TUCANO_MS_CLIENT_ID");
-            let client_secret = get(
-                "calendar.microsoft.client_secret",
-                "TUCANO_MS_CLIENT_SECRET",
-            );
+            let token = get("calendar.microsoft.access_token", "TATU_MS_TOKEN")?;
+            let refresh = get("calendar.microsoft.refresh_token", "TATU_MS_REFRESH_TOKEN");
+            let client_id = get("calendar.microsoft.client_id", "TATU_MS_CLIENT_ID");
+            let client_secret = get("calendar.microsoft.client_secret", "TATU_MS_CLIENT_SECRET");
             Some(Arc::new(GraphCalendar::new(Arc::new(BearerFetch::new(
                 "microsoft",
                 token,

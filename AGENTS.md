@@ -1,6 +1,6 @@
-# AI Agent Rules — Tucano Time
+# AI Agent Rules — TatuTime
 
-Rules and guidelines for AI agents working on Tucano Time.
+Rules and guidelines for AI agents working on TatuTime.
 
 ## Shared rules
 
@@ -8,10 +8,10 @@ Organisation-wide rules live in [`AgentRules/`](AgentRules/) and apply to every 
 Read them before making changes. This file records only what is specific to this repository.
 
 **`AgentRules/` is synced automatically from
-[TucanoAgentRules](https://github.com/TucanoTechnology/TucanoAgentRules), the single source of
-truth shared with [TucanoTestAPI](https://github.com/TucanoTechnology/TucanoTestAPI) and
-[TucanoTestGUI](https://github.com/TucanoTechnology/TucanoTestGUI). Do not edit
-files under `AgentRules/` in this repository — submit changes against TucanoAgentRules instead and
+[TatuAgentRules](https://github.com/TatuHQ/TatuAgentRules), the single source of
+truth shared with [TatuTestAPI](https://github.com/TatuHQ/TatuTestAPI) and
+[TatuTestGUI](https://github.com/TatuHQ/TatuTestGUI). Do not edit
+files under `AgentRules/` in this repository — submit changes against TatuAgentRules instead and
 they will arrive here as an automated pull request.**
 
 ---
@@ -20,10 +20,10 @@ they will arrive here as an automated pull request.**
 
 ### What this project is
 
-TucanoTime is a timesheet system: time entries recorded per day/week against a
+TatuTime is a timesheet system: time entries recorded per day/week against a
 customer and project code, with per-customer and per-project currency and hourly
 rate. A single Rust binary serves the REST API, the browser GUI and the API docs;
-data is file-based JSON (no database), mirroring the TucanoTest suite philosophy.
+data is file-based JSON (no database), mirroring the TatuTest suite philosophy.
 The GUI is a presentation layer and nothing more — it never reads storage.
 
 ### Branching
@@ -36,7 +36,7 @@ targets `main` too. The shared rules in
 describe a Gitflow flow with a `develop` branch; for this repository, read them
 as requiring the default branch only and substitute `main` for `develop`
 throughout. That divergence is deliberate and repository-specific — `AgentRules/`
-is auto-synced from TucanoAgentRules and must not be edited here, so reconciling
+is auto-synced from TatuAgentRules and must not be edited here, so reconciling
 the upstream wording is an upstream change, not a local one.
 
 ### Releases
@@ -71,7 +71,7 @@ the `v0.1.8` release notes is no longer needed.
 - Tasks carry no currency or rate overrides. Legacy task billing fields are
   ignored on load; task entries use the existing person/project/customer rate
   resolution and project/customer currency resolution.
-- Storage layout below `TUCANO_DATA_DIR` (the API is the only writer):
+- Storage layout below `TATU_DATA_DIR` (the API is the only writer):
   `customers/<id>.json`, `customers/<id>/projects/<CODE>.json`,
   `customers/<id>/projects/<CODE>/tasks/<TASK>.json` (optional task tier, #38),
   `entries/<YYYY-MM-DD>/<id>.json`, `invoices/<id>.json`, `users/<id>.json`,
@@ -102,8 +102,8 @@ the `v0.1.8` release notes is no longer needed.
 - **In-app backups:** Settings → Backup writes unencrypted ZIPs of the data
   directory (files at the archive root, so restore is extracting into the data
   dir) to a sibling `Backup/` folder (`/Backup` in the image;
-  `TUCANO_BACKUP_DIR` overrides). Names are
-  `<datetime>_tucanotime-backup_<company>.zip`, timestamped and slugged in the
+  `TATU_BACKUP_DIR` overrides). Names are
+  `<datetime>_tatutime-backup_<company>.zip`, timestamped and slugged in the
   server's local zone. `backup_enabled` / `backup_cadence` / `backup_time` are
   whitelisted `config.json` keys; a 60-second scheduler job reads them live.
   No retention pass: archives are never deleted automatically.
@@ -112,14 +112,14 @@ the `v0.1.8` release notes is no longer needed.
   `<data>/vault.key` — 24 CSPRNG bytes as 32 base64url characters (192 bits),
   written 0600 and atomically. An existing key file that is group/world-readable
   is tightened to 0600 on read; if that cannot be applied boot fails with an
-  operator message. `TUCANO_SECRET_KEY` / `TUCANO_SECRET_KEY_FILE` are an
+  operator message. `TATU_SECRET_KEY` / `TATU_SECRET_KEY_FILE` are an
   optional override that always wins and is never copied into the data
   directory. Fail-closed: a store (`secrets.bin`) with no reachable key, a
   malformed key (not exactly 32 bytes) or a wrong key is a hard boot failure —
   never silent regeneration. `vault_enabled` (default true) opts out, but it is
   read-only through `PUT /api/admin/config` (422 `validation_failed`): only the
   dedicated lifecycle endpoints write it, and disabling while any credential is
-  stored is refused. A valid `TUCANO_VAULT_ENABLED` (or an env key/`*_FILE`)
+  stored is refused. A valid `TATU_VAULT_ENABLED` (or an env key/`*_FILE`)
   makes the vault operator-managed: enable/disable/regenerate refuse with 409
   `vault_managed_externally` and `can_enable`/`can_disable` are false. The key is
   never returned to clients (source, fingerprint and the fixed file name only)
@@ -178,10 +178,10 @@ the `v0.1.8` release notes is no longer needed.
 - **Auth (#19):** users are file-based (`users/<id>.json`), passwords argon2id,
   sessions are HMAC-signed HttpOnly cookies (`tt_session`). Data routes require a
   valid session; `/api/users` requires `admin`. First-run `/api/auth/bootstrap` creates
-  the initial admin only while no users exist. Key: `TUCANO_SESSION_SECRET[_FILE]`
+  the initial admin only while no users exist. Key: `TATU_SESSION_SECRET[_FILE]`
   else the auto-created `<data>/session.key`, so restarts keep sessions (#94);
-  the `Secure` cookie flag is the independent `TUCANO_SECURE_COOKIES` axis
-  (default on iff `TUCANO_ENV=production`; `=0` allows plain-HTTP LAN serving,
+  the `Secure` cookie flag is the independent `TATU_SECURE_COOKIES` axis
+  (default on iff `TATU_ENV=production`; `=0` allows plain-HTTP LAN serving,
   review A5). `password_hash` is never serialised to clients.
 - **SSO (#32, #260):** identity providers (OIDC/signed-token, SAML stub) are
   additive to local login and JIT-provision members from a verified assertion.
@@ -234,8 +234,8 @@ the `v0.1.8` release notes is no longer needed.
 | Format check / apply | `cargo fmt --all -- --check` / `cargo fmt --all` |
 | Lint (CI treats all clippy lints as errors) | `cargo clippy --all-targets -- -D warnings` |
 | Latest version of a crate | `cargo info <crate>` (or crates.io API) |
-| Container image (distroless, uid 10001, ~41 MiB) | `docker build -t tucanotime .` |
-| Container run (hardened, loopback-only) | `docker run -d --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges -p 127.0.0.1:8080:8080 -v tucanotime-data:/data -v tucanotime-backups:/Backup tucanotime` |
+| Container image (distroless, uid 10001, ~41 MiB) | `docker build -t tatutime .` |
+| Container run (hardened, loopback-only) | `docker run -d --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges -p 127.0.0.1:8080:8080 -v tatutime-data:/data -v tatutime-backups:/Backup tatutime` |
 | Container stack (same hardening, from `docker-compose.yml`) | `docker compose up -d` |
 
 The toolchain is pinned by `rust-toolchain.toml` and the Dockerfile/CI images

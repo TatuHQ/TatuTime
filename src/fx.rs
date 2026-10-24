@@ -5,7 +5,7 @@
 //! is fetched lazily and cached in-process **with its reference date**, and never
 //! invented — with no table the caller gets [`FxError::Unavailable`] and the API
 //! answers `503 fx_unavailable` (fail-closed, like the vault and SSO allow-list).
-//! `TUCANO_FX_RATES_FILE` points the loader at a local copy of the *same* document
+//! `TATU_FX_RATES_FILE` points the loader at a local copy of the *same* document
 //! instead of the network — the seam the contract tests use offline, and an
 //! air-gapped deployment story; a configured file is read on every call and never
 //! populates the network cache, so the two sources cannot contaminate each other.
@@ -20,7 +20,7 @@ use chrono::{NaiveDate, Utc};
 pub const ECB_URL: &str = "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml";
 
 /// Settings/env key for the offline rates file.
-pub const RATES_FILE_ENV: &str = "TUCANO_FX_RATES_FILE";
+pub const RATES_FILE_ENV: &str = "TATU_FX_RATES_FILE";
 
 /// How long a fetched table is served before a refresh is attempted.
 const CACHE_TTL: Duration = Duration::from_secs(12 * 60 * 60);

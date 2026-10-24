@@ -1,6 +1,6 @@
 # Coding style
 
-The Rust style bar for TucanoTime is **idiomatic, example-led Rust** — closer to
+The Rust style bar for TatuTime is **idiomatic, example-led Rust** — closer to
 [*Rust by Example*](https://doc.rust-lang.org/rust-by-example/) than to a formal
 specification. That book is the reference exemplar: short, purposeful modules,
 a one-line statement of what each item does, and a tiny example when the shape of

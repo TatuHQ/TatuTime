@@ -1,4 +1,4 @@
-//! Backup/restore (#94). `tucano-time --backup out.tar.gz` archives the whole
+//! Backup/restore (#94). `tatu-time --backup out.tar.gz` archives the whole
 //! data dir (users, entries, invoices, vault store, config.json, scheduler
 //! state — everything that makes an installation *itself*); `--restore` unpacks
 //! it back. The archive is a plain `.tar.gz` with a `manifest.json` recording
@@ -129,7 +129,7 @@ fn hash_file(path: &Path) -> Result<(u64, String), BackupError> {
 /// snapshot — a point-in-time, cross-file-consistent backup.
 fn acquire_lock(root: &Path) -> Result<std::fs::File, BackupError> {
     use fs2::FileExt;
-    let lock = root.join(".tucanotime.lock");
+    let lock = root.join(".tatutime.lock");
     let f = std::fs::OpenOptions::new()
         .create(true)
         .write(true)
@@ -164,7 +164,7 @@ pub fn create(root: &Path, out: &Path) -> Result<usize, BackupError> {
         });
     }
     let manifest = Manifest {
-        app: "tucano-time".into(),
+        app: "tatu-time".into(),
         version: env!("CARGO_PKG_VERSION").into(),
         created_at: chrono::Utc::now().to_rfc3339(),
         files: entries,
@@ -252,7 +252,7 @@ pub fn restore(in_path: &Path, target: &Path, force: bool) -> Result<Vec<String>
                 notes.push(
                     "backup contains the encrypted vault store (secrets.bin): restore \
                      <data>/vault.key together with the data (or supply the external \
-                     TUCANO_SECRET_KEY / TUCANO_SECRET_KEY_FILE override) or the stored \
+                     TATU_SECRET_KEY / TATU_SECRET_KEY_FILE override) or the stored \
                      credentials cannot be decrypted"
                         .into(),
                 );
@@ -286,13 +286,13 @@ pub fn restore(in_path: &Path, target: &Path, force: bool) -> Result<Vec<String>
     let _ = std::fs::remove_dir_all(&staging);
 
     // Operator nudge: a vault store without its key is unreadable on boot.
-    let key_present = std::env::var("TUCANO_SECRET_KEY")
+    let key_present = std::env::var("TATU_SECRET_KEY")
         .ok()
-        .or_else(|| std::env::var("TUCANO_SECRET_KEY_FILE").ok())
+        .or_else(|| std::env::var("TATU_SECRET_KEY_FILE").ok())
         .is_some_and(|v| !v.is_empty());
     if !key_present && had_vault {
         notes.push(
-            "WARNING: no TUCANO_SECRET_KEY(_FILE) is set in this environment, but the \
+            "WARNING: no TATU_SECRET_KEY(_FILE) is set in this environment, but the \
              backup carries a vault store."
                 .into(),
         );
@@ -501,11 +501,11 @@ use crate::scheduler::Job;
 
 /// The fixed middle of a backup file name. `list_backups` uses it to recognise
 /// the files this feature owns, so unrelated ZIPs in the folder are ignored.
-pub const FILE_MARKER: &str = "_tucanotime-backup_";
+pub const FILE_MARKER: &str = "_tatutime-backup_";
 
 /// Where backups live: a `Backup` folder next to the data directory, which is
 /// the project-root `Backup/` for the default `./Data` and the volume-mounted
-/// `/Backup` in the hardened image. `TUCANO_BACKUP_DIR` overrides it.
+/// `/Backup` in the hardened image. `TATU_BACKUP_DIR` overrides it.
 #[must_use]
 pub fn directory(root: &Path) -> PathBuf {
     match root.parent() {
@@ -519,7 +519,7 @@ pub fn directory(root: &Path) -> PathBuf {
 /// empty string as unset elsewhere too).
 #[must_use]
 pub fn configured_directory(root: &Path, env: &dyn Fn(&str) -> Option<String>) -> PathBuf {
-    env("TUCANO_BACKUP_DIR")
+    env("TATU_BACKUP_DIR")
         .filter(|value| !value.trim().is_empty())
         .map(PathBuf::from)
         .unwrap_or_else(|| directory(root))
@@ -527,7 +527,7 @@ pub fn configured_directory(root: &Path, env: &dyn Fn(&str) -> Option<String>) -
 
 /// Lower-case ASCII slug of the company name for the file name, matching
 /// `capyabarasolutionsltda` from "Capyabara Solutions Ltda". Non-ASCII and
-/// punctuation are dropped; an empty name becomes `tucanotime`.
+/// punctuation are dropped; an empty name becomes `tatutime`.
 #[must_use]
 pub fn company_slug(name: &str) -> String {
     let slug: String = name
@@ -542,19 +542,19 @@ pub fn company_slug(name: &str) -> String {
         .take(60)
         .collect();
     if slug.is_empty() {
-        "tucanotime".to_string()
+        "tatutime".to_string()
     } else {
         slug
     }
 }
 
-/// `<datetime>_tucanotime-backup_<company>.zip`, timestamped in the server's
+/// `<datetime>_tatutime-backup_<company>.zip`, timestamped in the server's
 /// local time zone (the same zone the schedule uses). Colons are replaced by
 /// hyphens so the name is portable.
 #[must_use]
 pub fn file_name(now: DateTime<Local>, company: &str) -> String {
     format!(
-        "{}_tucanotime-backup_{}.zip",
+        "{}_tatutime-backup_{}.zip",
         now.format("%Y-%m-%d_%H-%M-%S"),
         company_slug(company)
     )
@@ -562,7 +562,7 @@ pub fn file_name(now: DateTime<Local>, company: &str) -> String {
 
 /// Collect every regular file under `root`, skipping transient artefacts and
 /// the backup destination (which may sit inside the data directory when
-/// `TUCANO_BACKUP_DIR` points there).
+/// `TATU_BACKUP_DIR` points there).
 fn walk_for_zip(root: &Path, skip: &[PathBuf]) -> Result<Vec<(String, PathBuf)>, BackupError> {
     let mut out = Vec::new();
     let mut stack = vec![root.to_path_buf()];
@@ -633,7 +633,7 @@ pub fn create_zip(root: &Path, out: &Path) -> Result<usize, BackupError> {
             // ordinary documents use the usual 0644.
             let mode = if matches!(
                 rel.as_str(),
-                "secrets.bin" | "vault.key" | "session.key" | ".tucanotime.lock"
+                "secrets.bin" | "vault.key" | "session.key" | ".tatutime.lock"
             ) {
                 0o600
             } else {
@@ -920,7 +920,7 @@ fn company_name(root: &Path, cfg: &AppConfig, env: &dyn Fn(&str) -> Option<Strin
 }
 
 /// Environment lookup shared with `AppState` (the job resolves the same
-/// `TUCANO_*` keys as the request handlers).
+/// `TATU_*` keys as the request handlers).
 pub type EnvLookup = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 
 /// The scheduler job behind Settings → Backup. It fires every minute, reads the
@@ -1180,8 +1180,8 @@ mod tests {
         seed_data(src.path());
         let destination = hold.path().join("Backup");
         let now = Utc::now();
-        let first = run_in(&destination, src.path(), "Tucano", now).unwrap();
-        let second = run_in(&destination, src.path(), "Tucano", now).unwrap();
+        let first = run_in(&destination, src.path(), "Tatu", now).unwrap();
+        let second = run_in(&destination, src.path(), "Tatu", now).unwrap();
         assert_ne!(first.file_name, second.file_name);
         assert!(second.file_name.ends_with("-1.zip"));
     }
@@ -1192,7 +1192,7 @@ mod tests {
             company_slug("Capyabara Solutions Ltda"),
             "capyabarasolutionsltda"
         );
-        assert_eq!(company_slug("  "), "tucanotime");
+        assert_eq!(company_slug("  "), "tatutime");
         assert_eq!(company_slug("A/B:C"), "abc");
         assert_eq!(directory(Path::new("Data")), PathBuf::from("Backup"));
         assert_eq!(
@@ -1319,7 +1319,7 @@ mod tests {
         assert!(
             files[0]
                 .file_name
-                .contains("_tucanotime-backup_capyabarasolutionsltda.zip"),
+                .contains("_tatutime-backup_capyabarasolutionsltda.zip"),
             "unexpected name: {}",
             files[0].file_name
         );

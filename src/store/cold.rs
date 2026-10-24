@@ -338,7 +338,7 @@ impl Store {
         write_json(
             &self.root.join(rel),
             &ArchiveManifest {
-                app: "tucano-time",
+                app: "tatu-time",
                 version: env!("CARGO_PKG_VERSION"),
                 created_at: Utc::now().to_rfc3339(),
                 cutoff,

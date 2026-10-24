@@ -307,14 +307,14 @@ test('decoration is attribute-only and every rendered button states what it need
 test('the JS builders emit the official fields and explicit button icons (#232 phase 2b)', async () => {
     const { dom, document, f } = setup();
     f.api.get = async (path) => {
-        if (path === '/customers/c1') return { customer: { id: 'c1', name: 'Tucano Time', currency: 'EUR' } };
+        if (path === '/customers/c1') return { customer: { id: 'c1', name: 'TatuTime', currency: 'EUR' } };
         if (path.startsWith('/entries?')) return { entries: [{ id: 'e1', customer_id: 'c1', billable: true, project_code: 'SM-1', hours: 2 }] };
         if (path === '/invoices') return { invoices: [] };
         if (path === '/customers/c1/projects') return { projects: [{ code: 'SM-1', name: 'Smoke', active: true }] };
         return {};
     };
     // A <select> ignores a .value with no matching option, so fill it first.
-    f.fillSelect(f.$('iw-customer'), [{ value: 'c1', text: 'Tucano Time' }]);
+    f.fillSelect(f.$('iw-customer'), [{ value: 'c1', text: 'TatuTime' }]);
     f.$('iw-from').value = '2026-10-01';
     f.$('iw-to').value = '2026-10-31';
     await f.iwLoadProjects();
@@ -362,14 +362,14 @@ test('payment-rail add/remove produces the documented PaymentDetails.rails paylo
     assert.equal(rows().length, 1, 'a real button adds a rail');
     const set = (id, value) => { document.getElementById(id).value = value; };
     set('pay-rail-0-currency', 'eur');
-    set('pay-rail-0-account-name', 'Tucano Time EUR');
+    set('pay-rail-0-account-name', 'TatuTime EUR');
     set('pay-rail-0-iban', 'EX000000000000000000');
-    set('pay-rail-0-bank-name', 'Tucano Bank');
+    set('pay-rail-0-bank-name', 'Tatu Bank');
     set('pay-rail-0-instructions', 'Quote the invoice number');
 
     const read = f.readPaymentRails();
     assert.equal(read[0].currency, 'EUR', 'the currency is upper-cased on read');
-    assert.equal(read[0].bank_name, 'Tucano Bank');
+    assert.equal(read[0].bank_name, 'Tatu Bank');
     assert.equal(f.validatePaymentRails(read), null, 'a well-formed rail validates');
 
     // A second rail, then remove it: the route back to zero works.
@@ -393,9 +393,9 @@ test('payment-rail add/remove produces the documented PaymentDetails.rails paylo
     assert.equal(posted[0].path, '/customers');
     assert.deepEqual(JSON.parse(JSON.stringify(body.payment_details.rails)), [{
         currency: 'EUR',
-        account_name: 'Tucano Time EUR',
+        account_name: 'TatuTime EUR',
         iban: 'EX000000000000000000',
-        bank_name: 'Tucano Bank',
+        bank_name: 'Tatu Bank',
         instructions: 'Quote the invoice number',
     }], 'the payload carries the rail with its optional fields and no blank row');
     dom.window.close();
@@ -404,7 +404,7 @@ test('payment-rail add/remove produces the documented PaymentDetails.rails paylo
 test('payment-rail validation surfaces the API field path against the right input (#354)', () => {
     const { dom, document, f } = setup();
     f.setPaymentRails([
-        { currency: 'EUR', account_name: 'Tucano' },
+        { currency: 'EUR', account_name: 'Tatu' },
         { currency: '', account_name: 'No currency' },
     ]);
     f.addPaymentRail(); // an untouched third row must not mask the error

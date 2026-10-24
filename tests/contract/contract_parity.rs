@@ -198,7 +198,7 @@ async fn router_routes_match_openapi_bidirectionally() {
     let contract: Value =
         serde_json::from_str(include_str!("../../openapi.json")).expect("valid openapi.json");
     let contract_ops = contract_operations(&contract);
-    let registry: std::collections::BTreeSet<(String, String)> = tucano_time::API_ROUTES
+    let registry: std::collections::BTreeSet<(String, String)> = tatu_time::API_ROUTES
         .iter()
         .map(|(m, p, _)| ((*m).to_string(), (*p).to_string()))
         .collect();
@@ -233,7 +233,7 @@ async fn router_routes_match_openapi_bidirectionally() {
     // registry nor the contract changed.
     let (client, _dir) = app().await;
     let served = router_paths(&client.router);
-    let registered: std::collections::BTreeSet<String> = tucano_time::API_ROUTES
+    let registered: std::collections::BTreeSet<String> = tatu_time::API_ROUTES
         .iter()
         .map(|(_, p, _)| (*p).to_string())
         .collect();
@@ -248,9 +248,9 @@ async fn router_routes_match_openapi_bidirectionally() {
     // answers 401 while the open tier still answers 405.
     let mut expected: std::collections::BTreeMap<
         &str,
-        (tucano_time::Tier, std::collections::BTreeSet<&'static str>),
+        (tatu_time::Tier, std::collections::BTreeSet<&'static str>),
     > = std::collections::BTreeMap::new();
-    for (method, path, tier) in tucano_time::API_ROUTES {
+    for (method, path, tier) in tatu_time::API_ROUTES {
         expected
             .entry(*path)
             .or_insert((*tier, std::collections::BTreeSet::new()))
@@ -281,12 +281,12 @@ async fn router_routes_match_openapi_bidirectionally() {
 
         let (anon, _) = trace_probe(&client.router, path, None).await;
         match tier {
-            tucano_time::Tier::Open => assert_eq!(
+            tatu_time::Tier::Open => assert_eq!(
                 anon,
                 StatusCode::METHOD_NOT_ALLOWED,
                 "{path} is open but an unauthenticated probe returned {anon}"
             ),
-            tucano_time::Tier::Member | tucano_time::Tier::Admin => assert_eq!(
+            tatu_time::Tier::Member | tatu_time::Tier::Admin => assert_eq!(
                 anon,
                 StatusCode::UNAUTHORIZED,
                 "{path} is guarded but an unauthenticated probe returned {anon}"
@@ -309,8 +309,8 @@ fn contract_declares_producible_status_and_security() {
 
     let mut gaps: std::collections::BTreeSet<(String, String, String)> =
         std::collections::BTreeSet::new();
-    for (method, path, tier) in tucano_time::API_ROUTES {
-        if *tier == tucano_time::Tier::Admin && !declares_code(paths, method, path, "403") {
+    for (method, path, tier) in tatu_time::API_ROUTES {
+        if *tier == tatu_time::Tier::Admin && !declares_code(paths, method, path, "403") {
             gaps.insert(((*method).to_string(), (*path).to_string(), "403".into()));
         }
     }
@@ -378,7 +378,7 @@ fn contract_error_code_enum_matches_rust_vocabulary() {
         .iter()
         .map(|c| c.as_str().expect("string code").to_string())
         .collect();
-    let rust_codes: Vec<String> = tucano_time::error::ApiError::codes()
+    let rust_codes: Vec<String> = tatu_time::error::ApiError::codes()
         .iter()
         .map(|c| (*c).to_string())
         .collect();
