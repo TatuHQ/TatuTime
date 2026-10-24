@@ -23,6 +23,14 @@ To carry an existing installation over:
 
 The default organisation name (`TATU_ORG_NAME`) is now `TatuTime`; an explicit Company name in Settings still wins.
 
+## Interim brand mark
+
+The official TatuHQ logo has not been drawn yet. The app uses the TatuHQ organisation avatar as a
+placeholder in `web/assets/tatu.png` and the favicons, with the blue accent tokens in
+`web/styles.css` derived from it. When the final artwork lands, replace the mark and favicons, then
+update the `--brand` / `--brand-deep` / `--accent` tokens and the note in
+[`docs/ubuntu-design.md`](docs/ubuntu-design.md).
+
 ## What an invoice looks like
 
 A fresh install already produces a complete document: a `From` block (company,
