@@ -2,26 +2,17 @@
 
 Self-hosted timesheet and invoicing server — time per customer and project, exact money, invoices. Full documentation is in [docs/README.md](docs/README.md); licensed under [AGPL-3.0-or-later](LICENSE).
 
-## Renamed from TucanoTime (0.2.0)
+## Deployment identifiers (0.2.0)
 
-The project is now **TatuTime**, published by [TatuHQ](https://github.com/TatuHQ). Stored documents are unchanged — the JSON layout, field names and `config.json` keys are the same — but deployment names are not. This release is deliberately a clean break, with no `TUCANO_*` fallback.
+0.2.0 is a clean-break deployment release: use the `TATU_` prefix for every environment variable,
+the `tatutime` image, and the `tatutime-data` / `tatutime-backups` Compose volumes. The stored
+documents are unchanged — the JSON layout, field names and `config.json` keys are the same — so an
+existing data directory needs no conversion. Point `TATU_DATA_DIR` at it, update the deployment
+variables to `TATU_*`, and start the new stack. See [Operations](docs/operations.md) for the current
+names.
 
-| Before | After |
-| --- | --- |
-| `TucanoTime` / `tucano-time` | `TatuTime` / `tatu-time` |
-| `ghcr.io/tucanotechnology/tucanotime` | `ghcr.io/tatuhq/tatutime` |
-| `tucanotime-data`, `tucanotime-backups` volumes | `tatutime-data`, `tatutime-backups` |
-| Every `TUCANO_*` environment variable | The same name with `TATU_*` (for example `TATU_DATA_DIR`, `TATU_SESSION_SECRET`, `TATU_SECRET_KEY`, `TATU_SMTP_HOST`) |
-| `.tucanotime.lock` | `.tatutime.lock` |
-
-To carry an existing installation over:
-
-1. Stop the old container and keep a copy of its data volume.
-2. Copy the data into the new volume (or point `TATU_DATA_DIR` at the existing directory). The files themselves need no conversion.
-3. Rename every `TUCANO_*` variable in the Compose file, `.env` or service definition to `TATU_*`.
-4. Pull `ghcr.io/tatuhq/tatutime` or rebuild from this repository, then start the new stack.
-
-The default organisation name (`TATU_ORG_NAME`) is now `TatuTime`; an explicit Company name in Settings still wins.
+The default organisation name (`TATU_ORG_NAME`) is `TatuTime`; an explicit Company name in Settings
+still wins.
 
 ## Interim brand mark
 
