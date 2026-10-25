@@ -7,7 +7,7 @@ the browser entry point. It drives the real forms against a running server
 
 ```sh
 cargo build --release
-TUCANO_DATA_DIR=$(mktemp -d) TUCANO_PORT=8099 ./target/release/tucano-time &
+TATU_DATA_DIR=$(mktemp -d) TATU_PORT=8099 ./target/release/tatu-time &
 cd gui-test && npm install && npm test
 ```
 
@@ -107,7 +107,7 @@ the server's own reason**:
    to a key, `field` is empty and the reason is printed alone; never `": reason"`
    with a dangling colon.
 
-**Why a page can be newer than the server answering it.** `TUCANO_WEB_DIR` serves
+**Why a page can be newer than the server answering it.** `TATU_WEB_DIR` serves
 the working tree from disk while the binary's Rust is fixed at compile time (and a
 debug build embeds `web/` from disk per request — rust-embed), so a long-running
 process hands out today's GUI over yesterday's contract. That drift is exactly the
@@ -140,7 +140,7 @@ Playwright/Puppeteer, no npm package, no Rust crate.
 ```sh
 cargo build --locked --release            # or: the CI container build step
 python3 gui-test/browser-smoke.py         # embedded/production assets
-python3 gui-test/browser-smoke.py --dev-web-dir   # TUCANO_WEB_DIR=./web + live-reload probe
+python3 gui-test/browser-smoke.py --dev-web-dir   # TATU_WEB_DIR=./web + live-reload probe
 ```
 
 It boots the release binary on a **free ephemeral port** with a **fresh `mktemp -d`
@@ -187,7 +187,7 @@ review needs visual evidence, capture it manually against a local server:
 
 ```sh
 cargo build
-TUCANO_DATA_DIR=/tmp/tt-shots TUCANO_PORT=8080 ./target/debug/tucano-time
+TATU_DATA_DIR=/tmp/tt-shots TATU_PORT=8080 ./target/debug/tatu-time
 # sign in as the bootstrapped admin in a browser at http://localhost:8080
 ```
 

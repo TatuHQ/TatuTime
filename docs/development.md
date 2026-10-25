@@ -15,7 +15,7 @@ This serves the GUI and API at <http://localhost:8080>, with data in `./Data`.
 Overrides for a local run:
 
 ```sh
-TUCANO_DATA_DIR=$(mktemp -d) TUCANO_PORT=8099 cargo run
+TATU_DATA_DIR=$(mktemp -d) TATU_PORT=8099 cargo run
 ```
 
 Useful checks before opening a pull request:
@@ -38,16 +38,16 @@ To serve GUI assets from disk on every request, so HTML/CSS/JS edits need no
 Rust rebuild:
 
 ```sh
-TUCANO_WEB_DIR=./web cargo run
+TATU_WEB_DIR=./web cargo run
 ```
 
-When `TUCANO_WEB_DIR` is set, static files are read from that directory on every
+When `TATU_WEB_DIR` is set, static files are read from that directory on every
 request. A small script is injected into HTML pages that opens an SSE connection
 to `/_dev/reload`; the server polls `web/` every 300 ms and reloads the browser
-when a file's modification time changes. Without `TUCANO_WEB_DIR`, the embedded
+when a file's modification time changes. Without `TATU_WEB_DIR`, the embedded
 bundle is served and `/_dev/reload` returns 404.
 
-A running server with `TUCANO_WEB_DIR` can therefore serve a newer page than the
+A running server with `TATU_WEB_DIR` can therefore serve a newer page than the
 contract compiled into its binary. Restart the server after changing Rust code
 or `openapi.json`.
 
@@ -99,10 +99,10 @@ repository; the pages here do not duplicate them.
 
 ## Licence
 
-TucanoTime is licensed under the
+TatuTime is licensed under the
 [GNU Affero General Public License v3.0 or later](../LICENSE)
 (`AGPL-3.0-or-later`).
 
 ---
 
-Last verified against TucanoTime 0.1.41.
+Last verified against TatuTime 0.1.41.

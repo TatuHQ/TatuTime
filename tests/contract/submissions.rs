@@ -19,7 +19,7 @@ async fn seed_week(app: &Client, cid: &str) -> String {
 #[tokio::test]
 async fn submit_locks_and_reject_unlocks() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
+    let c = new_customer(&app, "TatuTime", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({})).await;
     let eid = seed_week(&app, cid).await;
@@ -61,7 +61,7 @@ async fn submit_locks_and_reject_unlocks() {
 #[tokio::test]
 async fn approve_keeps_locked_and_double_submit_refused() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
+    let c = new_customer(&app, "TatuTime", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({})).await;
     let eid = seed_week(&app, cid).await;
@@ -109,7 +109,7 @@ async fn approve_keeps_locked_and_double_submit_refused() {
 #[tokio::test]
 async fn approved_week_lock_message_does_not_offer_reject() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
+    let c = new_customer(&app, "TatuTime", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap().to_string();
     new_project(&app, &cid, "P1", json!({})).await;
     let eid = seed_week(&app, &cid).await;
@@ -189,7 +189,7 @@ async fn submission_invalid_shapes_are_422() {
     assert_eq!(s_bad, StatusCode::BAD_REQUEST);
 
     // A real submission, then a malformed decision must 422 and not transition.
-    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
+    let c = new_customer(&app, "TatuTime", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({})).await;
     json_req(

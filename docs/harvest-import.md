@@ -234,7 +234,7 @@ contract test at their folder; it reads them in memory, uses no network and
 prints only counts and SHA-256 hashes:
 
 ```sh
-TUCANOTIME_HARVEST_SAMPLES=/path/to/private/exports \
+TATUTIME_HARVEST_SAMPLES=/path/to/private/exports \
   cargo test --locked --test contract imports::supplied_private_exports_parse_only_when_explicitly_enabled -- --nocapture
 ```
 

@@ -1,4 +1,4 @@
-// boot.js — TucanoTime GUI module (ES-module split of web/app.js, #264).
+// boot.js — TatuTime GUI module (ES-module split of web/app.js, #264).
 // Moved from the original monolithic app.js; behaviour is unchanged.
 
 
@@ -735,7 +735,7 @@ export async function startApp() {
 /// it was built from, both read from `/healthz` — the API is the only source,
 /// so the GUI can never hardcode a version and then lie about a server that was
 /// upgraded underneath it. The footer is cosmetic: a probe that fails (or a
-/// server too old to answer with a version) leaves the static `TucanoTime`
+/// server too old to answer with a version) leaves the static `TatuTime`
 /// branding in place instead of breaking the boot.
 async function paintBuildStamp() {
   if (typeof fetch !== 'function') return; // jsdom harnesses stub the API, not fetch
@@ -745,7 +745,7 @@ async function paintBuildStamp() {
     const info = await res.json();
     if (typeof info !== 'object' || info === null) return;
     if (typeof info.version !== 'string' || !info.version) return;
-    $('version').textContent = `TucanoTime v${info.version}`;
+    $('version').textContent = `TatuTime v${info.version}`;
     if (typeof info.build === 'string' && info.build) {
       const build = $('build');
       build.textContent = `· build ${info.build}`;

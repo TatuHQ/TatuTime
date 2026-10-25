@@ -1,7 +1,7 @@
 //! Calendar integration (#15): read an ICS feed and expose events so time can
 //! be logged from them. The feed source is configured (never user-supplied per
 //! request, avoiding SSRF) via the credential vault key `calendar.ics_url` or
-//! the `TUCANO_CALENDAR_ICS` env var — either an http(s) URL or a local file
+//! the `TATU_CALENDAR_ICS` env var — either an http(s) URL or a local file
 //! path (handy for tests / a synced file).
 //!
 //! MVP scope (per the locked decision): single (non-recurring) events only;

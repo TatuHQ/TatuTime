@@ -6,8 +6,8 @@ Applies to: #11 (model), #18 (seams), and all downstream phases
 
 ## Context
 
-TucanoTime is a timesheet + invoicing app in the Tucano suite. Every sibling
-(TucanoTestAPI/GUI) is **file-based with no database**, and the owner reaffirmed
+TatuTime is a timesheet + invoicing app in the Tatu suite. Every sibling
+(TatuTestAPI/GUI) is **file-based with no database**, and the owner reaffirmed
 that constraint. The app must stay portable (one folder on a volume), auditable
 (human-readable JSON), and safe to extend with later integrations (SSO, payments,
 accounting sync, calendar OAuth) that are deliberately **lowest priority to build
@@ -17,7 +17,7 @@ but first priority to design for**.
 
 ### 1. No database — the filesystem is the store, the API is the only writer
 
-- Every entity is one pretty-printed JSON document under `TUCANO_DATA_DIR`:
+- Every entity is one pretty-printed JSON document under `TATU_DATA_DIR`:
   ```
   customers/<id>.json
   customers/<id>/projects/<CODE>.json
@@ -96,7 +96,7 @@ is traceable and lockable:
 - The rate-ownership change (#11) is a breaking API change (project fields become
   required) — acceptable pre-1.0, documented in its PR, with legacy reads preserved.
 - **Concurrency (#62):** every mutation takes a process-local mutex **and** an
-  advisory exclusive `flock` on `.tucanotime.lock` (via `fs2`), retried to a 5 s
+  advisory exclusive `flock` on `.tatutime.lock` (via `fs2`), retried to a 5 s
   deadline then surfaced as **503 + `Retry-After`**. Writes are atomic (tmp +
   rename). This serialises concurrent writers across processes sharing the volume,
   and read-modify-writes (e.g. invoice numbering via `Store::create_invoice`)

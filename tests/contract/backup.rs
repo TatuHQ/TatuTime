@@ -111,7 +111,7 @@ async fn manual_backup_writes_a_timestamped_company_zip() {
     assert_eq!(status, StatusCode::OK, "{created}");
     let name = created["file_name"].as_str().expect("file name");
     assert!(
-        name.contains("_tucanotime-backup_capyabarasolutionsltda.zip"),
+        name.contains("_tatutime-backup_capyabarasolutionsltda.zip"),
         "company name and marker in {name}"
     );
     assert!(name.ends_with(".zip"));

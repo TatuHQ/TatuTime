@@ -1,4 +1,4 @@
-// setup.js — TucanoTime GUI module: the admin startup wizard.
+// setup.js — TatuTime GUI module: the admin startup wizard.
 //
 // First-run flow separate from the #111 customer/project wizard
 // (wizard.js, #wizard-dialog): five steps that create the first administrator,
@@ -18,7 +18,7 @@ import { startApp } from './boot.js';
 import { state } from './state.js';
 
 export const AW_TITLES = [
-    'Welcome to TucanoTime',
+    'Welcome to TatuTime',
     'Administrator',
     'Organisation',
     'Defaults',
@@ -310,7 +310,7 @@ async function awFinish() {
     }
     try {
         await startApp();
-        announce('Setup complete. Welcome to TucanoTime.');
+        announce('Setup complete. Welcome to TatuTime.');
     } catch (err) {
         announce(`Failed to start: ${err.message}`);
     }

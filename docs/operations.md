@@ -1,13 +1,13 @@
 # Operations
 
-This page covers running TucanoTime in production: upgrades, backup and restore,
+This page covers running TatuTime in production: upgrades, backup and restore,
 file ownership, container hardening, health and logs, and the background
 scheduler. Configuration details live in [Configuration](configuration.md).
 
 ## Persistence and upgrades
 
 Everything an installation knows lives in the data directory
-(`TUCANO_DATA_DIR`, `/data` in the image). The container itself is disposable;
+(`TATU_DATA_DIR`, `/data` in the image). The container itself is disposable;
 the volume is the installation. Users, entries, invoices, expenses, settings,
 the credential vault, session key and scheduler state all survive a container
 recreation.
@@ -17,20 +17,20 @@ docker compose build --pull
 docker compose up -d
 ```
 
-Compose builds the local `tucanotime:latest` image from this repository
+Compose builds the local `tatutime:latest` image from this repository
 (`build: .`), so `docker compose pull` does **not** fetch the published GHCR
 image. To run the published image instead, pull it and tag it locally under the
 name Compose expects:
 
 ```sh
-docker pull ghcr.io/tucanotechnology/tucanotime:latest
-docker tag ghcr.io/tucanotechnology/tucanotime:latest tucanotime:latest
+docker pull ghcr.io/tatuhq/tatutime:latest
+docker tag ghcr.io/tatuhq/tatutime:latest tatutime:latest
 docker compose up -d
 ```
 
 Nothing needs to be reconfigured after an image update. A pinned published
 image works the same way: pull its `<version>` (or `sha-<short>`) tag, tag it
-`tucanotime:latest` locally and recreate the container. The data layout is
+`tatutime:latest` locally and recreate the container. The data layout is
 summarised in [Storage and retention](storage-and-retention.md).
 
 ## Backup and restore
@@ -43,12 +43,12 @@ and set the time. Settings shows the server's local time zone, which is what the
 time is interpreted in. **Back up now** writes an archive immediately.
 
 A backup is a plain, **unencrypted ZIP** of everything below the data directory
-(`TUCANO_DATA_DIR`). Files sit at the archive root — there is no `Data/` prefix
+(`TATU_DATA_DIR`). Files sit at the archive root — there is no `Data/` prefix
 — so restoring means stopping the server and extracting the ZIP into the data
 directory. Archives are written to a `Backup` folder next to the data directory
 (`/Backup` in the image) and named
-`<datetime>_tucanotime-backup_<company>.zip`, using the company name from
-Settings → Company. `TUCANO_BACKUP_DIR` overrides the location.
+`<datetime>_tatutime-backup_<company>.zip`, using the company name from
+Settings → Company. `TATU_BACKUP_DIR` overrides the location.
 
 Because the archive contains `secrets.bin` and (unless you use an external key)
 `vault.key`, treat it exactly like the data directory: protect it, and keep a
@@ -60,10 +60,10 @@ are never deleted automatically.
 The image ships an operator CLI on the same binary:
 
 ```sh
-tucano-time --backup FILE    # archive the data dir to FILE (tar.gz + manifest)
-tucano-time --restore FILE   # unpack a backup into the data dir (--force to overwrite)
-tucano-time --health         # probe the local server's /healthz
-tucano-time --version        # print the version
+tatu-time --backup FILE    # archive the data dir to FILE (tar.gz + manifest)
+tatu-time --restore FILE   # unpack a backup into the data dir (--force to overwrite)
+tatu-time --health         # probe the local server's /healthz
+tatu-time --version        # print the version
 ```
 
 A backup is a plain `tar.gz` with a `manifest.json` recording the crate version
@@ -73,32 +73,32 @@ the archive carries a vault store while no key is configured.
 
 ### With the Compose `cli` profile
 
-The `tucanotime-cli` service runs the same image against the same
-`tucanotime-data` volume. It is in the optional `cli` profile.
+The `tatutime-cli` service runs the same image against the same
+`tatutime-data` volume. It is in the optional `cli` profile.
 
 ```sh
 # back up
-docker compose --profile cli run --rm tucanotime-cli \
+docker compose --profile cli run --rm tatutime-cli \
   --backup /backups/monday.tar.gz
 
 # restore (stop the server first)
-docker compose stop tucanotime
-docker compose --profile cli run --rm tucanotime-cli \
+docker compose stop tatutime
+docker compose --profile cli run --rm tatutime-cli \
   --restore /backups/monday.tar.gz
-docker compose up -d tucanotime
+docker compose up -d tatutime
 ```
 
-`/backups` maps to `TUCANO_BACKUP_DIR` (default `./backups`) and must be
+`/backups` maps to `TATU_BACKUP_DIR` (default `./backups`) and must be
 writable by uid 10001. Back up while the server is stopped, or accept a torn
 snapshot across collections.
 
-The server service mounts `${TUCANO_BACKUP_DIR:-tucanotime-backups}` at
+The server service mounts `${TATU_BACKUP_DIR:-tatutime-backups}` at
 `/Backup`, where Settings → Backup writes its ZIPs. Setting
-`TUCANO_BACKUP_DIR=./backups` makes both the in-app ZIPs and the CLI archives
+`TATU_BACKUP_DIR=./backups` makes both the in-app ZIPs and the CLI archives
 share one host folder (mounted at `/Backup` and `/backups` respectively).
 
 **Keep the vault key with the backup.** Unless you use an external
-`TUCANO_SECRET_KEY[_FILE]`, the generated `<data>/vault.key` is inside the data
+`TATU_SECRET_KEY[_FILE]`, the generated `<data>/vault.key` is inside the data
 directory, so the backup contains both `secrets.bin` and the key that decrypts
 it. Protect the archive accordingly, keep a separate copy of `vault.key`, or
 supply the key externally and store that copy with the backup. Without the key
@@ -115,7 +115,7 @@ sudo chown -R 10001:10001 ./Data
 ```
 
 A named volume is the recommended default and needs no ownership step. On
-Unraid, run `chown -R 10001:10001 /mnt/user/appdata/tucanotime` before the first
+Unraid, run `chown -R 10001:10001 /mnt/user/appdata/tatutime` before the first
 start; see the [Unraid runbook](../deploy/unraid/README.md).
 
 ## Container hardening
@@ -131,7 +131,7 @@ services are locked down by default.
 | `user: "10001:10001"` | Numeric, non-root uid/gid fixed in the image and Compose |
 | `init: true` | A tiny init reaps orphans and forwards SIGTERM |
 | `stop_grace_period: 30s` | The server finishes in-flight writes before exit |
-| `ports: 127.0.0.1:8080:8080` | Loopback-only by default; `TUCANO_HOST_ADDR=0.0.0.0` publishes on the LAN |
+| `ports: 127.0.0.1:8080:8080` | Loopback-only by default; `TATU_HOST_ADDR=0.0.0.0` publishes on the LAN |
 
 The runtime base is distroless: there is no shell, no package manager and no
 `apt` state. `docker exec … sh` fails by design; use `docker logs`.
@@ -143,15 +143,15 @@ The runtime base is distroless: there is no shell, no package manager and no
   crate version in `Cargo.toml` (the release version), and the build is the
   commit the binary was compiled from — seven characters, the same short sha
   release tags use. The GUI footer renders both, and a probe that fails leaves
-  the plain `TucanoTime` branding rather than blocking the boot.
-- Image builds pass the commit as the `TUCANO_BUILD` build arg
-  (`docker build --build-arg TUCANO_BUILD=$(git rev-parse --short HEAD) .`);
+  the plain `TatuTime` branding rather than blocking the boot.
+- Image builds pass the commit as the `TATU_BUILD` build arg
+  (`docker build --build-arg TATU_BUILD=$(git rev-parse --short HEAD) .`);
   CI does this automatically. The builder context has no `.git`, so without the
   arg the binary reports `unknown`. The image `HEALTHCHECK` runs
-  `tucano-time --health`, which probes `http://127.0.0.1:${TUCANO_PORT}/healthz`
+  `tatu-time --health`, which probes `http://127.0.0.1:${TATU_PORT}/healthz`
   inside the container, so no `curl` or shell is needed.
 - `RUST_LOG` controls the tracing filter; the default is `info`.
-- `docker logs -f tucanotime` is the primary debugging interface.
+- `docker logs -f tatutime` is the primary debugging interface.
 - Security-relevant events are appended to `<data>/audit.log` as JSON lines and
   rotated at 1 MiB with one previous generation. See [Security](security.md).
 
@@ -179,15 +179,15 @@ a crash between a run and the state write costs at most one duplicate.
 CI publishes on every push to `main`:
 
 ```
-ghcr.io/tucanotechnology/tucanotime:latest
-ghcr.io/tucanotechnology/tucanotime:<version>
-ghcr.io/tucanotechnology/tucanotime:sha-<short-sha>
+ghcr.io/tatuhq/tatutime:latest
+ghcr.io/tatuhq/tatutime:<version>
+ghcr.io/tatuhq/tatutime:sha-<short-sha>
 ```
 
 `:<version>` is the crate version in `Cargo.toml`, which is also the release
 version and the `v<version>` git tag: pin it when you want the release, or the
 `sha-`-prefixed tag when you want a fixed build. The image is published at
-`ghcr.io/tucanotechnology/tucanotime` as `:latest`, `:<version>` and
+`ghcr.io/tatuhq/tatutime` as `:latest`, `:<version>` and
 `:sha-<short>`; check the registry package visibility (a public package pulls
 anonymously without credentials).
 
@@ -205,17 +205,17 @@ The image is defined by the [`Dockerfile`](../Dockerfile) and run by
 - Dependencies compile in a cached layer, so a source or GUI edit rebuilds only
   this crate.
 - The image size is not documented here; measure it on your own build with
-  `docker image ls tucanotime` if you need the number.
+  `docker image ls tatutime` if you need the number.
 
 ## Unraid
 
 The canonical Unraid template and step-by-step runbook live in
 [`deploy/unraid/README.md`](../deploy/unraid/README.md), with the template at
-[`deploy/unraid/my-TucanoTime.xml`](../deploy/unraid/my-TucanoTime.xml). The
+[`deploy/unraid/my-TatuTime.xml`](../deploy/unraid/my-TatuTime.xml). The
 Unraid runbook adds platform-specific steps (flash-share import, uid 10001
 permissions, the vault key, SMTP relay options and backups); use this page for
 generic operations.
 
 ---
 
-Last verified against TucanoTime 0.1.41.
+Last verified against TatuTime 0.1.41.

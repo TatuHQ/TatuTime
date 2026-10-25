@@ -12,11 +12,11 @@
 # outside world. Vault-stored smtp.* settings still win over these env vars:
 # on a fresh test volume nothing is stored, so this overlay is enough.
 services:
-  tucanotime:
+  tatutime:
     environment:
-      TUCANO_SMTP_HOST: mailhog
-      TUCANO_SMTP_PORT: "1025"
-      TUCANO_SMTP_FROM: invoices@tucanotime.local
+      TATU_SMTP_HOST: mailhog
+      TATU_SMTP_PORT: "1025"
+      TATU_SMTP_FROM: invoices@tatutime.local
 
   mailhog:
     image: mailhog/mailhog:v1.0.1

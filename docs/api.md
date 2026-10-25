@@ -279,4 +279,4 @@ exports use the same cap.
 
 ---
 
-Last verified against TucanoTime 0.1.42.
+Last verified against TatuTime 0.1.42.

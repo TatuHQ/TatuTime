@@ -23,11 +23,11 @@ const app = loadAppSource();
 
 const CUSTOMER = {
     id: 'c1',
-    name: 'Tucano Time',
-    email: 'legacy@tucanotime.test',
+    name: 'TatuTime',
+    email: 'legacy@tatutime.test',
     contacts: [
-        { name: 'Ada', role: 'Accounts', email: 'ada@tucanotime.test', billing: true },
-        { name: 'Bob', role: 'Operations', email: 'bob@tucanotime.test', billing: false },
+        { name: 'Ada', role: 'Accounts', email: 'ada@tatutime.test', billing: true },
+        { name: 'Bob', role: 'Operations', email: 'bob@tatutime.test', billing: false },
     ],
 };
 const INVOICE = { id: 'i1', number: 'INV-0001', customer_id: 'c1' };
@@ -36,7 +36,7 @@ function setup({
     adminEmail = { configured: true, transport: 'smtp' },
     postResult,
     postError = null,
-    org = { accountant_email: 'books@tucanotime.test' },
+    org = { accountant_email: 'books@tatutime.test' },
     receipts = [],
 } = {}) {
     const dom = new JSDOM(html, { runScripts: 'outside-only', url: 'http://localhost/' });
@@ -57,8 +57,8 @@ function setup({
       window.__receipts = ${JSON.stringify(receipts)};
       window.__postError = ${JSON.stringify(postError)};
       window.__postResult = ${JSON.stringify(postResult || {
-        sent_to: 'ada@tucanotime.test',
-        recipients: ['ada@tucanotime.test'],
+        sent_to: 'ada@tatutime.test',
+        recipients: ['ada@tatutime.test'],
         transport: 'smtp',
     })};
       api.get = async (path) => {
@@ -132,7 +132,7 @@ test('clicking #ip-send opens the recipient dialog and sends nothing', async () 
     await waitFor(() => isOpen(dlgOf(document)), { message: 'the recipient dialog to open' });
     assert.equal(t.calls().length, 0, 'opening the dialog must not POST anything');
     assert.equal(t.state.isAdmin, false, 'the harness never loads the register');
-    assert.deepEqual(checked(document), ['ada@tucanotime.test'], 'the billing address is checked by default');
+    assert.deepEqual(checked(document), ['ada@tatutime.test'], 'the billing address is checked by default');
     assert.ok(dlgOf(document).contains(document.activeElement), 'focus moves into the dialog on open');
     // Escape closes and returns focus to the opener.
     dlgOf(document).dispatchEvent(new window.KeyboardEvent('keydown', {
@@ -158,7 +158,7 @@ test('issuing a draft opens the recipient dialog for the issued invoice', async 
     assert.equal(t.calls().length, 1, 'issuing posts once and never sends');
     assert.equal(t.calls()[0].path, '/invoices/i1/issue');
     assert.match(document.getElementById('send-email-invoice').textContent, /INV-0001/);
-    assert.deepEqual(checked(document), ['ada@tucanotime.test'],
+    assert.deepEqual(checked(document), ['ada@tatutime.test'],
         'the issued invoice dialog pre-ticks the billing address');
     click(window, document.getElementById('send-email-close'));
     await waitFor(() => !isOpen(dlgOf(document)), { message: 'closing the dialog after issue' });
@@ -186,7 +186,7 @@ test('expense receipts are offered, listed and sent when requested', async () =>
     await waitFor(() => t.calls().length === 1, { message: 'the send request with receipts' });
     const body = t.calls()[0].body;
     assert.equal(body.include_receipts, true, 'the flag travels with the send');
-    assert.deepEqual([...body.recipients], ['ada@tucanotime.test']);
+    assert.deepEqual([...body.recipients], ['ada@tatutime.test']);
     dom.window.close();
 });
 
@@ -202,11 +202,11 @@ test('the billing contact leads the list and other on-file addresses follow unch
     const { dom, document, t } = setup();
     await t.openSendEmailDialog(INVOICE, null);
     const list = boxes(document);
-    assert.deepEqual(list.map((b) => b.value), ['ada@tucanotime.test', 'bob@tucanotime.test', 'legacy@tucanotime.test'],
+    assert.deepEqual(list.map((b) => b.value), ['ada@tatutime.test', 'bob@tatutime.test', 'legacy@tatutime.test'],
         'billing contact first, then the other contact, then the legacy address');
     assert.deepEqual(list.map((b) => b.checked), [true, false, false], 'only the billing address is pre-ticked');
     assert.deepEqual([...t.emailCandidates({ ...CUSTOMER, contacts: [] }).map((c) => c.email)],
-        ['legacy@tucanotime.test'], 'without contacts the legacy email is the default');
+        ['legacy@tatutime.test'], 'without contacts the legacy email is the default');
     assert.deepEqual([...t.emailCandidates({ id: 'c2', email: '', contacts: [] })], [],
         'no address on file yields no candidates');
     dom.window.close();
@@ -217,8 +217,8 @@ test('the billing contact leads the list and other on-file addresses follow unch
 test('two ticked contacts send one request with both addresses in order', async () => {
     const { dom, document, window, t } = setup({
         postResult: {
-            sent_to: 'ada@tucanotime.test, bob@tucanotime.test',
-            recipients: ['ada@tucanotime.test', 'bob@tucanotime.test'],
+            sent_to: 'ada@tatutime.test, bob@tatutime.test',
+            recipients: ['ada@tatutime.test', 'bob@tatutime.test'],
             transport: 'smtp',
         },
     });
@@ -229,12 +229,12 @@ test('two ticked contacts send one request with both addresses in order', async 
     assert.equal(t.calls().length, 1, 'exactly one request');
     const call = t.calls()[0];
     assert.equal(call.path, '/invoices/i1/email', 'the invoice email endpoint');
-    assert.deepEqual([...call.body.recipients], ['ada@tucanotime.test', 'bob@tucanotime.test'],
+    assert.deepEqual([...call.body.recipients], ['ada@tatutime.test', 'bob@tatutime.test'],
         'both addresses travel in one ordered list');
     const result = document.getElementById('send-email-result');
     await waitFor(() => !isOpen(dlgOf(document)), { message: 'successful SMTP send to close the dialog' });
     assert.equal(result.hidden, false, 'the result is announced inline');
-    assert.match(result.textContent, /ada@tucanotime\.test, bob@tucanotime\.test/,
+    assert.match(result.textContent, /ada@tatutime\.test, bob@tatutime\.test/,
         'the success message names every recipient, in order');
     dom.window.close();
 });
@@ -251,10 +251,10 @@ test('the untouched single default omits the body entirely', async () => {
 test('a typed extra address is merged and de-duplicated', async () => {
     const { dom, document, window, t } = setup();
     await t.openSendEmailDialog(INVOICE, null);
-    document.getElementById('send-email-extra').value = 'ADA@tucanotime.test, extra@client.test';
+    document.getElementById('send-email-extra').value = 'ADA@tatutime.test, extra@client.test';
     click(window, document.getElementById('send-email-send'));
     await waitFor(() => t.calls().length === 1, { message: 'the merged send' });
-    assert.deepEqual([...t.calls()[0].body.recipients], ['ada@tucanotime.test', 'extra@client.test'],
+    assert.deepEqual([...t.calls()[0].body.recipients], ['ada@tatutime.test', 'extra@client.test'],
         'the extra merges after the ticked address and the case-insensitive duplicate drops');
     dom.window.close();
 });
@@ -336,14 +336,14 @@ test('the Email copy action opens a dialog pre-filled with the accountant addres
     await waitFor(() => document.getElementById('app-dialog').open === true,
         { message: 'the Email copy prompt to open' });
     assert.equal(document.getElementById('dlg-title').textContent, 'Email a copy');
-    assert.equal(document.getElementById('dlg-input').value, 'books@tucanotime.test',
+    assert.equal(document.getElementById('dlg-input').value, 'books@tatutime.test',
         'the accountant address from Settings -> Company is offered, not retyped');
     assert.equal(document.getElementById('dlg-ok').textContent, 'Send copy');
     assert.equal(document.getElementById('dlg-cancel').hidden, false, 'the copy prompt can be cancelled');
     document.getElementById('dlg-ok').click();
     await pending;
     assert.deepEqual(JSON.parse(JSON.stringify(t.calls())),
-        [{ path: '/invoices/i1/email-copy', body: { to: 'books@tucanotime.test' } }],
+        [{ path: '/invoices/i1/email-copy', body: { to: 'books@tatutime.test' } }],
         'one copy request to the pre-filled address');
     dom.window.close();
 });
@@ -354,7 +354,7 @@ test('marking an invoice paid offers the accountant copy and cancelling sends no
     const pending = t.offerAccountantCopy({ id: 'i1', number: 'INV-0001', status: 'paid' });
     await waitFor(() => document.getElementById('app-dialog').open === true,
         { message: 'the paid offer to open' });
-    assert.equal(document.getElementById('dlg-input').value, 'books@tucanotime.test');
+    assert.equal(document.getElementById('dlg-input').value, 'books@tatutime.test');
     document.getElementById('dlg-cancel').click();
     await pending;
     assert.equal(t.calls().length, 0, 'cancelling the offer sends nothing');

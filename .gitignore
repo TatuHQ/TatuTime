@@ -1,6 +1,6 @@
 /target/
 
-# Local runtime data (TUCANO_DATA_DIR; the server's default is ./Data, so a
+# Local runtime data (TATU_DATA_DIR; the server's default is ./Data, so a
 # default `cargo run` never dirties the repo). /data is kept for the older
 # local naming.
 /Data/
@@ -11,7 +11,7 @@
 /backups/
 
 # Belt-and-braces: the same documents straight in the repo root, should anyone
-# ever point TUCANO_DATA_DIR at it. Mirrors the storage layout in AGENTS.md.
+# ever point TATU_DATA_DIR at it. Mirrors the storage layout in AGENTS.md.
 /customers/
 /entries/
 /expenses/
@@ -29,7 +29,7 @@
 # holds operator-supplied keys, so it is ignored as a whole.
 /secrets/
 /.server.lock
-/.tucanotime.lock
+/.tatutime.lock
 
 # Local editor and scratch artifacts.
 *.json.tmp

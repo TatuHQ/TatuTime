@@ -53,7 +53,7 @@ pub const VAR_HELP: &[(&str, &str)] = &[
     ("%period_month_number%", "10"),
     ("%period_month_padded%", "10"),
     ("%period_year%", "2026"),
-    ("%customer_name%", "Tucano Time"),
+    ("%customer_name%", "TatuTime"),
     ("%currency%", "EUR"),
     ("%total%", "1,200.00"),
     ("%line_count%", "14"),
@@ -642,7 +642,7 @@ mod tests {
     fn vars() -> Vars {
         vars_for(
             &sample_invoice(),
-            &customer_named("Tucano Time"),
+            &customer_named("TatuTime"),
             Some(NaiveDate::from_ymd_opt(2026, 10, 5).unwrap()),
         )
     }
@@ -674,7 +674,7 @@ mod tests {
     fn variable_table_resolves_documented_examples() {
         let issue = Some(NaiveDate::from_ymd_opt(2026, 10, 5).unwrap());
         let inv = sample_invoice();
-        let built = vars_for(&inv, &customer_named("Tucano Time"), issue);
+        let built = vars_for(&inv, &customer_named("TatuTime"), issue);
         assert_eq!(built["invoice_number"], "INV-0007");
         assert_eq!(built["invoice_issue_day"], "5");
         assert_eq!(built["invoice_issue_month"], "October");
@@ -688,7 +688,7 @@ mod tests {
         assert_eq!(built["period_month_number"], "10");
         assert_eq!(built["period_month_padded"], "10");
         assert_eq!(built["period_year"], "2026");
-        assert_eq!(built["customer_name"], "Tucano Time");
+        assert_eq!(built["customer_name"], "TatuTime");
         assert_eq!(built["currency"], "EUR");
         assert_eq!(built["total"], "1,200.00 EUR");
         assert_eq!(built["line_count"], "0");
@@ -703,7 +703,7 @@ mod tests {
         );
         assert_eq!(
             s,
-            "Invoice INV-0007 for Tucano Time: 1,200.00 EUR due 2026-11-04"
+            "Invoice INV-0007 for TatuTime: 1,200.00 EUR due 2026-11-04"
         );
     }
 
@@ -807,7 +807,7 @@ mod tests {
         let draft = sample_invoice();
         assert_eq!(
             resolve_subject(&draft, &template, &customer, &v).as_deref(),
-            Some("INV-0007 for Tucano Time")
+            Some("INV-0007 for TatuTime")
         );
         let bare = Customer {
             invoice_subject: String::new(),
@@ -822,12 +822,12 @@ mod tests {
         assert_eq!(resolve_subject(&draft, &empty, &bare, &v), None);
         // The issue-time snapshot wins verbatim over both live sources.
         let issued = Invoice {
-            subject: "Tucano Time invoice for 08 2026".into(),
+            subject: "TatuTime invoice for 08 2026".into(),
             ..sample_invoice()
         };
         assert_eq!(
             resolve_subject(&issued, &template, &customer, &v).as_deref(),
-            Some("Tucano Time invoice for 08 2026")
+            Some("TatuTime invoice for 08 2026")
         );
     }
 
@@ -873,7 +873,7 @@ mod tests {
         };
         let template = InvoiceTemplate::default();
         let inv = sample_invoice();
-        let mut doc = crate::pdf::doc_for(&inv, &customer, &crate::pdf::Org::named("Tucano"));
+        let mut doc = crate::pdf::doc_for(&inv, &customer, &crate::pdf::Org::named("Tatu"));
         let before = doc.clone();
         let content = doc_content(&inv, &template, &customer, &vars_for(&inv, &customer, None));
         apply_doc_content(&mut doc, &content);
@@ -887,7 +887,7 @@ mod tests {
         use crate::domain::{Currency, Customer, InvoiceTemplate};
         let customer = Customer {
             id: uuid::Uuid::new_v4(),
-            name: "Tucano Time".into(),
+            name: "TatuTime".into(),
             currency: Currency("EUR".into()),
             default_rate_minor: 1,
             active: true,
@@ -910,7 +910,7 @@ mod tests {
             ..Default::default()
         };
         let inv = sample_invoice();
-        let mut doc = crate::pdf::doc_for(&inv, &customer, &crate::pdf::Org::named("Tucano"));
+        let mut doc = crate::pdf::doc_for(&inv, &customer, &crate::pdf::Org::named("Tatu"));
         let content = doc_content(
             &inv,
             &template,
@@ -986,7 +986,7 @@ mod tests {
             notes: "Org note.".into(),
             ..Default::default()
         };
-        let mut doc = crate::pdf::doc_for(&inv, &customer, &crate::pdf::Org::named("Tucano"));
+        let mut doc = crate::pdf::doc_for(&inv, &customer, &crate::pdf::Org::named("Tatu"));
         let content = doc_content(&inv, &template, &customer, &vars_for(&inv, &customer, None));
         apply_doc_content(&mut doc, &content);
         let rows: Vec<String> = doc

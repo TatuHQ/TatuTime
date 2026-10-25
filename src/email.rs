@@ -6,7 +6,7 @@
 //! other port here; callers on the request path use `spawn_blocking`.
 //!
 //! Credentials: `smtp.host`, `smtp.port`, `smtp.username`, `smtp.password`,
-//! `smtp.from` in the secret vault, or `TUCANO_SMTP_*` env vars. If none are
+//! `smtp.from` in the secret vault, or `TATU_SMTP_*` env vars. If none are
 //! configured the app runs with `DisabledEmailSender` — emails are logged, not
 //! sent — degrading safely exactly like the vault itself.
 
@@ -24,7 +24,7 @@ pub struct EmailMessage {
     /// receipts the admin chose to include.
     pub attachments: Vec<(String, Vec<u8>)>,
     /// Sender display name override (#146); None keeps the built-in
-    /// "TucanoTime" — resolved from the org profile by the API layer.
+    /// "TatuTime" — resolved from the org profile by the API layer.
     pub from_name: Option<String>,
     /// Reply-To header (#146): honoured by every transport; None omits it.
     pub reply_to: Option<String>,
@@ -272,25 +272,24 @@ pub struct SmtpConfig {
 
 impl SmtpConfig {
     /// Builds a config from vault keys (`smtp.*`) falling back to
-    /// `TUCANO_SMTP_*` env vars. `None` when no host is configured.
+    /// `TATU_SMTP_*` env vars. `None` when no host is configured.
     pub fn from_sources(vault: Option<&crate::vault::SecretVault>) -> Option<Self> {
         let get = |key: &str, env: &str| -> Option<String> {
             vault
                 .and_then(|v| v.get(key))
                 .or_else(|| std::env::var(env).ok())
         };
-        let host = get("smtp.host", "TUCANO_SMTP_HOST")?;
-        let port = get("smtp.port", "TUCANO_SMTP_PORT")
+        let host = get("smtp.host", "TATU_SMTP_HOST")?;
+        let port = get("smtp.port", "TATU_SMTP_PORT")
             .and_then(|p| p.parse().ok())
             .unwrap_or(25);
-        let from =
-            get("smtp.from", "TUCANO_SMTP_FROM").unwrap_or_else(|| "noreply@localhost".into());
+        let from = get("smtp.from", "TATU_SMTP_FROM").unwrap_or_else(|| "noreply@localhost".into());
         Some(Self {
             host,
             port,
             from,
-            username: get("smtp.username", "TUCANO_SMTP_USERNAME"),
-            password: get("smtp.password", "TUCANO_SMTP_PASSWORD"),
+            username: get("smtp.username", "TATU_SMTP_USERNAME"),
+            password: get("smtp.password", "TATU_SMTP_PASSWORD"),
         })
     }
 }
@@ -376,7 +375,7 @@ impl SmtpEmailSender {
     }
 }
 
-/// Resolve the live transport from the vault + `TUCANO_SMTP_*` env.
+/// Resolve the live transport from the vault + `TATU_SMTP_*` env.
 /// `DisabledEmailSender` when no host is configured.
 pub fn sender_from_sources(
     vault: Option<&crate::vault::SecretVault>,
@@ -523,7 +522,7 @@ impl SmtpConn {
 
     fn run(&mut self, cfg: &SmtpConfig, msg: &EmailMessage) -> Result<(), EmailError> {
         self.read_reply()?; // 220 greeting
-        self.command("EHLO tucanotime", &[250])?;
+        self.command("EHLO tatutime", &[250])?;
         if let (Some(u), Some(p)) = (&cfg.username, &cfg.password) {
             self.command("AUTH LOGIN", &[334])?;
             // M2: the base64 username/password lines are credentials — label
@@ -617,7 +616,7 @@ fn build_mime_with_sender(msg: &EmailMessage, sender: Option<&str>) -> Result<St
         .from_name
         .as_deref()
         .filter(|n| !n.trim().is_empty())
-        .unwrap_or("TucanoTime");
+        .unwrap_or("TatuTime");
     let from_header = match sender {
         Some(address) => format!("{} <{address}>", encode_header(from_display)),
         None => encode_header(from_display),
@@ -851,26 +850,26 @@ mod tests {
     fn copy_email_names_requester_and_carries_note() {
         let s = render_copy_email(
             "INV-9",
-            "Tucano Time",
+            "TatuTime",
             "Pat Admin",
             Some("for the books"),
-            "Tucano",
+            "Tatu",
         );
-        assert!(s.contains("INV-9") && s.contains("Tucano Time") && s.contains("Pat Admin"));
+        assert!(s.contains("INV-9") && s.contains("TatuTime") && s.contains("Pat Admin"));
         assert!(s.contains("for the books"));
         // Blank notes drop the section entirely.
-        let bare = render_copy_email("INV-9", "Tucano Time", "Pat", Some("   "), "Tucano");
+        let bare = render_copy_email("INV-9", "TatuTime", "Pat", Some("   "), "Tatu");
         assert!(!bare.contains("Note:"));
     }
 
     #[test]
     fn templates_include_key_fields() {
         let inv = render_invoice_email(
-            "Tucano Time",
+            "TatuTime",
             "INV-1",
             "1,200.00 EUR",
             Some("2026-10-19"),
-            "Tucano",
+            "Tatu",
             true,
             None,
         );
@@ -881,22 +880,22 @@ mod tests {
         assert!(!inv.contains("How to pay"));
         // Configured: the block rides along verbatim.
         let with_pay = render_invoice_email(
-            "Tucano Time",
+            "TatuTime",
             "INV-1",
             "1,200.00 EUR",
             Some("2026-10-19"),
-            "Tucano",
+            "Tatu",
             true,
             Some("IBAN: EX00 0000 0000 0000 0000 00"),
         );
         assert!(with_pay.contains("How to pay:") && with_pay.contains("IBAN: EX00"));
         let rem = render_reminder_email(
-            "Tucano Time",
+            "TatuTime",
             "INV-1",
             "1,200.00 EUR",
             "2026-10-19",
             12,
-            "Tucano",
+            "Tatu",
             true,
             None,
         );
@@ -971,12 +970,12 @@ mod tests {
             reply_to: None,
         };
         let mime = build_mime(&m).expect("a legitimate message builds");
-        assert!(mime.contains("From: TucanoTime\r\n"), "{mime}");
+        assert!(mime.contains("From: TatuTime\r\n"), "{mime}");
         assert!(!mime.contains("Reply-To"), "{mime}");
         // Configured (#146): display name RFC 2047 when non-ASCII + Reply-To.
         let m2 = EmailMessage {
-            from_name: Some("Café Tucano".into()),
-            reply_to: Some("billing@tucano.test".into()),
+            from_name: Some("Café Tatu".into()),
+            reply_to: Some("billing@tatu.test".into()),
             ..m
         };
         let mime2 = build_mime(&m2).expect("a legitimate message builds");
@@ -984,10 +983,7 @@ mod tests {
             mime2.starts_with("From: =?UTF-8?B?") || mime2.contains("From: =?UTF-8?B?"),
             "{mime2}"
         );
-        assert!(
-            mime2.contains("Reply-To: billing@tucano.test\r\n"),
-            "{mime2}"
-        );
+        assert!(mime2.contains("Reply-To: billing@tatu.test\r\n"), "{mime2}");
         assert!(!mime2.contains("Café"), "no raw UTF-8 in headers");
     }
 
@@ -1028,25 +1024,25 @@ mod tests {
         // The guard rejects injections, not address shapes: a display-name
         // recipient and an ASCII display name build exactly as they always did.
         let m = EmailMessage {
-            to: vec!["billing@tucanotime.test".into()],
-            subject: "Invoice INV-0001 from Tucano".into(),
+            to: vec!["billing@tatutime.test".into()],
+            subject: "Invoice INV-0001 from Tatu".into(),
             text: "b".into(),
             html: None,
             attachments: vec![],
-            from_name: Some("Tucano Time".into()),
-            reply_to: Some("billing@tucano.test".into()),
+            from_name: Some("TatuTime".into()),
+            reply_to: Some("billing@tatu.test".into()),
         };
         let mime = build_mime(&m).expect("a legitimate message builds");
-        assert!(mime.contains("From: Tucano Time\r\n"), "{mime}");
-        assert!(mime.contains("To: billing@tucanotime.test\r\n"), "{mime}");
-        assert!(mime.contains("Reply-To: billing@tucano.test\r\n"), "{mime}");
+        assert!(mime.contains("From: TatuTime\r\n"), "{mime}");
+        assert!(mime.contains("To: billing@tatutime.test\r\n"), "{mime}");
+        assert!(mime.contains("Reply-To: billing@tatu.test\r\n"), "{mime}");
         let named = EmailMessage {
-            to: vec!["Tucano Time <billing@tucanotime.example>".into()],
+            to: vec!["TatuTime <billing@tatutime.example>".into()],
             ..m.clone()
         };
         let mime = build_mime(&named).expect("a display-name recipient builds");
         assert!(
-            mime.contains("To: Tucano Time <billing@tucanotime.example>\r\n"),
+            mime.contains("To: TatuTime <billing@tatutime.example>\r\n"),
             "{mime}"
         );
         // The recording transport takes it exactly as before.
@@ -1101,7 +1097,7 @@ mod tests {
             Err(EmailError::Header("reply-to"))
         ));
         let m = EmailMessage {
-            from_name: Some("Tucano\r\nBcc: attacker@evil.example".into()),
+            from_name: Some("Tatu\r\nBcc: attacker@evil.example".into()),
             ..base.clone()
         };
         assert!(matches!(
@@ -1156,7 +1152,7 @@ mod tests {
         let smtp = SmtpEmailSender::new(SmtpConfig {
             host: "127.0.0.1".into(),
             port: 1,
-            from: "noreply@tucano.test".into(),
+            from: "noreply@tatu.test".into(),
             username: None,
             password: None,
         });
@@ -1166,8 +1162,8 @@ mod tests {
     #[test]
     fn recipient_resolution_defaults_dedupes_and_validates() {
         // Absent/empty list -> the single customer default, exactly as before.
-        let default = resolve_recipients(&[], Some("billing@tucanotime.test")).unwrap();
-        assert_eq!(default, vec!["billing@tucanotime.test".to_string()]);
+        let default = resolve_recipients(&[], Some("billing@tatutime.test")).unwrap();
+        assert_eq!(default, vec!["billing@tatutime.test".to_string()]);
         assert!(resolve_recipients(&[], None).is_err());
         assert!(resolve_recipients(&[], Some("   ")).is_err());
         // Explicit order is preserved; a case-insensitive duplicate drops the
@@ -1178,7 +1174,7 @@ mod tests {
                 "first@x.test".into(),
                 " second@x.TEST ".into(),
             ],
-            Some("ignored@tucanotime.test"),
+            Some("ignored@tatutime.test"),
         )
         .unwrap();
         assert_eq!(

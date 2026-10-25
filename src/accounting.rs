@@ -69,20 +69,20 @@ impl crate::providers::NamedProvider for dyn AccountingSync {
 
 /// Builds the registry from vault/env/config (#94 precedence): a provider is
 /// enabled when its OAuth token exists (`qbo.token` / `xero.token`, or
-/// `TUCANO_QBO_TOKEN` / `TUCANO_XERO_TOKEN`); base URLs resolve as
+/// `TATU_QBO_TOKEN` / `TATU_XERO_TOKEN`); base URLs resolve as
 /// env > config.json > the providers' public APIs.
 pub fn registry_from_vault(
     vault: Option<&crate::vault::SecretVault>,
     cfg: &crate::appconfig::AppConfig,
 ) -> Arc<AccountingRegistry> {
     let mut providers: Vec<Arc<dyn AccountingSync>> = Vec::new();
-    if let Some(token) = crate::providers::resolve_secret(vault, "qbo.token", "TUCANO_QBO_TOKEN") {
+    if let Some(token) = crate::providers::resolve_secret(vault, "qbo.token", "TATU_QBO_TOKEN") {
         let base = crate::providers::resolve_setting(
             cfg,
             vault,
             "qbo_base_url",
             "qbo.base_url",
-            "TUCANO_QBO_BASE_URL",
+            "TATU_QBO_BASE_URL",
         )
         .unwrap_or_else(|| "https://quickbooks.api.intuit.com/v3/company/default".into());
         providers.push(Arc::new(QboProvider::new(Arc::new(HttpTransport {
@@ -90,14 +90,13 @@ pub fn registry_from_vault(
             bearer: token,
         }))));
     }
-    if let Some(token) = crate::providers::resolve_secret(vault, "xero.token", "TUCANO_XERO_TOKEN")
-    {
+    if let Some(token) = crate::providers::resolve_secret(vault, "xero.token", "TATU_XERO_TOKEN") {
         let base = crate::providers::resolve_setting(
             cfg,
             vault,
             "xero_base_url",
             "xero.base_url",
-            "TUCANO_XERO_BASE_URL",
+            "TATU_XERO_BASE_URL",
         )
         .unwrap_or_else(|| "https://api.xero.com/api.xro/4.0".into());
         providers.push(Arc::new(XeroProvider::new(Arc::new(HttpTransport {
@@ -592,7 +591,7 @@ mod tests {
     fn sample_invoice() -> (Invoice, Customer) {
         let customer = Customer {
             id: Uuid::new_v4(),
-            name: "Tucano Time".into(),
+            name: "TatuTime".into(),
             currency: Currency("EUR".into()),
             default_rate_minor: 6000,
             active: true,

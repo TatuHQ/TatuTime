@@ -4,7 +4,7 @@ use axum::http::StatusCode;
 use serde_json::Value;
 use serde_json::json;
 use std::sync::Arc;
-use tucano_time::store::Store;
+use tatu_time::store::Store;
 
 #[tokio::test]
 async fn notifications_endpoint_empty_then_read() {
@@ -36,7 +36,7 @@ async fn notifications_hide_stale_and_resolved_no_time_reminders() {
         store
             .push_notification(
                 user.id,
-                &tucano_time::domain::Notification {
+                &tatu_time::domain::Notification {
                     id: uuid::Uuid::new_v4(),
                     kind: kind.to_string(),
                     title: kind.to_string(),
@@ -79,7 +79,7 @@ async fn notifications_hide_stale_and_resolved_no_time_reminders() {
 #[tokio::test]
 async fn schedule_crud_admin_only() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
+    let c = new_customer(&app, "TatuTime", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     let (s, sched) = json_req(&app, "POST", "/api/schedules", Some(json!({"customer_id":cid,"cadence":"monthly","mode":"retainer","retainer_amount_minor":150000,"currency":"EUR"}))).await;
     assert_eq!(s, StatusCode::CREATED, "{sched}");
@@ -115,7 +115,7 @@ async fn schedule_crud_admin_only() {
 #[tokio::test]
 async fn recurring_schedule_pause_resume_keeps_the_cursor() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
+    let c = new_customer(&app, "TatuTime", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     let (s, scd) = json_req(
         &app,
@@ -200,8 +200,8 @@ async fn recurring_never_rebills_settled_or_written_off_entries() {
     // predicate. A settled (`paid` / `partly_paid`) or written-off invoice's
     // entries are released from the edit lock but must never be re-billed,
     // while a draft's lines stay billable.
-    use tucano_time::recurring::RecurringJob;
-    use tucano_time::scheduler::Job;
+    use tatu_time::recurring::RecurringJob;
+    use tatu_time::scheduler::Job;
 
     // Run the daily recurring job once against the router's data dir. `now`
     // fixes the weekly period to 2026-10-01..2026-10-07 (the seeded week).
@@ -218,7 +218,7 @@ async fn recurring_never_rebills_settled_or_written_off_entries() {
         ("written_off", 0u64),
     ] {
         let (app, dir) = app().await;
-        let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
+        let c = new_customer(&app, "TatuTime", "EUR", 6000).await;
         let cid = c["id"].as_str().unwrap().to_string();
         new_project(&app, &cid, "P1", json!({"rate_minor": 6000})).await;
         json_req(
@@ -277,7 +277,7 @@ async fn recurring_never_rebills_settled_or_written_off_entries() {
 
     // (c) A DRAFT's lines stay billable: the same recurring run still bills.
     let (app, dir) = app().await;
-    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
+    let c = new_customer(&app, "TatuTime", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap().to_string();
     new_project(&app, &cid, "P1", json!({"rate_minor": 6000})).await;
     json_req(

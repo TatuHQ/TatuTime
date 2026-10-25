@@ -1,13 +1,13 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "TucanoTime API",
+    "title": "TatuTime API",
     "version": "0.1.0",
     "license": {
       "name": "AGPL-3.0-or-later",
       "identifier": "AGPL-3.0-or-later"
     },
-    "description": "Timesheet system: daily/weekly time entries, customers and project codes with per-entity currencies and hourly rates. File-backed (no database); the API is the only writer below TUCANO_DATA_DIR. Access is private-per-user: a member sees and edits only their own entries/expenses/submissions; an administrator sees all data and owns invoicing, approvals and user management (the /api/users and /api/invoices routes return 403 for members). Mutating endpoints may return 503 (Retry-After) under write contention. Mutating requests (POST/PUT/DELETE) must also carry the X-CSRF-Protection: 1 header; without it the request is rejected 403 with code csrf. Exempt: POST /api/auth/login, /api/auth/bootstrap, /api/auth/sso/assertion."
+    "description": "Timesheet system: daily/weekly time entries, customers and project codes with per-entity currencies and hourly rates. File-backed (no database); the API is the only writer below TATU_DATA_DIR. Access is private-per-user: a member sees and edits only their own entries/expenses/submissions; an administrator sees all data and owns invoicing, approvals and user management (the /api/users and /api/invoices routes return 403 for members). Mutating endpoints may return 503 (Retry-After) under write contention. Mutating requests (POST/PUT/DELETE) must also carry the X-CSRF-Protection: 1 header; without it the request is rejected 403 with code csrf. Exempt: POST /api/auth/login, /api/auth/bootstrap, /api/auth/sso/assertion."
   },
   "servers": [
     {
@@ -227,7 +227,7 @@
           },
           "external_override": {
             "type": "boolean",
-            "description": "TUCANO_SECRET_KEY or TUCANO_SECRET_KEY_FILE is configured; the key is operator-managed out-of-band."
+            "description": "TATU_SECRET_KEY or TATU_SECRET_KEY_FILE is configured; the key is operator-managed out-of-band."
           },
           "can_enable": {
             "type": "boolean"
@@ -259,7 +259,7 @@
         "pattern": "^[A-Z0-9][A-Z0-9_-]{0,23}$",
         "description": "Normalised upper case; letters and digits, dashes and underscores after the first character; at most 24 characters.",
         "examples": [
-          "TUCANO-42"
+          "TATU-42"
         ]
       },
       "Hours": {
@@ -3566,7 +3566,7 @@
         "properties": {
           "file_name": {
             "type": "string",
-            "description": "<datetime>_tucanotime-backup_<company>.zip"
+            "description": "<datetime>_tatutime-backup_<company>.zip"
           },
           "size_bytes": {
             "type": "integer",
@@ -3724,7 +3724,7 @@
         }
       },
       "CollectionFull": {
-        "description": "The target collection has reached its configured document limit (code collection_full, TUCANO_MAX_DOCS). Nothing was written; the collection stays readable, so delete unused records and retry.",
+        "description": "The target collection has reached its configured document limit (code collection_full, TATU_MAX_DOCS). Nothing was written; the collection stays readable, so delete unused records and retry.",
         "content": {
           "application/json": {
             "schema": {
@@ -3821,7 +3821,7 @@
         }
       },
       "FxUnavailable": {
-        "description": "No exchange-rate reference table could be loaded - offline, an unreadable TUCANO_FX_RATES_FILE, or a document that does not parse. Fail-closed: the rate is never guessed (code fx_unavailable), so the caller can enter one by hand.",
+        "description": "No exchange-rate reference table could be loaded - offline, an unreadable TATU_FX_RATES_FILE, or a document that does not parse. Fail-closed: the rate is never guessed (code fx_unavailable), so the caller can enter one by hand.",
         "content": {
           "application/json": {
             "schema": {
@@ -8599,7 +8599,7 @@
             "$ref": "#/components/responses/Forbidden"
           },
           "409": {
-            "description": "vault_already_enabled, or vault_managed_externally when the lifecycle is operator-managed (`TUCANO_VAULT_ENABLED` carries a valid boolean, or an env key/env key file is configured).",
+            "description": "vault_already_enabled, or vault_managed_externally when the lifecycle is operator-managed (`TATU_VAULT_ENABLED` carries a valid boolean, or an env key/env key file is configured).",
             "content": {
               "application/json": {
                 "schema": {
@@ -8622,7 +8622,7 @@
           "admin"
         ],
         "summary": "Disable the credential vault and delete the generated key (admin only)",
-        "description": "Requires `{ \"confirm\": true }`. Refused with vault_in_use while any secret is stored, and with vault_managed_externally when the lifecycle is operator-managed (`TUCANO_VAULT_ENABLED` or an env key/env key file). On success `vault_enabled=false` is persisted first, the disabled state is installed, and the managed vault.key is then deleted best-effort \u2014 a persistence failure returns 500 and leaves both the slot and the key untouched.",
+        "description": "Requires `{ \"confirm\": true }`. Refused with vault_in_use while any secret is stored, and with vault_managed_externally when the lifecycle is operator-managed (`TATU_VAULT_ENABLED` or an env key/env key file). On success `vault_enabled=false` is persisted first, the disabled state is installed, and the managed vault.key is then deleted best-effort \u2014 a persistence failure returns 500 and leaves both the slot and the key untouched.",
         "parameters": [
           {
             "$ref": "#/components/parameters/CsrfProtection"
@@ -8700,7 +8700,7 @@
           "admin"
         ],
         "summary": "Replace the managed vault key with a fresh one (admin only)",
-        "description": "Requires `{ \"confirm\": true }`. Refused with vault_in_use while any secret is stored and with vault_managed_externally when the lifecycle is operator-managed (`TUCANO_VAULT_ENABLED` or an env key/env key file). Answers 200 with a new fingerprint and `created_key: true`.",
+        "description": "Requires `{ \"confirm\": true }`. Refused with vault_in_use while any secret is stored and with vault_managed_externally when the lifecycle is operator-managed (`TATU_VAULT_ENABLED` or an env key/env key file). Answers 200 with a new fingerprint and `created_key: true`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/CsrfProtection"
@@ -11344,7 +11344,7 @@
           "admin"
         ],
         "summary": "Backup schedule, server time zone, next run and stored ZIP archives",
-        "description": "Backups are unencrypted ZIPs of the data directory written to the Backup folder next to it (or TUCANO_BACKUP_DIR). Files sit at the archive root so restoring is extracting them into the data directory.",
+        "description": "Backups are unencrypted ZIPs of the data directory written to the Backup folder next to it (or TATU_BACKUP_DIR). Files sit at the archive root so restoring is extracting them into the data directory.",
         "responses": {
           "401": {
             "$ref": "#/components/responses/Unauthorized"

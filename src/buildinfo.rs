@@ -2,7 +2,7 @@
 //!
 //! [`VERSION`] is the crate version — the release version, bumped in the PR that
 //! lands (`AGENTS.md`). [`BUILD`] is the commit the binary was compiled from,
-//! recorded by `build.rs` from git on a source build or from `TUCANO_BUILD` when
+//! recorded by `build.rs` from git on a source build or from `TATU_BUILD` when
 //! the build context has no `.git` (the Docker image). Neither is read from
 //! storage or taken from a client: a running server can only ever describe
 //! itself, so the footer cannot be made to claim a version it is not.
@@ -13,8 +13,8 @@ use serde_json::{Value, json};
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// The commit this binary was built from; `unknown` when the build could not
-/// name one (no git checkout and no `TUCANO_BUILD`).
-pub const BUILD: &str = env!("TUCANO_BUILD");
+/// name one (no git checkout and no `TATU_BUILD`).
+pub const BUILD: &str = env!("TATU_BUILD");
 
 /// The liveness body: status plus the build identity, so an operator — or the
 /// GUI footer — can tell *which* server answered without shelling into it.

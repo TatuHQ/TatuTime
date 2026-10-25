@@ -6,11 +6,11 @@ use serde_json::{Value, json};
 use std::sync::Arc;
 use tower::ServiceExt;
 
-use tucano_time::api::AppState;
-use tucano_time::auth::Session;
-use tucano_time::clock::SystemClock;
-use tucano_time::lock::{EntryLock, LockReason};
-use tucano_time::store::Store;
+use tatu_time::api::AppState;
+use tatu_time::auth::Session;
+use tatu_time::clock::SystemClock;
+use tatu_time::lock::{EntryLock, LockReason};
+use tatu_time::store::Store;
 
 pub(crate) const ADMIN_EMAIL: &str = "admin@test.local";
 pub(crate) const ADMIN_PW: &str = "supersecret1";
@@ -20,7 +20,7 @@ pub(crate) struct Client {
     pub(crate) router: Router,
     pub(crate) cookie: String,
     /// The recording email transport installed on the router (#35).
-    pub(crate) email: Arc<tucano_time::email::RecordingEmailSender>,
+    pub(crate) email: Arc<tatu_time::email::RecordingEmailSender>,
 }
 
 pub(crate) async fn raw(
@@ -77,7 +77,7 @@ impl Client {
         Self::build(
             store,
             locks,
-            tucano_time::accounting::AccountingRegistry::default(),
+            tatu_time::accounting::AccountingRegistry::default(),
         )
         .await
     }
@@ -85,7 +85,7 @@ impl Client {
     /// Client with accounting providers injected (#33 tests).
     pub(crate) async fn with_accounting(
         store: Store,
-        accounting: tucano_time::accounting::AccountingRegistry,
+        accounting: tatu_time::accounting::AccountingRegistry,
     ) -> Self {
         Self::build(store, None, accounting).await
     }
@@ -93,49 +93,49 @@ impl Client {
     pub(crate) async fn build(
         store: Store,
         locks: Option<Arc<dyn EntryLock>>,
-        accounting: tucano_time::accounting::AccountingRegistry,
+        accounting: tatu_time::accounting::AccountingRegistry,
     ) -> Self {
         let session = Arc::new(Session::new(
             b"test-session-secret-0000000000000032".to_vec(),
             3600,
             false,
         ));
-        let recorder = Arc::new(tucano_time::email::RecordingEmailSender::default());
+        let recorder = Arc::new(tatu_time::email::RecordingEmailSender::default());
         let accounting = Arc::new(accounting);
         let state = match locks {
             Some(l) => {
                 let store = Arc::new(store);
-                let audit = Arc::new(tucano_time::audit::AuditLog::new(store.root()));
-                let revocations = Arc::new(tucano_time::revoke::Revocations::new(store.root()));
+                let audit = Arc::new(tatu_time::audit::AuditLog::new(store.root()));
+                let revocations = Arc::new(tatu_time::revoke::Revocations::new(store.root()));
                 AppState {
                     store,
                     clock: Arc::new(SystemClock),
                     locks: l,
                     session,
-                    rate: Arc::new(tucano_time::ratelimit::RateLimiter::new(
+                    rate: Arc::new(tatu_time::ratelimit::RateLimiter::new(
                         8,
                         std::time::Duration::from_secs(300),
                     )),
                     audit,
                     revocations,
-                    vault: tucano_time::vault::VaultSlot::disabled(
-                        tucano_time::vault::DisabledReason::Config,
+                    vault: tatu_time::vault::VaultSlot::disabled(
+                        tatu_time::vault::DisabledReason::Config,
                     ),
                     email: recorder.clone(),
                     accounting,
-                    sso: Arc::new(tucano_time::sso::SsoRegistry::default()),
-                    oauth_flows: Arc::new(tucano_time::calendar_oauth::OAuthFlows::new()),
+                    sso: Arc::new(tatu_time::sso::SsoRegistry::default()),
+                    oauth_flows: Arc::new(tatu_time::calendar_oauth::OAuthFlows::new()),
                     cfg: Arc::new(std::sync::Mutex::new(Arc::new(
-                        tucano_time::appconfig::AppConfig::empty(),
+                        tatu_time::appconfig::AppConfig::empty(),
                     ))),
-                    env: Arc::new(tucano_time::appconfig::process_env),
+                    env: Arc::new(tatu_time::appconfig::process_env),
                 }
             }
             None => AppState::with_session(store, session)
                 .with_email(recorder.clone())
                 .with_accounting(accounting),
         };
-        let router = tucano_time::build_router(state);
+        let router = tatu_time::build_router(state);
         // Bootstrap the first admin (403 if users already exist — fine).
         let _ = raw(
             &router,
@@ -160,7 +160,7 @@ impl EntryLock for LockOne {
     fn entry_lock(
         &self,
         entry_id: uuid::Uuid,
-    ) -> Result<Option<LockReason>, tucano_time::lock::LockUnavailable> {
+    ) -> Result<Option<LockReason>, tatu_time::lock::LockUnavailable> {
         if self.0 == Some(entry_id) {
             Ok(Some(LockReason::Invoiced { id: "INV-1".into() }))
         } else {
@@ -169,7 +169,7 @@ impl EntryLock for LockOne {
     }
     fn locked_entries(
         &self,
-    ) -> Result<std::collections::HashSet<uuid::Uuid>, tucano_time::lock::LockUnavailable> {
+    ) -> Result<std::collections::HashSet<uuid::Uuid>, tatu_time::lock::LockUnavailable> {
         Ok(self.0.into_iter().collect())
     }
 }
@@ -185,46 +185,46 @@ pub(crate) async fn app() -> (Client, tempfile::TempDir) {
 /// `AppState::boot(...)` and hand it here; `recorder` is the transport they
 /// injected with `with_email` (or a detached one when they injected none).
 /// A boot state whose key was generated under `root` (`key_file` source).
-pub(crate) fn vault_boot_enabled(root: &std::path::Path) -> tucano_time::vault::VaultBoot {
-    tucano_time::vault::open_for_boot(root, None, None, true).expect("vault boot")
+pub(crate) fn vault_boot_enabled(root: &std::path::Path) -> tatu_time::vault::VaultBoot {
+    tatu_time::vault::open_for_boot(root, None, None, true).expect("vault boot")
 }
 
 /// A boot state disabled by configuration (no key, no store).
-pub(crate) fn vault_boot_disabled() -> tucano_time::vault::VaultBoot {
-    tucano_time::vault::VaultBoot::disabled(tucano_time::vault::DisabledReason::Config)
+pub(crate) fn vault_boot_disabled() -> tatu_time::vault::VaultBoot {
+    tatu_time::vault::VaultBoot::disabled(tatu_time::vault::DisabledReason::Config)
 }
 
 /// Build a client from an explicit store + vault boot + config (vault
 /// lifecycle tests construct the slot directly and never mutate process env).
 pub(crate) async fn app_with_vault(
     store: Store,
-    boot: tucano_time::vault::VaultBoot,
-    cfg: tucano_time::appconfig::AppConfig,
+    boot: tatu_time::vault::VaultBoot,
+    cfg: tatu_time::appconfig::AppConfig,
 ) -> Client {
     let session = Arc::new(Session::new(
         b"test-session-secret-0000000000000032".to_vec(),
         3600,
         false,
     ));
-    let recorder = Arc::new(tucano_time::email::RecordingEmailSender::default());
+    let recorder = Arc::new(tatu_time::email::RecordingEmailSender::default());
     let state = AppState::boot(store, session, boot, Arc::new(cfg)).with_email(recorder.clone());
     client_for_state(state, recorder).await
 }
 
 /// Same, with an injected environment map. This is how the operator-managed
-/// (`TUCANO_VAULT_ENABLED`) 409s are tested without mutating process env.
+/// (`TATU_VAULT_ENABLED`) 409s are tested without mutating process env.
 pub(crate) async fn app_with_vault_env(
     store: Store,
-    boot: tucano_time::vault::VaultBoot,
-    cfg: tucano_time::appconfig::AppConfig,
-    env: tucano_time::api::EnvLookup,
+    boot: tatu_time::vault::VaultBoot,
+    cfg: tatu_time::appconfig::AppConfig,
+    env: tatu_time::api::EnvLookup,
 ) -> Client {
     let session = Arc::new(Session::new(
         b"test-session-secret-0000000000000032".to_vec(),
         3600,
         false,
     ));
-    let recorder = Arc::new(tucano_time::email::RecordingEmailSender::default());
+    let recorder = Arc::new(tatu_time::email::RecordingEmailSender::default());
     let state = AppState::boot(store, session, boot, Arc::new(cfg))
         .with_email(recorder.clone())
         .with_env(env);
@@ -233,9 +233,9 @@ pub(crate) async fn app_with_vault_env(
 
 pub(crate) async fn client_for_state(
     state: AppState,
-    recorder: Arc<tucano_time::email::RecordingEmailSender>,
+    recorder: Arc<tatu_time::email::RecordingEmailSender>,
 ) -> Client {
-    let router = tucano_time::build_router(state);
+    let router = tatu_time::build_router(state);
     let _ = raw(
         &router,
         "POST",
@@ -390,7 +390,7 @@ pub(crate) async fn seed_issued_invoice(client: &Client) -> (Value, String) {
         client,
         "POST",
         "/api/customers",
-        Some(json!({"name":"Tucano Time","currency":"EUR","default_rate_minor":6000,"email":"billing@tucanotime.test"})),
+        Some(json!({"name":"TatuTime","currency":"EUR","default_rate_minor":6000,"email":"billing@tatutime.test"})),
     )
     .await;
     assert_eq!(sc, StatusCode::CREATED, "{cust}");

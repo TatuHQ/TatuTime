@@ -71,7 +71,7 @@ fn vault_disabled() -> ApiError {
         StatusCode::SERVICE_UNAVAILABLE,
         "vault_disabled",
         "the credential vault is disabled — enable it in Settings → Security, \
-         or set TUCANO_VAULT_ENABLED=true",
+         or set TATU_VAULT_ENABLED=true",
     )
 }
 
@@ -161,7 +161,7 @@ fn vault_status_json(app: &AppState) -> serde_json::Value {
     let disabled_reason = disabled_name(boot.disabled);
     let secrets_count = boot.vault.as_ref().map_or(0, |v| v.keys().len());
     let key_file_present = boot.key_file.is_some();
-    // M1: an operator-set `TUCANO_VAULT_ENABLED` (valid boolean) owns the
+    // M1: an operator-set `TATU_VAULT_ENABLED` (valid boolean) owns the
     // lifecycle, so neither direction is offered as an admin action.
     let env_managed = env_managed_flag(app).is_some();
     let can_enable = !enabled
@@ -242,12 +242,12 @@ fn managed_externally() -> ApiError {
     vault_error(
         StatusCode::CONFLICT,
         "vault_managed_externally",
-        "the vault lifecycle is managed outside the app (TUCANO_VAULT_ENABLED, \
-         TUCANO_SECRET_KEY or TUCANO_SECRET_KEY_FILE is set)",
+        "the vault lifecycle is managed outside the app (TATU_VAULT_ENABLED, \
+         TATU_SECRET_KEY or TATU_SECRET_KEY_FILE is set)",
     )
 }
 
-/// Resolve `TUCANO_VAULT_ENABLED` exactly as boot does (env > config.json >
+/// Resolve `TATU_VAULT_ENABLED` exactly as boot does (env > config.json >
 /// default). `Some(enabled)` means the environment carries a **valid**
 /// boolean, so the operator owns the flag and the admin API must not override
 /// it (M1). An invalid value falls through to config/default, matching boot
@@ -313,8 +313,8 @@ pub async fn vault_enable(State(app): State<AppState>) -> ApiResult {
         let existed = key_path.exists();
         let boot = crate::vault::open_for_boot(
             app.store.root(),
-            app.env_var("TUCANO_SECRET_KEY"),
-            app.env_var("TUCANO_SECRET_KEY_FILE"),
+            app.env_var("TATU_SECRET_KEY"),
+            app.env_var("TATU_SECRET_KEY_FILE"),
             true,
         )
         .map_err(|e| {

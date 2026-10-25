@@ -30,7 +30,7 @@ and budgets are lifetime totals built on exactly that scan (`src/budgets.rs`).
 
 `MAX_DOCS = 100_000` (`src/store/mod.rs`) is the store's compile-time
 *per-directory* cap; the server boot path overrides it with the whitelisted
-`max_docs` value (`TUCANO_MAX_DOCS` or `config.json`, default 50 000, range
+`max_docs` value (`TATU_MAX_DOCS` or `config.json`, default 50 000, range
 10–1,000,000). `dir_entries` (`src/store/io.rs`) skips dot files and applies the
 cap to the documents it lists. On `entries/` the directory holds day folders, not
 documents, so the cap is ~274 years of days; inside one day folder it is 100 000
@@ -127,8 +127,8 @@ HTTP entry point.
 **Trigger** — measured on the live data dir with stock tools; any one is sufficient:
 
 ```sh
-du -sh "$TUCANO_DATA_DIR/entries"        # > 1 GiB
-ls "$TUCANO_DATA_DIR/entries" | wc -l    # > 3 650 day folders (~10 years)
+du -sh "$TATU_DATA_DIR/entries"        # > 1 GiB
+ls "$TATU_DATA_DIR/entries" | wc -l    # > 3 650 day folders (~10 years)
 ```
 
 or, observed at runtime, a `list_all_entries`-backed request

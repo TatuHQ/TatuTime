@@ -2,15 +2,15 @@ use crate::support::*;
 
 use axum::http::StatusCode;
 use serde_json::json;
-use tucano_time::api::AppState;
-use tucano_time::auth::Session;
-use tucano_time::clock::SystemClock;
-use tucano_time::store::Store;
+use tatu_time::api::AppState;
+use tatu_time::auth::Session;
+use tatu_time::clock::SystemClock;
+use tatu_time::store::Store;
 
 #[tokio::test]
 async fn timer_start_stop_creates_entry() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
+    let c = new_customer(&app, "TatuTime", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({})).await;
 
@@ -51,7 +51,7 @@ async fn timer_start_stop_creates_entry() {
 
 #[tokio::test]
 async fn calendar_events_from_configured_feed() {
-    use tucano_time::vault::SecretVault;
+    use tatu_time::vault::SecretVault;
     let dir = tempfile::tempdir().unwrap();
     let ics = dir.path().join("cal.ics");
     std::fs::write(&ics, "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:e1\r\nDTSTART:20261002T090000Z\r\nDTEND:20261002T100000Z\r\nSUMMARY:Stand-up\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n").unwrap();
@@ -71,34 +71,34 @@ async fn calendar_events_from_configured_feed() {
         3600,
         false,
     ));
-    let boot = tucano_time::vault::VaultBoot::from_vault(
+    let boot = tatu_time::vault::VaultBoot::from_vault(
         vault,
-        tucano_time::vault::KeySource::Env,
+        tatu_time::vault::KeySource::Env,
         None,
         true,
     );
     let state = AppState {
         store: std::sync::Arc::new(store),
         clock: std::sync::Arc::new(SystemClock),
-        locks: std::sync::Arc::new(tucano_time::lock::NoLocks),
+        locks: std::sync::Arc::new(tatu_time::lock::NoLocks),
         session,
-        rate: std::sync::Arc::new(tucano_time::ratelimit::RateLimiter::new(
+        rate: std::sync::Arc::new(tatu_time::ratelimit::RateLimiter::new(
             8,
             std::time::Duration::from_secs(300),
         )),
-        audit: std::sync::Arc::new(tucano_time::audit::AuditLog::new(&root)),
-        revocations: std::sync::Arc::new(tucano_time::revoke::Revocations::new(&root)),
-        vault: tucano_time::vault::VaultSlot::new(boot),
-        email: std::sync::Arc::new(tucano_time::email::DisabledEmailSender),
-        accounting: std::sync::Arc::new(tucano_time::accounting::AccountingRegistry::default()),
-        sso: std::sync::Arc::new(tucano_time::sso::SsoRegistry::default()),
-        oauth_flows: std::sync::Arc::new(tucano_time::calendar_oauth::OAuthFlows::new()),
+        audit: std::sync::Arc::new(tatu_time::audit::AuditLog::new(&root)),
+        revocations: std::sync::Arc::new(tatu_time::revoke::Revocations::new(&root)),
+        vault: tatu_time::vault::VaultSlot::new(boot),
+        email: std::sync::Arc::new(tatu_time::email::DisabledEmailSender),
+        accounting: std::sync::Arc::new(tatu_time::accounting::AccountingRegistry::default()),
+        sso: std::sync::Arc::new(tatu_time::sso::SsoRegistry::default()),
+        oauth_flows: std::sync::Arc::new(tatu_time::calendar_oauth::OAuthFlows::new()),
         cfg: std::sync::Arc::new(std::sync::Mutex::new(std::sync::Arc::new(
-            tucano_time::appconfig::AppConfig::empty(),
+            tatu_time::appconfig::AppConfig::empty(),
         ))),
-        env: std::sync::Arc::new(tucano_time::appconfig::process_env),
+        env: std::sync::Arc::new(tatu_time::appconfig::process_env),
     };
-    let router = tucano_time::build_router(state);
+    let router = tatu_time::build_router(state);
     raw(
         &router,
         "POST",
@@ -172,7 +172,7 @@ async fn calendar_oauth_start_and_callback_plumbing() {
 #[tokio::test]
 async fn timer_invalid_project_is_422_and_stop_without_timer_is_404() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
+    let c = new_customer(&app, "TatuTime", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
 
     let (s_bad, body) = json_req(
@@ -196,7 +196,7 @@ async fn timer_invalid_project_is_422_and_stop_without_timer_is_404() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn parallel_timer_starts_yield_exactly_one_winner() {
     let (app, d) = app().await;
-    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
+    let c = new_customer(&app, "TatuTime", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
 

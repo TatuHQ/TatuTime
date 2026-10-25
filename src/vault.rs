@@ -4,7 +4,7 @@
 //!
 //! The key is created by default on first boot (`<data>/vault.key`, 24 CSPRNG
 //! bytes encoded base64url without padding — exactly 32 ASCII characters).
-//! `TUCANO_SECRET_KEY` / `TUCANO_SECRET_KEY_FILE` remain an optional override
+//! `TATU_SECRET_KEY` / `TATU_SECRET_KEY_FILE` remain an optional override
 //! and always win. Values are never returned to any client (only a masked hint)
 //! and never logged. If no key can be resolved or created the vault is disabled
 //! (fail-closed) rather than storing plaintext.
@@ -53,7 +53,7 @@ impl KeySource {
 pub enum DisabledReason {
     /// `vault_enabled` is false in configuration.
     Config,
-    /// `TUCANO_VAULT_ENABLED` resolved from the environment to a valid
+    /// `TATU_VAULT_ENABLED` resolved from the environment to a valid
     /// `false` (an invalid value is ignored instead, L2).
     Env,
     /// The generated key file could not be written (read-only volume, …).
@@ -73,9 +73,7 @@ impl DisabledReason {
 
 #[derive(Debug, thiserror::Error)]
 pub enum VaultError {
-    #[error(
-        "vault is disabled (enable it in Settings → Security or set TUCANO_VAULT_ENABLED=true)"
-    )]
+    #[error("vault is disabled (enable it in Settings → Security or set TATU_VAULT_ENABLED=true)")]
     Disabled,
     #[error("invalid master key")]
     BadKey,
@@ -122,7 +120,7 @@ pub struct VaultBoot {
     /// `<root>/vault.key` when that file was used or created.
     pub key_file: Option<PathBuf>,
     pub fingerprint: Option<String>,
-    /// An env key (`TUCANO_SECRET_KEY` or `TUCANO_SECRET_KEY_FILE`) is set, so
+    /// An env key (`TATU_SECRET_KEY` or `TATU_SECRET_KEY_FILE`) is set, so
     /// the operator owns the key out-of-band and the admin API cannot rotate or
     /// remove it.
     pub external_override: bool,
@@ -240,8 +238,8 @@ impl VaultSlot {
 ///
 /// 1. `enabled == false` → disabled; a store on disk is a hard error because it
 ///    would be unreadable, and configured key material is ignored with a warning.
-/// 2. `TUCANO_SECRET_KEY` non-empty → used verbatim (exactly 32 bytes).
-/// 3. `TUCANO_SECRET_KEY_FILE` non-empty → read + trim (exactly 32 bytes).
+/// 2. `TATU_SECRET_KEY` non-empty → used verbatim (exactly 32 bytes).
+/// 3. `TATU_SECRET_KEY_FILE` non-empty → read + trim (exactly 32 bytes).
 ///    Unreadable is a hard error, except when it names `<root>/vault.key`, no
 ///    store exists and the file is missing: it is then generated there.
 /// 4. `<root>/vault.key` exists → read + trim (exactly 32 bytes, never
@@ -268,7 +266,7 @@ pub fn open_for_boot(
         && content.trim() != inline
     {
         tracing::warn!(
-            "both TUCANO_SECRET_KEY and TUCANO_SECRET_KEY_FILE are set and differ; using TUCANO_SECRET_KEY"
+            "both TATU_SECRET_KEY and TATU_SECRET_KEY_FILE are set and differ; using TATU_SECRET_KEY"
         );
     }
 
@@ -279,7 +277,7 @@ pub fn open_for_boot(
         let external_override = env_key.is_some() || env_key_file.is_some();
         if external_override {
             tracing::warn!(
-                "the credential vault is disabled; ignoring configured TUCANO_SECRET_KEY(_FILE)"
+                "the credential vault is disabled; ignoring configured TATU_SECRET_KEY(_FILE)"
             );
         }
         let mut boot = VaultBoot::disabled(DisabledReason::Config);
@@ -291,7 +289,7 @@ pub fn open_for_boot(
 
     if let Some(raw) = env_key {
         let vault = open_with_message(root, &raw, KeySource::Env)
-            .map_err(|e| format!("TUCANO_SECRET_KEY is configured but invalid: {e}"))?;
+            .map_err(|e| format!("TATU_SECRET_KEY is configured but invalid: {e}"))?;
         return Ok(VaultBoot::from_vault(
             Arc::new(vault),
             KeySource::Env,
@@ -309,19 +307,19 @@ pub fn open_for_boot(
                 return generate_key_file(root, external_override);
             }
             return Err(format!(
-                "cannot read TUCANO_SECRET_KEY_FILE {file}: file does not exist"
+                "cannot read TATU_SECRET_KEY_FILE {file}: file does not exist"
             ));
         }
         let content = read_existing_key_file(candidate)
-            .map_err(|e| format!("TUCANO_SECRET_KEY_FILE {file} is unusable: {e}"))?;
+            .map_err(|e| format!("TATU_SECRET_KEY_FILE {file} is unusable: {e}"))?;
         let raw = content.trim();
         if raw.len() != KEY_LEN {
             return Err(format!(
-                "TUCANO_SECRET_KEY_FILE {file} is configured but invalid: invalid master key"
+                "TATU_SECRET_KEY_FILE {file} is configured but invalid: invalid master key"
             ));
         }
         let vault = open_with_message(root, raw, KeySource::EnvFile)
-            .map_err(|e| format!("TUCANO_SECRET_KEY_FILE {file} is invalid: {e}"))?;
+            .map_err(|e| format!("TATU_SECRET_KEY_FILE {file} is invalid: {e}"))?;
         return Ok(VaultBoot::from_vault(
             Arc::new(vault),
             KeySource::EnvFile,
@@ -385,7 +383,7 @@ fn read_existing_key_file(path: &Path) -> Result<String, String> {
 }
 
 fn store_without_key_message() -> String {
-    "vault store found on disk (secrets.bin) but TUCANO_SECRET_KEY(_FILE) is missing \
+    "vault store found on disk (secrets.bin) but TATU_SECRET_KEY(_FILE) is missing \
      — supply the key that protected it (or restore it from backup) before starting; \
      refusing to run with a disabled Settings tab"
         .to_string()
@@ -444,7 +442,7 @@ fn generate_key_file(root: &Path, external_override: bool) -> Result<VaultBoot, 
         Err(e) => {
             tracing::error!(
                 "could not create vault.key ({e}); the credential vault stays disabled — \
-                 check the data directory's permissions or set TUCANO_SECRET_KEY(_FILE)"
+                 check the data directory's permissions or set TATU_SECRET_KEY(_FILE)"
             );
             let mut boot = VaultBoot::disabled(DisabledReason::WriteFailed);
             boot.external_override = external_override;
@@ -474,7 +472,7 @@ pub(crate) fn write_new_key_file(root: &Path) -> Result<String, VaultError> {
 
 impl SecretVault {
     /// Open (or create) the vault. `master_key` should come from
-    /// `TUCANO_SECRET_KEY` (exactly 32 bytes). Returns `Ok(None)` when no key
+    /// `TATU_SECRET_KEY` (exactly 32 bytes). Returns `Ok(None)` when no key
     /// is provided — the caller treats the feature as disabled.
     pub fn open(root: &Path, master_key: Option<&str>) -> Result<Option<Self>, VaultError> {
         match master_key.filter(|s| !s.is_empty()) {
@@ -597,7 +595,7 @@ impl SecretVault {
         }
     }
 
-    /// Store/overwrite a secret. `key` is a provider path e.g. `tucano.api_token`.
+    /// Store/overwrite a secret. `key` is a provider path e.g. `tatu.api_token`.
     pub fn put(&self, key: &str, value: &str) -> Result<(), VaultError> {
         let mut map = lock(&self.data);
         map.insert(key.to_string(), value.to_string());
@@ -696,14 +694,14 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let vault = SecretVault::open(dir.path(), Some(KEY)).unwrap().unwrap();
         vault
-            .put("tucano.api_token", "unit-test-secret-value-abcdef")
+            .put("tatu.api_token", "unit-test-secret-value-abcdef")
             .unwrap();
         assert_eq!(
-            vault.get("tucano.api_token").as_deref(),
+            vault.get("tatu.api_token").as_deref(),
             Some("unit-test-secret-value-abcdef")
         );
-        assert_eq!(vault.hint("tucano.api_token"), "••••ef");
-        assert_eq!(vault.keys(), vec!["tucano.api_token".to_string()]);
+        assert_eq!(vault.hint("tatu.api_token"), "••••ef");
+        assert_eq!(vault.keys(), vec!["tatu.api_token".to_string()]);
 
         // On-disk blob must not contain the plaintext.
         let blob = fs::read(dir.path().join("secrets.bin")).unwrap();
@@ -715,7 +713,7 @@ mod tests {
         // Reopen: value survives (decrypted with the same key).
         let v2 = SecretVault::open(dir.path(), Some(KEY)).unwrap().unwrap();
         assert_eq!(
-            v2.get("tucano.api_token").as_deref(),
+            v2.get("tatu.api_token").as_deref(),
             Some("unit-test-secret-value-abcdef")
         );
     }
@@ -805,7 +803,7 @@ mod tests {
     fn env_key_of_wrong_length_hard_fails() {
         let dir = tempfile::tempdir().unwrap();
         let err = open_for_boot(dir.path(), Some("short".into()), None, true).unwrap_err();
-        assert!(err.contains("TUCANO_SECRET_KEY"), "{err}");
+        assert!(err.contains("TATU_SECRET_KEY"), "{err}");
     }
 
     #[test]
@@ -814,7 +812,7 @@ mod tests {
         let missing = dir.path().join("elsewhere.key");
         let err =
             open_for_boot(dir.path(), None, Some(missing.display().to_string()), true).unwrap_err();
-        assert!(err.contains("TUCANO_SECRET_KEY_FILE"), "{err}");
+        assert!(err.contains("TATU_SECRET_KEY_FILE"), "{err}");
 
         // The env file names <root>/vault.key: first boot generates it there.
         let managed = dir.path().join("vault.key");

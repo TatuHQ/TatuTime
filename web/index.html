@@ -9,7 +9,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>TucanoTime — Timesheets</title>
+  <title>TatuTime — Timesheets</title>
   <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f6f0e4">
   <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#17120f">
   <link rel="icon" href="/favicon.ico" sizes="any">
@@ -28,8 +28,8 @@
     <form id="auth-form" class="p-card auth-card">
       <header class="p-card__header">
         <div class="auth-brand">
-          <img class="brand-mark" src="/assets/tucano.png" alt="" width="223" height="244">
-          <span class="brand-word">Tucano<strong>Time</strong></span>
+          <img class="brand-mark" src="/assets/tatu.png" alt="" width="512" height="512">
+          <span class="brand-word">Tatu<strong>Time</strong></span>
         </div>
         <h1 id="auth-title" class="auth-title">Sign in</h1>
         <p id="auth-sub" class="p-form-help-text"></p>
@@ -66,8 +66,8 @@
     <aside class="sidebar" id="sidebar">
       <div class="sidebar-heading">
         <div class="brand">
-          <img class="brand-mark" src="/assets/tucano.png" alt="" width="223" height="244">
-          <span class="brand-word">Tucano<strong>Time</strong></span>
+          <img class="brand-mark" src="/assets/tatu.png" alt="" width="512" height="512">
+          <span class="brand-word">Tatu<strong>Time</strong></span>
         </div>
         <button type="button" id="navigation-close" class="p-button--base navigation-control"
           aria-label="Close navigation" title="Close navigation" autofocus><i class="p-icon--close"
@@ -1858,7 +1858,7 @@
                     type="text" class="p-form__control" id="org-country" maxlength="56" autocomplete="off"></div>
                 <div class="p-form__group"><label class="p-form__label" for="org-from">Email sender display
                     name</label><input type="text" class="p-form__control" id="org-from" maxlength="120"
-                    autocomplete="off" placeholder="TucanoTime"></div>
+                    autocomplete="off" placeholder="TatuTime"></div>
                 <div class="p-form__group"><label class="p-form__label" for="org-reply">Reply-To address</label><input
                     class="p-form__control" id="org-reply" type="email" maxlength="200" autocomplete="off"
                     placeholder="billing@yourcompany.test"></div>
@@ -1895,7 +1895,7 @@
               <div class="p-card__content">
                 <p class="p-form-help-text">A backup is a ZIP of everything in the data directory, stored in the
                   <strong>Backup</strong> folder next to it. Files are named
-                  <code>&lt;datetime&gt;_tucanotime-backup_&lt;company&gt;.zip</code> using the company name from
+                  <code>&lt;datetime&gt;_tatutime-backup_&lt;company&gt;.zip</code> using the company name from
                   Settings → Company. Backups are <strong>not encrypted</strong> and contain the vault key and stored
                   credentials, so protect the folder like the data directory.</p>
                 <div class="p-form__group"><label class="p-form__label" for="backup-enabled"><input
@@ -2253,7 +2253,7 @@
       </main>
 
       <footer class="foot">
-        <p><a href="/docs">API documentation</a> · <span id="version">TucanoTime</span>
+        <p><a href="/docs">API documentation</a> · <span id="version">TatuTime</span>
           <span id="build" hidden></span>
         </p>
       </footer>
@@ -2282,7 +2282,7 @@
   <dialog id="wizard-dialog" class="p-modal" aria-modal="true" aria-labelledby="wz-title">
     <div class="p-card">
       <header class="p-card__header">
-        <h2 id="wz-title">Welcome to TucanoTime</h2>
+        <h2 id="wz-title">Welcome to TatuTime</h2>
       </header>
       <div class="p-card__content">
         <div id="wz-steps">
@@ -2293,7 +2293,7 @@
           <div id="wz-step-1" class="wz-step" hidden>
             <div class="p-form__group"><label class="p-form__label" for="wz-cust-name">Customer name</label>
               <input type="text" class="p-form__control" id="wz-cust-name" maxlength="120" autocomplete="off"
-                value="Tucano Time" placeholder="Tucano Ltd.">
+                value="TatuTime" placeholder="Tatu Ltd.">
             </div>
             <div class="p-form__group"><label class="p-form__label" for="wz-cust-currency">Currency (ISO-4217)</label>
               <input type="text" class="p-form__control" id="wz-cust-currency" maxlength="3" value="EUR">
@@ -2356,7 +2356,7 @@
   <dialog id="admin-wizard" class="p-modal" role="dialog" aria-modal="true" aria-labelledby="aw-title">
     <div class="p-modal__dialog">
       <header class="p-modal__header">
-        <h2 class="p-modal__title" id="aw-title">Welcome to TucanoTime</h2>
+        <h2 class="p-modal__title" id="aw-title">Welcome to TatuTime</h2>
       </header>
       <form id="aw-form" novalidate>
         <div id="aw-step-1" class="aw-step">

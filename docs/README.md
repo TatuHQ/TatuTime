@@ -1,11 +1,11 @@
-# TucanoTime documentation
+# TatuTime documentation
 
 Human documentation for operators, administrators and developers. Start with the
 guide that matches what you are trying to do.
 
 ## Getting started
 
-- [Getting started](getting-started.md) — what TucanoTime does, first run, roles,
+- [Getting started](getting-started.md) — what TatuTime does, first run, roles,
   the GUI map and your first timesheet/invoice.
 
 ## Configuration
@@ -82,4 +82,4 @@ guide that matches what you are trying to do.
 
 ---
 
-Last verified against TucanoTime 0.1.41.
+Last verified against TatuTime 0.1.41.

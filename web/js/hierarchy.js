@@ -1,4 +1,4 @@
-// hierarchy.js — TucanoTime GUI module (ES-module split of web/app.js, #264).
+// hierarchy.js — TatuTime GUI module (ES-module split of web/app.js, #264).
 // Moved from the original monolithic app.js; behaviour is unchanged.
 
 

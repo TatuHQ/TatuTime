@@ -1,4 +1,4 @@
-// dom.js — TucanoTime GUI module (ES-module split of web/app.js, #264).
+// dom.js — TatuTime GUI module (ES-module split of web/app.js, #264).
 // Moved from the original monolithic app.js; behaviour is unchanged.
 //
 // This is the graph's leaf module: it imports nothing, so the browser
@@ -394,7 +394,7 @@ export async function panelRefresh(panelId, label, run) {
 /// is never a bad field name in the payload: it means the process answering
 /// predates the field the page just sent. The modules and the binary can drift
 /// apart because the sheets are served from disk while the Rust is fixed at
-/// compile time — `TUCANO_WEB_DIR` does that in any profile (the dev asset path,
+/// compile time — `TATU_WEB_DIR` does that in any profile (the dev asset path,
 /// src/lib.rs) and rust-embed does it in a debug build — so a long-running
 /// server hands out today's GUI over yesterday's contract. Naming that is the
 /// difference between "original_amount_minor: unknown field" sending the reader

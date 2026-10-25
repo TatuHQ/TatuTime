@@ -1,4 +1,4 @@
-// settings.js — TucanoTime GUI module (ES-module split of web/app.js, #264).
+// settings.js — TatuTime GUI module (ES-module split of web/app.js, #264).
 // Moved from the original monolithic app.js; behaviour is unchanged.
 
 
@@ -305,7 +305,7 @@ export function renderVault(status) {
   }
   const reason = status.disabled_reason;
   if (reason === 'env') {
-    statusLine.textContent = 'Vault disabled by TUCANO_VAULT_ENABLED.';
+    statusLine.textContent = 'Vault disabled by TATU_VAULT_ENABLED.';
     detail.textContent = 'Remove the variable to use the Settings controls.';
     return;
   }

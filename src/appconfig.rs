@@ -74,7 +74,7 @@ pub const KEYS: &[KeyDef] = &[
     KeyDef {
         name: "reminder_days",
         writable: true,
-        env: "TUCANO_REMINDER_DAYS",
+        env: "TATU_REMINDER_DAYS",
         kind: Kind::Int {
             min: 1,
             max: 365,
@@ -85,30 +85,30 @@ pub const KEYS: &[KeyDef] = &[
     KeyDef {
         name: "org_name",
         writable: true,
-        env: "TUCANO_ORG_NAME",
+        env: "TATU_ORG_NAME",
         kind: Kind::Str {
-            default: "TucanoTime",
+            default: "TatuTime",
         },
         description: "Fallback organisation name, used only when the Company name is blank",
     },
     KeyDef {
         name: "sso_admin_group",
         writable: true,
-        env: "TUCANO_SSO_ADMIN_GROUP",
+        env: "TATU_SSO_ADMIN_GROUP",
         kind: Kind::Str { default: "" },
         description: "IdP group that maps to the admin role on SSO login",
     },
     KeyDef {
         name: "sso_allowed_domains",
         writable: true,
-        env: "TUCANO_SSO_ALLOWED_DOMAINS",
+        env: "TATU_SSO_ALLOWED_DOMAINS",
         kind: Kind::Csv,
         description: "Comma-separated email domains allowed for SSO",
     },
     KeyDef {
         name: "calendar_oauth_redirect",
         writable: true,
-        env: "TUCANO_CALENDAR_OAUTH_REDIRECT",
+        env: "TATU_CALENDAR_OAUTH_REDIRECT",
         kind: Kind::Str {
             default: "/api/calendar/oauth/callback",
         },
@@ -117,35 +117,35 @@ pub const KEYS: &[KeyDef] = &[
     KeyDef {
         name: "google_calendar_client_id",
         writable: true,
-        env: "TUCANO_GOOGLE_CLIENT_ID",
+        env: "TATU_GOOGLE_CLIENT_ID",
         kind: Kind::OptionalStr,
         description: "Google OAuth client id (public half of the pair; the secret stays env/vault)",
     },
     KeyDef {
         name: "ms_calendar_client_id",
         writable: true,
-        env: "TUCANO_MS_CLIENT_ID",
+        env: "TATU_MS_CLIENT_ID",
         kind: Kind::OptionalStr,
         description: "Microsoft OAuth client id (secret stays env/vault)",
     },
     KeyDef {
         name: "qbo_base_url",
         writable: true,
-        env: "TUCANO_QBO_BASE_URL",
+        env: "TATU_QBO_BASE_URL",
         kind: Kind::OptionalStr,
         description: "Override the QuickBooks API base URL",
     },
     KeyDef {
         name: "xero_base_url",
         writable: true,
-        env: "TUCANO_XERO_BASE_URL",
+        env: "TATU_XERO_BASE_URL",
         kind: Kind::OptionalStr,
         description: "Override the Xero API base URL",
     },
     KeyDef {
         name: "max_docs",
         writable: true,
-        env: "TUCANO_MAX_DOCS",
+        env: "TATU_MAX_DOCS",
         kind: Kind::Int {
             min: 10,
             max: 1_000_000,
@@ -162,7 +162,7 @@ pub const KEYS: &[KeyDef] = &[
     KeyDef {
         name: "base_currency",
         writable: true,
-        env: "TUCANO_BASE_CURRENCY",
+        env: "TATU_BASE_CURRENCY",
         kind: Kind::Currency,
         description: "Optional base currency for mixed-currency invoice Trends (ISO 4217, e.g. EUR); unset disables the conversion",
     },
@@ -173,14 +173,14 @@ pub const KEYS: &[KeyDef] = &[
     KeyDef {
         name: "backup_enabled",
         writable: true,
-        env: "TUCANO_BACKUP_ENABLED",
+        env: "TATU_BACKUP_ENABLED",
         kind: Kind::Bool { default: false },
         description: "Run scheduled ZIP backups of the data directory",
     },
     KeyDef {
         name: "backup_cadence",
         writable: true,
-        env: "TUCANO_BACKUP_CADENCE",
+        env: "TATU_BACKUP_CADENCE",
         kind: Kind::Choice {
             values: &["daily", "weekly", "monthly"],
             default: "daily",
@@ -190,7 +190,7 @@ pub const KEYS: &[KeyDef] = &[
     KeyDef {
         name: "backup_time",
         writable: true,
-        env: "TUCANO_BACKUP_TIME",
+        env: "TATU_BACKUP_TIME",
         kind: Kind::TimeOfDay { default: "02:00" },
         description: "Backup time of day (HH:MM) in the server's local time zone",
     },
@@ -202,7 +202,7 @@ pub const KEYS: &[KeyDef] = &[
         // M3: the dedicated lifecycle endpoints are the only writer; a generic
         // PUT must not brick the next boot by disabling a vault with a store.
         writable: false,
-        env: "TUCANO_VAULT_ENABLED",
+        env: "TATU_VAULT_ENABLED",
         kind: Kind::Bool { default: true },
         description: "Enable the credential vault (a master key is created on first boot); env override or stored configuration",
     },
@@ -634,7 +634,7 @@ mod tests {
             Value::from(14)
         );
         // env wins over file
-        let env = env_from(&[("TUCANO_REMINDER_DAYS", "3")]);
+        let env = env_from(&[("TATU_REMINDER_DAYS", "3")]);
         let (v, src) = cfg.resolve(key_def("reminder_days").unwrap(), &env);
         assert_eq!(v, Value::from(3));
         assert_eq!(src, Source::Env);
@@ -675,13 +675,10 @@ mod tests {
 
     #[test]
     fn csv_parsing() {
-        let env = env_from(&[(
-            "TUCANO_SSO_ALLOWED_DOMAINS",
-            "tucanotime.test, other.test ,",
-        )]);
+        let env = env_from(&[("TATU_SSO_ALLOWED_DOMAINS", "tatutime.test, other.test ,")]);
         assert_eq!(
             AppConfig::empty().get_csv("sso_allowed_domains", &env),
-            vec!["tucanotime.test".to_string(), "other.test".to_string()]
+            vec!["tatutime.test".to_string(), "other.test".to_string()]
         );
     }
 
@@ -751,7 +748,7 @@ mod tests {
 
         // env beats file, in either spelling
         for raw in ["true", "TRUE", "True"] {
-            let pairs = [("TUCANO_VAULT_ENABLED", raw)];
+            let pairs = [("TATU_VAULT_ENABLED", raw)];
             let env = env_from(&pairs);
             assert_eq!(
                 cfg.resolve(def, &env),
@@ -759,11 +756,11 @@ mod tests {
                 "{raw}"
             );
         }
-        let env = env_from(&[("TUCANO_VAULT_ENABLED", "false")]);
+        let env = env_from(&[("TATU_VAULT_ENABLED", "false")]);
         assert!(!AppConfig::empty().get_bool("vault_enabled", &env));
 
         // An invalid env value is ignored, so the file/default still wins.
-        let invalid = env_from(&[("TUCANO_VAULT_ENABLED", "yes")]);
+        let invalid = env_from(&[("TATU_VAULT_ENABLED", "yes")]);
         assert_eq!(
             cfg.resolve(def, &invalid),
             (Value::Bool(false), Source::File),
@@ -841,9 +838,9 @@ mod tests {
 
         // Env overrides parse through the same rules.
         let env = env_from(&[
-            ("TUCANO_BACKUP_CADENCE", "Monthly"),
-            ("TUCANO_BACKUP_TIME", "07:15"),
-            ("TUCANO_BACKUP_ENABLED", "true"),
+            ("TATU_BACKUP_CADENCE", "Monthly"),
+            ("TATU_BACKUP_TIME", "07:15"),
+            ("TATU_BACKUP_ENABLED", "true"),
         ]);
         let cfg = AppConfig::empty();
         assert_eq!(

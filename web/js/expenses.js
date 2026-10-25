@@ -1,4 +1,4 @@
-// expenses.js — TucanoTime GUI module (ES-module split of web/app.js, #264).
+// expenses.js — TatuTime GUI module (ES-module split of web/app.js, #264).
 // Moved from the original monolithic app.js; behaviour is unchanged.
 // The receipt half lives in ./receipt.js (#332).
 

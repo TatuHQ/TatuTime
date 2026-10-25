@@ -397,7 +397,7 @@ impl Store {
         std::fs::create_dir_all(root.join("users"))?;
         std::fs::create_dir_all(root.join("categories"))?;
         std::fs::create_dir_all(root.join("expenses"))?;
-        let max_docs = std::env::var("TUCANO_MAX_DOCS")
+        let max_docs = std::env::var("TATU_MAX_DOCS")
             .ok()
             .and_then(|s| s.parse().ok())
             .unwrap_or(MAX_DOCS);
@@ -429,7 +429,7 @@ impl Store {
 
     /// Acquire the writer lock for a mutating operation: the process-local
     /// mutex (cheap, serialises threads) then the cross-process advisory flock
-    /// on `.tucanotime.lock`, retried until the deadline. Returns
+    /// on `.tatutime.lock`, retried until the deadline. Returns
     /// `LockTimeout` (→ 503) if another process holds it too long.
     ///
     /// The retry loop parks the calling thread (`std::thread::sleep`), so this
@@ -446,7 +446,7 @@ impl Store {
             .truncate(false)
             .read(true)
             .write(true)
-            .open(self.root.join(".tucanotime.lock"))?;
+            .open(self.root.join(".tatutime.lock"))?;
         let deadline = Instant::now() + self.lock_timeout;
         loop {
             match lock.try_lock_exclusive() {
@@ -468,7 +468,7 @@ impl Store {
     }
 
     /// Override the per-collection document cap (used by tests; production uses
-    /// the default or `TUCANO_MAX_DOCS`).
+    /// the default or `TATU_MAX_DOCS`).
     pub fn with_max_docs(mut self, max: usize) -> Self {
         self.max_docs = max;
         self

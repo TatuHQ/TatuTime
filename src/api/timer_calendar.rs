@@ -117,7 +117,7 @@ pub async fn discard_timer(State(app): State<AppState>, actor: AuthUser) -> ApiR
 // ---------------------------------------------------------------- calendar --
 
 /// List calendar events overlapping the range, from the configured ICS feed
-/// (vault key `calendar.ics_url` or `TUCANO_CALENDAR_ICS`). #15.
+/// (vault key `calendar.ics_url` or `TATU_CALENDAR_ICS`). #15.
 pub async fn calendar_events(
     State(app): State<AppState>,
     Query(q): Query<RangeQuery>,
@@ -141,19 +141,16 @@ pub async fn calendar_events(
         .await?;
         return Ok(Json(serde_json::json!({ "events": events })).into_response());
     }
-    let source = crate::providers::resolve_secret(
-        vault.as_deref(),
-        "calendar.ics_url",
-        "TUCANO_CALENDAR_ICS",
-    )
-    .filter(|s| !s.is_empty())
-    .ok_or_else(|| {
-        ApiError::new(
-            StatusCode::NOT_FOUND,
-            "calendar_not_configured",
-            "no calendar feed is configured",
-        )
-    })?;
+    let source =
+        crate::providers::resolve_secret(vault.as_deref(), "calendar.ics_url", "TATU_CALENDAR_ICS")
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| {
+                ApiError::new(
+                    StatusCode::NOT_FOUND,
+                    "calendar_not_configured",
+                    "no calendar feed is configured",
+                )
+            })?;
     let text = blocking("calendar fetch", move || {
         crate::calendar::fetch_ics(&source).map_err(|_| {
             ApiError::new(
@@ -262,7 +259,7 @@ pub async fn calendar_oauth_callback(
         ApiError::new(
             StatusCode::SERVICE_UNAVAILABLE,
             "no_vault",
-            "secret vault is not enabled (set TUCANO_SECRET_KEY)",
+            "secret vault is not enabled (set TATU_SECRET_KEY)",
         )
     })?;
     // The code exchange is a live provider call; run it off the async core.
@@ -302,7 +299,7 @@ pub async fn calendar_oauth_callback(
 }
 
 fn provider_env(provider: &str, suffix: &str) -> String {
-    format!("TUCANO_{}_{}", provider.to_ascii_uppercase(), suffix)
+    format!("TATU_{}_{}", provider.to_ascii_uppercase(), suffix)
 }
 
 /// The caller's notifications, newest first (#22).

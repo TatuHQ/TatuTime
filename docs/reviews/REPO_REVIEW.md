@@ -1,4 +1,4 @@
-# TucanoTime — Full Repository Review (2026-10-06)
+# TatuTime — Full Repository Review (2026-10-06)
 
 > *Historical snapshot — not current guidance. See the reviews index.*
 
@@ -44,7 +44,7 @@ draft of this document mistakenly inventoried them).
 | `web/vendor/ubuntu/` | 6 assets + 4 licences + `manifest.json` + pinned `vanilla-framework-4.59.0.tgz` | **Keep** — all referenced by `manifest.json`, `build-ubuntu-assets.mjs`, and served via rust-embed (`index.html:8`). Licences/corresponding source required for traceability. |
 | `gui-test/` | 6 scripts + package/lock + README | **Keep**; one drift finding R-DOC-8. |
 | Docs root + `docs/` | `README.md`, `AGENTS.md`, `CODE_REVIEW.md`, 4 `docs/*.md`, 2 ADRs | **Keep with updates** (R-DOC-*). `CODE_REVIEW.md` is a historical record whose disposition is now complete except C3 — do not delete. |
-| `AgentRules/` | 14 | **Keep, never edit here** (synced from TucanoAgentRules). |
+| `AgentRules/` | 14 | **Keep, never edit here** (synced from TatuAgentRules). |
 | CI/config | `.github/*`, `Dockerfile`, `docker-compose.yml`, `deny.toml`, `.gitleaks.toml`, `Cargo.*`, `rust-toolchain.toml`, `.gitignore`, `LICENSE` | **Keep**; minor hygiene R-DOC-9/10/11. |
 | `openapi.json` | 1 | **Keep.** Accurate against routes. |
 
@@ -200,10 +200,10 @@ Audited against vanillaframework.io/docs & design.ubuntu.com per #181's foundati
 
 ### R8 — Docs/config accuracy and consolidation · LOW-MED → ticket #192
 
-- `README.md`: example uses image `tucano-time` (:99-102) but every build names the image
-  `tucanotime`; auth section (:94-96) still describes pre-#94 ephemeral session keys and
+- `README.md`: example uses image `tatu-time` (:99-102) but every build names the image
+  `tatutime`; auth section (:94-96) still describes pre-#94 ephemeral session keys and
   prod-only Secure cookies (contradicts the README's own persistence table :48-49 and
-  `main.rs:123-140`); missing `TUCANO_SECURE_COOKIES`/`TUCANO_PORT`/`TUCANO_MAX_DOCS`;
+  `main.rs:123-140`); missing `TATU_SECURE_COOKIES`/`TATU_PORT`/`TATU_MAX_DOCS`;
   storage block (:123-127) thinner than AGENTS.md (duplicated, drifting); Features list
   omits shipped surfaces (timer, calendar/SSO, notifications, recurring, payments).
 - `AGENTS.md`: #19 auth paragraph stale (same as README); #8 wording "issued" should be
@@ -221,7 +221,7 @@ Audited against vanillaframework.io/docs & design.ubuntu.com per #181's foundati
 - `.gitleaks.toml` is the auto-generated upstream default **with** hand-edited repo
   allowlist entries (:52-57) — regenerate-safe split (`extends` overlay) needed.
 - Backup recipe duplicated in README, compose comments and compose labels, and none mention
-  that the profiled `tucanotime-cli` service needs `--profile cli`.
+  that the profiled `tatutime-cli` service needs `--profile cli`.
 
 ## 5. Prior history check (no regressions into fixed items)
 

@@ -4,12 +4,12 @@ use axum::http::StatusCode;
 use serde_json::Value;
 use serde_json::json;
 use std::sync::Arc;
-use tucano_time::api::AppState;
-use tucano_time::appconfig::AppConfig;
-use tucano_time::auth::Session;
-use tucano_time::email::{EmailError, EmailMessage, EmailSender, RecordingEmailSender};
-use tucano_time::store::Store;
-use tucano_time::vault::SecretVault;
+use tatu_time::api::AppState;
+use tatu_time::appconfig::AppConfig;
+use tatu_time::auth::Session;
+use tatu_time::email::{EmailError, EmailMessage, EmailSender, RecordingEmailSender};
+use tatu_time::store::Store;
+use tatu_time::vault::SecretVault;
 
 #[tokio::test]
 async fn invoice_email_sends_to_customer() {
@@ -19,11 +19,11 @@ async fn invoice_email_sends_to_customer() {
         &app,
         "POST",
         "/api/customers",
-        Some(json!({"name":"Tucano Time","currency":"EUR","default_rate_minor":6000,"email":"billing@tucanotime.test"})),
+        Some(json!({"name":"TatuTime","currency":"EUR","default_rate_minor":6000,"email":"billing@tatutime.test"})),
     )
     .await;
     assert_eq!(sc, StatusCode::CREATED, "{cust}");
-    assert_eq!(cust["email"], "billing@tucanotime.test");
+    assert_eq!(cust["email"], "billing@tatutime.test");
     let cid = cust["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
     json_req(
@@ -49,10 +49,10 @@ async fn invoice_email_sends_to_customer() {
     json_req(&app, "POST", &format!("/api/invoices/{iid}/issue"), None).await;
     let (se, body) = json_req(&app, "POST", &format!("/api/invoices/{iid}/email"), None).await;
     assert_eq!(se, StatusCode::OK, "{body}");
-    assert_eq!(body["sent_to"], "billing@tucanotime.test");
+    assert_eq!(body["sent_to"], "billing@tatutime.test");
     // The no-body path keeps the historical single recipient, now also exposed
     // as an array so the GUI can render the list.
-    assert_eq!(body["recipients"], json!(["billing@tucanotime.test"]));
+    assert_eq!(body["recipients"], json!(["billing@tatutime.test"]));
     // #130: the result names the transport; the test recorder never claims smtp.
     assert_eq!(body["transport"], "recording");
     let msgs = app.email.messages();
@@ -64,7 +64,7 @@ async fn invoice_email_sends_to_customer() {
     );
     // The default template now names the billing period (not the invoice
     // number) and the issued snapshot is what the email carries.
-    assert_eq!(msgs[0].subject, "Tucano Time invoice for 10 2026");
+    assert_eq!(msgs[0].subject, "TatuTime invoice for 10 2026");
 }
 
 #[tokio::test]
@@ -288,7 +288,7 @@ async fn email_result_reports_disabled_transport_honestly() {
     // disclose transport "disabled" so no client can read a 200 as delivery.
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(dir.path().join("data")).expect("store");
-    let router = tucano_time::build_router(AppState::new(store));
+    let router = tatu_time::build_router(AppState::new(store));
     raw(
         &router,
         "POST",
@@ -309,7 +309,7 @@ async fn email_result_reports_disabled_transport_honestly() {
     let (sc, cust) = call(
         "POST".to_string(),
         "/api/customers".into(),
-        Some(json!({"name":"Tucano Time","currency":"EUR","default_rate_minor":6000,"email":"billing@tucanotime.test"})),
+        Some(json!({"name":"TatuTime","currency":"EUR","default_rate_minor":6000,"email":"billing@tatutime.test"})),
     )
     .await;
     assert_eq!(sc, StatusCode::CREATED, "{cust}");
@@ -336,7 +336,7 @@ async fn email_result_reports_disabled_transport_honestly() {
     call("POST".into(), format!("/api/invoices/{iid}/issue"), None).await;
     let (se, body) = call("POST".into(), format!("/api/invoices/{iid}/email"), None).await;
     assert_eq!(se, StatusCode::OK, "{body}");
-    assert_eq!(body["sent_to"], "billing@tucanotime.test");
+    assert_eq!(body["sent_to"], "billing@tatutime.test");
     assert_eq!(body["transport"], "disabled", "no SMTP => honest label");
     let (sc2, copy) = call(
         "POST".to_string(),
@@ -376,7 +376,7 @@ async fn invoice_email_refuses_control_characters_at_the_sink() {
         &app,
         "PUT",
         "/api/admin/org",
-        Some(json!({"name":"Tucano BV","from_name":"Tucano\r\nBcc: attacker@evil.example"})),
+        Some(json!({"name":"Tatu BV","from_name":"Tatu\r\nBcc: attacker@evil.example"})),
     )
     .await;
     assert_eq!(
@@ -532,9 +532,9 @@ async fn vault_state() -> (AppState, tempfile::TempDir) {
         3600,
         false,
     ));
-    let boot = tucano_time::vault::VaultBoot::from_vault(
+    let boot = tatu_time::vault::VaultBoot::from_vault(
         vault,
-        tucano_time::vault::KeySource::Env,
+        tatu_time::vault::KeySource::Env,
         None,
         true,
     );
@@ -576,21 +576,21 @@ async fn admin_email_settings_never_leak_the_password() {
         "PUT",
         "/api/admin/email",
         Some(json!({
-            "host": "relay.tucano.test",
+            "host": "relay.tatu.test",
             "port": 2525,
             "username": "mailer",
             "password": secret,
-            "from": "billing@tucano.test"
+            "from": "billing@tatu.test"
         })),
     )
     .await;
     assert_eq!(sp, StatusCode::OK, "{saved}");
     assert_eq!(saved["configured"], true);
     assert_eq!(saved["transport"], "smtp");
-    assert_eq!(saved["host"], "relay.tucano.test");
+    assert_eq!(saved["host"], "relay.tatu.test");
     assert_eq!(saved["port"], 2525);
     assert_eq!(saved["username"], "mailer");
-    assert_eq!(saved["from"], "billing@tucano.test");
+    assert_eq!(saved["from"], "billing@tatu.test");
     assert_eq!(saved["has_password"], true);
     assert!(saved.get("password").is_none(), "password never returned");
     assert!(!saved.to_string().contains(secret), "{saved}");
@@ -608,12 +608,12 @@ async fn admin_email_settings_never_leak_the_password() {
         &app,
         "PUT",
         "/api/admin/email",
-        Some(json!({"host": "relay2.tucano.test", "port": 25})),
+        Some(json!({"host": "relay2.tatu.test", "port": 25})),
     )
     .await;
     assert_eq!(sp2, StatusCode::OK, "{kept}");
     assert_eq!(kept["has_password"], true, "omitted password is not wiped");
-    assert_eq!(kept["host"], "relay2.tucano.test");
+    assert_eq!(kept["host"], "relay2.tatu.test");
 }
 
 #[tokio::test]

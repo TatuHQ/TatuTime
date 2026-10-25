@@ -1,4 +1,4 @@
-# Code review — TucanoTime (2026-10-05)
+# Code review — TatuTime (2026-10-05)
 
 > *Historical snapshot — not current guidance. See the reviews index.*
 
@@ -31,7 +31,7 @@ empty default allow-list (`registry_from_vault`) that is arbitrary-account login
 `map_role` can make it Admin.
 **Fix:** this is a stub, but it is *routable*. Either (a) gate `SamlIdp` behind a
 real XML-DSig verifier before any SAML provider is registered, or (b) at minimum mix
-a deployment secret into the HMAC (`HMAC(fingerprint ‖ TUCANO_SAML_KEY, …)`) and
+a deployment secret into the HMAC (`HMAC(fingerprint ‖ TATU_SAML_KEY, …)`) and
 default `allowed_domains` to non-empty / fail-closed. Never register a provider whose
 `verify` can be satisfied from public data.
 
@@ -41,7 +41,7 @@ default `allowed_domains` to non-empty / fail-closed. Never register a provider 
 when `fake` is set. A config-only flip turns off webhook auth for a live provider →
 unsigned bodies settle invoices. **Fix:** drop `*_demo` from the config whitelist
 (env-only, like real secrets), and refuse to boot with `fake=true` when a real
-`*.webhook_secret` exists or `TUCANO_ENV=production`.
+`*.webhook_secret` exists or `TATU_ENV=production`.
 
 ### A4 — Profitability & budget reports leak cost data to every member · HIGH · Effort: S
 `src/lib.rs:112-113` route `/reports/profitability` and `/reports/budgets` in the
@@ -51,11 +51,11 @@ Contradicts the #51 privacy model. **Fix:** move both to the admin router (one l
 each); add a member-403 contract test.
 
 ### A5 — Default compose deployment can't log in over plain HTTP · HIGH · Effort: S
-`docker-compose.yml:28` defaults `TUCANO_ENV=production` → `Session::secure=true` →
+`docker-compose.yml:28` defaults `TATU_ENV=production` → `Session::secure=true` →
 `; Secure` cookie (`src/auth.rs:165-169`). The app serves plain HTTP on :8080, so a
 LAN/IP origin drops the cookie and login loops. The operator's workaround (clear
-`TUCANO_ENV`) also drops the strong-secret enforcement. **Fix:** decide the Secure
-flag from scheme (`TUCANO_SECURE_COOKIES` or `X-Forwarded-Proto` behind TLS), not from
+`TATU_ENV`) also drops the strong-secret enforcement. **Fix:** decide the Secure
+flag from scheme (`TATU_SECURE_COOKIES` or `X-Forwarded-Proto` behind TLS), not from
 the prod/secret axis; document "embedded LAN HTTP ⇒ no Secure flag" as expected.
 
 ### A6 — Real SSO POST binding is blocked by the CSRF guard · MED · Effort: S
@@ -151,7 +151,7 @@ async worker (and the HTTP API behind it). **Fix:** wrap `tick` in `spawn_blocki
 
 ### B6 — Cross-process state divergence (the CLI shares the volume) · MED · Effort: M
 `revoke.rs` and `vault.rs` load once at boot and cache in memory; the scheduler keeps
-a per-process `last` map. With the documented `tucanotime-cli --backup` (and the
+a per-process `last` map. With the documented `tatutime-cli --backup` (and the
 multi-process design `lock.rs` implies): a revocation on A is invisible to B; each
 process's `vault.put` rewrites the whole map (last-writer-wins deletes the other's
 secrets); two schedulers fire every job ⇒ duplicate reminders/emails, and (with B2)

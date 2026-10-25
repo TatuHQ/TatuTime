@@ -13,7 +13,7 @@ const html = readFileSync(new URL('../web/index.html', import.meta.url), 'utf8')
 const app = loadAppSource();
 
 const customers = [
-  { id: 'c1', name: 'Tucano Time', currency: 'EUR', default_rate_minor: 6000, active: true, email: '' },
+  { id: 'c1', name: 'TatuTime', currency: 'EUR', default_rate_minor: 6000, active: true, email: '' },
   { id: 'c2', name: 'Globex', currency: 'USD', default_rate_minor: 4550, active: true, email: '' },
 ];
 const projectsByCustomer = {
@@ -110,7 +110,7 @@ test('section navigation shows one panel at a time and scopes project rows (#182
   assert.equal(document.getElementById('panel-customers').hidden, true);
   const allRows = [...document.querySelectorAll('#project-table tbody tr')];
   assert.equal(allRows.length, 3, 'all customers by default');
-  assert.equal(allRows[0].cells[1].textContent, 'Tucano Time', 'Customer column present');
+  assert.equal(allRows[0].cells[1].textContent, 'TatuTime', 'Customer column present');
   // Cross-navigation from the Customers section filters the Projects section.
   await h.openProjectsFor('c2');
   await waitFor(() => rowsIn(document, '#project-table tbody tr').length === 1, {
@@ -139,7 +139,7 @@ test('tasks filters scope by customer and project, and both default to all (#182
   await h.openTasksFor('c1', 'MKT-2');
   await waitFor(() => document.getElementById('panel-tasks').hidden === false
     && document.getElementById('task-filter-project').value === 'MKT-2', {
-    message: 'the task list to re-render scoped to Tucano Time / MKT-2',
+    message: 'the task list to re-render scoped to TatuTime / MKT-2',
   });
   assert.equal(document.getElementById('panel-tasks').hidden, false);
   assert.equal(document.getElementById('task-filter-customer').value, 'c1');
@@ -173,7 +173,7 @@ test('tasks filters scope by customer and project, and both default to all (#182
     'with no customer picked, no concrete project can be named',
   );
   assert.equal(rowsIn(document, '#task-table tbody tr').length, 1,
-    'the unscoped list shows every task (W-1 lives in Tucano Time / MKT-2)');
+    'the unscoped list shows every task (W-1 lives in TatuTime / MKT-2)');
   assert.equal(document.getElementById('tasks-empty-state').hidden, true);
   assert.match(document.getElementById('live-region').textContent, /all customers and projects/i);
   dom.window.close();
@@ -185,7 +185,7 @@ test('an all-projects scope lists a customer\'s tasks and names each row\'s proj
   // Customer picked, project left on "all": every task of that customer lists,
   // each row naming the project it came from.
   await waitFor(() => rowsIn(document, '#task-table tbody tr').length === 1, {
-    message: 'the all-projects task list to render Tucano Time\'s tasks',
+    message: 'the all-projects task list to render TatuTime\'s tasks',
   });
   assert.equal(document.getElementById('task-filter-project').options[0].textContent, 'All projects');
   assert.equal(
@@ -198,11 +198,11 @@ test('an all-projects scope lists a customer\'s tasks and names each row\'s proj
   proj.value = 'MKT-2';
   proj.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
   await waitFor(() => document.querySelector('#task-table tbody tr th')?.textContent === 'W-1'
-    && /Tucano Time \/ MKT-2/.test(document.getElementById('live-region').textContent), {
+    && /TatuTime \/ MKT-2/.test(document.getElementById('live-region').textContent), {
     message: 'the scoped task list to render its W-1 row',
   });
   assert.equal(document.querySelector('#task-table tbody tr th').textContent, 'W-1');
-  assert.match(document.getElementById('live-region').textContent, /Tucano Time \/ MKT-2/);
+  assert.match(document.getElementById('live-region').textContent, /TatuTime \/ MKT-2/);
   dom.window.close();
 });
 
@@ -212,7 +212,7 @@ test('refreshProjectTable is the single owner of the filter select value (#219)'
   const { dom, h, document } = setup();
   await h.openProjectsFor('c1');
   await waitFor(() => document.getElementById('proj-filter-customer').value === 'c1', {
-    message: 'the project list to render scoped to Tucano Time',
+    message: 'the project list to render scoped to TatuTime',
   });
   h.state.projectsFilter = 'c2'; // what saveProject does after saving elsewhere
   await h.refreshProjectTable();
@@ -228,7 +228,7 @@ test('refreshProjectTable is the single owner of the filter select value (#219)'
 
 test('the customer legal id round-trips on create and edit (#354)', async () => {
   const edited = {
-    id: 'c1', name: 'Tucano Time', currency: 'EUR', default_rate_minor: 6000, active: true,
+    id: 'c1', name: 'TatuTime', currency: 'EUR', default_rate_minor: 6000, active: true,
     email: '', legal_id: 'BE-0999',
   };
   const { dom, h, document } = setup({ customerList: [edited] });
@@ -236,7 +236,7 @@ test('the customer legal id round-trips on create and edit (#354)', async () => 
 
   // Create: the dialog's legal id is sent as `legal_id`.
   h.cancelCustomerEdit();
-  field('customer-name', 'Tucano Time');
+  field('customer-name', 'TatuTime');
   field('customer-currency', 'EUR');
   field('customer-rate', '90');
   field('customer-legal-id', 'BR-12345678');
@@ -289,10 +289,10 @@ test('payment rails add, remove, renumber and validate against the right input (
   // Two rails, then remove the first: ids and accessible names renumber.
   add.click();
   document.getElementById('pay-rail-0-currency').value = 'eur';
-  document.getElementById('pay-rail-0-account-name').value = 'Tucano Time EUR';
+  document.getElementById('pay-rail-0-account-name').value = 'TatuTime EUR';
   document.getElementById('pay-rail-0-iban').value = 'EX000000000000000000';
   document.getElementById('pay-rail-1-currency').value = 'USD';
-  document.getElementById('pay-rail-1-account-name').value = 'Tucano Time USD';
+  document.getElementById('pay-rail-1-account-name').value = 'TatuTime USD';
   const firstRemove = rows()[0].querySelector('button');
   assert.equal(firstRemove.tagName, 'BUTTON');
   assert.equal(firstRemove.getAttribute('aria-label'), 'Remove payment rail 1');
@@ -314,7 +314,7 @@ test('payment rails add, remove, renumber and validate against the right input (
 
   // Validation: a short IBAN is refused before the API is called, and the
   // error marks the row input named by the API's field path.
-  h.setPaymentRails([{ currency: 'EUR', account_name: 'Tucano', iban: 'AB' }]);
+  h.setPaymentRails([{ currency: 'EUR', account_name: 'Tatu', iban: 'AB' }]);
   document.getElementById('customer-name').value = 'Rails Co';
   document.getElementById('customer-currency').value = 'EUR';
   document.getElementById('customer-rate').value = '80';
@@ -334,7 +334,7 @@ test('payment rails add, remove, renumber and validate against the right input (
   assert.equal(body.payment_details.rails.length, 1, 'the blank row is dropped');
   assert.deepEqual(JSON.parse(JSON.stringify(body.payment_details.rails[0])), {
     currency: 'EUR',
-    account_name: 'Tucano',
+    account_name: 'Tatu',
     iban: 'de89370400440532013000',
   }, 'uppercase currency, optional blanks omitted, required keys present');
   dom.window.close();

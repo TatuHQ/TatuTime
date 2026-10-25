@@ -24,10 +24,10 @@ pub(crate) async fn docs() -> Response {
 
 /// Serves the GUI.
 ///
-/// **Production** (no `TUCANO_WEB_DIR`): files are read from the embedded
+/// **Production** (no `TATU_WEB_DIR`): files are read from the embedded
 /// bundle compiled in at build time — zero runtime deps, single binary.
 ///
-/// **Dev mode** (`TUCANO_WEB_DIR=/path/to/web`): files are read from disk on
+/// **Dev mode** (`TATU_WEB_DIR=/path/to/web`): files are read from disk on
 /// every request, so editing HTML/CSS/JS takes effect on the next browser
 /// refresh with no Rust rebuild. Every HTML response gets a
 /// `<script src="/_dev/reload.js">` tag — an external asset, never an inline
@@ -49,7 +49,7 @@ pub(crate) async fn static_assets(uri: axum::http::Uri) -> Response {
     };
 
     // Dev mode: serve directly from the web dir on disk.
-    if let Ok(web_dir) = std::env::var("TUCANO_WEB_DIR") {
+    if let Ok(web_dir) = std::env::var("TATU_WEB_DIR") {
         // Prevent directory traversal: only allow simple relative paths with
         // no `..` segments and no leading `/`.
         if rel.contains("..") || rel.starts_with('/') {
@@ -125,10 +125,10 @@ pub(crate) async fn static_assets(uri: axum::http::Uri) -> Response {
 /// script because the app's CSP is `script-src 'self'` — an inline snippet would
 /// be refused and log a CSP violation.
 ///
-/// Dev-only, exactly like the SSE endpoint: without `TUCANO_WEB_DIR` it 404s
+/// Dev-only, exactly like the SSE endpoint: without `TATU_WEB_DIR` it 404s
 /// with the standard error shape, and no copy exists in the embedded bundle.
 pub(crate) async fn dev_reload_script() -> Response {
-    if std::env::var("TUCANO_WEB_DIR").is_err() {
+    if std::env::var("TATU_WEB_DIR").is_err() {
         return (
             StatusCode::NOT_FOUND,
             Json(serde_json::json!({
@@ -158,7 +158,7 @@ const DEV_RELOAD_JS: &str = "\
 })();
 ";
 
-/// SSE endpoint used in dev mode only (`TUCANO_WEB_DIR` set).
+/// SSE endpoint used in dev mode only (`TATU_WEB_DIR` set).
 ///
 /// Clients subscribe at `/_dev/reload`; the server polls the web dir every
 /// 300 ms and sends a `reload` event when any file's mtime advances.  The
@@ -200,9 +200,9 @@ pub(crate) async fn dev_reload(
 
 /// Spawn a background task that polls the web dir every 300 ms and sends a
 /// tick on `tx` whenever any file's mtime advances.  Returns `None` when
-/// `TUCANO_WEB_DIR` is not set (production — nothing to watch).
+/// `TATU_WEB_DIR` is not set (production — nothing to watch).
 pub fn spawn_web_watcher() -> Option<std::sync::Arc<tokio::sync::watch::Sender<u64>>> {
-    let web_dir = std::env::var("TUCANO_WEB_DIR").ok()?;
+    let web_dir = std::env::var("TATU_WEB_DIR").ok()?;
     let (tx, _rx) = tokio::sync::watch::channel(0u64);
     let tx = std::sync::Arc::new(tx);
     let tx2 = tx.clone();

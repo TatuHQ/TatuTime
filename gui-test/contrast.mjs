@@ -1,4 +1,4 @@
-// WCAG 2.1 contrast auditor for the Tucano-palette GUI (#132).
+// WCAG 2.1 contrast auditor for the Tatu-palette GUI (#132).
 //
 // Parses the :root custom properties out of web/styles.css (light block and
 // the prefers-color-scheme:dark override), then checks every TEXT pairing the

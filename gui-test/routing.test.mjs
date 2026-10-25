@@ -39,7 +39,7 @@ async function bootAt(url) {
   await waitFor(() => dom.window.document.documentElement.dataset.booted === 'ready', {
     message: 'the app to finish booting at ' + url,
   });
-  assert.ok(dom.window.document.getElementById('version').textContent.startsWith('TucanoTime'),
+  assert.ok(dom.window.document.getElementById('version').textContent.startsWith('TatuTime'),
     'boot completed');
   return dom;
 }

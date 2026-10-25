@@ -1567,6 +1567,42 @@ dependencies = [
 ]
 
 [[package]]
+name = "tatu-time"
+version = "0.2.0"
+dependencies = [
+ "aes-gcm",
+ "argon2",
+ "axum",
+ "base64",
+ "chrono",
+ "csv",
+ "flate2",
+ "fs2",
+ "futures-util",
+ "hmac",
+ "http-body-util",
+ "lettre",
+ "lopdf",
+ "pdf-writer",
+ "rand",
+ "rust-embed",
+ "serde",
+ "serde_json",
+ "sha2",
+ "skrifa",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tower",
+ "tower-http",
+ "tracing",
+ "tracing-subscriber",
+ "ureq",
+ "uuid",
+ "zip",
+]
+
+[[package]]
 name = "tempfile"
 version = "3.27.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1757,42 +1793,6 @@ dependencies = [
  "tracing",
  "tracing-core",
  "tracing-log",
-]
-
-[[package]]
-name = "tucano-time"
-version = "0.1.78"
-dependencies = [
- "aes-gcm",
- "argon2",
- "axum",
- "base64",
- "chrono",
- "csv",
- "flate2",
- "fs2",
- "futures-util",
- "hmac",
- "http-body-util",
- "lettre",
- "lopdf",
- "pdf-writer",
- "rand",
- "rust-embed",
- "serde",
- "serde_json",
- "sha2",
- "skrifa",
- "tempfile",
- "thiserror",
- "tokio",
- "tower",
- "tower-http",
- "tracing",
- "tracing-subscriber",
- "ureq",
- "uuid",
- "zip",
 ]
 
 [[package]]

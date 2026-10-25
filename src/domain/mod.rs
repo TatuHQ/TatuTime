@@ -1,4 +1,4 @@
-//! Domain model and validation for TucanoTime.
+//! Domain model and validation for TatuTime.
 //!
 //! Money is stored in minor units (cents) as integers; hours are stored as
 //! hundredths of an hour. Floats never touch persisted values, so totals are

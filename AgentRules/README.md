@@ -1,7 +1,7 @@
 # AgentRules
 
-Organisation-wide rules for AI agents in TucanoTechnology repositories, synced from
-[TucanoAgentRules](https://github.com/TucanoTechnology/TucanoAgentRules). **Do not edit files
+Organisation-wide rules for AI agents in TatuHQ repositories, synced from
+[TatuAgentRules](https://github.com/TatuHQ/TatuAgentRules). **Do not edit files
 here**: the next sync overwrites them — change them in the source repository instead. Rules
 specific to one repository belong in that repository's own `AGENTS.md`.
 

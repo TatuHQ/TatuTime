@@ -405,11 +405,11 @@ mod tests {
     fn customer() -> Customer {
         Customer {
             id: "22222222-2222-2222-2222-222222222222".parse().unwrap(),
-            name: "Tucano Time".into(),
+            name: "TatuTime".into(),
             currency: Currency("EUR".into()),
             default_rate_minor: 9000,
             active: true,
-            email: "billing@tucanotime.example".into(),
+            email: "billing@tatutime.example".into(),
             payment_terms: None,
             invoice_notes: String::new(),
             invoice_subject: String::new(),
@@ -424,7 +424,7 @@ mod tests {
     }
 
     fn org() -> Org {
-        Org::named("Tucano")
+        Org::named("Tatu")
     }
 
     #[test]

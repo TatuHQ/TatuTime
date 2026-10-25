@@ -1,4 +1,4 @@
-# TucanoTime — recreate-safe, hardened deployment (#94).
+# TatuTime — recreate-safe, hardened deployment (#94).
 #
 # Everything the app *stores* lives on the named volume: users, entries,
 # invoices, the credential vault (secrets.bin + its auto-generated vault.key),
@@ -8,7 +8,7 @@
 #
 #   * sessions — the signing key is auto-generated on first boot and kept at
 #     <volume>/session.key (0600), so logins survive restarts. Override with a
-#     mounted TUCANO_SESSION_SECRET_FILE (see "secrets" below);
+#     mounted TATU_SESSION_SECRET_FILE (see "secrets" below);
 #   * settings — resolved env > /data/config.json > default. Make runtime
 #     knobs survive recreation via `PUT /api/admin/config` (Settings tab in
 #     the GUI) or by editing config.json on the volume. `vault_enabled` is the
@@ -23,24 +23,26 @@
 # Hardening applied to **both** services: the container root filesystem is
 # read-only (only /data and the /tmp tmpfs are writable), every capability is
 # dropped, privilege escalation is blocked, an init reaps zombies, and the
-# published port binds to loopback unless TUCANO_HOST_ADDR says otherwise.
+# published port binds to loopback unless TATU_HOST_ADDR says otherwise.
 # The server was verified to run under exactly this set.
+name: tatutime
+
 services:
-  tucanotime:
+  tatutime:
     build: .
-    image: tucanotime:latest
+    image: tatutime:latest
     restart: unless-stopped
     # Loopback by default (S4): a timesheet server with a first-run bootstrap
     # endpoint should not appear on every interface because of a side effect.
-    # For LAN use set TUCANO_HOST_ADDR=0.0.0.0 (and see TUCANO_SECURE_COOKIES).
+    # For LAN use set TATU_HOST_ADDR=0.0.0.0 (and see TATU_SECURE_COOKIES).
     ports:
-      - "${TUCANO_HOST_ADDR:-127.0.0.1}:${TUCANO_HOST_PORT:-8080}:8080"
+      - "${TATU_HOST_ADDR:-127.0.0.1}:${TATU_HOST_PORT:-8080}:8080"
     volumes:
-      - tucanotime-data:/data
+      - tatutime-data:/data
       # Settings → Backup writes ZIPs here (sibling of /data). Point this at a
       # host directory to keep backups off the data volume:
-      #   TUCANO_BACKUP_DIR=/srv/tucanotime-backups docker compose up -d
-      - ${TUCANO_BACKUP_DIR:-tucanotime-backups}:/Backup
+      #   TATU_BACKUP_DIR=/srv/tatutime-backups docker compose up -d
+      - ${TATU_BACKUP_DIR:-tatutime-backups}:/Backup
     read_only: true
     tmpfs:
       - /tmp
@@ -53,36 +55,36 @@ services:
     stop_grace_period: 30s
     environment:
       # All optional. Empty/unset means defaults (sessions auto-persist).
-      TUCANO_ENV: ${TUCANO_ENV:-production}
-      # Plain HTTP on a LAN (no TLS proxy)? Set TUCANO_SECURE_COOKIES=0 —
+      TATU_ENV: ${TATU_ENV:-production}
+      # Plain HTTP on a LAN (no TLS proxy)? Set TATU_SECURE_COOKIES=0 —
       # browsers drop `Secure` cookies on non-localhost origins, so the
       # default (secure in production) would break login over http://IP.
       # This flag is independent of the strong-secret enforcement (review A5).
-      TUCANO_SECURE_COOKIES: ${TUCANO_SECURE_COOKIES:-}
+      TATU_SECURE_COOKIES: ${TATU_SECURE_COOKIES:-}
       # Optional file-based secrets, never plaintext env. The session and vault
       # keys are otherwise auto-generated on the data volume; enable the
       # `secrets:` blocks at the bottom of this file and uncomment these to
       # override them from outside /data:
-      # TUCANO_SESSION_SECRET_FILE: /run/secrets/tucano_session_secret
-      # TUCANO_SECRET_KEY_FILE: /run/secrets/tucano_vault_key
+      # TATU_SESSION_SECRET_FILE: /run/secrets/tatu_session_secret
+      # TATU_SECRET_KEY_FILE: /run/secrets/tatu_vault_key
       # labels are ignored by docker but document the backup recipe:
     labels:
-      com.tucanotime.backup: >-
-        docker compose run --rm tucanotime-cli --backup /backups/manual.tar.gz
+      com.tatutime.backup: >-
+        docker compose run --rm tatutime-cli --backup /backups/manual.tar.gz
 
   # One-shot CLI on the same image for backups/restores against the volume:
-  #   docker compose run --rm tucanotime-cli --backup /backups/today.tar.gz
-  #   docker compose stop tucanotime
-  #   docker compose run --rm tucanotime-cli --restore /backups/today.tar.gz
-  #   docker compose up -d tucanotime
+  #   docker compose run --rm tatutime-cli --backup /backups/today.tar.gz
+  #   docker compose stop tatutime
+  #   docker compose run --rm tatutime-cli --restore /backups/today.tar.gz
+  #   docker compose up -d tatutime
   # (--restore refuses a non-empty data dir unless you pass --force)
-  tucanotime-cli:
-    image: tucanotime:latest
+  tatutime-cli:
+    image: tatutime:latest
     profiles: [ "cli" ]
-    entrypoint: [ "/usr/local/bin/tucano-time" ]
+    entrypoint: [ "/usr/local/bin/tatu-time" ]
     volumes:
-      - tucanotime-data:/data
-      - ${TUCANO_BACKUP_DIR:-./backups}:/backups
+      - tatutime-data:/data
+      - ${TATU_BACKUP_DIR:-./backups}:/backups
     read_only: true
     tmpfs:
       - /tmp
@@ -94,11 +96,11 @@ services:
     user: "10001:10001"
     stop_grace_period: 30s
     environment:
-      TUCANO_ENV: ${TUCANO_ENV:-production}
+      TATU_ENV: ${TATU_ENV:-production}
       # Same optional file-based secrets as the server, so a restore/backup run
       # sees the same external vault key (see the `secrets:` block below). With
       # no override, the server's generated <volume>/vault.key is used.
-      # TUCANO_SECRET_KEY_FILE: /run/secrets/tucano_vault_key
+      # TATU_SECRET_KEY_FILE: /run/secrets/tatu_vault_key
 
       # External-override recipe (the app generates both keys on the volume by
       # default, so this is only needed to keep them outside /data):
@@ -110,7 +112,7 @@ services:
       #
       # `./secrets/` is listed in both .gitignore and .dockerignore, so this
       # recipe can never stage key material in git or bake it into the image.
-      # To keep it outside the checkout instead, point TUCANO_SECRETS_DIR at a
+      # To keep it outside the checkout instead, point TATU_SECRETS_DIR at a
       # directory outside the repository.
       #
       # Setting either *_FILE variable makes the vault operator-managed: the
@@ -121,11 +123,11 @@ services:
       # `*_FILE` environment entries above. The app reads the *files*; the operator
       # never puts a secret into the environment or the compose file.
       # secrets:
-      #   tucano_vault_key:
-      #     file: ${TUCANO_SECRETS_DIR:-./secrets}/vault.key
-      #   tucano_session_secret:
-      #     file: ${TUCANO_SECRETS_DIR:-./secrets}/session.key
+      #   tatu_vault_key:
+      #     file: ${TATU_SECRETS_DIR:-./secrets}/vault.key
+      #   tatu_session_secret:
+      #     file: ${TATU_SECRETS_DIR:-./secrets}/session.key
 
 volumes:
-  tucanotime-data:
-  tucanotime-backups:
+  tatutime-data:
+  tatutime-backups:

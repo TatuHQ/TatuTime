@@ -1,13 +1,14 @@
-/* TucanoTime design system (#10), Tucano Technology brand.
+/* TatuTime design system (#10), interim TatuHQ brand.
    The component layer remains Canonical's Vanilla Framework (#110) and the
-   Ubuntu variable font, but the palette is the Tucano Technology identity:
-   warm paper surfaces, ink text, toucan orange for primary action and a
-   deeper burnt orange for links and accents. Light + dark, WCAG-AA contrast,
+   Ubuntu variable font. The palette is derived from the interim TatuHQ mark
+   (the organisation avatar) until the official logo is drawn:
+   warm paper surfaces, ink text, tatu blue for primary action and a
+   deeper blue for links and accents. Light + dark, WCAG-AA contrast,
    visible focus. Vanilla's own colour variables are mapped onto these tokens
    below so p-cards, tables, inputs and dialogs share the same theme.
    Contrast notes: ink #17120f on paper #f6f0e4 = 16.4:1; button ink on
-   #f4a300 = 8.9:1; links #9d3f0c on surface #fffdf7 = 6.6:1; the focus ring
-   #9d3f0c meets the 3:1 UI-component minimum. */
+   #6ab6dc = 8.3:1; links #14536f on surface #fffdf7 = 7.7:1; the focus ring
+   #14536f meets the 3:1 UI-component minimum. */
 
 :root {
   --bg: #f6f0e4;          /* warm paper */
@@ -15,18 +16,18 @@
   --fg: #17120f;          /* ink — body copy */
   --muted: #6a6057;       /* warm grey — secondary text (6.0:1 on card) */
   --line: #d8cdbb;        /* warm rule */
-  --brand: #f4a300;       /* toucan orange — primary action */
-  --brand-ink: #17120f;   /* ink text on orange (8.9:1) */
-  --brand-hover: #ffb31a; /* lighter orange */
-  --brand-active: #d98f00;
-  --accent: #e95420;      /* burnt orange — active nav, today, UI rules */
-  --accent-soft: #fbe6bd; /* pale orange tint */
+  --brand: #6ab6dc;       /* tatu blue — primary action */
+  --brand-ink: #17120f;   /* ink text on blue (8.3:1) */
+  --brand-hover: #85c8e8; /* lighter blue */
+  --brand-active: #4a9fc8;
+  --accent: #1f6f95;      /* deep blue — active nav, today, UI rules */
+  --accent-soft: #d8eef8; /* pale blue tint */
   --danger: #a3261c;      /* destructive text */
-  --brand-deep: #9d3f0c;  /* wordmark + link text (6.6:1 on card) */
+  --brand-deep: #14536f;  /* wordmark + link text (7.7:1 on card) */
   --field-bg: #fffdf7;
-  --focus: #9d3f0c;
+  --focus: #14536f;
   --row-alt: #efe6d5;     /* alternating table row */
-  --cell-active: #fbe6bd;
+  --cell-active: #d8eef8;
   --sidebar-bg: #fffdf7;
   --radius: 2px;
   --shadow: 0 1px 2px rgba(23, 18, 15, .06), 0 1px 3px rgba(23, 18, 15, .10);
@@ -44,7 +45,7 @@
   --field-rule: #8a7b66;  /* underline rule on the warm input fill (3.6:1) */
   --input-bg: #f5eee0;    /* warm input fill */
 
-  /* Vanilla component tokens, mapped onto the Tucano palette. */
+  /* Vanilla component tokens, mapped onto the Tatu palette. */
   --vf-color-text-default: var(--fg);
   --vf-color-text-muted: var(--muted);
   --vf-color-text-inactive: color-mix(in srgb, var(--fg) 72%, var(--bg));
@@ -74,18 +75,18 @@
     --fg: #f1e9ed;
     --muted: #c9bcaa;
     --line: #43382e;
-    --brand: #f4a300;
+    --brand: #6ab6dc;
     --brand-ink: #17120f;
-    --brand-hover: #ffb31a;
-    --brand-active: #d98f00;
-    --accent: #ffb31a;
-    --accent-soft: #3a2f24;
+    --brand-hover: #85c8e8;
+    --brand-active: #4a9fc8;
+    --accent: #8fd2ee;
+    --accent-soft: #1f3a47;
     --danger: #ff9b8f;
-    --brand-deep: #f4a300;
+    --brand-deep: #8fd2ee;
     --field-bg: #17120f;
-    --focus: #ffb31a;
+    --focus: #8fd2ee;
     --row-alt: #221b16;
-    --cell-active: #3a2f24;
+    --cell-active: #1f3a47;
     --sidebar-bg: #221b16;
     --shadow: none;
     --field-rule: #a99b89;
@@ -120,18 +121,18 @@
   --fg: #f1e9ed;
   --muted: #c9bcaa;
   --line: #43382e;
-  --brand: #f4a300;
+  --brand: #6ab6dc;
   --brand-ink: #17120f;
-  --brand-hover: #ffb31a;
-  --brand-active: #d98f00;
-  --accent: #ffb31a;
-  --accent-soft: #3a2f24;
+  --brand-hover: #85c8e8;
+  --brand-active: #4a9fc8;
+  --accent: #8fd2ee;
+  --accent-soft: #1f3a47;
   --danger: #ff9b8f;
-  --brand-deep: #f4a300;
+  --brand-deep: #8fd2ee;
   --field-bg: #17120f;
-  --focus: #ffb31a;
+  --focus: #8fd2ee;
   --row-alt: #221b16;
-  --cell-active: #3a2f24;
+  --cell-active: #1f3a47;
   --sidebar-bg: #221b16;
   --shadow: none;
   --field-rule: #a99b89;
@@ -160,7 +161,7 @@
 }
 /* Vanilla publishes its component tokens on body.is-light / body.is-dark as
    well as :root; repeat the mapping at that specificity so p-cards, buttons
-   and inputs inherit the Tucano palette instead of the vendor defaults. */
+   and inputs inherit the Tatu palette instead of the vendor defaults. */
 .is-light {
   --vf-color-text-default: var(--fg);
   --vf-color-text-muted: var(--muted);
@@ -233,13 +234,6 @@ body {
 .brand-mark { width: 32px; height: auto; flex: 0 0 auto; padding: 2px; border-radius: 5px; image-rendering: pixelated; }
 .brand-word { font-size: 1.35rem; font-weight: 600; letter-spacing: -.02em; color: var(--fg); white-space: nowrap; }
 .brand-word strong { color: var(--brand-deep); font-weight: 600; }
-/* The pixel toucan is black-bodied: on the dark theme a paper tile keeps the
-   mark legible without inverting or recolouring the artwork. */
-:root[data-theme="dark"] .brand-mark,
-.is-dark .brand-mark { background: #f6f0e4; }
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) .brand-mark { background: #f6f0e4; }
-}
 .sidebar nav { flex: 1; display: flex; flex-direction: column; gap: .15rem; } /* #191: the utility separator + wizard button are nav siblings of the tablist now */
 /* ---- tablists: the official Vanilla p-tabs pattern (#232 increment 5) ----
    Every app tablist (the sidebar rail, Day|Week|Calendar, the settings bar)
@@ -332,7 +326,7 @@ button { font: inherit; cursor: pointer; }
 input:focus-visible, select:focus-visible, textarea:focus-visible,
 button:focus-visible, a:focus-visible { outline: 3px solid var(--focus); outline-offset: 1px; }
 /* Vanilla's button/input rules set their own blue focus colour at equal or
-   higher specificity; keep the Tucano focus colour on every control. */
+   higher specificity; keep the Tatu focus colour on every control. */
 .p-button--positive:focus-visible, .p-button:focus-visible,
 input:focus-visible, select:focus-visible, textarea:focus-visible { outline-color: var(--focus); }
 button.secondary { background: var(--surface); color: var(--fg); border-color: var(--line); }

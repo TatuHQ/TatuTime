@@ -1,6 +1,6 @@
 # Getting started
 
-TucanoTime records time against a customer and a project code, then turns that
+TatuTime records time against a customer and a project code, then turns that
 time into invoices. Each customer and each project carries its own currency and
 hourly rate. One Rust binary serves the REST API, the browser GUI and the API
 documentation; all data is stored as JSON documents in one data directory, so
@@ -120,4 +120,4 @@ are described in [Invoicing and expenses](invoicing-and-expenses.md).
 
 ---
 
-Last verified against TucanoTime 0.1.41.
+Last verified against TatuTime 0.1.41.

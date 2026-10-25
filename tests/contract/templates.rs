@@ -906,18 +906,18 @@ async fn template_notes_print_in_preview_and_issued_pdf_in_order() {
     let (app, d) = app().await;
     let pay = json!({
         "bank_name": "Example Bank",
-        "account_name": "Tucano Time",
+        "account_name": "TatuTime",
         "iban": "EX000000000000000000",
         "instructions": "Quote the invoice number.",
         "rails": [
             {
                 "currency": "EUR",
-                "account_name": "Tucano Time",
+                "account_name": "TatuTime",
                 "iban": "EX111111111111111111"
             },
             {
                 "currency": "USD",
-                "account_name": "Tucano Time",
+                "account_name": "TatuTime",
                 "account_number": "000000000000"
             }
         ]

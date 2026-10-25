@@ -357,7 +357,7 @@ pub fn build_router(state: AppState) -> Router {
         .layer(axum::middleware::from_fn(json_method_not_allowed));
 
     meta.nest("/api", api_router)
-        // Dev-mode live reload (SSE): active only when TUCANO_WEB_DIR is set.
+        // Dev-mode live reload (SSE): active only when TATU_WEB_DIR is set.
         // In production the watcher is None and the endpoint returns 404.
         .route(
             "/_dev/reload",

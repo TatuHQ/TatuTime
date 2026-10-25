@@ -106,7 +106,7 @@ impl ApiError {
         Self::new(
             StatusCode::INTERNAL_SERVER_ERROR,
             "data_dir_invalid",
-            "a data directory is not usable; stop the server and check TUCANO_DATA_DIR",
+            "a data directory is not usable; stop the server and check TATU_DATA_DIR",
         )
     }
 

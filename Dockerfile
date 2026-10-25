@@ -14,8 +14,8 @@ ENV CARGO_TERM_COLOR=never \
 # Build identity for /healthz and the GUI footer. The build context carries no
 # `.git`, so the commit cannot be read here: CI's image job passes it as a build
 # arg, and a bare `docker build` reports `unknown` rather than inventing one.
-ARG TUCANO_BUILD=unknown
-ENV TUCANO_BUILD=${TUCANO_BUILD}
+ARG TATU_BUILD=unknown
+ENV TATU_BUILD=${TATU_BUILD}
 
 # Dependency layer (E6): compile the ~136 crates from the manifest + lockfile
 # alone, against empty stub sources. Nothing in this layer depends on `src/`,
@@ -47,9 +47,9 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
   # call the crate fresh and ship the stub binary. Dropping the local
   # package's artefacts forces a real rebuild while every dependency stays
   # compiled (that is the whole point of the layer above).
-  cargo clean --release --package tucano-time \
+  cargo clean --release --package tatu-time \
   && cargo build --release --locked \
-  && cp target/release/tucano-time /build/tucano-time
+  && cp target/release/tatu-time /build/tatu-time
 
 # ---------------------------------------------------------------------------
 # Runtime: distroless cc-debian13 — glibc + libgcc + the CA bundle, no shell,
@@ -62,24 +62,24 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
 # ---------------------------------------------------------------------------
 FROM gcr.io/distroless/cc-debian13:nonroot@sha256:83b9b50586253821cf63ffcec87d3d94265a093ad30da232039af962dd8f4edf
 
-LABEL org.opencontainers.image.title="TucanoTime" \
-  org.opencontainers.image.description="TucanoTime timesheet server (API, GUI and contract in one binary)" \
-  org.opencontainers.image.vendor="Tucano Technology" \
+LABEL org.opencontainers.image.title="TatuTime" \
+  org.opencontainers.image.description="TatuTime timesheet server (API, GUI and contract in one binary)" \
+  org.opencontainers.image.vendor="TatuHQ" \
   org.opencontainers.image.licenses="AGPL-3.0-or-later" \
-  org.opencontainers.image.url="https://github.com/TucanoTechnology/TucanoTime" \
-  org.opencontainers.image.source="https://github.com/TucanoTechnology/TucanoTime" \
-  org.opencontainers.image.documentation="https://github.com/TucanoTechnology/TucanoTime#README" \
+  org.opencontainers.image.url="https://github.com/TatuHQ/TatuTime" \
+  org.opencontainers.image.source="https://github.com/TatuHQ/TatuTime" \
+  org.opencontainers.image.documentation="https://github.com/TatuHQ/TatuTime#README" \
   org.opencontainers.image.base.name="gcr.io/distroless/cc-debian13:nonroot"
 
 # Fixed uid/gid so bind mounts and volumes have a stable owner. No passwd entry
 # is needed: the image runs with a numeric user id.
 COPY --from=builder --chown=10001:10001 /build/empty-data /data
 COPY --from=builder --chown=10001:10001 /build/empty-data /Backup
-COPY --from=builder --chown=10001:10001 /build/tucano-time /usr/local/bin/tucano-time
+COPY --from=builder --chown=10001:10001 /build/tatu-time /usr/local/bin/tatu-time
 
 USER 10001:10001
-ENV TUCANO_DATA_DIR=/data \
-  TUCANO_PORT=8080
+ENV TATU_DATA_DIR=/data \
+  TATU_PORT=8080
 EXPOSE 8080
 # `/Backup` is where Settings → Backup writes its ZIPs (sibling of the data
 # dir). It is a volume so `--read-only` still allows backups; the operator can
@@ -93,6 +93,6 @@ STOPSIGNAL SIGTERM
 # Container liveness (#94): the same binary probes its own /healthz, so the
 # runtime image needs no curl/wget — and distroless has no shell to need one.
 HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \
-  CMD ["/usr/local/bin/tucano-time", "--health"]
+  CMD ["/usr/local/bin/tatu-time", "--health"]
 
-ENTRYPOINT ["/usr/local/bin/tucano-time"]
+ENTRYPOINT ["/usr/local/bin/tatu-time"]

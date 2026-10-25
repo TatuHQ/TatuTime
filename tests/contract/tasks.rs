@@ -27,7 +27,7 @@ async fn new_task(app: &Client, cid: &str, pcode: &str, code: &str, extra: Value
 #[tokio::test]
 async fn task_crud_and_entry_reference() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
+    let c = new_customer(&app, "TatuTime", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({})).await;
 
@@ -67,7 +67,7 @@ async fn task_crud_and_entry_reference() {
 #[tokio::test]
 async fn entry_task_must_belong_to_project() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
+    let c = new_customer(&app, "TatuTime", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({})).await;
     new_project(&app, cid, "P2", json!({})).await;
@@ -91,7 +91,7 @@ async fn entry_task_must_belong_to_project() {
 #[tokio::test]
 async fn reports_and_invoices_use_project_rates_for_legacy_tasks() {
     let (app, dir) = app().await;
-    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await; // 60/h default
+    let c = new_customer(&app, "TatuTime", "EUR", 6000).await; // 60/h default
     let cid = c["id"].as_str().unwrap();
     new_project(
         &app,
@@ -191,7 +191,7 @@ async fn tasks_reject_billing_overrides_without_persistence() {
 #[tokio::test]
 async fn tasks_list_returns_the_projects_tasks() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
+    let c = new_customer(&app, "TatuTime", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({})).await;
     new_task(&app, cid, "P1", "T-1", json!({"name":"Design"})).await;
@@ -218,7 +218,7 @@ async fn tasks_list_returns_the_projects_tasks() {
 #[tokio::test]
 async fn task_rename_then_delete_after_unreferencing() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
+    let c = new_customer(&app, "TatuTime", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({})).await;
     new_task(&app, cid, "P1", "T-1", json!({"name":"Design"})).await;
@@ -297,7 +297,7 @@ async fn task_rename_then_delete_after_unreferencing() {
 #[tokio::test]
 async fn inactive_task_round_trips_and_stays_listed() {
     let (app, _d) = app().await;
-    let c = new_customer(&app, "Tucano Time", "EUR", 6000).await;
+    let c = new_customer(&app, "TatuTime", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({})).await;
 

@@ -1,0 +1,30 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>TatuTime</Name>
+  <Repository>ghcr.io/tatuhq/tatutime:latest</Repository>
+  <Registry>https://github.com/TatuHQ/TatuTime/pkgs/container/tatutime</Registry>
+  <Network>bridge</Network>
+  <MyIP/>
+  <Shell>false</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/TatuHQ/TatuTime/issues</Support>
+  <Project>https://github.com/TatuHQ/TatuTime</Project>
+  <Overview>TatuTime is a self-hosted timesheet server: one Rust binary serves the REST API, the browser GUI and the OpenAPI docs. Data is file-based JSON, so there is no database. The published image is distroless (no shell, no package manager) and runs as the fixed non-root user 10001:10001; the Unraid Console button will therefore not open a terminal, which is expected. Use docker logs TatuTime from an Unraid terminal instead. First run: open the WebUI and complete the admin startup wizard (administrator, then company, then currency). All persistent state lives on the /data path.</Overview>
+  <Category>Productivity: Tools:</Category>
+  <WebUI>http://[IP]:[PORT:8080]/</WebUI>
+  <TemplateURL>https://raw.githubusercontent.com/TatuHQ/TatuTime/main/deploy/unraid/my-TatuTime.xml</TemplateURL>
+  <Icon/>
+  <ExtraParams>--read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges</ExtraParams>
+  <PostArgs/>
+  <CPUset/>
+  <DateInstalled>1792371975</DateInstalled>
+  <DonateText/>
+  <DonateLink/>
+  <Description>TatuTime timesheet server (API, GUI and contract in one binary). Container hardening is intentional: ExtaParams adds --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges, so the root filesystem is read-only, every Linux capability is dropped and privilege escalation is blocked. /data is the only writable bind mount and /tmp is a small tmpfs. The runtime image has no shell; the Unraid Console will not work by design. On first start open http://[IP]:[PORT:8080]/ and complete the admin startup wizard (administrator, then company, then currency); then use Settings, Email to configure SMTP. Set TATU_SECURE_COOKIES=0 for plain HTTP on the LAN (the template default); set it to 1 only when the WebUI is served over HTTPS. The credential vault generates /data/vault.key automatically on first boot; TATU_SECRET_KEY(_FILE) is only an optional external override. If secrets.bin exists but no key can open it, the app refuses to start instead of silently losing access. See deploy/unraid/README.md in the repository for the full runbook.</Description>
+  <Config Name="Data (all persistent state)" Target="/data" Default="/mnt/user/appdata/tatutime" Mode="rw" Description="Holds every document the app writes: customers, projects, entries, invoices, users, config.json, session.key, secrets.bin, the generated vault.key, audit.log and scheduler state. It must be owned by uid/gid 10001 because the image is fixed non-root; run: chown -R 10001:10001 /mnt/user/appdata/tatutime before the first start. Back up this whole folder: it contains both the encrypted vault and the key that decrypts it, so protect the backup accordingly (or keep the key outside /data with an external override)." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/tatutime</Config>
+  <Config Name="WebUI port" Target="8080" Default="8080" Mode="tcp" Description="Host port published to the container on 8080. Open http://YOUR-UNRAID-IP:8080/ after the container starts. In bridge mode this is reachable from the LAN by default; restrict it with a firewall or put it behind a TLS reverse proxy if that matters." Type="Port" Display="always" Required="true" Mask="false">8080</Config>
+  <Config Name="Data dir (internal)" Target="TATU_DATA_DIR" Default="/data" Mode="" Description="Internal data directory inside the container. Leave at /data; it must match the Data path target above. This is the TATU_DATA_DIR environment variable read by src/main.rs." Type="Variable" Display="advanced" Required="true" Mask="false">/data</Config>
+  <Config Name="Listen port (internal)" Target="TATU_PORT" Default="8080" Mode="" Description="TCP port the server binds inside the container and the port the image HEALTHCHECK probes. Leave at 8080 and change the WebUI port mapping instead if you need a different host port." Type="Variable" Display="advanced" Required="true" Mask="false">8080</Config>
+  <Config Name="Plain-HTTP cookies" Target="TATU_SECURE_COOKIES" Default="0" Mode="" Description="Cookie Secure flag, independent of TATU_ENV. 0 drops the Secure attribute so login works over plain http://YOUR-UNRAID-IP:8080. Set to 1 only when the WebUI is served over HTTPS (for example behind a TLS reverse proxy); with 1 over plain HTTP the browser discards the session cookie and login loops." Type="Variable" Display="always" Required="true" Mask="false">0</Config>
+  <Config Name="Vault key file (optional override)" Target="TATU_SECRET_KEY_FILE" Default="" Mode="" Description="Leave empty to let the app create and manage /data/vault.key automatically on first boot (32 base64url characters, mode 0600). Set this only to supply an external key from outside the data directory, for example a Docker secret mounted into the container: the path must name a file holding exactly 32 ASCII bytes (a trailing newline is trimmed). An external key always wins and is never copied into /data. The value is a path, never the key itself, so the key never appears in the Unraid XML or docker inspect. If secrets.bin exists but no key can open it (no key, a malformed key or the wrong key), the app refuses to start." Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+</Container>

@@ -1,4 +1,4 @@
-# Build context for the TucanoTime image.
+# Build context for the TatuTime image.
 #
 # The image is one Rust binary: the only inputs the build needs are the crate
 # manifest + lockfile, the pinned toolchain file, `src/`, the `web/` assets and
@@ -34,7 +34,7 @@ vault.key
 # Local key material for the docker-compose `secrets:` recipe.
 secrets/
 .server.lock
-.tucanotime.lock
+.tatutime.lock
 config.json
 
 # Tests, harnesses and tooling that are not part of the shipped binary.

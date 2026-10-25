@@ -187,8 +187,8 @@ pub fn token_from_cookie_header(header: &str) -> Option<&str> {
     })
 }
 
-/// Resolve the session signing secret (#94): `TUCANO_SESSION_SECRET` >
-/// `TUCANO_SESSION_SECRET_FILE` (mount-friendly) > `<root>/session.key`, which is
+/// Resolve the session signing secret (#94): `TATU_SESSION_SECRET` >
+/// `TATU_SESSION_SECRET_FILE` (mount-friendly) > `<root>/session.key`, which is
 /// **auto-created** on first boot so a restart or update keeps everyone signed
 /// in. In production a strong secret is required (#44): missing or shorter than
 /// 32 bytes fails fast. Returns `(secret, ephemeral)`; `secret` is `None` only
@@ -213,7 +213,7 @@ pub fn resolve_session_secret(
                     "{path} contains a session secret shorter than 32 bytes; ignoring in production"
                 );
             }
-            Err(e) => tracing::warn!("cannot read TUCANO_SESSION_SECRET_FILE {path}: {e}"),
+            Err(e) => tracing::warn!("cannot read TATU_SESSION_SECRET_FILE {path}: {e}"),
         }
     }
     let key_path = root.join("session.key");
@@ -296,7 +296,7 @@ pub fn write_private_file(path: &std::path::Path, bytes: &[u8]) -> Result<(), St
 /// `production` (review A5): an embedded LAN deployment terminates TLS at no
 /// proxy and serves plain HTTP, where a `Secure` cookie is dropped by the
 /// browser and login loops. Operators on such a setup set
-/// `TUCANO_SECURE_COOKIES=0` **without** weakening the strong-secret policy.
+/// `TATU_SECURE_COOKIES=0` **without** weakening the strong-secret policy.
 pub fn make_session(
     secret: Option<String>,
     production: bool,
@@ -305,20 +305,20 @@ pub fn make_session(
     match secret.filter(|s| !s.is_empty()) {
         Some(s) if s.len() >= 32 => Ok(Session::new(s.into_bytes(), 60 * 60 * 24, secure)),
         Some(_) if production => Err(
-            "TUCANO_SESSION_SECRET is set but shorter than 32 bytes; refuse to start in production"
+            "TATU_SESSION_SECRET is set but shorter than 32 bytes; refuse to start in production"
                 .to_string(),
         ),
         Some(s) => {
-            tracing::warn!("TUCANO_SESSION_SECRET is <32 bytes; use a longer key in production");
+            tracing::warn!("TATU_SESSION_SECRET is <32 bytes; use a longer key in production");
             Ok(Session::new(s.into_bytes(), 60 * 60 * 24, secure))
         }
         None if production => Err(
-            "TUCANO_SESSION_SECRET is required in production (generate: openssl rand -hex 32)"
+            "TATU_SESSION_SECRET is required in production (generate: openssl rand -hex 32)"
                 .to_string(),
         ),
         None => {
             tracing::warn!(
-                "TUCANO_SESSION_SECRET unset: sessions are ephemeral (restart logs everyone out)"
+                "TATU_SESSION_SECRET unset: sessions are ephemeral (restart logs everyone out)"
             );
             let mut key = [0u8; 32];
             use rand::TryRng;

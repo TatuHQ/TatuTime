@@ -1,4 +1,4 @@
-# Dependabot version updates for TucanoTime.
+# Dependabot version updates for TatuTime.
 #
 # CI on each PR validates the new pin and a human merges — pins never move
 # silently. The Rust toolchain is pinned by rust-toolchain.toml and the

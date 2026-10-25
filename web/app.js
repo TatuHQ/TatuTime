@@ -1,4 +1,4 @@
-// TucanoTime GUI entry point. Pure presentation layer: every value comes from
+// TatuTime GUI entry point. Pure presentation layer: every value comes from
 // and goes to the JSON API. The server is the only actor that touches storage.
 // All user data is inserted with textContent (never innerHTML) so stored
 // notes/names cannot execute as markup.
