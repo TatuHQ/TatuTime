@@ -3,7 +3,7 @@
 ## Toolchain and local workflow
 
 The toolchain is pinned by [`rust-toolchain.toml`](../rust-toolchain.toml):
-Rust `1.98.0` with `rustfmt` and `clippy`, edition 2024. The Dockerfile and CI
+Rust `1.99.1` with `rustfmt` and `clippy`, edition 2024. The Dockerfile and CI
 images carry the same version; bump all three together in one intentional
 change.
 

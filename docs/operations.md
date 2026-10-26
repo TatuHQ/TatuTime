@@ -196,7 +196,7 @@ anonymously without credentials).
 The image is defined by the [`Dockerfile`](../Dockerfile) and run by
 [`docker-compose.yml`](../docker-compose.yml).
 
-- Multi-stage build: a Rust `1.98.0` builder and a distroless
+- Multi-stage build: a Rust `1.99.1` builder and a distroless
   `cc-debian13:nonroot` runtime. Both stages are pinned by digest.
 - The GUI and the OpenAPI contract are embedded in the binary; there is no
   runtime build step and no CDN.

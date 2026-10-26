@@ -5,7 +5,7 @@
 # by the same compiler CI and developers use. Pinned by tag *and* digest: the
 # digest is what makes the build reproducible, the tag keeps it readable.
 # ---------------------------------------------------------------------------
-FROM rust:1.98.0-slim-trixie@sha256:17d1ba895198f9934c6314ec5346a0d5115372f3243390c3d731e242f35c2f27 AS builder
+FROM rust:1.99.1-slim-trixie@sha256:1a939748a7cbab172de91a014e3804a97af1394a8c844faa67fce9401c4e40fb AS builder
 
 WORKDIR /build
 ENV CARGO_TERM_COLOR=never \
@@ -60,7 +60,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
 # Harden at runtime (compose does this by default):
 #   --read-only --cap-drop ALL --security-opt no-new-privileges --tmpfs /tmp
 # ---------------------------------------------------------------------------
-FROM gcr.io/distroless/cc-debian13:nonroot@sha256:83b9b50586253821cf63ffcec87d3d94265a093ad30da232039af962dd8f4edf
+FROM gcr.io/distroless/cc-debian13:nonroot@sha256:3ee00291cf386ec52a552e6a858d555debd74776eb4bfa53fa3df2cd6677515e
 
 LABEL org.opencontainers.image.title="TatuTime" \
   org.opencontainers.image.description="TatuTime timesheet server (API, GUI and contract in one binary)" \

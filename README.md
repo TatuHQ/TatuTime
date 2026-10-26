@@ -43,7 +43,7 @@ customer edits do not change an issued invoice. Details:
 
 ## Build locally
 
-Prerequisite: Rust `1.98.0`, as pinned by [`rust-toolchain.toml`](rust-toolchain.toml). The crate uses edition 2024.
+Prerequisite: Rust `1.99.1`, as pinned by [`rust-toolchain.toml`](rust-toolchain.toml). The crate uses edition 2024.
 
 ```sh
 cargo run
