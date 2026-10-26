@@ -29,8 +29,8 @@ concurrency:
 # same pinned Rust image the Dockerfile builds with, so CI, image and local
 # `cargo test` share one toolchain.
 #
-# Container pins (#263 item 5): `rust:1.98.0-slim-trixie` below and in the
-# Dockerfile builder stage mirrors rust-toolchain.toml (channel = "1.98.0");
+# Container pins (#263 item 5): `rust:1.99.1-slim-trixie` below and in the
+# Dockerfile builder stage mirrors rust-toolchain.toml (channel = "1.99.1");
 # bump the three together. Images referenced inside `run:` strings are invisible
 # to Dependabot's docker ecosystem (it only sees `image:`/`FROM` fields), so
 # they are bumped by hand — see the note in .github/dependabot.yml.
@@ -40,13 +40,13 @@ jobs:
     runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 45
     container:
-      image: rust:1.98.0-slim-trixie
+      image: rust:1.99.1-slim-trixie
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       # Toolchain fetch retry (run 38605399352): rust-toolchain.toml pins
-      # channel = "1.98.0" with the rustfmt/clippy components, so the first
+      # channel = "1.99.1" with the rustfmt/clippy components, so the first
       # `cargo` invocation in the checkout makes rustup fetch that channel
       # from static.rust-lang.org. A transient connect timeout there
       # (os error 110) turned a green PR red. Warm the pinned toolchain once
@@ -68,7 +68,7 @@ jobs:
               delay=$((delay * 2))
             done
           }
-          retry rustup toolchain install 1.98.0 --profile minimal --component rustfmt --component clippy
+          retry rustup toolchain install 1.99.1 --profile minimal --component rustfmt --component clippy
 
       - name: Format
         run: cargo fmt --all -- --check
@@ -116,7 +116,7 @@ jobs:
       # Log in to GHCR on main pushes; skip on PRs (no token needed for build-only).
       - name: Log in to GitHub Container Registry
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -178,7 +178,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Build server binary
-        run: docker run --rm -v "$PWD:/repo" -w /repo rust:1.98.0-slim-trixie cargo build --locked --release
+        run: docker run --rm -v "$PWD:/repo" -w /repo rust:1.99.1-slim-trixie cargo build --locked --release
 
       # Real-browser gate: drives the release binary in a real Firefox through
       # the Marionette wire protocol (gui-test/browser-smoke.py, standard
@@ -224,7 +224,7 @@ jobs:
           docker run -d --name "$TT_CONTAINER" --network host \
             -v "$PWD:/repo:ro" -v /data \
             -e TATU_DATA_DIR=/data -e TATU_PORT="$TT_PORT" \
-            rust:1.98.0-slim-trixie /repo/target/release/tatu-time
+            rust:1.99.1-slim-trixie /repo/target/release/tatu-time
 
       - name: Wait for health
         run: |
@@ -241,7 +241,7 @@ jobs:
           docker run --rm --network host \
             -v "$PWD/gui-test:/gui" -v "$PWD/web:/web:ro" \
             -e TT_GUI_BASE="http://localhost:$TT_PORT" \
-            -w /gui node:22-slim \
+            -w /gui node:24-slim \
             bash -c "npm ci --no-audit --no-fund && node contrast.mjs && npm run test:jsdom --silent && node gui.mjs"
 
       - name: Stop server
@@ -271,7 +271,7 @@ jobs:
     runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 45
     container:
-      image: rust:1.98.0-slim-trixie
+      image: rust:1.99.1-slim-trixie
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -281,7 +281,7 @@ jobs:
       # time and can flip a green build red (or vice versa) between runs.
       #
       # Toolchain fetch retry (run 38605399352): rust-toolchain.toml pins
-      # channel = "1.98.0" with the rustfmt/clippy components, so the first
+      # channel = "1.99.1" with the rustfmt/clippy components, so the first
       # `cargo` invocation below makes rustup fetch that channel from
       # static.rust-lang.org. A transient connect timeout there (os error 110)
       # turned a green PR red. Warm the pinned toolchain through a bounded
@@ -304,7 +304,7 @@ jobs:
               delay=$((delay * 2))
             done
           }
-          retry rustup toolchain install 1.98.0 --profile minimal --component rustfmt --component clippy
+          retry rustup toolchain install 1.99.1 --profile minimal --component rustfmt --component clippy
           cargo install --locked cargo-deny --version 0.20.2
 
       - name: cargo deny check

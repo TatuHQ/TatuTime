@@ -54,8 +54,8 @@ check that only passes because it sleeps longer is a failed check. The harness
 contains no fixed-duration wait, and
 [`condition-waits.test.mjs`](./condition-waits.test.mjs) (part of
 `npm run test:jsdom`) fails CI if one is reintroduced, naming the file and line.
-`gui-test/node_modules` is gitignored, so run the gates in the pinned `node:22-slim`
-image (`npm ci` first) or a local Node 22 with the dependencies installed.
+`gui-test/node_modules` is gitignored, so run the gates in the pinned `node:24-slim`
+image (`npm ci` first) or a local Node 24 with the dependencies installed.
 
 The suites read the app from `../web/…`, so a container run must mount **both**
 trees: `gui-test` as the working directory and `web` next to it. This is exactly
@@ -65,7 +65,7 @@ what CI does (`.github/workflows/ci.yml`, `gui-test` job):
 docker run --rm --network host \
   -v "$PWD/gui-test:/gui" -v "$PWD/web:/web:ro" \
   -e TT_GUI_BASE="http://localhost:$TT_PORT" \
-  -w /gui node:22-slim \
+  -w /gui node:24-slim \
   bash -c "npm ci --no-audit --no-fund && node contrast.mjs && npm run test:jsdom --silent && node gui.mjs"
 ```
 
