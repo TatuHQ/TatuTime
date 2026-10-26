@@ -38,6 +38,16 @@
 # than skips when a runner lacks the tools, so the job can never silently not
 # release.
 #
+# Scratch space: the API payloads and responses go into a private directory
+# created with `mktemp -d` under `$RUNNER_TEMP` and removed on exit -- never a
+# fixed path under `/tmp`. This pool has been driven by more than one user: a
+# root-owned `/tmp/tt-response.json` left behind by the pre-migration runner
+# made every curl in run 40187427943 die with `curl: (23) Failure writing
+# output to destination`, because the runner now runs as a normal user and
+# cannot truncate a file it does not own. A per-run directory cannot collide
+# with a leftover like that, nor with another run on a sibling runner, and the
+# preflight proves it is writable before the release starts.
+#
 # Runner choice: the self-hosted pool, as every other workflow here uses. This
 # job runs its steps on the runner host (as `gui-test` and `actionlint` do) and
 # deliberately declares no `container:` -- it needs the host's curl/jq, not the
@@ -91,6 +101,18 @@ jobs:
           jq --version
           awk --version 2>/dev/null | head -n 1 || true
 
+          # Scratch space must be writable by the runner's user. A read-only or
+          # foreign-owned temp root fails here, with a message, instead of
+          # surfacing later as a bare `curl: (23) Failure writing output to
+          # destination` (run 40187427943).
+          scratch_root="${RUNNER_TEMP:-${TMPDIR:-/tmp}}"
+          if ! probe="$(mktemp -d "$scratch_root/tatu-release-preflight.XXXXXXXX" 2>/dev/null)"; then
+            echo "::error title=Release job cannot run::no writable scratch directory under ${scratch_root}. This job writes its API payloads and responses into a per-run mktemp directory there; point RUNNER_TEMP (or TMPDIR) at a directory the runner's user owns."
+            exit 1
+          fi
+          rmdir "$probe"
+          echo "scratch space: ${scratch_root}"
+
       - name: Tag the pushed commit and create its GitHub Release
         shell: bash
         env:
@@ -99,6 +121,21 @@ jobs:
           COMMIT_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
+
+          # ---- private scratch space for this run ----------------------------
+          # $RUNNER_TEMP is the runner's per-job temp directory and `mktemp -d`
+          # makes this run's slice of it the job's own, so two runs -- or two
+          # users, which this pool has had -- can never write the same file. A
+          # fixed /tmp path is what broke run 40187427943: the file was left
+          # root-owned by the pre-migration runner, and curl could not truncate
+          # it. The trap removes the directory however the step ends.
+          scratch_root="${RUNNER_TEMP:-${TMPDIR:-/tmp}}"
+          work="$(mktemp -d "$scratch_root/tatu-release.XXXXXXXX")"
+          trap 'rm -rf "$work"' EXIT
+          response="$work/response.json"
+          payload="$work/payload.json"
+          body="$work/body.txt"
+
           api="${GITHUB_API_URL:-https://api.github.com}/repos/${REPO}"
           api_headers=(
             -H "Authorization: Bearer ${GH_TOKEN}"
@@ -106,38 +143,54 @@ jobs:
             -H "X-GitHub-Api-Version: 2022-11-28"
           )
 
-          # GET <url>: response body in /tmp/tt-response.json, status in $status.
-          get() {
-            status="$(curl -sS "${api_headers[@]}" -o /tmp/tt-response.json -w '%{http_code}' "$1")"
+          # curl failing to write "$response" (permissions, ownership, full
+          # disk) used to surface only as a bare exit 23. Name the call instead.
+          curl_failed() {
+            echo "::error title=curl failed::${1} ${2} exited ${3} before a response was written to ${response}. Exit 23 means curl could not write that file (ownership, permissions or a full disk); any other code is the transport itself."
+            exit 1
           }
 
-          # POST <url> <json file>: body in /tmp/tt-response.json, status in $status.
+          # GET <url>: response body in $response, status in $status.
+          get() {
+            local rc=0
+            status="$(curl -sS "${api_headers[@]}" -o "$response" -w '%{http_code}' "$1")" || rc=$?
+            [ "$rc" -eq 0 ] || curl_failed GET "$1" "$rc"
+          }
+
+          # POST <url> <json file>: body in $response, status in $status.
           post() {
+            local rc=0
             status="$(curl -sS "${api_headers[@]}" -X POST -H "Content-Type: application/json" \
-              --data-binary "@$2" -o /tmp/tt-response.json -w '%{http_code}' "$1")"
+              --data-binary "@$2" -o "$response" -w '%{http_code}' "$1")" || rc=$?
+            [ "$rc" -eq 0 ] || curl_failed POST "$1" "$rc"
           }
 
           # A tag name goes into a URL path with '+' percent-encoded so it can
           # never be read as anything but a literal plus.
           tag_url() { printf '%s' "${1//+/%2B}"; }
 
-          # tag_commit <tag>: the commit the tag points to (an annotated tag is
-          # peeled to its object), or nothing when the tag does not exist.
+          # tag_commit <tag>: sets $tag_target to the commit the tag points to
+          # (an annotated tag is peeled to its object), or to '' when the tag
+          # does not exist. It fills a variable instead of printing one because
+          # callers used to invoke it as $(tag_commit ...) -- and every
+          # ::error it raised died inside that subshell, leaving the job to fail
+          # with a bare exit 1 and no annotation. The runner now sees them.
           tag_commit() {
             local tag="$1" obj_type obj_sha
+            tag_target=""
             get "$api/git/ref/tags/$(tag_url "$tag")"
             case "$status" in
               404) return 0 ;;
               200) ;;
-              *) echo "::error title=GitHub API error::GET git/ref/tags/$tag -> HTTP $status: $(cat /tmp/tt-response.json)"; exit 1 ;;
+              *) echo "::error title=GitHub API error::GET git/ref/tags/$tag -> HTTP $status: $(cat "$response")"; exit 1 ;;
             esac
-            obj_type="$(jq -r '.object.type' /tmp/tt-response.json)"
-            obj_sha="$(jq -r '.object.sha' /tmp/tt-response.json)"
+            obj_type="$(jq -r '.object.type' "$response")"
+            obj_sha="$(jq -r '.object.sha' "$response")"
             if [ "$obj_type" = "tag" ]; then
               get "$api/git/tags/$obj_sha"
-              jq -r '.object.sha' /tmp/tt-response.json
+              tag_target="$(jq -r '.object.sha' "$response")"
             else
-              printf '%s\n' "$obj_sha"
+              tag_target="$obj_sha"
             fi
           }
 
@@ -159,7 +212,9 @@ jobs:
           # ---- resolve the tag for this commit -------------------------------
           short_sha="${COMMIT_SHA:0:7}"
           tag="v${version}"
-          version_tag_commit="$(tag_commit "$tag")"
+          version_tag_commit=""
+          tag_commit "$tag"
+          version_tag_commit="$tag_target"
           mode="versioned"
 
           if [ -n "$version_tag_commit" ] && [ "$version_tag_commit" != "$COMMIT_SHA" ]; then
@@ -171,7 +226,8 @@ jobs:
           fi
 
           # "" = absent (create it), $COMMIT_SHA = already correct (leave it).
-          tag_commit_now="$(tag_commit "$tag")"
+          tag_commit "$tag"
+          tag_commit_now="$tag_target"
           if [ -n "$tag_commit_now" ] && [ "$tag_commit_now" != "$COMMIT_SHA" ]; then
             echo "::error title=Refusing to move an existing tag::$tag already points at $tag_commit_now, not at $COMMIT_SHA. Nothing was changed."
             exit 1
@@ -188,7 +244,7 @@ jobs:
           get "$api/releases/tags/$(tag_url "$tag")"
           case "$status" in
             200)
-              url="$(jq -r '.html_url' /tmp/tt-response.json)"
+              url="$(jq -r '.html_url' "$response")"
               echo "Already released: ${tag} -> ${url}. No-op, nothing changed."
               {
                 echo "### Release ${tag}: already released"
@@ -200,7 +256,7 @@ jobs:
               exit 0
               ;;
             404) ;;
-            *) echo "::error title=GitHub API error::GET releases/tags/$tag -> HTTP $status: $(cat /tmp/tt-response.json)"; exit 1 ;;
+            *) echo "::error title=GitHub API error::GET releases/tags/$tag -> HTTP $status: $(cat "$response")"; exit 1 ;;
           esac
 
           # ---- create the tag (only when it is absent) ----------------------
@@ -219,19 +275,19 @@ jobs:
             # Actions bot because the workflow token is the actor.
             jq -n --arg tag "$tag" --arg msg "$tag_message" --arg sha "$COMMIT_SHA" \
               '{tag: $tag, message: $msg, object: $sha, type: "commit", tagger: {name: "github-actions[bot]", email: "41898282+github-actions[bot]@users.noreply.github.com"}}' \
-              > /tmp/tt-payload.json
-            post "$api/git/tags" /tmp/tt-payload.json
+              > "$payload"
+            post "$api/git/tags" "$payload"
             if [ "$status" != "201" ]; then
-              echo "::error title=Could not create the tag object::HTTP $status: $(cat /tmp/tt-response.json)"
+              echo "::error title=Could not create the tag object::HTTP $status: $(cat "$response")"
               exit 1
             fi
-            tag_object_sha="$(jq -r '.sha' /tmp/tt-response.json)"
+            tag_object_sha="$(jq -r '.sha' "$response")"
 
             jq -n --arg ref "refs/tags/$tag" --arg sha "$tag_object_sha" \
-              '{ref: $ref, sha: $sha}' > /tmp/tt-payload.json
-            post "$api/git/refs" /tmp/tt-payload.json
+              '{ref: $ref, sha: $sha}' > "$payload"
+            post "$api/git/refs" "$payload"
             if [ "$status" != "201" ]; then
-              echo "::error title=Could not create the tag ref::HTTP $status: $(cat /tmp/tt-response.json)"
+              echo "::error title=Could not create the tag ref::HTTP $status: $(cat "$response")"
               exit 1
             fi
             echo "Tagged ${COMMIT_SHA} as ${tag} (annotated)."
@@ -242,17 +298,17 @@ jobs:
           # ---- create the release with generated notes ----------------------
           # `generate_release_notes` is the API's `--generate-notes`: the body
           # below is prepended to the generated notes.
-          printf '%s\n\n%s\n' "$case_note" "$scheme_note" > /tmp/tt-body.txt
-          jq -n --arg tag "$tag" --arg name "$tag" --arg body "$(cat /tmp/tt-body.txt)" \
+          printf '%s\n\n%s\n' "$case_note" "$scheme_note" > "$body"
+          jq -n --arg tag "$tag" --arg name "$tag" --arg body "$(cat "$body")" \
             '{tag_name: $tag, target_commitish: "main", name: $name, body: $body, generate_release_notes: true, draft: false, prerelease: false}' \
-            > /tmp/tt-payload.json
-          post "$api/releases" /tmp/tt-payload.json
+            > "$payload"
+          post "$api/releases" "$payload"
           if [ "$status" != "201" ]; then
-            echo "::error title=Could not create the release::HTTP $status: $(cat /tmp/tt-response.json)"
+            echo "::error title=Could not create the release::HTTP $status: $(cat "$response")"
             exit 1
           fi
 
-          url="$(jq -r '.html_url' /tmp/tt-response.json)"
+          url="$(jq -r '.html_url' "$response")"
           {
             echo "### Released ${tag}"
             echo ""
