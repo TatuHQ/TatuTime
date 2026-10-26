@@ -19,8 +19,25 @@ branch. Repoint a repository that lacks one before its next change, and do not c
 - Never commit directly to `main` or `develop`; every change merges through a pull request.
 - Keep the branch up to date with the branch its pull request targets, and resolve conflicts
   locally before requesting review.
-- Merge only after review and the required checks pass.
+- Merge only after the review requirement below and the required checks pass.
 - Delete the branch — locally and on `origin` — once its pull request is merged.
+
+## Protected `main`
+
+Rulesets refuse direct pushes, force pushes, and deletion in every repository, so nothing reaches
+`main` except through a pull request whose required checks pass. Never ask for, use, or work around
+a bypass.
+
+Who reviews depends on who authored the pull request:
+
+| Author | Review required |
+| --- | --- |
+| The repository owner — the code owner in `.github/CODEOWNERS` | None; merge once checks pass |
+| Anyone else, including agents and bots | The owner's approval |
+
+Working for a non-owner, an agent opens the pull request and requests the owner's review. It never
+approves work it did not author, never treats a bot or non-owner approval as the owner's, and never
+merges that pull request or escalates to an admin flag until the owner approves.
 
 ## Commits
 

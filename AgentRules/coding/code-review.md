@@ -24,3 +24,9 @@ Report the impact of the change, and separate must-fix issues from suggestions.
 - The implementation cannot be understood or justified.
 
 Approve once the change is safe, tested, and understandable.
+
+## Who approves
+
+The owner's approval gates every pull request the owner did not author, whatever other reviews it
+collects. An agent may review and report, but cannot cast that approval on the owner's behalf, and
+a green check suite never substitutes for it.
