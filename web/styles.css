@@ -1222,6 +1222,11 @@ html[data-advanced-billing="off"] #advanced-billing { display: none; }
   #invoice-new, #manual-new { min-height: 2.75rem; }
 
   /* ---- Day view: each entry becomes a card ---- */
+  /* Day navigation is the forward/back arrows in the date bar. The week strip
+     (a calendar overview) and the month Calendar view are desktop aids and are
+     hidden here; the entries themselves are the mobile content. */
+  #week-strip { display: none; }
+  #ts-cal-item { display: none; }
   #day-table { display: block; width: 100%; border-spacing: 0; table-layout: auto; margin-top: .35rem; }
   #day-table thead { display: none; }
   #day-table tbody { display: grid; gap: .55rem; }
