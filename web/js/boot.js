@@ -104,6 +104,59 @@ export function wireDayAndCalendar() {
   });
 }
 
+// Phone bottom bar (web/index.html #mobile-nav). It is a shortcut layer only:
+// every button activates the same tab/action the desktop rail exposes, so
+// routing, refresh and focus behaviour stay in one place.
+export function wireMobileNav() {
+  const nav = $('mobile-nav');
+  if (!nav) return;
+  const timesheets = $('mnav-timesheets');
+  const invoices = $('mnav-invoices');
+  const add = $('mnav-add');
+  const active = (id) => $(id)?.getAttribute('aria-selected') === 'true';
+  const sync = () => {
+    const onTimesheets = active('tab-timesheet');
+    const onInvoices = active('tab-invoices');
+    if (onTimesheets) timesheets.setAttribute('aria-current', 'page');
+    else timesheets.removeAttribute('aria-current');
+    if (onInvoices) invoices.setAttribute('aria-current', 'page');
+    else invoices.removeAttribute('aria-current');
+    // The middle button does the obvious thing for the screen in view.
+    add.setAttribute('aria-label', onInvoices ? 'New invoice' : 'Track time');
+    const addLabel = add.querySelector('span');
+    if (addLabel) addLabel.textContent = onInvoices ? 'Invoice' : 'Track';
+  };
+  const toTop = () => {
+    try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch { /* jsdom has no scrolling */ }
+  };
+  timesheets.addEventListener('click', () => {
+    switchTab('tab-timesheet');
+    toTop();
+  });
+  invoices.addEventListener('click', () => {
+    switchTab('tab-invoices');
+    toTop();
+  });
+  add.addEventListener('click', () => {
+    if (active('tab-invoices')) {
+      $('invoice-new').click();
+      return;
+    }
+    if (!active('tab-timesheet')) {
+      switchTab('tab-timesheet');
+      showTimesheet('ts-day');
+    }
+    $('day-add').click();
+  });
+  $('mnav-menu').addEventListener('click', () => $('navigation-open').click());
+  // The sidebar tabs (and the router, which clicks them) are the source of
+  // truth for the highlighted destination.
+  for (const tab of document.querySelectorAll('#tabs [role="tab"]')) {
+    tab.addEventListener('click', sync);
+  }
+  sync();
+}
+
 // Invoice dashboard controls (#135/#189).
 export function wireInvoiceDashboard() {
   initInvoiceDropdowns();
@@ -208,7 +261,13 @@ export function wireEntryForm() {
   $('entry-project').addEventListener('change', async (e) => {
     await fillTaskSelect($('entry-task'), $('entry-customer').value, e.target.value, null);
   });
-
+  // Phone shortcut row: fill the field, then leave it editable. The buttons
+  // stay in the DOM (CSS hides them on wide screens), so nothing else changes.
+  for (const button of document.querySelectorAll('#entry-quick button')) {
+    button.addEventListener('click', () => {
+      $('entry-hours').value = button.dataset.hours;
+    });
+  }
 }
 
 // Week grid: inline cell editing via delegated events (#13/#189).
@@ -677,6 +736,7 @@ export async function startApp() {
   initWizard(); // first-run setup wizard (#111)
 
   wireDayAndCalendar();
+  wireMobileNav();
   wireInvoiceDashboard();
   wireEntryForm();
   wireWeekGrid();

@@ -33,8 +33,10 @@ const SUMMARY_REGISTERS = {
 };
 // Deliberately app-owned: the timesheet grids and the editable line editor.
 // The Invoices register is phase 2d — the real aria-sort + .p-table__sort-button
-// pattern (there is no `p-table--sortable` class in Vanilla 4.59).
-const LEFT_ALONE = ['day-table', 'week-table', 'cal-grid', 'invoice-table', 'ed-lines'];
+// pattern (there is no `p-table--sortable` class in Vanilla 4.59) — plus the
+// mobile-card rows introduced for the phone layout. It is asserted separately
+// below because its scroll wrapper is `.invoice-table-scroll`, not `.table-scroll`.
+const LEFT_ALONE = ['day-table', 'week-table', 'cal-grid', 'ed-lines'];
 
 function headers(table) {
     return [...table.querySelectorAll('thead th')].map((th) => th.textContent.trim());
@@ -77,6 +79,31 @@ test('converted registers are p-card shells with unchanged columns (#232 phase 2
         assert.ok(table, `#${id} exists`);
         assert.ok(!table.classList.contains('p-table--mobile-card'), `#${id} left app-owned`);
     }
+    dom.window.close();
+});
+
+test('invoice register uses the mobile-card rows without changing its columns', () => {
+    const dom = new JSDOM(html, { url: 'http://localhost/' });
+    const doc = dom.window.document;
+    const table = doc.getElementById('invoice-table');
+    assert.ok(table, '#invoice-table exists');
+    assert.ok(table.classList.contains('p-table--mobile-card'), '#invoice-table uses p-table--mobile-card');
+    assert.ok(table.closest('.invoice-table-scroll'), '#invoice-table keeps its own scroll wrapper');
+    assert.deepEqual(headers(table),
+        ['Number', 'Customer', 'Period', 'Total', 'Balance', 'Status', 'Actions'],
+        '#invoice-table column order unchanged');
+    dom.window.close();
+});
+
+test('phone shortcuts are present without taking desktop space', () => {
+    const dom = new JSDOM(html, { url: 'http://localhost/' });
+    const doc = dom.window.document;
+    assert.ok(doc.getElementById('mobile-nav'), 'the phone bottom bar exists');
+    assert.deepEqual(
+        [...doc.querySelectorAll('#mobile-nav button')].map((b) => b.id),
+        ['mnav-timesheets', 'mnav-invoices', 'mnav-add', 'mnav-menu'],
+        'the bottom bar carries the four shortcuts');
+    assert.equal(doc.querySelectorAll('#entry-quick [data-hours]').length, 5, 'entry dialog offers five quick durations');
     dom.window.close();
 });
 

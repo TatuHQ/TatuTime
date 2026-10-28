@@ -1177,3 +1177,226 @@ html[data-advanced-billing="off"] #advanced-billing { display: none; }
 .import-pager button { min-height: 2.75rem; }
 .import-pager .import-page-status { margin: 0; }
 .inv-imported { display: inline-block; margin-left: .4rem; }
+
+/* =====================================================================
+   Phone layout — a thumb-first pass for the two screens used every day
+   ===================================================================== */
+/* These affordances only exist on the phone breakpoint. Kept as explicit
+   base rules so the desktop register and the entry dialog are byte-for-byte
+   the layout they were. */
+.mobile-nav { display: none; }
+.entry-quick { display: none; }
+.mobile-primary-actions { display: none; }
+
+@media print {
+  .mobile-nav { display: none !important; }
+}
+
+@media (max-width: 720px) {
+  /* ---- fixed bottom bar ---- */
+  .app { padding-bottom: calc(4.15rem + env(safe-area-inset-bottom)); }
+  .mobile-nav {
+    position: fixed; inset: auto 0 0 0; z-index: 45;
+    display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: .1rem; margin: 0;
+    padding: .3rem .35rem calc(.3rem + env(safe-area-inset-bottom));
+    background: color-mix(in srgb, var(--surface) 94%, transparent);
+    border-top: 1px solid var(--line);
+    box-shadow: 0 -2px 14px rgb(0 0 0 / .10);
+    -webkit-backdrop-filter: blur(10px);
+    backdrop-filter: blur(10px);
+  }
+  .mobile-nav__item {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: .1rem; min-width: 0; min-height: 3.15rem; margin: 0; padding: .25rem .1rem;
+    border: 0; border-radius: var(--radius); background: transparent;
+    color: var(--muted); font-size: .68rem; font-weight: 600; line-height: 1.1;
+    letter-spacing: .01em;
+  }
+  .mobile-nav__item [class*="p-icon--"] { margin: 0; width: 1.3rem; height: 1.3rem; flex-basis: 1.3rem; }
+  .mobile-nav__item[aria-current="page"] { color: var(--brand-deep); background: var(--accent-soft); }
+  .mobile-nav__add { background: var(--brand); color: var(--brand-ink); }
+  .mobile-nav__add:hover, .mobile-nav__add:focus-visible { background: var(--brand-hover); }
+  .mobile-nav__add [class*="p-icon--"] { width: 1.45rem; height: 1.45rem; flex-basis: 1.45rem; }
+  .mobile-nav__item:focus-visible { outline: 3px solid var(--focus); outline-offset: 1px; }
+
+  /* ---- shell ---- */
+  .masthead {
+    position: sticky; top: 0; z-index: 20;
+    padding: .55rem .8rem; border-bottom: 1px solid var(--line);
+  }
+  .masthead h1 { font-size: 1.15rem; line-height: 1.35; }
+  .masthead .navigation-control { flex-basis: 2.55rem; width: 2.55rem; height: 2.55rem; }
+  main { padding: .75rem .75rem 1.25rem; }
+  .foot { padding: .75rem 1rem; font-size: .8rem; }
+  h2 { font-size: 1.25rem; margin: 1rem 0 .6rem; }
+
+  /* Heading slot actions become full-width thumb targets. */
+  .ts-head { flex-direction: column; align-items: stretch; gap: .55rem; margin-bottom: .85rem; }
+  .ts-head .hierarchy-actions { width: 100%; }
+  .ts-head .hierarchy-actions > button { flex: 1 1 0; min-width: 0; }
+  #day-add { width: 100%; min-width: 0; min-height: 2.85rem; justify-content: center; }
+  #day-add-bottom { display: inline-flex; align-items: center; min-height: 2.5rem; }
+  #ts-seg { width: 100%; }
+  #ts-seg .p-tabs__item { flex: 1 1 0; }
+  #ts-seg .p-tabs__link { width: 100%; min-width: 0; justify-content: center; }
+  #invoice-new, #manual-new { min-height: 2.75rem; }
+
+  /* ---- Day view: each entry becomes a card ---- */
+  #day-table { display: block; width: 100%; border-spacing: 0; table-layout: auto; margin-top: .35rem; }
+  #day-table thead { display: none; }
+  #day-table tbody { display: grid; gap: .55rem; }
+  #day-table tbody tr {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto;
+    gap: .15rem .75rem; padding: .65rem .75rem;
+    border: 1px solid var(--line); border-radius: var(--radius);
+    background: var(--surface);
+  }
+  #day-table tbody tr:nth-child(odd) { background: var(--surface); }
+  #day-table tbody td {
+    display: block; width: auto !important; min-width: 0;
+    border: 0 !important; padding: 0 !important;
+  }
+  #day-table tbody td.entry-main { grid-column: 1; grid-row: 1; overflow-wrap: anywhere; }
+  #day-table tbody td.entry-main .entry-note-text { margin-top: .55rem; }
+  #day-table tbody td.entry-hours { grid-column: 2; grid-row: 1; align-self: start; white-space: nowrap; font-size: 1rem; }
+  #day-table tbody td.actions-col {
+    grid-column: 1 / -1; grid-row: 2; display: flex; flex-wrap: wrap; align-items: center;
+    gap: .45rem; margin-top: .45rem; padding-top: .5rem !important;
+    border-top: 1px solid var(--line) !important; white-space: normal;
+  }
+  #day-table tbody td.actions-col button {
+    min-height: 2.5rem; padding: .35rem .65rem;
+    border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface);
+  }
+  #day-table tbody td.actions-col button.danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 35%, var(--line)); }
+  #day-table tfoot { display: block; margin-top: .55rem; }
+  #day-table tfoot tr {
+    display: flex; align-items: center; justify-content: space-between; gap: .75rem;
+    padding: .35rem .1rem;
+  }
+  #day-table tfoot th, #day-table tfoot td { display: block; border: 0; padding: 0; }
+  #day-table tfoot th { flex: 1 1 auto; }
+  #day-table tfoot td { text-align: right; }
+  .copy-bar.p-card { margin-top: .55rem; }
+  .copy-row { flex-wrap: wrap; }
+  .copy-label { min-width: 0; flex: 1 1 100%; }
+
+  /* ---- Invoice register: one card per invoice ---- */
+  .invoice-table-scroll { overflow: visible; }
+  .invoice-register-column #invoice-table { width: 100%; min-width: 0; table-layout: auto; font-size: 1rem; }
+  /* The desktop column percentages would squeeze the card title to 8% of the
+     row; the card is one column, so every cell owns its own full width. */
+  .invoice-register-column #invoice-table.p-table--mobile-card th,
+  .invoice-register-column #invoice-table.p-table--mobile-card td { width: auto; }
+  #invoice-summary { font-size: .8rem; line-height: 1.45; }
+  /* The year chart is a desktop overview: on a phone it pushed the register
+     (the screen's real job) below the fold. The summary line above it still
+     reports drafts, sent, paid and outstanding. */
+  #invoice-trends { display: none; }
+
+  #inv-filter-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .5rem; }
+  #inv-filter-row .filter-field { width: auto; min-width: 0; }
+  #inv-filter-row .filter-field:first-child { grid-column: 1 / -1; }
+  #inv-filter-row .filter-field input,
+  #inv-filter-row .filter-field select,
+  #inv-filter-row .select-trigger { width: 100%; }
+  #inv-filter-row .invoice-period-nav,
+  #inv-filter-row .inv-custom-period { grid-column: 1 / -1; }
+  #inv-list-head { margin-bottom: .5rem; }
+
+  .invoice-register-column #invoice-table.p-table--mobile-card tbody { gap: .7rem; }
+  .invoice-register-column #invoice-table.p-table--mobile-card tbody tr {
+    padding: .55rem .75rem .7rem;
+    border: 1px solid var(--line); border-radius: var(--radius);
+    background: var(--surface);
+  }
+  #invoice-table.p-table--mobile-card td,
+  #invoice-table.p-table--mobile-card tbody th {
+    display: flex; align-items: baseline; justify-content: space-between; gap: .9rem;
+    width: auto; min-width: 0; max-width: 100%;
+    padding: .28rem 0; overflow: visible; white-space: normal; text-overflow: clip;
+  }
+  #invoice-table.p-table--mobile-card td::before,
+  #invoice-table.p-table--mobile-card tbody th::before {
+    content: attr(data-heading); flex: 0 0 auto; width: auto; margin: 0;
+    padding: 0; font-size: .68rem; font-weight: 700; letter-spacing: .06em;
+    color: var(--muted); overflow: visible; text-overflow: clip;
+  }
+  #invoice-table.p-table--mobile-card td:not(:first-child)::after,
+  #invoice-table.p-table--mobile-card tbody th:not(:first-child)::after { left: 0; right: 0; }
+  /* The number (and its frozen subject) reads as the card title, not as a
+     label/value pair. */
+  #invoice-table.p-table--mobile-card tbody th { display: block; font-size: 1.05rem; font-weight: 700; }
+  #invoice-table.p-table--mobile-card tbody th::before { display: block; margin-bottom: .1rem; }
+  #invoice-table tbody th .inv-row-subject { display: block; text-align: left; margin-top: .1rem; }
+  #invoice-table td.num { text-align: right; }
+  /* Status stays grouped with its chip(s) at the end of the line. */
+  #invoice-table.p-table--mobile-card td[data-heading="Status"] { flex-wrap: wrap; gap: .3rem; }
+  #invoice-table.p-table--mobile-card td[data-heading="Status"]::before { margin-right: auto; }
+  #invoice-table.p-table--mobile-card .actions-col { display: block; width: auto; padding-top: .5rem !important; }
+  #invoice-table .actions-col::before { margin-bottom: .4rem; }
+  #invoice-table .row-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .4rem; }
+  #invoice-table .row-actions > button.icon-action {
+    width: 100%; min-width: 0; height: auto; min-height: 2.75rem;
+    justify-content: flex-start; gap: .45rem; padding: .45rem .55rem;
+    border: 1px solid var(--line); border-radius: var(--radius);
+    background: var(--surface);
+  }
+  #invoice-table .row-actions > button.icon-action [class*="p-icon--"] {
+    margin: 0; width: 1.1rem; height: 1.1rem; flex-basis: 1.1rem;
+  }
+  /* Turn the hover/focus tooltip into the button's always-on label. */
+  #invoice-table .row-actions .p-tooltip__message {
+    display: inline; position: static; inset: auto; transform: none;
+    width: auto; max-width: none; margin: 0; padding: 0;
+    border: 0; background: none; box-shadow: none;
+    color: inherit; font-size: .8rem; line-height: 1.2;
+    text-align: left; white-space: normal; overflow-wrap: anywhere;
+  }
+  #invoice-table .row-actions .p-tooltip__message::before,
+  #invoice-table .row-actions .p-tooltip__message::after { display: none; content: none; }
+
+  /* The next action the row exists for, spelled out above the icon grid. */
+  .mobile-primary-actions { display: grid; gap: .4rem; margin-bottom: .55rem; }
+  #invoice-table .mobile-primary-action {
+    width: 100%; min-height: 2.85rem; margin: 0; justify-content: center;
+  }
+
+  /* ---- invoice document preview ---- */
+  #invoice-preview { scroll-margin-top: 4rem; }
+  .ip-head { flex-wrap: wrap; }
+  .ip-facts { grid-template-columns: minmax(0, 1fr); gap: .1rem; margin-bottom: .8rem; }
+  .ip-facts dt { margin-top: .35rem; }
+  #ip-actions { flex-wrap: wrap; }
+  #ip-actions > button { flex: 1 1 10rem; min-height: 2.75rem; margin: 0; }
+  #ip-getpaid .buttons > button { width: 100%; min-height: 2.75rem; }
+
+  /* ---- dialogs: bottom sheets with a reachable footer ---- */
+  dialog.p-modal { padding: 0; align-items: flex-end; }
+  dialog.p-modal .p-modal__dialog {
+    position: relative; inset: auto; left: 0; right: 0; bottom: 0;
+    width: 100%; max-width: none; max-height: 92dvh; margin: 0;
+    padding: .1rem 1rem calc(.75rem + env(safe-area-inset-bottom));
+    border-radius: 14px 14px 0 0;
+    box-shadow: 0 -8px 30px rgb(0 0 0 / .22);
+  }
+  .p-modal__header { padding-top: 1rem; }
+  .p-modal__footer {
+    position: sticky; bottom: calc(-0.75rem - env(safe-area-inset-bottom));
+    display: flex; justify-content: stretch; gap: .5rem; margin-top: .6rem;
+    padding: .6rem 0 calc(.2rem + env(safe-area-inset-bottom));
+    background: var(--surface); border-top: 1px solid var(--line);
+  }
+  .p-modal__footer > button { flex: 1 1 0; min-width: 0; margin: 0; }
+  /* The first-run wizard is a single p-card, not a p-modal__dialog. */
+  #wizard-dialog.p-modal { padding: .75rem; align-items: center; }
+  #wizard-dialog .p-card { max-height: 94dvh; }
+
+  /* ---- entry dialog quick hours ---- */
+  .entry-quick { display: flex; flex-wrap: wrap; gap: .35rem; margin-top: .45rem; }
+  .entry-quick button { min-height: 2.5rem; min-width: 3.2rem; margin: 0; padding: .35rem .5rem; }
+
+  /* A date input on its own line should not force the sheet wider than the phone. */
+  input[type="date"] { max-width: 100%; }
+}

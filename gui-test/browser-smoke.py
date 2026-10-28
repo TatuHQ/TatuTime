@@ -2693,7 +2693,12 @@ class Gate:
                     for theme in ("light", "dark"):
                         result = json.loads(self.marionette.script("""
                             document.documentElement.setAttribute('data-theme', %s);
-                            const buttons = [...document.querySelectorAll('td[data-icon-actions="1"] button')].filter(button => button.checkVisibility());
+                            // The phone layout also renders a labelled primary button in this
+                            // cell; it is not an icon-only action, so the icon/tooltip contract
+                            // (44px square, aria-describedby tooltip) does not apply to it.
+                            const cellButtons = [...document.querySelectorAll('td[data-icon-actions="1"] button')]
+                                .filter(button => button.checkVisibility());
+                            const buttons = cellButtons.filter(button => !button.classList.contains('mobile-primary-action'));
                             const bad = buttons.flatMap(button => {
                                 const rect = button.getBoundingClientRect();
                                 const tooltip = document.getElementById(button.getAttribute('aria-describedby'));
@@ -2704,11 +2709,20 @@ class Gate:
                                     || !button.querySelector('i[aria-hidden="true"]')
                                     || tooltip.textContent !== label ? [label || button.textContent] : [];
                             });
-                            return JSON.stringify({count: buttons.length, bad});
+                            // The labelled phone primary is not an icon action, but it must
+                            // still be a 44px touch target with readable text.
+                            const primaryBad = cellButtons
+                                .filter(button => button.classList.contains('mobile-primary-action'))
+                                .flatMap(button => {
+                                    const rect = button.getBoundingClientRect();
+                                    const label = button.textContent.trim();
+                                    return rect.width < 44 || rect.height < 44 || !label ? [label || '(unlabelled)'] : [];
+                                });
+                            return JSON.stringify({count: buttons.length, bad, primaryBad});
                         """ % json.dumps(theme)))
                         seen += result["count"]
                         self.check(f"icon action targets and tooltips: {path} {width}px {theme}",
-                                   not result["bad"], str(result))
+                                   not result["bad"] and not result["primaryBad"], str(result))
         finally:
             self.marionette.call("WebDriver:SetWindowRect", original)
         self.check("icon action audit exercised real rendered rows", seen > 0, str(seen))

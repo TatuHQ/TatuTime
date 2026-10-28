@@ -8,7 +8,7 @@
 
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>TatuTime — Timesheets</title>
   <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f6f0e4">
   <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#17120f">
@@ -295,6 +295,15 @@
                     <label class="p-form__label" for="entry-hours">Hours (0.01–24.00)</label>
                     <input class="p-form__control" type="number" id="entry-hours" name="hours" min="0.01" max="24"
                       step="0.01" required inputmode="decimal">
+                    <!-- Mobile shortcut: one tap fills the hours field, so the
+                         common durations do not need the numeric keyboard. -->
+                    <div id="entry-quick" class="entry-quick" role="group" aria-label="Quick hours">
+                      <button type="button" data-hours="0.5">30m</button>
+                      <button type="button" data-hours="1">1h</button>
+                      <button type="button" data-hours="2">2h</button>
+                      <button type="button" data-hours="4">4h</button>
+                      <button type="button" data-hours="8">8h</button>
+                    </div>
                   </div>
                   <div class="p-form__group">
                     <label class="p-form__label" for="entry-note">Note</label>
@@ -727,7 +736,7 @@
            There is NO `.p-table--sortable` class in 4.59 (the mixin is
            vf-p-table-sortable); the earlier plan prose was wrong. -->
             <div class="invoice-table-scroll">
-              <table id="invoice-table">
+              <table id="invoice-table" class="p-table--mobile-card">
                 <caption class="sr-only">Invoices</caption>
                 <thead>
                   <tr>
@@ -2258,6 +2267,30 @@
         </p>
       </footer>
     </div><!-- /content -->
+
+    <!-- Phone layout: a fixed thumb-reach bar carrying the two screens used
+         every day plus the two actions those screens exist for. It is hidden
+         above the phone breakpoint, where the sidebar rail is always visible.
+         The buttons are plain buttons, not tabs: #tabs remains the one tablist
+         and these simply activate its tabs (web/js/boot.js, wireMobileNav). -->
+    <nav id="mobile-nav" class="mobile-nav" aria-label="Primary">
+      <button type="button" id="mnav-timesheets" class="mobile-nav__item" aria-current="page">
+        <i class="p-icon--history" aria-hidden="true"></i>
+        <span>Time</span>
+      </button>
+      <button type="button" id="mnav-invoices" class="mobile-nav__item">
+        <i class="p-icon--credit-card" aria-hidden="true"></i>
+        <span>Invoices</span>
+      </button>
+      <button type="button" id="mnav-add" class="mobile-nav__item mobile-nav__add" aria-label="Track time">
+        <i class="p-icon--plus" aria-hidden="true"></i>
+        <span>Track</span>
+      </button>
+      <button type="button" id="mnav-menu" class="mobile-nav__item" aria-label="Open navigation">
+        <i class="p-icon--menu" aria-hidden="true"></i>
+        <span>Menu</span>
+      </button>
+    </nav>
   </div><!-- /app -->
 
   <!-- One inline dialog replacing confirm/prompt/alert (#102). -->
