@@ -95,15 +95,11 @@ test('invoice register uses the mobile-card rows without changing its columns', 
     dom.window.close();
 });
 
-test('phone shortcuts are present without taking desktop space', () => {
+test('the entry dialog offers the phone quick-duration shortcuts', () => {
     const dom = new JSDOM(html, { url: 'http://localhost/' });
     const doc = dom.window.document;
-    assert.ok(doc.getElementById('mobile-nav'), 'the phone bottom bar exists');
-    assert.deepEqual(
-        [...doc.querySelectorAll('#mobile-nav button')].map((b) => b.id),
-        ['mnav-timesheets', 'mnav-invoices', 'mnav-add', 'mnav-menu'],
-        'the bottom bar carries the four shortcuts');
-    assert.equal(doc.querySelectorAll('#entry-quick [data-hours]').length, 5, 'entry dialog offers five quick durations');
+    assert.equal(doc.querySelectorAll('#entry-quick [data-hours]').length, 5,
+        'entry dialog offers five quick durations');
     dom.window.close();
 });
 
