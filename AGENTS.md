@@ -208,8 +208,9 @@ the `v0.1.8` release notes is no longer needed.
 - **Getting paid is provider-free (by design):** there is **no** hosted-checkout
   or payment-provider integration — no Stripe, no PayPal, no webhook receiver,
   no demo-flag env vars. An invoice answers "how does this client pay us" from
-  `Customer::payment_details` (bank name, account name/number, IBAN, BIC,
-  reference, free-text instructions; `domain::PaymentDetails`), rendered into
+  `Customer::payment_details` (bank name and address, account name/number/type,
+  routing number, IBAN, BIC, reference, free-text instructions;
+  `domain::PaymentDetails`), rendered into
   the GUI's *Get paid* panel, the invoice/reminder emails ("How to pay") and
   the document PDF, plus the `%payment_details%` template variable. Settlement
   is recorded manually (`POST /invoices/{id}/pay`, ledger `method: "manual"`);

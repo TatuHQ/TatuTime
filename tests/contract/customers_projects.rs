@@ -547,7 +547,9 @@ async fn payment_details_round_trip_validate_and_email() {
         Some(
             json!({"name":"PAYME","currency":"EUR","default_rate_minor":6000,
             "email":"pay@payme.test",
-            "payment_details":{"bank_name":"Example Bank","iban":"EX000000000000000000",
+            "payment_details":{"bank_name":"Example Bank","bank_address":"1 Bank Street",
+                "account_type":"Checking","routing_number":"000000000",
+                "iban":"EX000000000000000000",
                 "bic":"EXAMPLEB","reference":"Invoice number",
                 "instructions":"Please pay by bank transfer in EUR."}}),
         ),
@@ -556,6 +558,9 @@ async fn payment_details_round_trip_validate_and_email() {
     assert_eq!(s, StatusCode::CREATED, "{c}");
     assert_eq!(c["payment_details"]["iban"], "EX000000000000000000");
     assert_eq!(c["payment_details"]["bank_name"], "Example Bank");
+    assert_eq!(c["payment_details"]["bank_address"], "1 Bank Street");
+    assert_eq!(c["payment_details"]["account_type"], "Checking");
+    assert_eq!(c["payment_details"]["routing_number"], "000000000");
     let cid = c["id"].as_str().unwrap().to_string();
 
     // An all-blank block normalises to absent on update (never persisted).
@@ -577,7 +582,9 @@ async fn payment_details_round_trip_validate_and_email() {
     );
 
     // Restore, then the rejection matrix: every bad shape is a 422.
-    let pay = json!({"bank_name":"Example Bank","iban":"EX000000000000000000",
+    let pay = json!({"bank_name":"Example Bank","bank_address":"1 Bank Street",
+        "account_type":"Checking","routing_number":"000000000",
+        "iban":"EX000000000000000000",
         "bic":"EXAMPLEB","reference":"Invoice number",
         "instructions":"Please pay by bank transfer in EUR."});
     json_req(
@@ -595,6 +602,9 @@ async fn payment_details_round_trip_validate_and_email() {
         json!({"bic":"SHORT"}),                         // 5 chars — wrong length
         json!({"iban":"AB"}),                           // below the 5-char floor
         json!({"routing":"99"}),                        // unknown field
+        json!({"bank_address":"x".repeat(201)}),        // over the 200 cap
+        json!({"account_type":"x".repeat(41)}),         // over the 40 cap
+        json!({"routing_number":"x".repeat(41)}),       // over the 40 cap
         json!({"instructions":"x".repeat(501)}),        // over the 500 cap
     ] {
         let (sb, bb) = json_req(
@@ -645,6 +655,9 @@ async fn payment_details_round_trip_validate_and_email() {
     for fragment in [
         "How to pay:",
         "Bank: Example Bank",
+        "Bank address: 1 Bank Street",
+        "Account type: Checking",
+        "Routing number: 000000000",
         "IBAN: EX000000000000000000",
         "BIC/SWIFT: EXAMPLEB",
         "Reference: Invoice number",
@@ -666,6 +679,8 @@ async fn payment_details_round_trip_validate_and_email() {
     let html = doc["html"].as_str().unwrap();
     assert!(html.contains("Pay us:"), "{html}");
     assert!(html.contains("EX000000000000000000"), "{html}");
+    assert!(html.contains("Routing number: 000000000"), "{html}");
+    assert!(html.contains("Account type: Checking"), "{html}");
 }
 
 #[tokio::test]

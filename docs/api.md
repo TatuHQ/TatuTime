@@ -196,7 +196,9 @@ The invoice document model gained these fields; the schemas live in
   customers. `currency` (3 uppercase letters) and `account_name` are required;
   the remaining account fields are optional and shape-checked (`iban` 5-34
   alphanumerics, `bic`/`swift` 8 or 11). The flat fields remain authoritative
-  for the single-rail case; nothing is migrated.
+  for the single-rail case; nothing is migrated. The flat block also carries
+  `bank_address` (≤ 200), `account_type` (≤ 40) and `routing_number` (≤ 40) for
+  banks that require them on the invoice.
 
 An install that has never saved `invoice_template.json` resolves to the seeded
 defaults: `payment_terms = {"kind": "net_30"}` and the subject

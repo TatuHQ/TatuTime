@@ -2342,6 +2342,11 @@
             "type": "string",
             "maxLength": 120
           },
+          "bank_address": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "The bank's branch/street address, when the payer needs it."
+          },
           "account_name": {
             "type": "string",
             "maxLength": 120
@@ -2349,6 +2354,16 @@
           "account_number": {
             "type": "string",
             "maxLength": 64
+          },
+          "account_type": {
+            "type": "string",
+            "maxLength": 40,
+            "description": "Account type as the bank labels it (e.g. Checking)."
+          },
+          "routing_number": {
+            "type": "string",
+            "maxLength": 40,
+            "description": "ABA/routing number for US-style transfers."
           },
           "iban": {
             "type": "string",
