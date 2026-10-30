@@ -1045,6 +1045,11 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
   custEdit.dispatchEvent(new window.Event('click', { bubbles: true }));
   await waitFor(() => dialogOpen(byId('customer-dialog')), { message: 'the customer edit dialog to open' });
   window.document.getElementById('pay-bank-name').value = 'Tatu Bank';
+  window.document.getElementById('pay-bank-address').value = '1 Bank Street';
+  window.document.getElementById('pay-account-name').value = 'TatuTime';
+  window.document.getElementById('pay-account-number').value = '000000000000';
+  window.document.getElementById('pay-account-type').value = 'Checking';
+  window.document.getElementById('pay-routing-number').value = '000000000';
   window.document.getElementById('pay-iban').value = 'EX000000000000000000';
   window.document.getElementById('pay-reference').value = 'Invoice number';
   window.document.getElementById('pay-instructions').value = 'Bank transfer in EUR, please.';
@@ -1052,7 +1057,10 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
   await settle('the payment details on TatuTime to save');
   const custAfter = (await (await fetch(BASE + '/api/customers', { headers: { Cookie: SESSION_COOKIE } })).json()).customers.find((c) => c.name === 'TatuTime');
   check('customer form saved payment details',
-    !!custAfter && !!custAfter.payment_details && custAfter.payment_details.iban === 'EX000000000000000000');
+    !!custAfter && !!custAfter.payment_details && custAfter.payment_details.iban === 'EX000000000000000000'
+    && custAfter.payment_details.bank_address === '1 Bank Street'
+    && custAfter.payment_details.account_type === 'Checking'
+    && custAfter.payment_details.routing_number === '000000000');
 }
 
 // ---- INVOICE DETAIL (#133/#349): a rendered PDF, the Get paid box and the activity history ----
@@ -1126,6 +1134,8 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
   const payBox = window.document.getElementById('ip-getpaid-pay').textContent;
   check('Get paid box pulls in the customer payment details',
     payBox.includes('Tatu Bank') && payBox.includes('IBAN') && payBox.includes('EX000000000000000000')
+    && payBox.includes('1 Bank Street') && payBox.includes('Checking')
+    && payBox.includes('000000000')
     && window.document.getElementById('ip-getpaid-instr').textContent.includes('Bank transfer in EUR'));
   check('Get paid box offers manual settlement, never a provider button',
     window.document.getElementById('ip-record-payment').hidden === false

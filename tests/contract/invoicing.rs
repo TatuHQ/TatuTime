@@ -3092,7 +3092,10 @@ async fn payment_block_is_canonical_across_pdf_variable_and_email() {
             "email": "pay@canonical.test",
             "payment_details": {
                 "bank_name": "Example Bank",
+                "bank_address": "1 Bank Street",
                 "account_name": "Canonical Co",
+                "account_type": "Checking",
+                "routing_number": "000000000",
                 "iban": "EX000000000000000000",
                 "instructions": "Flat instruction.",
                 "rails": [
@@ -3156,7 +3159,10 @@ async fn payment_block_is_canonical_across_pdf_variable_and_email() {
     // Every surface carries every line of the canonical block.
     for fragment in [
         "Bank: Example Bank",
+        "Bank address: 1 Bank Street",
         "Account name: Canonical Co",
+        "Account type: Checking",
+        "Routing number: 000000000",
         "IBAN: EX000000000000000000",
         "Flat instruction.",
         "Currency: EUR",
