@@ -96,6 +96,20 @@ fn resolve_specifier(from_url: &str, spec: &str) -> String {
     format!("/{}", parts.join("/"))
 }
 
+async fn asset_cache_control(router: &Router, path: &str) -> String {
+    let req = Request::builder()
+        .method("GET")
+        .uri(path)
+        .body(Body::empty())
+        .unwrap();
+    let res = router.clone().oneshot(req).await.expect("oneshot");
+    res.headers()
+        .get(header::CACHE_CONTROL)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default()
+        .to_string()
+}
+
 /// The branding assets are images, not opaque bytes. A `.png` served as
 /// `application/octet-stream` relies on content sniffing and can break proxies,
 /// caches and clients that key on the declared type.
@@ -115,6 +129,32 @@ async fn brand_assets_are_served_with_image_mime() {
             ctype, expected,
             "{path} must be served with {expected}; an octet-stream image is a sniffing \
              dependency and breaks caches/CDNs that key on the declared type"
+        );
+    }
+}
+
+/// Assets keep stable names across releases, so they must forbid storage:
+/// `no-cache` is rewritten by Cloudflare's Browser Cache TTL to
+/// `max-age=14400`, and a browser then keeps an old `hierarchy.js` while the
+/// new `index.html` shows inputs that the stale code never reads or saves.
+#[tokio::test]
+async fn mutable_assets_forbid_browser_and_cdn_storage() {
+    let (client, _dir) = app().await;
+
+    for path in [
+        "/",
+        "/app.js",
+        "/js/hierarchy.js",
+        "/js/invoices.js",
+        "/styles.css",
+        "/vendor/ubuntu/components.css",
+    ] {
+        let cache = asset_cache_control(&client.router, path).await;
+        assert!(
+            cache.split(',').any(|part| part.trim() == "no-store"),
+            "{path} must be served with Cache-Control: no-store, got {cache:?}; a stable \
+             asset name cached by a CDN survives a deploy and can pair an old module with a \
+             new shell"
         );
     }
 }
