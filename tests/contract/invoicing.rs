@@ -3075,6 +3075,81 @@ async fn invoice_pdf_prints_one_block_per_payment_rail() {
     assert!(mail.contains("EX000000000000000000"), "{mail}");
 }
 
+/// The three flat bank fields a customer configures for payment are printed on
+/// the invoice itself: the archived PDF created at issue and the live preview
+/// both carry the labelled values, not just the customer document (#438).
+#[tokio::test]
+async fn invoice_pdf_prints_bank_address_account_type_and_routing_number() {
+    let (app, _d) = app().await;
+    let (sc, c) = json_req(
+        &app,
+        "POST",
+        "/api/customers",
+        Some(json!({
+            "name": "Bank Fields Co",
+            "currency": "EUR",
+            "default_rate_minor": 6000,
+            "email": "billing@bankfields.test",
+            "payment_details": {
+                "bank_name": "Example Bank",
+                "bank_address": "1 Bank Street",
+                "account_name": "Bank Fields Co",
+                "account_number": "000000000000",
+                "account_type": "Checking",
+                "routing_number": "000000000",
+                "iban": "EX000000000000000000",
+                "bic": "EXAMPLEB",
+                "reference": "Invoice number"
+            }
+        })),
+    )
+    .await;
+    assert_eq!(sc, StatusCode::CREATED, "{c}");
+    let cid = c["id"].as_str().unwrap();
+    new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
+    json_req(
+        &app,
+        "POST",
+        "/api/entries",
+        Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":2})),
+    )
+    .await;
+    let (_s, inv) = json_req(
+        &app,
+        "POST",
+        "/api/invoices",
+        Some(json!({"customer_id":cid,"from":"2026-10-01","to":"2026-10-07"})),
+    )
+    .await;
+    let iid = inv["id"].as_str().unwrap();
+    json_req(&app, "POST", &format!("/api/invoices/{iid}/issue"), None).await;
+
+    let expected = [
+        "Bank address: 1 Bank Street",
+        "Account type: Checking",
+        "Routing number: 000000000",
+    ];
+    // The archived document written at issue.
+    let (_sa, _ha, archived) = raw_req(&app, "GET", &format!("/api/invoices/{iid}/pdf")).await;
+    let archived = pdf_joined(&archived);
+    for fragment in expected {
+        assert!(
+            archived.contains(fragment),
+            "archived invoice PDF missing {fragment}: {archived}"
+        );
+    }
+    // The on-demand preview rendered for the invoice panel.
+    let (_sp, _hp, preview) =
+        raw_req(&app, "GET", &format!("/api/invoices/{iid}/pdf/preview")).await;
+    let preview = pdf_joined(&preview);
+    for fragment in expected {
+        assert!(
+            preview.contains(fragment),
+            "invoice PDF preview missing {fragment}: {preview}"
+        );
+    }
+}
+
 /// The same canonical block reaches the PDF, the `%payment_details%` document
 /// variable and the invoice email when a customer has flat fields AND rails:
 /// flat rows + instructions first, then every currency rail.
