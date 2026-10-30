@@ -151,8 +151,9 @@ Saving a template explicitly replaces those defaults; a saved template with
   outstanding totals.
 - Settlement is **manual**. TatuTime has no hosted checkout, card processor or
   payment-provider integration. The invoice tells the customer how to pay using
-  the customer's own payment details (bank name, account name/number, IBAN, BIC,
-  reference and free-text instructions). Those details appear in the **Get paid**
+  the customer's own payment details (bank name and address, account
+  name/number/type, routing number, IBAN, BIC, reference and free-text
+  instructions). Those details appear in the **Get paid**
   panel, the invoice and reminder emails and the PDF, and are available as the
   `%payment_details%` template variable.
 - Multi-currency customers may add up to four **structured payment rails**

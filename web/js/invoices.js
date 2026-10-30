@@ -1391,8 +1391,11 @@ export async function openInvoicePreview(inv, opener) {
     const payRows = pd
       ? [
         ['Bank', pd.bank_name],
+        ['Bank address', pd.bank_address],
         ['Account name', pd.account_name],
         ['Account number', pd.account_number],
+        ['Account type', pd.account_type],
+        ['Routing number', pd.routing_number],
         ['IBAN', pd.iban],
         ['BIC/SWIFT', pd.bic],
         ['Reference', pd.reference],

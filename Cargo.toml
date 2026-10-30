@@ -1,6 +1,6 @@
 [package]
 name = "tatu-time"
-version = "0.2.1"
+version = "0.2.2"
 description = "Timesheet system: daily and weekly time entries, customers and project codes with currencies and rates"
 edition = "2024"
 license = "AGPL-3.0-or-later"
