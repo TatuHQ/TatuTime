@@ -1366,9 +1366,11 @@ export async function openInvoicePreview(inv, opener) {
   gp.hidden = draft || superseded;
   const gpFacts = $('ip-getpaid-facts');
   const gpPay = $('ip-getpaid-pay');
+  const gpRails = $('ip-getpaid-rails');
   const gpHist = $('ip-getpaid-history');
   gpFacts.textContent = '';
   gpPay.textContent = '';
+  gpRails.textContent = '';
   gpHist.textContent = '';
   if (!draft) {
     const pair = (list) => (label, value) => {
@@ -1402,13 +1404,48 @@ export async function openInvoicePreview(inv, opener) {
       ].filter((r) => r[1] && String(r[1]).trim())
       : [];
     const instr = pd && pd.instructions ? String(pd.instructions).trim() : '';
-    const hasPay = payRows.length > 0 || !!instr;
+    // Structured rails (#354) are part of the same canonical payment block the
+    // PDF and email render: each rail starts with its currency row, then its
+    // account fields and instructions. The GUI used to show only the flat
+    // block, so a customer configured through rails lost those details on the
+    // invoice even though the document printed them (#438 follow-up).
+    const railBlocks = (pd && Array.isArray(pd.rails) ? pd.rails : [])
+      .filter((rail) => rail && String(rail.currency || '').trim())
+      .map((rail) => ({
+        rows: [
+          ['Currency', rail.currency],
+          ['Bank', rail.bank_name],
+          ['Account name', rail.account_name],
+          ['Account number', rail.account_number],
+          ['Account type', rail.account_type],
+          ['IBAN', rail.iban],
+          ['BIC/SWIFT', rail.bic],
+          ['Bank address', rail.bank_address],
+          ['Routing number', rail.routing_number],
+          ['SWIFT', rail.swift],
+        ].filter((r) => r[1] && String(r[1]).trim()),
+        instructions: rail.instructions ? String(rail.instructions).trim() : '',
+      }));
+    const hasPay = payRows.length > 0 || !!instr || railBlocks.length > 0;
     $('ip-getpaid-paytitle').hidden = !hasPay;
     $('ip-getpaid-none').hidden = hasPay;
+    gpPay.hidden = payRows.length === 0;
     for (const [label, value] of payRows) gpr(label, String(value).trim());
     const gpInstr = $('ip-getpaid-instr');
     gpInstr.hidden = !instr;
     gpInstr.textContent = instr;
+    for (const block of railBlocks) {
+      const rail = el('div', { cls: 'ip-pay-rail' });
+      const list = el('dl', { cls: 'ip-facts' });
+      for (const [label, value] of block.rows) {
+        list.append(el('dt', { text: label }), el('dd', { text: String(value).trim() }));
+      }
+      rail.appendChild(list);
+      if (block.instructions) {
+        rail.appendChild(el('p', { cls: 'ip-letter', text: block.instructions }));
+      }
+      gpRails.appendChild(rail);
+    }
     for (const p of inv.payments || []) {
       gpHist.appendChild(
         el('p', {

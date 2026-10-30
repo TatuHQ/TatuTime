@@ -846,6 +846,10 @@ dialog.p-modal::backdrop { background: transparent; }
 .ip-facts { display: grid; grid-template-columns: auto 1fr; gap: .15rem .9rem; margin: .3rem 0 .7rem; }
 .ip-facts dt { color: var(--muted); font-weight: 600; }
 .ip-facts dd { margin: 0; }
+/* A structured payment rail is its own section, separated from the flat block
+   and from the previous rail by the same dashed rule the PDF prints. */
+.ip-pay-rail { border-top: 1px dashed var(--line); margin-top: .5rem; padding-top: .5rem; }
+.ip-pay-rail .ip-facts { margin-top: 0; }
 /* #349: the preview region frames the rendered PDF; the activity history
    beneath it is a plain ordered list. The .ip-letter rule still paints the
    Get paid instructions (upstream #357). */
