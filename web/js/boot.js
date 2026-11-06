@@ -208,7 +208,13 @@ export function wireEntryForm() {
   $('entry-project').addEventListener('change', async (e) => {
     await fillTaskSelect($('entry-task'), $('entry-customer').value, e.target.value, null);
   });
-
+  // Phone shortcut row: fill the field, then leave it editable. The buttons
+  // stay in the DOM (CSS hides them on wide screens), so nothing else changes.
+  for (const button of document.querySelectorAll('#entry-quick button')) {
+    button.addEventListener('click', () => {
+      $('entry-hours').value = button.dataset.hours;
+    });
+  }
 }
 
 // Week grid: inline cell editing via delegated events (#13/#189).

@@ -39,7 +39,10 @@ export function el(tag, opts = {}, children = []) {
   }
   for (const child of [].concat(children)) if (child) node.appendChild(child);
   if (opts.data?.iconActions === '1') {
-    for (const button of node.querySelectorAll('button[data-icon]')) {
+    // The phone primary action (invoices.js) is a regular labelled button, not
+    // one of the icon-only register actions, so it keeps its text and must not
+    // be turned into a tooltip trigger.
+    for (const button of node.querySelectorAll('button[data-icon]:not(.mobile-primary-action)')) {
       const label = button.textContent.trim();
       const id = `action-tooltip-${++actionTooltipSequence}`;
       button.classList.add('icon-action', 'p-tooltip--top-center');
@@ -116,12 +119,17 @@ export function rowAction(cls, text, fn, title, icon) {
 // row; the invoice register overrides it to a fixed 4-column grid so eight
 // actions read as two rows of four (web/styles.css). The cell keeps its
 // tooltips in reach and never spills past the register's scroll area.
-export function iconActionsCell(buttons, attrs = {}) {
+export function iconActionsCell(buttons, attrs = {}, mobilePrimary = []) {
   return el('td', {
     cls: 'actions-col',
     data: { iconActions: '1' },
     attrs: { 'data-heading': 'Actions', ...attrs },
-  }, [el('div', { cls: 'row-actions' }, buttons)]);
+  }, [
+    // Phone-only shortcuts sit above the icon row; CSS hides the wrapper above
+    // the phone breakpoint so the desktop register keeps its one action row.
+    mobilePrimary.length ? el('div', { cls: 'mobile-primary-actions' }, mobilePrimary) : null,
+    el('div', { cls: 'row-actions' }, buttons),
+  ]);
 }
 
 // #232 increment 3: the official status pill. Vanilla 4.59 deprecates

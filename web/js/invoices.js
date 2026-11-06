@@ -22,6 +22,19 @@ export const EMAIL_SETTINGS_ROUTE = '/settings/email';
 
 // -------------------------------------------------------------- invoices ---
 
+// Phone-only primary action for a register card. The ordinary icon actions
+// stay in place below it; this is the one task the row exists for, spelled out
+// instead of hidden behind a tooltip (web/styles.css shows it below 720px).
+function mobilePrimaryAction(text, icon, onClick) {
+  return el('button', {
+    cls: 'mobile-primary-action',
+    type: 'button',
+    text,
+    data: { icon, positive: '1' },
+    on: { click: onClick },
+  });
+}
+
 
 export function refreshInvoices() {
   // QA-10: a failed load keeps the last invoice rows and shows the visible
@@ -48,6 +61,21 @@ async function refreshInvoicesBody() {
     const balance = invBalance(inv); // #189: shared semantic
     const open = isOpenInvoice(inv);
     const superseded = Boolean(inv.superseded_by);
+    // The one action this invoice needs next, promoted for touch: settle an
+    // open document, or send the settled one to the accountant.
+    const mobilePrimary = [];
+    if (!superseded) {
+      if (inv.status === 'draft') {
+        mobilePrimary.push(mobilePrimaryAction('Issue invoice', 'credit-card',
+          () => issueInvoice(inv)));
+      } else if (open) {
+        mobilePrimary.push(mobilePrimaryAction('Mark as paid', 'credit-card',
+          () => recordPayment(inv, balance)));
+      } else if (inv.status === 'paid') {
+        mobilePrimary.push(mobilePrimaryAction('Send to accountant', 'email',
+          () => emailInvoiceCopy(inv)));
+      }
+    }
     const edit = () => action('link', 'Edit',
       () => api.get(`/invoices/${inv.id}`).then(edOpen, (e) => announce(e.message)),
       'Edit, or create a correction revision of, this invoice', 'edit');
@@ -127,15 +155,15 @@ async function refreshInvoicesBody() {
           },
         },
       }, [
-        el('th', { attrs: { scope: 'row' } }, [
+        el('th', { attrs: { scope: 'row', 'data-heading': 'Invoice' } }, [
           el('span', { text: inv.number }),
           subject ? el('span', { cls: 'inv-row-subject', text: subject }) : null,
         ]),
-        el('td', { text: customerName(inv.customer_id) }),
-        el('td', { text: `${inv.period_from} → ${inv.period_to}` }),
-        el('td', { cls: 'num', text: `${inv.currency} ${formatMoney(inv.total_minor)}` }),
-        el('td', { cls: 'num', text: open ? `${inv.currency} ${formatMoney(balance)}` : '\u2014' }),
-        el('td', {}, [
+        el('td', { attrs: { 'data-heading': 'Customer' }, text: customerName(inv.customer_id) }),
+        el('td', { attrs: { 'data-heading': 'Period' }, text: `${inv.period_from} → ${inv.period_to}` }),
+        el('td', { cls: 'num', attrs: { 'data-heading': 'Total' }, text: `${inv.currency} ${formatMoney(inv.total_minor)}` }),
+        el('td', { cls: 'num', attrs: { 'data-heading': 'Balance' }, text: open ? `${inv.currency} ${formatMoney(balance)}` : '\u2014' }),
+        el('td', { attrs: { 'data-heading': 'Status' } }, [
           // The chip's second argument is the emphasis flag, and `open` here is
           // isOpenInvoice (collectable now): sent and partly paid read positive
           // while draft, paid and written off stay neutral. The label is the
@@ -156,7 +184,7 @@ async function refreshInvoicesBody() {
           // Import provenance is history, not a second status: it is shown as
           // an Imported entry in the invoice timeline instead of a chip here.
         ]),
-        iconActionsCell(actions),
+        iconActionsCell(actions, {}, mobilePrimary),
       ]),
     );
   }
