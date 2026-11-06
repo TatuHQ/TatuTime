@@ -14,7 +14,7 @@
   },
   "devDependencies": {
     "css-tree": "3.2.1",
-    "pdfjs-dist": "6.4.299",
+    "pdfjs-dist": "6.5.438",
     "sass": "1.107.1",
     "vanilla-framework": "4.59.0"
   }
