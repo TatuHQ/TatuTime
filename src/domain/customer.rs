@@ -97,12 +97,21 @@ pub struct PaymentDetails {
     /// The bank the money goes to.
     #[serde(default)]
     pub bank_name: String,
+    /// The bank's branch/street address, when the payer needs it.
+    #[serde(default)]
+    pub bank_address: String,
     /// Account holder name as the bank knows it.
     #[serde(default)]
     pub account_name: String,
     /// Local account number.
     #[serde(default)]
     pub account_number: String,
+    /// Account type as the bank labels it (e.g. "Checking").
+    #[serde(default)]
+    pub account_type: String,
+    /// ABA/routing number for US-style transfers.
+    #[serde(default)]
+    pub routing_number: String,
     /// SEPA IBAN (preferred for transfers where IBAN is the norm).
     #[serde(default)]
     pub iban: String,
@@ -211,8 +220,11 @@ impl PaymentDetails {
     pub fn has_content(&self) -> bool {
         [
             &self.bank_name,
+            &self.bank_address,
             &self.account_name,
             &self.account_number,
+            &self.account_type,
+            &self.routing_number,
             &self.iban,
             &self.bic,
             &self.reference,
@@ -228,8 +240,11 @@ impl PaymentDetails {
     pub fn trimmed(&self) -> Self {
         Self {
             bank_name: self.bank_name.trim().to_string(),
+            bank_address: self.bank_address.trim().to_string(),
             account_name: self.account_name.trim().to_string(),
             account_number: self.account_number.trim().to_string(),
+            account_type: self.account_type.trim().to_string(),
+            routing_number: self.routing_number.trim().to_string(),
             iban: self.iban.trim().to_string(),
             bic: self.bic.trim().to_string(),
             reference: self.reference.trim().to_string(),
@@ -246,8 +261,11 @@ impl PaymentDetails {
         let mut out: Vec<(&'static str, String)> = Vec::new();
         for (label, value) in [
             ("Bank", &self.bank_name),
+            ("Bank address", &self.bank_address),
             ("Account name", &self.account_name),
             ("Account number", &self.account_number),
+            ("Account type", &self.account_type),
+            ("Routing number", &self.routing_number),
             ("IBAN", &self.iban),
             ("BIC/SWIFT", &self.bic),
             ("Reference", &self.reference),
@@ -428,8 +446,11 @@ pub fn validate_customer_billing_fields(
     if let Some(p) = payment_details {
         for (field, val, max) in [
             ("payment_details.bank_name", &p.bank_name, 120usize),
+            ("payment_details.bank_address", &p.bank_address, 200),
             ("payment_details.account_name", &p.account_name, 120),
             ("payment_details.account_number", &p.account_number, 64),
+            ("payment_details.account_type", &p.account_type, 40),
+            ("payment_details.routing_number", &p.routing_number, 40),
             ("payment_details.iban", &p.iban, 34),
             ("payment_details.bic", &p.bic, 11),
             ("payment_details.reference", &p.reference, 60),
@@ -1095,6 +1116,61 @@ mod tests {
         input.legal_id = " 99999999 ".into();
         let draft = validate_customer_input(&input).unwrap();
         assert_eq!(draft.legal_id, "99999999");
+    }
+
+    #[test]
+    fn flat_payment_fields_carry_routing_type_and_bank_address() {
+        let details = PaymentDetails {
+            bank_name: "Example Bank".into(),
+            bank_address: "1 Bank Street".into(),
+            account_name: "TatuTime".into(),
+            account_number: "000000000000".into(),
+            account_type: "Checking".into(),
+            routing_number: "000000000".into(),
+            ..Default::default()
+        };
+        assert!(details.has_content());
+        assert_eq!(
+            details.rows(),
+            vec![
+                ("Bank", "Example Bank".to_string()),
+                ("Bank address", "1 Bank Street".to_string()),
+                ("Account name", "TatuTime".to_string()),
+                ("Account number", "000000000000".to_string()),
+                ("Account type", "Checking".to_string()),
+                ("Routing number", "000000000".to_string()),
+            ]
+        );
+        // A block holding only one of the new fields still persists, and the
+        // persisted copy is trimmed like every other payment field.
+        let only_routing = PaymentDetails {
+            routing_number: " 000000000 ".into(),
+            ..Default::default()
+        };
+        assert!(only_routing.has_content());
+        assert_eq!(only_routing.trimmed().routing_number, "000000000");
+        // Bounds mirror the rails and the checked-in contract.
+        let mut errors = Vec::new();
+        validate_customer_billing_fields(
+            &None,
+            &[],
+            0,
+            0,
+            &Some(PaymentDetails {
+                bank_address: "x".repeat(201),
+                account_type: "x".repeat(41),
+                routing_number: "x".repeat(41),
+                ..Default::default()
+            }),
+            &mut errors,
+        );
+        for field in [
+            "payment_details.bank_address",
+            "payment_details.account_type",
+            "payment_details.routing_number",
+        ] {
+            assert!(errors.iter().any(|e| e.field == field), "{field}");
+        }
     }
 
     #[test]

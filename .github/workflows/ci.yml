@@ -209,22 +209,24 @@ jobs:
           python3 gui-test/browser-smoke.py
           python3 gui-test/browser-smoke.py --dev-web-dir
 
-      # Self-hosted runners can overlap PR jobs: a fixed :8099 plus a shared
-      # container name let one job's `docker rm -f` kill another's server.
-      # One random port + per-run container name per job instead (#143 CI).
-      - name: Pick a private port for this job
+      # Self-hosted runners can overlap PR jobs, and the host may already own
+      # any fixed or random port. Ask Docker for an ephemeral host port and
+      # publish the container's 8080 on loopback instead: the mapping is held
+      # for the whole job, so it cannot collide with another job's server
+      # (#143 CI).
+      - name: Serve on an ephemeral host port (fresh data dir)
         run: |
-          PORT=$((20000 + RANDOM % 30000))
-          echo "TT_PORT=$PORT" >> "$GITHUB_ENV"
-          echo "TT_CONTAINER=tt-gui-$PORT" >> "$GITHUB_ENV"
-
-      - name: Serve on the job port (fresh data dir)
-        run: |
-          docker rm -f "$TT_CONTAINER" 2>/dev/null || true
-          docker run -d --name "$TT_CONTAINER" --network host \
+          NAME="tt-gui-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          docker rm -f "$NAME" 2>/dev/null || true
+          docker run -d --name "$NAME" \
+            -p 127.0.0.1::8080 \
             -v "$PWD:/repo:ro" -v /data \
-            -e TATU_DATA_DIR=/data -e TATU_PORT="$TT_PORT" \
+            -e TATU_DATA_DIR=/data -e TATU_PORT=8080 \
             rust:1.99.1-slim-trixie /repo/target/release/tatu-time
+          PORT=$(docker port "$NAME" 8080/tcp | head -n1 | sed 's/.*://')
+          test -n "$PORT"
+          echo "TT_PORT=$PORT" >> "$GITHUB_ENV"
+          echo "TT_CONTAINER=$NAME" >> "$GITHUB_ENV"
 
       - name: Wait for health
         run: |
@@ -246,7 +248,10 @@ jobs:
 
       - name: Stop server
         if: always()
-        run: docker rm -f "$TT_CONTAINER"
+        run: |
+          if [ -n "$TT_CONTAINER" ]; then
+            docker rm -f "$TT_CONTAINER" 2>/dev/null || true
+          fi
 
   # Secret scanning (#49): full git history via the pinned gitleaks image. The
   # digest is pinned (matching the sibling project's supply-chain discipline)

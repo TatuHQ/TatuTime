@@ -151,8 +151,9 @@ Saving a template explicitly replaces those defaults; a saved template with
   outstanding totals.
 - Settlement is **manual**. TatuTime has no hosted checkout, card processor or
   payment-provider integration. The invoice tells the customer how to pay using
-  the customer's own payment details (bank name, account name/number, IBAN, BIC,
-  reference and free-text instructions). Those details appear in the **Get paid**
+  the customer's own payment details (bank name and address, account
+  name/number/type, routing number, IBAN, BIC, reference and free-text
+  instructions). Those details appear in the **Get paid**
   panel, the invoice and reminder emails and the PDF, and are available as the
   `%payment_details%` template variable.
 - Multi-currency customers may add up to four **structured payment rails**
@@ -252,10 +253,11 @@ org template is never frozen onto a revision or its PDF.
 - The payment block is one canonical sequence on every surface: the flat rows
   and flat instructions first, then each currency rail's rows (starting with a
   `Currency` row) and instructions, separated by a dashed rule. The PDF, the
-  invoice/reminder email ("How to pay") and the `%payment_details%` variable
-  render exactly the same content; a customer with rails never loses the flat
-  block. A multi-line value interpolated into a template renders one paragraph
-  per line instead of collapsing into one wrapped line.
+  invoice/reminder email ("How to pay"), the GUI's **Get paid** panel and the
+  `%payment_details%` variable render exactly the same content; a customer with
+  rails never loses the flat block. A multi-line value interpolated into a
+  template renders one paragraph per line instead of collapsing into one
+  wrapped line.
 - Document money is `EUR €1,200.00` (code, symbol, grouped amount) and a payment
   is `EUR -€1,300.00`; emails keep their `1,200.00 EUR` wording. Dates on the
   document are `dd/mm/yyyy`, and an issued invoice's due date carries the terms

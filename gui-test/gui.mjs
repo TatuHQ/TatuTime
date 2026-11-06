@@ -463,12 +463,20 @@ await waitFor(() => {
 }, { message: 'copy previous day to list the P-9 row' });
 const copyRow = window.document.querySelector('#copy-rows .copy-row');
 check('copy previous day lists the P-9 row', !!copyRow && copyRow.textContent.includes('P-9'));
+check(
+  'copy previous day previews the note that will be copied',
+  !!copyRow && copyRow.textContent.includes('gui-test entry'),
+);
 copyRow.querySelector('input').value = '3';
 copyRow.querySelector('button').dispatchEvent(new window.Event('click', { bubbles: true }));
 await settle('the copied row to save through the API');
 const day12 = await (await fetch(BASE + '/api/entries?date=2026-11-12')).json();
 const copied = day12.entries.find((e) => e.project_code === 'P-9' && e.hours === 3);
 check('copied row saved through the API', !!copied);
+check(
+  'copied row carries the previous day\'s note',
+  !!copied && copied.note === 'gui-test entry',
+);
 // Clean up so later week-view assertions stay at 4.25h.
 await fetch(`${BASE}/api/entries/${copied.id}`, { method: 'DELETE', headers: { Cookie: SESSION_COOKIE } });
 
@@ -1045,6 +1053,11 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
   custEdit.dispatchEvent(new window.Event('click', { bubbles: true }));
   await waitFor(() => dialogOpen(byId('customer-dialog')), { message: 'the customer edit dialog to open' });
   window.document.getElementById('pay-bank-name').value = 'Tatu Bank';
+  window.document.getElementById('pay-bank-address').value = '1 Bank Street';
+  window.document.getElementById('pay-account-name').value = 'TatuTime';
+  window.document.getElementById('pay-account-number').value = '000000000000';
+  window.document.getElementById('pay-account-type').value = 'Checking';
+  window.document.getElementById('pay-routing-number').value = '000000000';
   window.document.getElementById('pay-iban').value = 'EX000000000000000000';
   window.document.getElementById('pay-reference').value = 'Invoice number';
   window.document.getElementById('pay-instructions').value = 'Bank transfer in EUR, please.';
@@ -1052,7 +1065,10 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
   await settle('the payment details on TatuTime to save');
   const custAfter = (await (await fetch(BASE + '/api/customers', { headers: { Cookie: SESSION_COOKIE } })).json()).customers.find((c) => c.name === 'TatuTime');
   check('customer form saved payment details',
-    !!custAfter && !!custAfter.payment_details && custAfter.payment_details.iban === 'EX000000000000000000');
+    !!custAfter && !!custAfter.payment_details && custAfter.payment_details.iban === 'EX000000000000000000'
+    && custAfter.payment_details.bank_address === '1 Bank Street'
+    && custAfter.payment_details.account_type === 'Checking'
+    && custAfter.payment_details.routing_number === '000000000');
 }
 
 // ---- INVOICE DETAIL (#133/#349): a rendered PDF, the Get paid box and the activity history ----
@@ -1126,6 +1142,8 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
   const payBox = window.document.getElementById('ip-getpaid-pay').textContent;
   check('Get paid box pulls in the customer payment details',
     payBox.includes('Tatu Bank') && payBox.includes('IBAN') && payBox.includes('EX000000000000000000')
+    && payBox.includes('1 Bank Street') && payBox.includes('Checking')
+    && payBox.includes('000000000')
     && window.document.getElementById('ip-getpaid-instr').textContent.includes('Bank transfer in EUR'));
   check('Get paid box offers manual settlement, never a provider button',
     window.document.getElementById('ip-record-payment').hidden === false

@@ -1274,6 +1274,10 @@ mod tests {
     fn configured_payment_details_print_a_how_to_pay_footer() {
         let mut c = customer();
         c.payment_details = Some(PaymentDetails {
+            bank_name: "Example Bank".into(),
+            bank_address: "1 Bank Street".into(),
+            account_type: "Checking".into(),
+            routing_number: "000000000".into(),
             iban: "EX000000000000000000".into(),
             bic: "EXAMPLEB".into(),
             reference: "Invoice number".into(),
@@ -1290,7 +1294,11 @@ mod tests {
             })
             .collect();
         assert!(
-            keys.contains(&"IBAN") && keys.contains(&"BIC/SWIFT"),
+            keys.contains(&"IBAN")
+                && keys.contains(&"BIC/SWIFT")
+                && keys.contains(&"Bank address")
+                && keys.contains(&"Account type")
+                && keys.contains(&"Routing number"),
             "{keys:?}"
         );
         let rendered = render_invoice_pdf(&doc);

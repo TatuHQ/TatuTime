@@ -67,13 +67,14 @@ test('the shell ships the official form vocabulary and no bespoke class (#232 ph
     // fieldset) to the Settings split's 146 groups; the template notes row
     // added one more, the Expense-categories dialog one more, and the
     // accountant-email row (#112 follow-up) one more.
-    // 179 groups: the Settings split's rows, the Document label rows, the
+    // 182 groups: the Settings split's rows, the Document label rows, the
     // Company legal id + label, the template notes row, the invoice editor
     // status row, the accountant-email row, the email dialog's receipt row and
-    // the three Settings → Backup rows (enable, cadence, time).
-    assert.equal(groups.length, 179, 'every field wrapper is a p-form__group');
-    assert.equal(document.querySelectorAll('.p-form__label').length, 171, 'one official label per field row');
-    assert.equal(document.querySelectorAll('.p-form__control').length, 171, 'one official control per field row');
+    // the three Settings → Backup rows (enable, cadence, time), plus the three
+    // flat payment-detail rows (bank address, account type, routing number).
+    assert.equal(groups.length, 182, 'every field wrapper is a p-form__group');
+    assert.equal(document.querySelectorAll('.p-form__label').length, 174, 'one official label per field row');
+    assert.equal(document.querySelectorAll('.p-form__control').length, 174, 'one official control per field row');
     // The previous 70 plus the backup schedule intro, time-zone line, schedule
     // status, "Back up now" intro and result, the stored-backups intro and the
     // restore instructions.
@@ -119,9 +120,10 @@ test('every p-form__group pairs its label with its own control (#232 phase 2b)',
         assert.ok(label.textContent.trim().length > 0, `${control.id} keeps an accessible name`);
         paired += 1;
     }
-    // 171: the previous 168 plus the three Settings → Backup rows (enable,
-    // cadence, time). Every row has a direct label/control pair.
-    assert.equal(paired, 171, 'all 171 label/control pairs were verified');
+    // 174: the previous 171 plus the three flat payment-detail rows (bank
+    // address, account type, routing number), each with its own label/control
+    // pair.
+    assert.equal(paired, 174, 'all 174 label/control pairs were verified');
     assert.equal(composed.length, 8, 'eight composed rows have no label of their own');
     assert.equal(composed.filter((row) => row.tag === 'FIELDSET').length, 7, 'seven grouped fieldsets');
     assert.equal(composed.filter((row) => row.tag === 'DIV').length, 1, 'the Contacts row');
@@ -434,6 +436,46 @@ test('payment-rail validation surfaces the API field path against the right inpu
         payload: { error: { code: 'validation_failed', fields: [{ field: 'payment_details.iban', message: 'must be 5-34 letters/digits' }] } },
     });
     assert.equal(document.getElementById('pay-iban').getAttribute('aria-invalid'), 'true');
+    dom.window.close();
+});
+
+test('flat payment details round-trip bank address, account type and routing number (#354)', async () => {
+    const { dom, document, f } = setup();
+    const posted = [];
+    f.api.get = async (path) => (path === '/customers' ? { customers: [] } : {});
+    f.api.post = async (path, body) => { posted.push({ path, body }); return body; };
+    f.api.put = async (path, body) => { posted.push({ path, body }); return body; };
+
+    const customer = {
+        id: 'c1', name: 'Flat Co', currency: 'EUR', default_rate_minor: 6000, active: true,
+        payment_details: {
+            bank_name: 'Example Bank',
+            bank_address: '1 Bank Street',
+            account_name: 'Flat Co',
+            account_number: '000000000000',
+            account_type: 'Checking',
+            routing_number: '000000000',
+        },
+    };
+    f.startCustomerEdit(customer);
+    const field = (id) => document.getElementById(id);
+    assert.equal(field('pay-bank-address').value, '1 Bank Street', 'bank address is prefilled');
+    assert.equal(field('pay-account-type').value, 'Checking', 'account type is prefilled');
+    assert.equal(field('pay-routing-number').value, '000000000', 'routing number is prefilled');
+
+    field('pay-bank-address').value = ' 2 Bank Street ';
+    field('pay-account-type').value = ' Savings ';
+    field('pay-routing-number').value = ' 111111111 ';
+    await f.saveCustomer({ preventDefault() { } });
+    assert.equal(posted[0].path, '/customers/c1');
+    assert.equal(posted[0].body.payment_details.bank_address, '2 Bank Street', 'values are trimmed');
+    assert.equal(posted[0].body.payment_details.account_type, 'Savings');
+    assert.equal(posted[0].body.payment_details.routing_number, '111111111');
+
+    f.cancelCustomerEdit();
+    assert.equal(field('pay-bank-address').value, '', 'the dialog resets between customers');
+    assert.equal(field('pay-account-type').value, '');
+    assert.equal(field('pay-routing-number').value, '');
     dom.window.close();
 });
 

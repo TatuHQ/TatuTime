@@ -745,6 +745,65 @@ api.getBlob = async () => new Blob([new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d
   dom.window.close();
 });
 
+test('the Get paid panel renders the new flat payment-detail rows (#438)', async () => {
+  const { dom, context, document } = makeDom(`
+api.getBlob = async () => new Blob([new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d])], { type: 'application/pdf' });
+api.get = async (path) => (path.endsWith('/timeline') ? { events: [] } : {});
+`);
+  dom.window.URL.createObjectURL = () => 'blob:pay-details';
+  dom.window.URL.revokeObjectURL = () => { };
+  context.state.customers = [{
+    id: 'c1', name: 'Payer Co', currency: 'EUR', default_rate_minor: 0, active: true,
+    payment_details: {
+      bank_name: 'Example Bank',
+      bank_address: '1 Bank Street',
+      account_name: 'Payer Co',
+      account_number: '000000000000',
+      account_type: 'Checking',
+      routing_number: '000000000',
+      iban: 'EX000000000000000000',
+      reference: 'Invoice number',
+      instructions: 'Pay by bank transfer.',
+      rails: [{
+        currency: 'USD',
+        bank_name: 'US Bank',
+        account_name: 'Payer Co',
+        account_number: '111111111111',
+        account_type: 'Savings',
+        routing_number: '111111111',
+        bank_address: '2 Rail Street',
+        swift: 'EXAMPLEB',
+        instructions: 'Use the USD rail.',
+      }],
+    },
+  }];
+  await context.openInvoicePreview({
+    id: 'i1', number: 'INV-0001', status: 'issued', customer_id: 'c1', currency: 'EUR',
+    period_from: '2026-09-01', period_to: '2026-09-30', total_minor: 1000,
+    lines: [], payments: [],
+  }, null);
+  const pay = document.getElementById('ip-getpaid-pay').textContent;
+  for (const fragment of [
+    'Bank address', '1 Bank Street',
+    'Account type', 'Checking',
+    'Routing number', '000000000',
+  ]) {
+    assert.ok(pay.includes(fragment), `Get paid panel missing ${fragment}: ${pay}`);
+  }
+  assert.match(document.getElementById('ip-getpaid-instr').textContent, /Pay by bank transfer\./);
+  const rails = document.getElementById('ip-getpaid-rails').textContent;
+  for (const fragment of [
+    'Currency', 'USD',
+    '2 Rail Street', 'Savings', '111111111', 'Use the USD rail.',
+  ]) {
+    assert.ok(rails.includes(fragment), `Get paid rails missing ${fragment}: ${rails}`);
+  }
+  assert.equal(document.getElementById('ip-getpaid-none').hidden, true,
+    'rails count as configured payment details');
+  context.closeInvoicePreview();
+  dom.window.close();
+});
+
 test('a non-PDF preview body is reported, never framed (#349)', async () => {
   const { dom, context, document } = makeDom(`
 api.getBlob = async () => new Blob([new Uint8Array([0x7b, 0x22, 0x65])], { type: 'application/json' });

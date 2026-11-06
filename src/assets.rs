@@ -101,9 +101,18 @@ pub(crate) async fn static_assets(uri: axum::http::Uri) -> Response {
         Some(file) => (
             [
                 (axum::http::header::CONTENT_TYPE, content_type(rel)),
-                // Names are stable across image updates, so force a cheap
-                // revalidation instead of heuristic caching (review A10).
-                (axum::http::header::CACHE_CONTROL, "no-cache"),
+                // Stable file names mean a cached copy can survive a deploy.
+                // `no-cache` alone is not enough behind a CDN: Cloudflare's
+                // Browser Cache TTL rewrites it to `max-age=14400`, so a
+                // browser can keep an old module while loading the new shell
+                // (new form inputs appear, but their save code is stale).
+                // `no-store` is the header both Cloudflare and browsers honour,
+                // so an update is visible on the next load. Images and fonts
+                // keep the cheaper revalidation policy.
+                (
+                    axum::http::header::CACHE_CONTROL,
+                    cache_control(content_type(rel)),
+                ),
             ],
             file.data,
         )
@@ -251,5 +260,16 @@ fn content_type(path: &str) -> &'static str {
         "ico" => "image/x-icon",
         "woff2" => "font/woff2",
         _ => "application/octet-stream",
+    }
+}
+
+/// Code and markup must never be served from a cache across a deploy: their
+/// URLs are stable, so a stale module can be paired with a newer shell. Images
+/// and fonts are safe to revalidate (`no-cache`) instead.
+fn cache_control(content_type: &str) -> &'static str {
+    if content_type.starts_with("text/") || content_type == "application/json" {
+        "no-store"
+    } else {
+        "no-cache"
     }
 }

@@ -160,8 +160,11 @@ pub(crate) fn sample_customer() -> crate::domain::Customer {
         discount_hundredths: 0,
         payment_details: Some(PaymentDetails {
             bank_name: "Example Bank, 1 Sample Plaza, Testville".into(),
+            bank_address: String::new(),
             account_name: "Sample Customer".into(),
             account_number: String::new(),
+            account_type: String::new(),
+            routing_number: String::new(),
             iban: "EX000000000000000000".into(),
             bic: "EXAMPLEB".into(),
             reference: "Invoice number".into(),

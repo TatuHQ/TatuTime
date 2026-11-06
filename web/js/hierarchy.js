@@ -118,8 +118,11 @@ export function startCustomerEdit(c) {
   // integration exists — these strings drive Get paid, emails, documents).
   const pd = c.payment_details || {};
   $('pay-bank-name').value = pd.bank_name || '';
+  $('pay-bank-address').value = pd.bank_address || '';
   $('pay-account-name').value = pd.account_name || '';
   $('pay-account-number').value = pd.account_number || '';
+  $('pay-account-type').value = pd.account_type || '';
+  $('pay-routing-number').value = pd.routing_number || '';
   $('pay-iban').value = pd.iban || '';
   $('pay-bic').value = pd.bic || '';
   $('pay-reference').value = pd.reference || '';
@@ -398,8 +401,11 @@ async function saveCustomerBody() {
   // too; sending null clears a previously stored block).
   const pay = {
     bank_name: $('pay-bank-name').value.trim(),
+    bank_address: $('pay-bank-address').value.trim(),
     account_name: $('pay-account-name').value.trim(),
     account_number: $('pay-account-number').value.trim(),
+    account_type: $('pay-account-type').value.trim(),
+    routing_number: $('pay-routing-number').value.trim(),
     iban: $('pay-iban').value.trim(),
     bic: $('pay-bic').value.trim(),
     reference: $('pay-reference').value.trim(),

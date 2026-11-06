@@ -586,6 +586,9 @@ body:has(> #admin-wizard[open]) > .app {
 .copy-rows { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: .35rem; flex: 1 1 24rem; min-width: 0; }
 .copy-row { display: flex; align-items: center; gap: .6rem; padding: .45rem .6rem; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
 .copy-label { font-weight: 600; min-width: 22ch; }
+/* The previous day's note, carried into the copy (#note): muted and one line,
+   so it is visible without pushing the hours field off a narrow toolbar. */
+.copy-note { flex: 1 1 12rem; min-width: 0; color: var(--muted); font-size: .875rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .copy-hours { width: 6.5rem; min-width: 0; }
 #day-table tfoot th { text-align: left; }
 #day-table tfoot td { font-variant-numeric: tabular-nums; font-weight: 700; }
@@ -846,6 +849,10 @@ dialog.p-modal::backdrop { background: transparent; }
 .ip-facts { display: grid; grid-template-columns: auto 1fr; gap: .15rem .9rem; margin: .3rem 0 .7rem; }
 .ip-facts dt { color: var(--muted); font-weight: 600; }
 .ip-facts dd { margin: 0; }
+/* A structured payment rail is its own section, separated from the flat block
+   and from the previous rail by the same dashed rule the PDF prints. */
+.ip-pay-rail { border-top: 1px dashed var(--line); margin-top: .5rem; padding-top: .5rem; }
+.ip-pay-rail .ip-facts { margin-top: 0; }
 /* #349: the preview region frames the rendered PDF; the activity history
    beneath it is a plain ordered list. The .ip-letter rule still paints the
    Get paid instructions (upstream #357). */

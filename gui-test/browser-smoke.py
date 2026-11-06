@@ -1472,17 +1472,18 @@ class Gate:
             "the bespoke .field/.hint/.form-error markup is gone and the official "
             "form vocabulary is in place (#232 phase 2b)",
             counts["field"] == 0 and counts["hint"] == 0 and counts["formError"] == 0
-            # 171/171: the Settings split's rows plus the ten Document label
+            # 174/174: the Settings split's rows plus the ten Document label
             # rows (#354), the Company legal id and its label row, the template
             # notes row, the invoice editor status row, the accountant-email
-            # row, the email dialog's receipt row and the three Settings →
-            # Backup rows. Mirrors the shell census in
-            # gui-test/forms.test.mjs, so the two suites cannot drift.
-            # 179 groups: those rows plus the composed fieldsets, the Contacts
+            # row, the email dialog's receipt row, the three Settings →
+            # Backup rows and the three flat payment-detail rows (bank
+            # address, account type, routing number). Mirrors the shell census
+            # in gui-test/forms.test.mjs, so the two suites cannot drift.
+            # 182 groups: those rows plus the composed fieldsets, the Contacts
             # row, the Expense-categories dialog's name field and the three
             # Backup rows.
-            and counts["groups"] == 179 and counts["labels"] == 171
-            and counts["controls"] == 171
+            and counts["groups"] == 182 and counts["labels"] == 174
+            and counts["controls"] == 174
             # 77: the previous 70 plus the backup schedule intro, time-zone
             # line, schedule status, "Back up now" intro and result, the
             # stored-backups intro and the restore instructions.
