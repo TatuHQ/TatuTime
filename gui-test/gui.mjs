@@ -463,12 +463,20 @@ await waitFor(() => {
 }, { message: 'copy previous day to list the P-9 row' });
 const copyRow = window.document.querySelector('#copy-rows .copy-row');
 check('copy previous day lists the P-9 row', !!copyRow && copyRow.textContent.includes('P-9'));
+check(
+  'copy previous day previews the note that will be copied',
+  !!copyRow && copyRow.textContent.includes('gui-test entry'),
+);
 copyRow.querySelector('input').value = '3';
 copyRow.querySelector('button').dispatchEvent(new window.Event('click', { bubbles: true }));
 await settle('the copied row to save through the API');
 const day12 = await (await fetch(BASE + '/api/entries?date=2026-11-12')).json();
 const copied = day12.entries.find((e) => e.project_code === 'P-9' && e.hours === 3);
 check('copied row saved through the API', !!copied);
+check(
+  'copied row carries the previous day\'s note',
+  !!copied && copied.note === 'gui-test entry',
+);
 // Clean up so later week-view assertions stay at 4.25h.
 await fetch(`${BASE}/api/entries/${copied.id}`, { method: 'DELETE', headers: { Cookie: SESSION_COOKIE } });
 

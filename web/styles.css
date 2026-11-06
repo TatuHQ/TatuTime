@@ -586,6 +586,9 @@ body:has(> #admin-wizard[open]) > .app {
 .copy-rows { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: .35rem; flex: 1 1 24rem; min-width: 0; }
 .copy-row { display: flex; align-items: center; gap: .6rem; padding: .45rem .6rem; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
 .copy-label { font-weight: 600; min-width: 22ch; }
+/* The previous day's note, carried into the copy (#note): muted and one line,
+   so it is visible without pushing the hours field off a narrow toolbar. */
+.copy-note { flex: 1 1 12rem; min-width: 0; color: var(--muted); font-size: .875rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .copy-hours { width: 6.5rem; min-width: 0; }
 #day-table tfoot th { text-align: left; }
 #day-table tfoot td { font-variant-numeric: tabular-nums; font-weight: 700; }
