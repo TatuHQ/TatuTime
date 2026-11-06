@@ -1,6 +1,7 @@
 use crate::support::*;
 
 use axum::http::{StatusCode, header};
+use chrono::Datelike;
 use http_body_util::BodyExt;
 use serde_json::Value;
 use serde_json::json;
@@ -350,9 +351,29 @@ async fn email_uses_resolved_subject_and_html_body() {
     let msgs = app.email.messages();
     assert_eq!(msgs.len(), 1);
     // Customer subject override beats the org template, variables resolved.
+    // `%invoice_issue_month%` reads the issue date, which is the clock at
+    // issue time — derive it instead of pinning a month that rots on the 1st.
+    let month_names = [
+        "January",
+        "February",
+        "March",
+        "April",
+        "May",
+        "June",
+        "July",
+        "August",
+        "September",
+        "October",
+        "November",
+        "December",
+    ];
+    let issue_month = month_names[chrono::Utc::now().date_naive().month0() as usize];
     assert_eq!(
         msgs[0].subject,
-        format!("{} for MAILER — October", inv["number"].as_str().unwrap())
+        format!(
+            "{} for MAILER — {issue_month}",
+            inv["number"].as_str().unwrap()
+        )
     );
     assert!(
         msgs[0].text.contains("Please find invoice"),
