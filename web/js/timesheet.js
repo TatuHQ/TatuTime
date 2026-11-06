@@ -232,7 +232,8 @@ async function refreshDayBody() {
 
 // Copy-forward (#12, restyled #108): pending rows for the projects worked
 // `ago` days before the current one, saved only when the user fills in hours
-// (hours must be >= 0.01 to persist).
+// (hours must be >= 0.01 to persist). The row's note travels with the copy:
+// a day's diary line is project + note, and retyping it defeats the copy.
 export async function copyPreviousDay(ago = 1) {
   const target = dayDate();
   const prev = addDays(target, -ago);
@@ -269,11 +270,15 @@ export async function copyPreviousDay(ago = 1) {
         placeholder: 'h',
       },
     });
+    const note = e.note || '';
     const li = el('li', { cls: 'copy-row' }, [
       el('span', {
         cls: 'copy-label',
         text: `${customerName(e.customer_id)} / ${e.project_code}`,
       }),
+      // The note is copied verbatim and shown here so what will be saved is
+      // visible before the hours are entered.
+      note ? el('span', { cls: 'copy-note', text: note, attrs: { title: note } }) : null,
       input,
       el('button', {
         type: 'button',
@@ -293,7 +298,7 @@ export async function copyPreviousDay(ago = 1) {
                 project_code: e.project_code,
                 task_code: e.task_code || null,
                 hours,
-                note: '',
+                note,
                 billable: e.billable !== false,
               });
               li.remove();
