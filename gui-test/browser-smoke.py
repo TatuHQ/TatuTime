@@ -328,11 +328,10 @@ APPROVALS_HIDDEN = (
     "});"
 )
 
-# Reports is hidden the same way (#16's precedent): the rail entry takes no gap,
-# the tab and its panel stay in the markup, and the router refuses a hidden tab so
-# the stale /reports deep link lands on the default view. Reimplementing the
-# reporting suite is a markup change.
-REPORTS_HIDDEN = (
+# Reports is a real tool now: the monthly time report lives behind it, so the
+# rail entry is visible in More tools, the /reports deep link opens its panel,
+# and the chart + table render inside it.
+REPORTS_VISIBLE = (
     "var t = document.getElementById('tab-reports');"
     "var item = t && t.closest('.p-tabs__item');"
     "var panel = document.getElementById('panel-reports');"
@@ -1360,30 +1359,31 @@ class Gate:
             f"pathname={approvals['pathname']!r} timesheet shown={approvals['timesheetShown']}",
         )
 
-        # Reports is hidden the same way, and its deep link behaves the same:
-        # the rail drops it, the panel stays, and the URL lands on the default.
+        # Reports is a visible tool: its deep link opens the panel rather than
+        # falling back to the default view.
         self.navigate("/reports")
         self.wait_script(
             "document.readyState === 'complete'"
             " && document.documentElement.dataset.booted === 'ready'",
             "the app to boot at /reports",
         )
-        reports = json.loads(self.marionette.script(REPORTS_HIDDEN))
+        reports = json.loads(self.marionette.script(REPORTS_VISIBLE))
         self.check(
-            "the Reports rail entry is hidden and leaves no rail gap",
-            reports["tabHidden"] and reports["itemHidden"] and reports["itemHeight"] == 0
-            and reports["selected"] == "false"
-            and "tab-reports" not in reports["rail"].split(","),
+            "the Reports rail entry is visible in More tools",
+            not reports["tabHidden"] and not reports["itemHidden"]
+            and reports["itemHeight"] > 0
+            and reports["selected"] == "true"
+            and "tab-reports" in reports["rail"].split(","),
             f"reports={reports}",
         )
         self.check(
-            "the Reports panel keeps its markup for the day the tab returns",
-            reports["panelExists"] and reports["panelHidden"],
+            "the Reports panel opens with its chart and table",
+            reports["panelExists"] and not reports["panelHidden"],
             f"reports={reports}",
         )
         self.check(
-            "/reports falls back to the default view instead of a hidden tab",
-            reports["pathname"].rstrip("/") == "/timesheets/day" and reports["timesheetShown"],
+            "/reports opens the Reports view",
+            reports["pathname"].rstrip("/") == "/reports" and not reports["timesheetShown"],
             f"pathname={reports['pathname']!r} timesheet shown={reports['timesheetShown']}",
         )
 

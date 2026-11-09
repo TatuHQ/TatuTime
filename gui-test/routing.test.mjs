@@ -21,6 +21,10 @@ api.get = async (path) => {
   if (path === '/auth/status') return { initialised: true };
   if (path === '/auth/me') return { id: 'm1', name: 'Mem', email: 'm@x.test', role: 'member' };
   if (path === '/auth/sso/providers') return { providers: [] };
+  if (path.startsWith('/reports/monthly')) return {
+    group: 'customer', from: '2026-01-01', to: '2026-12-31', months: [], rows: [],
+    total_hours: 0, billable_hours: 0, nonbillable_hours: 0,
+  };
   return { entries: [], customers: [], projects: [], submissions: [], expenses: [],
            claims: [], notifications: [], categories: [], item_types: [],
            invoices: [], users: [], schedules: [], retainers: [], timer: null };
@@ -128,36 +132,21 @@ test('navigation updates the address bar and popstate restores the view', async 
   window.dispatchEvent(new window.PopStateEvent('popstate'));
   assert.ok(tabSelected(document, 'tab-customers'), 'the view is restored from the URL');
   assert.equal(document.getElementById('panel-customers').hidden, false);
-  // Reports is hidden for now, so its URL is not a view: popstate leaves what is
-  // up in place instead of opening a panel the rail does not offer.
+  // Reports is a real tool now, so popstate opens its panel.
   window.history.pushState({ path: '/reports' }, '', '/reports');
   window.dispatchEvent(new window.PopStateEvent('popstate'));
-  assert.ok(tabSelected(document, 'tab-customers'), 'a hidden tab leaves the current view alone');
-  assert.equal(document.getElementById('panel-reports').hidden, true, 'and keeps its panel closed');
+  assert.ok(tabSelected(document, 'tab-reports'), 'Reports is restored from the URL');
+  assert.equal(document.getElementById('panel-reports').hidden, false, 'its panel opens');
+  assert.equal(window.location.pathname, '/reports');
   dom.window.close();
 });
 
-test('the hidden Reports view falls back to the default route', async () => {
+test('a Reports deep link opens the section at boot', async () => {
   const dom = await bootAt('http://localhost/reports');
   const { document } = dom.window;
-  assert.equal(document.getElementById('tab-reports').hidden, true,
-    'the Reports rail entry is hidden for now');
-  assert.ok(tabSelected(document, 'tab-timesheet'), 'the default view is selected instead');
-  assert.equal(document.getElementById('panel-reports').hidden, true, 'the Reports panel stays closed');
-  assert.equal(dom.window.location.pathname, '/timesheets/day', 'the URL follows the view that rendered');
-  dom.window.close();
-});
-
-test('the Reports view returns the moment its rail entry does', async () => {
-  const dom = await bootAt('http://localhost/timesheets/day');
-  const { window, document } = dom.window;
-  // One attribute, exactly as for Approvals (#16): the tab, its panel and its
-  // route come back together, so reimplementing the suite is a markup change.
-  document.getElementById('tab-reports').hidden = false;
-  window.history.pushState({ path: '/reports' }, '', '/reports');
-  window.dispatchEvent(new window.PopStateEvent('popstate'));
-  assert.ok(tabSelected(document, 'tab-reports'), 'the unhidden tab is selectable again');
-  assert.equal(document.getElementById('panel-reports').hidden, false);
-  assert.equal(window.location.pathname, '/reports');
+  assert.ok(tabSelected(document, 'tab-reports'), 'the Reports tab is selected');
+  assert.equal(document.getElementById('panel-reports').hidden, false, 'the Reports panel is open');
+  assert.equal(document.getElementById('page-title').textContent, 'Reports');
+  assert.equal(dom.window.location.pathname, '/reports', 'the canonical URL is kept');
   dom.window.close();
 });

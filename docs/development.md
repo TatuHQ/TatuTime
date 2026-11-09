@@ -51,6 +51,21 @@ A running server with `TATU_WEB_DIR` can therefore serve a newer page than the
 contract compiled into its binary. Restart the server after changing Rust code
 or `openapi.json`.
 
+## Adding a report
+
+The Reports view is a list of report definitions in
+[`web/js/reports.js`](../web/js/reports.js). Each entry supplies a `label`, the
+extra filter controls it needs, a `load(range, values)` that calls one API
+endpoint, and a `render(data)` that draws its graph and table. The shell owns the
+report picker, the shared From/To range, the CSV link and the stale-data banner,
+so a new report is a registry entry (plus an endpoint and its `openapi.json`
+schema) rather than a new page.
+
+The monthly time report's endpoint is
+`GET /api/reports/monthly?from=…&to=…&group=customer|project|task`; its
+aggregation lives in `report::summarise_months` as a pure function over loaded
+documents.
+
 ## Repository layout
 
 | Path | Contents |

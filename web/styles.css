@@ -45,6 +45,19 @@
   --field-rule: #8a7b66;  /* underline rule on the warm input fill (3.6:1) */
   --input-bg: #f5eee0;    /* warm input fill */
 
+  /* Report series palette. Colours are auxiliary to the legend label and the
+     table, so they only need to be distinguishable, not carry meaning alone. */
+  --series-1: #1f6f95;
+  --series-2: #a8551f;
+  --series-3: #4f7a2a;
+  --series-4: #7a4a9e;
+  --series-5: #a3261c;
+  --series-6: #2f7d73;
+  --series-7: #7a6415;
+  --series-8: #5a6470;
+  /* Fallback for a chart/series node before its palette class is applied. */
+  --series: var(--accent);
+
   /* Vanilla component tokens, mapped onto the Tatu palette. */
   --vf-color-text-default: var(--fg);
   --vf-color-text-muted: var(--muted);
@@ -92,6 +105,16 @@
     --field-rule: #a99b89;
     --input-bg: #2a211b;
 
+    --series-1: #8fd2ee;
+    --series-2: #f0a36b;
+    --series-3: #a7d17a;
+    --series-4: #c9a0e8;
+    --series-5: #ff9b8f;
+    --series-6: #7fd6c9;
+    --series-7: #e6cf7a;
+    --series-8: #aab6c4;
+    --series: var(--accent);
+
     --vf-color-text-default: var(--fg);
     --vf-color-text-muted: var(--muted);
     --vf-color-text-inactive: color-mix(in srgb, var(--fg) 72%, var(--bg));
@@ -137,6 +160,16 @@
   --shadow: none;
   --field-rule: #a99b89;
   --input-bg: #2a211b;
+
+  --series-1: #8fd2ee;
+  --series-2: #f0a36b;
+  --series-3: #a7d17a;
+  --series-4: #c9a0e8;
+  --series-5: #ff9b8f;
+  --series-6: #7fd6c9;
+  --series-7: #e6cf7a;
+  --series-8: #aab6c4;
+  --series: var(--accent);
 
   --vf-color-text-default: var(--fg);
   --vf-color-text-muted: var(--muted);
@@ -1156,6 +1189,55 @@ html[data-advanced-billing="off"] #advanced-billing { display: none; }
   .inv-clabel-short { display: inline; }
 }
 
+
+/* ---- reports ---- */
+/* The picker and range share the house `.filter-row`; a report's own fields are
+   injected as more `.filter-field` siblings, so `display: contents` keeps them
+   on the same baseline without an extra wrapper box. */
+.report-filter-row { align-items: flex-end; }
+.report-extra-filters { display: contents; }
+.report-section { min-width: 0; }
+.report-card-head { display: flex; flex-wrap: wrap; align-items: baseline;
+  justify-content: space-between; gap: .35rem 1rem; }
+.report-card-head h2 { margin: 0; font-size: 1.15rem; }
+.report-subtitle { font-size: .8rem; color: var(--muted);
+  font-variant-numeric: tabular-nums; }
+/* One column per month, stacked bars from the registry palette. The chart
+   scrolls sideways rather than shrinking labels past legibility when a
+   400-day range spans more months than the viewport can hold. */
+.report-chart { display: flex; align-items: flex-end; gap: .35rem;
+  min-height: calc(170px + 1.6rem); padding: .75rem .25rem 0;
+  border-bottom: 1px solid var(--line); overflow-x: auto; }
+.report-month-col { flex: 1 0 2.25rem; min-width: 2.25rem; display: flex;
+  flex-direction: column; align-items: center; gap: .35rem; }
+.report-bars { width: 100%; max-width: 3.5rem; height: 170px; display: flex;
+  flex-direction: column-reverse; gap: 1px; }
+.report-bar { width: 100%; background: var(--series, var(--accent));
+  border-radius: 1px 1px 0 0; }
+.report-bar-zero { width: 100%; height: 2px; background: var(--line); }
+.report-month-label { font-size: .68rem; color: var(--muted);
+  white-space: nowrap; }
+.report-legend { display: flex; flex-wrap: wrap; gap: .35rem 1rem;
+  margin: .75rem 0 0; font-size: .8rem; }
+.report-legend-item { display: inline-flex; align-items: center; gap: .35rem;
+  min-width: 0; }
+.report-swatch { width: .8rem; height: .8rem; border-radius: 2px;
+  background: var(--series, var(--accent)); flex: none; }
+.report-legend-total { color: var(--muted); font-variant-numeric: tabular-nums; }
+#report-chart-note { margin: .4rem 0 0; font-size: .75rem; color: var(--muted); }
+#report-chart-note:empty { display: none; }
+.report-chart-empty { margin: 0; padding: 2rem .25rem; color: var(--muted); }
+#report-table { min-width: 36rem; }
+#report-table th[scope="row"] { white-space: normal; }
+#report-table td, #report-table th.num { font-variant-numeric: tabular-nums; }
+.series-1 { --series: var(--series-1); }
+.series-2 { --series: var(--series-2); }
+.series-3 { --series: var(--series-3); }
+.series-4 { --series: var(--series-4); }
+.series-5 { --series: var(--series-5); }
+.series-6 { --series: var(--series-6); }
+.series-7 { --series: var(--series-7); }
+.series-8 { --series: var(--series-8); }
 
 /* ---- appearance & messages settings (#146) ---- */
 .accent-row { display: flex; align-items: center; gap: .5rem; }

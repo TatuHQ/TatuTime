@@ -82,6 +82,7 @@ pub fn build_router(state: AppState) -> Router {
                 .delete(api::delete_entry),
         )
         .route("/reports/summary", get(api::summary))
+        .route("/reports/monthly", get(api::monthly_report))
         .route("/reports/export.csv", get(api::export_csv))
         .route(
             "/categories",

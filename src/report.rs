@@ -205,6 +205,265 @@ struct AccRow {
     entries: usize,
 }
 
+// ----------------------------------------------------- monthly time report --
+
+/// The hierarchy level a monthly time report groups by. Unlike `Group` (the
+/// money-oriented summary) this is time only, so no currency or rate is
+/// resolved and every total is a plain hour count.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MonthlyGroup {
+    Customer,
+    Project,
+    Task,
+}
+
+impl MonthlyGroup {
+    pub fn name(self) -> &'static str {
+        match self {
+            MonthlyGroup::Customer => "customer",
+            MonthlyGroup::Project => "project",
+            MonthlyGroup::Task => "task",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct MonthCell {
+    pub month: String,
+    pub hours: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct MonthRow {
+    pub key: String,
+    pub label: String,
+    pub hours: f64,
+    pub entries: usize,
+    /// One cell per entry in `MonthlyReport::months`, in the same order.
+    pub months: Vec<MonthCell>,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct MonthlyReport {
+    pub group: String,
+    pub from: String,
+    pub to: String,
+    pub months: Vec<String>,
+    pub rows: Vec<MonthRow>,
+    pub total_hours: f64,
+    pub billable_hours: f64,
+    pub nonbillable_hours: f64,
+}
+
+/// Reference data needed to label a monthly report. Projects are keyed by
+/// `(customer, code)`; tasks additionally carry their project code. A missing
+/// reference never hides time — the row falls back to the code the entry
+/// already stores.
+pub struct MonthlyContext<'a> {
+    pub customers: &'a [Customer],
+    pub projects: &'a [(Uuid, crate::domain::Project)],
+    pub tasks: &'a [(Uuid, String, crate::domain::Task)],
+}
+
+#[derive(Debug)]
+struct MonthAcc {
+    label: String,
+    hundredths: u64,
+    months: Vec<u64>,
+    entries: usize,
+}
+
+fn month_key(date: NaiveDate) -> String {
+    format!("{:04}-{:02}", date.year(), date.month())
+}
+
+/// Every month touched by an inclusive `from`/`to` range, oldest first. The
+/// store caps a range at 400 days, so this is at most fourteen months and a
+/// simple walk needs no calendar arithmetic beyond the December rollover.
+fn months_in_range(from: NaiveDate, to: NaiveDate) -> Vec<String> {
+    let mut out = Vec::new();
+    let (mut year, mut month) = (from.year(), from.month());
+    while (year, month) <= (to.year(), to.month()) {
+        out.push(format!("{year:04}-{month:02}"));
+        if month == 12 {
+            year += 1;
+            month = 1;
+        } else {
+            month += 1;
+        }
+    }
+    out
+}
+
+fn task_label(task: Option<&crate::domain::Task>, code: &str) -> String {
+    match task {
+        Some(task) if !task.name.trim().is_empty() && task.name != code => {
+            format!("{code} ({})", task.name)
+        }
+        _ => code.to_owned(),
+    }
+}
+
+/// Hours per month, grouped by customer, project or task. The totals are
+/// accumulated as integer hundredths, so no float error can creep into a cell
+/// before it is formatted for JSON.
+///
+/// Rows are ordered by total hours (largest first), which is also the order the
+/// GUI's stacked monthly chart draws them in. A task-grouped report includes a
+/// `(no task)` row for untasked entries, so the row totals always reconcile
+/// with the report total.
+pub fn summarise_months(
+    entries: &[Entry],
+    ctx: MonthlyContext<'_>,
+    kind: MonthlyGroup,
+    billable_filter: Option<bool>,
+    from: NaiveDate,
+    to: NaiveDate,
+) -> MonthlyReport {
+    let months = months_in_range(from, to);
+    let month_index: std::collections::HashMap<&str, usize> = months
+        .iter()
+        .enumerate()
+        .map(|(i, month)| (month.as_str(), i))
+        .collect();
+    let customer_by_id: std::collections::HashMap<Uuid, &Customer> =
+        ctx.customers.iter().map(|c| (c.id, c)).collect();
+    let project_by_key: std::collections::HashMap<(Uuid, &str), &crate::domain::Project> = ctx
+        .projects
+        .iter()
+        .map(|(cid, p)| ((*cid, p.code.0.as_str()), p))
+        .collect();
+    let task_by_key: std::collections::HashMap<(Uuid, &str, &str), &crate::domain::Task> = ctx
+        .tasks
+        .iter()
+        .map(|(cid, pcode, task)| ((*cid, pcode.as_str(), task.code.0.as_str()), task))
+        .collect();
+
+    let total_hundredths: u64 = entries.iter().map(|e| u64::from(e.hours.0)).sum::<u64>();
+    let billable_hundredths: u64 = entries
+        .iter()
+        .filter(|e| e.billable)
+        .map(|e| u64::from(e.hours.0))
+        .sum();
+
+    let mut acc: BTreeMap<String, MonthAcc> = BTreeMap::new();
+    for entry in entries {
+        if let Some(want) = billable_filter
+            && entry.billable != want
+        {
+            continue;
+        }
+        let Some(customer) = customer_by_id.get(&entry.customer_id) else {
+            continue; // dangling reference: never fabricate a row for it.
+        };
+        let project_code = entry.project_code.0.as_str();
+        let project = project_by_key
+            .get(&(entry.customer_id, project_code))
+            .copied();
+        let (key, label) = match kind {
+            MonthlyGroup::Customer => (customer.id.to_string(), customer.name.clone()),
+            MonthlyGroup::Project => {
+                let base = format!("{} / {project_code}", customer.name);
+                let label = match project {
+                    Some(project)
+                        if !project.name.trim().is_empty() && project.name != project_code =>
+                    {
+                        format!("{base} ({})", project.name)
+                    }
+                    _ => base,
+                };
+                (format!("{}:{project_code}", customer.id), label)
+            }
+            MonthlyGroup::Task => match &entry.task_code {
+                Some(task_code) => {
+                    let code = task_code.0.as_str();
+                    let task = task_by_key
+                        .get(&(entry.customer_id, project_code, code))
+                        .copied();
+                    (
+                        format!("{}:{project_code}:{code}", customer.id),
+                        format!(
+                            "{} / {project_code} / {}",
+                            customer.name,
+                            task_label(task, code)
+                        ),
+                    )
+                }
+                None => (
+                    format!("{}:{project_code}:(no task)", customer.id),
+                    format!("{} / {project_code} / (no task)", customer.name),
+                ),
+            },
+        };
+        let row = acc.entry(key).or_insert_with(|| MonthAcc {
+            label,
+            hundredths: 0,
+            months: vec![0; months.len()],
+            entries: 0,
+        });
+        row.hundredths = row.hundredths.saturating_add(u64::from(entry.hours.0));
+        row.entries += 1;
+        if let Some(&index) = month_index.get(month_key(entry.date).as_str()) {
+            row.months[index] = row.months[index].saturating_add(u64::from(entry.hours.0));
+        }
+    }
+
+    let mut rows: Vec<MonthRow> = acc
+        .into_iter()
+        .map(|(key, row)| MonthRow {
+            key,
+            label: row.label,
+            hours: round2(row.hundredths as f64 / 100.0),
+            entries: row.entries,
+            months: months
+                .iter()
+                .enumerate()
+                .map(|(i, month)| MonthCell {
+                    month: month.clone(),
+                    hours: round2(row.months[i] as f64 / 100.0),
+                })
+                .collect(),
+        })
+        .collect();
+    rows.sort_by(|a, b| {
+        b.hours
+            .partial_cmp(&a.hours)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.label.cmp(&b.label))
+    });
+
+    MonthlyReport {
+        group: kind.name().to_owned(),
+        from: from.to_string(),
+        to: to.to_string(),
+        months,
+        rows,
+        total_hours: round2(total_hundredths as f64 / 100.0),
+        billable_hours: round2(billable_hundredths as f64 / 100.0),
+        nonbillable_hours: round2((total_hundredths - billable_hundredths) as f64 / 100.0),
+    }
+}
+
+#[cfg(test)]
+mod monthly_tests {
+    use super::months_in_range;
+
+    #[test]
+    fn the_month_axis_crosses_a_year_boundary_in_order() {
+        let from = chrono::NaiveDate::from_ymd_opt(2025, 11, 15).unwrap();
+        let to = chrono::NaiveDate::from_ymd_opt(2026, 2, 2).unwrap();
+        assert_eq!(
+            months_in_range(from, to),
+            vec!["2025-11", "2025-12", "2026-01", "2026-02"]
+        );
+        // A range inside one month yields exactly that month, and the first and
+        // last month are included even when the bounds are mid-month.
+        let from = chrono::NaiveDate::from_ymd_opt(2026, 10, 20).unwrap();
+        let to = chrono::NaiveDate::from_ymd_opt(2026, 10, 21).unwrap();
+        assert_eq!(months_in_range(from, to), vec!["2026-10"]);
+    }
+}
+
 // ----------------------------------------------------------- profitability --
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]

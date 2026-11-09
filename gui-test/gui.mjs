@@ -145,23 +145,21 @@ check('the rail folds its tools into a disclosure, collapsed by default',
 check('core MVP navigation comes first, Setup split into three (#142/#182)',
   [...window.document.querySelectorAll('#tabs [role="tab"]')].slice(0, 5).map((t) => t.id).join(',') ===
   'tab-timesheet,tab-customers,tab-projects,tab-tasks,tab-invoices');
-// #16 and Reports are hidden for now (the approval process and the reporting
-// suite are not implemented), so the rail lists only the tools that are really
-// available: hidden entries drop out of the visible order and must not be
-// offering themselves to the user.
+// #16 is still hidden (the approval process is not implemented), but Reports
+// is a real tool now: the monthly report lives behind it.
 const railTabs = [...window.document.querySelectorAll('#tabs [role="tab"]')]
   .filter((t) => !t.hidden).map((t) => t.id);
 check('implemented secondary tools are grouped after the MVP destinations',
-  railTabs.slice(5).join(',') === 'tab-expenses,tab-settings' // after MVP + Setup tabs (#182)
+  railTabs.slice(5).join(',') === 'tab-expenses,tab-reports,tab-settings' // after MVP + Setup tabs (#182)
   && [...window.document.querySelectorAll('#tabs .nav-label')].map((n) => n.textContent).join(',') ===
   'Track time,Setup,Billing,More tools');
 check('the Approvals rail entry is hidden until its process exists (#16)',
   window.document.getElementById('tab-submissions').hidden === true
   && !railTabs.includes('tab-submissions'));
-check('the Reports rail entry is hidden until its suite is reimplemented',
-  window.document.getElementById('tab-reports').hidden === true
-  && window.document.getElementById('tab-reports').closest('.p-tabs__item').hidden === true
-  && !railTabs.includes('tab-reports'));
+check('Reports is a visible tool in the More tools disclosure',
+  window.document.getElementById('tab-reports').hidden === false
+  && window.document.getElementById('tab-reports').closest('details')?.id === 'more-tools'
+  && railTabs.includes('tab-reports'));
 check('Expenses is a Billing destination, not a separate tool',
   window.document.getElementById('tab-expenses').closest('.nav-group')
     ?.querySelector('.nav-label')?.textContent.trim() === 'Billing'
@@ -522,17 +520,20 @@ check('timer picker sees the new customer', optHas('timer-customer', 'Globex'));
 check('currency normalised to USD', globex && globex.currency === 'USD');
 check('rate stored as 4550 minor units', globex && globex.default_rate_minor === 4550);
 
-// ---- reports tab runs a query and renders totals ----
+// ---- reports tab runs a monthly query and renders the chart + table ----
 const reportForm = window.document.getElementById('report-form');
 window.document.getElementById('report-from').value = '2026-11-01';
 window.document.getElementById('report-to').value = '2026-11-30';
-window.document.getElementById('report-group').value = 'project';
+window.document.getElementById('report-filter-group').value = 'project';
 reportForm.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
-await waitFor(() => window.document.querySelectorAll('#report-table tbody tr').length >= 1, {
-  message: 'the report query to render grouped rows',
+await waitFor(() => window.document.querySelectorAll('#report-table tbody tr').length >= 1
+  && window.document.querySelectorAll('#report-chart .report-month-col').length >= 1, {
+  message: 'the report query to render the monthly chart and grouped rows',
 });
 const reportRows = window.document.querySelectorAll('#report-table tbody tr');
 check('report renders grouped rows', reportRows.length >= 1);
+check('report renders a monthly chart above the table',
+  window.document.querySelectorAll('#report-chart .report-month-col').length === 1);
 const csvHref = window.document.getElementById('csv-link').getAttribute('href');
 check('CSV download link wired', csvHref && csvHref.includes('export.csv'));
 
@@ -674,7 +675,8 @@ check('register actions sit above the card, like Timesheets',
 // the create action is the panel's first interactive element.
 check('panels lead with their action, not a duplicate H2',
   window.document.querySelector('#panel-customers h2') === null
-  && window.document.querySelector('#panel-reports h2') === null
+  && [...window.document.querySelectorAll('#panel-reports h2')]
+    .every((h) => h.closest('.report-card-head')) // report card titles, not a masthead duplicate
   && window.document.querySelector('#panel-expenses .ts-head button').id === 'expense-new'
   && window.document.querySelector('#panel-settings > .settings-head h2') === null);
 // Click "Projects" on the TatuTime row: cross-navigation filters the Projects
