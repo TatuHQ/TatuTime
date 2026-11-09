@@ -1484,10 +1484,9 @@ class Gate:
             # Backup rows.
             and counts["groups"] == 182 and counts["labels"] == 174
             and counts["controls"] == 174
-            # 77: the previous 70 plus the backup schedule intro, time-zone
-            # line, schedule status, "Back up now" intro and result, the
-            # stored-backups intro and the restore instructions.
-            and counts["help"] == 77
+            # 79: the previous 77 plus the Reports chart's rate/context note
+            # and its empty state.
+            and counts["help"] == 79
             # 30: the previous 28 plus the two Settings → Backup cards' errors.
             and counts["messages"] == counts["errorGroups"] == 30,
             f"counts={counts}",
