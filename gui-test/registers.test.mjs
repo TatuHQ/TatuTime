@@ -28,9 +28,10 @@ const CARD_REGISTERS = {
     'ret-table': ['Customer / project', 'Balance', 'Status', 'Last activity', 'Actions'],
 };
 // Summary/reference tables: a plain official table inside the card.
-const SUMMARY_REGISTERS = {
-    'report-table': ['Group', 'Currency', 'Hours', 'Amount', 'Entries'],
-};
+// #reports: `report-table` is now a monthly matrix whose header is built by
+// web/js/reports.js from the returned month range, so its columns are covered
+// in reports.test.mjs instead of the static markup guard.
+const SUMMARY_REGISTERS = {};
 // Deliberately app-owned: the timesheet grids and the editable line editor.
 // The Invoices register is phase 2d — the real aria-sort + .p-table__sort-button
 // pattern (there is no `p-table--sortable` class in Vanilla 4.59).

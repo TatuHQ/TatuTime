@@ -2,7 +2,7 @@
 // Moved from the original monolithic app.js; behaviour is unchanged.
 
 
-import { API_BASE, api } from './api.js';
+import { api } from './api.js';
 import { iw } from './billing.js';
 import { refreshPanel, switchTab } from './boot.js';
 import { $, announce, askAlert, askConfirm, clearFormError, el, fillSelect, formatMoney, iconActionsCell, panelRefresh, showFormError, singleFlight, statusChip } from './dom.js';
@@ -985,40 +985,6 @@ export async function refreshCustomerPickers() {
   }
 }
 
-// ------------------------------------------------------------- reports ---
-
-export function runReport(evt) {
-  evt.preventDefault();
-  // QA-10: a failed report fetch keeps the previous rows and shows the banner.
-  // The form listener has no caller to hand the rejection to, so it stops here.
-  return panelRefresh('panel-reports', 'the report', runReportBody).catch(() => { });
-}
-
-async function runReportBody() {
-  const from = $('report-from').value;
-  const to = $('report-to').value;
-  const group = $('report-group').value;
-  const billable = $('report-billable').value;
-  let url = `/reports/summary?from=${from}&to=${to}&group=${group}`;
-  if (billable) url += `&billable=${billable}`;
-  const summary = await api.get(url);
-  const tbody = $('report-table').querySelector('tbody');
-  tbody.textContent = '';
-  for (const row of summary.rows) {
-    tbody.appendChild(
-      el('tr', {}, [
-        el('th', { attrs: { scope: 'row' }, text: row.label }),
-        el('td', { text: row.currency }),
-        el('td', { cls: 'num', text: row.hours.toFixed(2) }),
-        el('td', { cls: 'num', text: `${row.currency} ${formatMoney(row.amount_minor)}` }),
-        el('td', { cls: 'num', text: String(row.entries) }),
-      ]),
-    );
-  }
-  $('report-total').textContent = `${summary.total_hours.toFixed(2)}  (billable ${summary.billable_hours.toFixed(2)} / non-billable ${summary.nonbillable_hours.toFixed(2)})`;
-  const link = $('csv-link');
-  link.href = `${API_BASE}/reports/export.csv?from=${from}&to=${to}`;
-  link.hidden = false;
-  announce(`Report ready: ${summary.rows.length} rows.`);
-}
+// Reports live in reports.js: the section is a registry of reports, so this
+// module keeps only the Setup hierarchy registers.
 

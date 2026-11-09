@@ -78,7 +78,8 @@ test('the shell ships the official form vocabulary and no bespoke class (#232 ph
     // The previous 70 plus the backup schedule intro, time-zone line, schedule
     // status, "Back up now" intro and result, the stored-backups intro and the
     // restore instructions.
-    assert.equal(document.querySelectorAll('.p-form-help-text').length, 77, 'the hints became p-form-help-text');
+    // +2 from the Reports view: the chart's rate/context note and the empty state.
+    assert.equal(document.querySelectorAll('.p-form-help-text').length, 79, 'the hints became p-form-help-text');
     assert.equal(document.querySelectorAll('.p-form-validation__message').length, ERROR_IDS.length,
         'every error message is the official validation message');
     assert.equal(document.querySelectorAll('.p-form-validation.is-error').length, ERROR_IDS.length,
@@ -87,10 +88,11 @@ test('the shell ships the official form vocabulary and no bespoke class (#232 ph
     assert.equal(document.querySelectorAll('.hint').length, 0, 'no .hint survives');
     assert.equal(document.querySelectorAll('.form-error').length, 0, 'no .form-error survives');
     // The filter bars and the dialog prompt stay app-owned on purpose: they are
-    // horizontal/compact controls, not stacked form rows. 14 = the hierarchy
+    // horizontal/compact controls, not stacked form rows. 17 = the hierarchy
     // registers (1 customer status + 2 projects + 3 tasks + 2 expenses) plus the
-    // six invoice filter fields (status, search, customer, project, from, to).
-    assert.equal(document.querySelectorAll('.filter-field').length, 14, 'the compact filter controls stay app-owned');
+    // six invoice filter fields (status, search, customer, project, from, to)
+    // plus the three shared Reports controls (report, from, to).
+    assert.equal(document.querySelectorAll('.filter-field').length, 17, 'the compact filter controls stay app-owned');
     dom.window.close();
 });
 

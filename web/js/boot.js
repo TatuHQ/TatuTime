@@ -7,9 +7,10 @@ import { calState, refreshTimeCal, shiftMonth } from './calendar.js';
 import { $, addDays, announce, clearFormError, decorateUbuntuButton, isoDate, mondayOf } from './dom.js';
 import { ADD_CATEGORY_VALUE, addCategory, addExpenseCategory, closeCategoryDialog, fillCategorySelect, openCategoryDialog, refreshCategories, refreshExpenses, refreshSubmissions, resetExpenseForm, saveExpense, submitWeek } from './expenses.js';
 import { refreshExpenseConversion, resetExpenseConversion, showConverted } from './fx.js';
-import { addPaymentRail, cancelCustomerEdit, cancelProjectEdit, cancelTaskEdit, contactRow, fillParentCustomers, fillTaskParents, prefillProjectParent, refreshCustomerPickers, refreshCustomerTable, refreshCustomersView, refreshProjectTable, refreshProjectsView, refreshTaskTable, refreshTasksView, runReport, saveCustomer, saveProject, saveTask } from './hierarchy.js';
+import { addPaymentRail, cancelCustomerEdit, cancelProjectEdit, cancelTaskEdit, contactRow, fillParentCustomers, fillTaskParents, prefillProjectParent, refreshCustomerPickers, refreshCustomerTable, refreshCustomersView, refreshProjectTable, refreshProjectsView, refreshTaskTable, refreshTasksView, saveCustomer, saveProject, saveTask } from './hierarchy.js';
 import { closeDeliveryRecord, closeInvoicePreview, closeSendEmailDialog, confirmSendEmail, dash, downloadInvoicePdf, ed, edCancel, edClose, edHasChanges, edLineRow, edLoadDefaults, edOpen, edRecalc, edSave, initInvoiceDropdowns, invoicePreview, markInvoiceSent, openEmailSettings, refreshInvoiceSummary, refreshInvoices, sendInvoiceEmail, setInvoicePeriod } from './invoices.js';
 import { markNotificationsRead, refreshNotifications } from './notifications.js';
+import { initReports, runReport } from './reports.js';
 import { initReceiptPreview } from './receipt.js';
 import { initSelectMenus } from './select.js';
 import { applyRoute, initRouter, initSegTabs, initSettingsTabs, initTabs, normaliseRoute, refreshTimesheetView, segActiveId, showTimesheet } from './route.js';
@@ -57,6 +58,7 @@ export function refreshPanel(tabId) {
     // #182: the hierarchy sections pull their own scoped data on show.
     'tab-projects': refreshProjectsView,
     'tab-tasks': refreshTasksView,
+    'tab-reports': () => runReport(),
     'tab-settings': refreshSettings,
   }[tabId];
   // #188: panel refreshes were dispatched un-awaited and un-caught; any
@@ -502,8 +504,6 @@ export function wireSetupPanels(today) {
     });
   }
 
-  $('report-form').addEventListener('submit', runReport);
-
   $('category-form').addEventListener('submit', addCategory);
   $('category-new').addEventListener('click', () => openCategoryDialog());
   $('category-cancel').addEventListener('click', closeCategoryDialog);
@@ -663,8 +663,10 @@ export async function startApp() {
   $('day-date').value = today;
   $('entry-date').value = today;
   $('week-date').value = today;
-  $('report-from').value = mondayOf(today);
-  $('report-to').value = addDays(mondayOf(today), 6);
+  // Reports open on the current calendar year: a monthly view is useful only
+  // once more than one month is in range, and the year is the natural frame.
+  $('report-from').value = `${today.slice(0, 4)}-01-01`;
+  $('report-to').value = `${today.slice(0, 4)}-12-31`;
 
   initTabs();
   document.querySelectorAll('button').forEach(decorateUbuntuButton);
@@ -673,6 +675,10 @@ export async function startApp() {
   // frame when hidden and renders the stored template once it is visible.
   initTemplatePreview();
   initSettingsTabs();
+  // The report registry must be built before the router can deep-link to
+  // /reports: its dynamic filter selects have to exist when that tab's first
+  // refresh runs, and the shared select-enhancement pass comes later.
+  initReports();
   initRouter(); // deep-link each view to a stable path (page routing)
   initWizard(); // first-run setup wizard (#111)
 

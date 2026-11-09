@@ -116,15 +116,11 @@
                  one of them is activated, so the rail always shows where you are. -->
           <details class="more-tools-group" id="more-tools">
             <summary class="nav-label">More tools</summary>
-            <!-- Reports is hidden until the reporting suite is reimplemented
-                   (the #16 precedent: the Approvals entry). The item *and* the
-                   button carry `hidden` so the rail keeps no gap, the route stays
-                   in TAB_ROUTES so page routing and the route-parity guard are
-                   untouched, and `applyRoute` refuses a hidden tab - a stale
-                   /reports link therefore lands on the default view instead of a
-                   panel the rail no longer offers. -->
-            <div class="p-tabs__item" hidden><button class="p-tabs__link" role="tab" id="tab-reports"
-                aria-controls="panel-reports" aria-selected="false" tabindex="-1" hidden><i class="p-icon--history"
+            <!-- Reports is a tool like the others: the shared monthly time
+                   report lives here, and more reports are added through the
+                   registry in web/js/reports.js rather than new rail entries. -->
+            <div class="p-tabs__item"><button class="p-tabs__link" role="tab" id="tab-reports"
+                aria-controls="panel-reports" aria-selected="false" tabindex="-1"><i class="p-icon--history"
                   aria-hidden="true"></i>Reports</button></div>
             <!-- Approvals (#16) is hidden for now: the approval process is not
                  implemented. The rail entry keeps its markup so the tab and its
@@ -569,51 +565,63 @@
 
         <!-- REPORTS -->
         <section id="panel-reports" role="tabpanel" aria-labelledby="tab-reports" tabindex="0" hidden>
+          <!-- The report picker and the shared range sit in one filter row. The
+               active report's own fields are rendered into #report-filters by
+               web/js/reports.js from its registry descriptor, so a new report
+               adds columns to this row without touching the shell. -->
           <div class="p-card">
             <div class="p-card__header">
-              <form id="report-form" class="bar">
-                <label for="report-from">From</label><input type="date" id="report-from" required>
-                <label for="report-to">To</label><input type="date" id="report-to" required>
-                <label for="report-group">Group by</label>
-                <select id="report-group">
-                  <option value="customer">Customer</option>
-                  <option value="project">Project</option>
-                  <option value="person">Person</option>
-                  <option value="week">ISO week</option>
-                </select>
-                <label for="report-billable">Work</label>
-                <select id="report-billable">
-                  <option value="">All</option>
-                  <option value="true">Billable</option>
-                  <option value="false">Non-billable</option>
-                </select>
+              <form id="report-form" class="filter-row report-filter-row">
+                <div class="filter-field">
+                  <label for="report-kind">Report</label>
+                  <select id="report-kind"></select>
+                </div>
+                <div class="filter-field">
+                  <label for="report-from">From</label>
+                  <input type="date" id="report-from" required>
+                </div>
+                <div class="filter-field">
+                  <label for="report-to">To</label>
+                  <input type="date" id="report-to" required>
+                </div>
+                <div id="report-filters" class="report-extra-filters"></div>
                 <button data-positive="1" type="submit" class="secondary">Run</button>
                 <a id="csv-link" class="button-link" href="#" download="timesheet.csv" hidden>Download CSV</a>
               </form>
             </div>
-            <div class="table-scroll">
-              <table id="report-table">
-                <caption class="sr-only">Report results</caption>
-                <thead>
-                  <tr>
-                    <th scope="col">Group</th>
-                    <th scope="col">Currency</th>
-                    <th scope="col">Hours</th>
-                    <th scope="col">Amount</th>
-                    <th scope="col">Entries</th>
-                  </tr>
-                </thead>
-                <tbody></tbody>
-                <tfoot>
-                  <tr>
-                    <th scope="row" colspan="2">Total hours</th>
-                    <td id="report-total"></td>
-                    <td colspan="2"></td>
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
           </div>
+          <!-- Graphs lead the view; the exact monthly matrix follows below. -->
+          <section class="report-section" aria-labelledby="report-chart-title">
+            <div class="p-card">
+              <div class="p-card__header report-card-head">
+                <h2 id="report-chart-title">Hours by month</h2>
+                <span id="report-chart-subtitle" class="report-subtitle"></span>
+              </div>
+              <div id="report-chart" class="report-chart" role="img" tabindex="0"
+                aria-label="Monthly hours chart"></div>
+              <div id="report-legend" class="report-legend"></div>
+              <p id="report-chart-note" class="p-form-help-text" role="status" aria-live="polite"></p>
+            </div>
+          </section>
+          <section class="report-section" aria-labelledby="report-table-title">
+            <div class="p-card">
+              <div class="p-card__header report-card-head">
+                <h2 id="report-table-title">Monthly detail</h2>
+                <span id="report-total" class="report-subtitle"></span>
+              </div>
+              <div class="table-scroll">
+                <table id="report-table">
+                  <caption class="sr-only">Hours by month</caption>
+                  <thead>
+                    <tr id="report-table-head"></tr>
+                  </thead>
+                  <tbody></tbody>
+                  <tfoot></tfoot>
+                </table>
+              </div>
+              <p id="report-empty" class="p-form-help-text" hidden></p>
+            </div>
+          </section>
         </section>
 
         <!-- INVOICES -->

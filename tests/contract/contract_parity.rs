@@ -680,6 +680,7 @@ fn contract_range_and_oauth_parameter_requiredness_matches_handlers() {
     }
     for path in [
         "/api/reports/summary",
+        "/api/reports/monthly",
         "/api/reports/export.csv",
         "/api/reports/profitability",
         "/api/calendar/events",

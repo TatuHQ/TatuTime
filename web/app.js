@@ -24,6 +24,7 @@ import './js/route.js';
 import './js/calendar.js';
 import './js/timesheet.js';
 import './js/hierarchy.js';
+import './js/reports.js';
 import './js/invoices.js';
 import './js/billing.js';
 import './js/receipt.js';

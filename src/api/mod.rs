@@ -764,8 +764,8 @@ pub use self::auth::{
 };
 pub use self::backup::{BackupSettingsInput, backup_settings, run_backup, update_backup_settings};
 pub use self::entries_reports::{
-    budget_report, create_entry, delete_entry, export_csv, get_entry, list_entries, profitability,
-    summary, update_entry,
+    budget_report, create_entry, delete_entry, export_csv, get_entry, list_entries, monthly_report,
+    profitability, summary, update_entry,
 };
 pub use self::expenses::{
     ClaimDecisionInput, DecisionInput, SubmitInput, create_category, create_claim, create_expense,

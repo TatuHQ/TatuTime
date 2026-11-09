@@ -351,6 +351,113 @@ async fn report_splits_billable_and_groups_by_person() {
 }
 
 #[tokio::test]
+async fn monthly_report_groups_time_across_months_and_tasks() {
+    let (app, _d) = app().await;
+    let c = new_customer(&app, "TatuTime", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap();
+    new_project(&app, cid, "P1", json!({})).await;
+    for (code, name) in [("T1", "Design"), ("T2", "Build")] {
+        let (status, task) = json_req(
+            &app,
+            "POST",
+            &format!("/api/customers/{cid}/projects/P1/tasks"),
+            Some(json!({"code": code, "name": name})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "create task: {task}");
+    }
+    let entries = [
+        json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","task_code":"T1","hours":2}),
+        json!({"date":"2026-10-03","customer_id":cid,"project_code":"P1","task_code":"T2","hours":1.5,"billable":false}),
+        json!({"date":"2026-11-05","customer_id":cid,"project_code":"P1","hours":1}),
+    ];
+    for body in entries {
+        let (status, created) = json_req(&app, "POST", "/api/entries", Some(body)).await;
+        assert_eq!(status, StatusCode::CREATED, "create entry: {created}");
+    }
+
+    let (status, report) = json_req(
+        &app,
+        "GET",
+        "/api/reports/monthly?from=2026-10-01&to=2026-11-30&group=task",
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(report["group"], "task");
+    assert_eq!(report["months"], json!(["2026-10", "2026-11"]));
+    assert_eq!(report["total_hours"], 4.5);
+    assert_eq!(report["billable_hours"], 3.0);
+    assert_eq!(report["nonbillable_hours"], 1.5);
+    let rows = report["rows"].as_array().unwrap();
+    assert_eq!(rows.len(), 3, "two tasks plus the untasked row: {rows:?}");
+    let design = rows
+        .iter()
+        .find(|r| r["label"].as_str().unwrap().contains("Design"))
+        .expect("task label resolves its name");
+    assert_eq!(design["hours"], 2.0);
+    assert_eq!(
+        design["months"],
+        json!([
+            {"month": "2026-10", "hours": 2.0},
+            {"month": "2026-11", "hours": 0.0}
+        ]),
+        "a month with no time is zero-filled, not omitted"
+    );
+    let untasked = rows
+        .iter()
+        .find(|r| r["label"].as_str().unwrap().contains("(no task)"))
+        .unwrap();
+    assert_eq!(untasked["hours"], 1.0);
+
+    // The same range grouped by customer/project still reconciles.
+    for group in ["customer", "project"] {
+        let (status, report) = json_req(
+            &app,
+            "GET",
+            &format!("/api/reports/monthly?from=2026-10-01&to=2026-11-30&group={group}"),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let rows = report["rows"].as_array().unwrap();
+        assert_eq!(rows.len(), 1, "{group}: {rows:?}");
+        assert_eq!(rows[0]["hours"], 4.5, "{group}");
+        assert_eq!(rows[0]["months"][0]["hours"], 3.5, "{group}");
+        assert_eq!(rows[0]["months"][1]["hours"], 1.0, "{group}");
+    }
+
+    // A billable filter scopes the rows; the report totals keep the full set
+    // (the same convention as /reports/summary).
+    let (status, filtered) = json_req(
+        &app,
+        "GET",
+        "/api/reports/monthly?from=2026-10-01&to=2026-11-30&group=task&billable=true",
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(filtered["total_hours"], 4.5);
+    let rows = filtered["rows"].as_array().unwrap();
+    assert_eq!(
+        rows.len(),
+        2,
+        "only the billable task and untasked rows remain"
+    );
+    assert!(rows.iter().all(|r| r["hours"] != 1.5));
+
+    // Unknown groupings are the documented 400, never a silent fallback.
+    let (status, body) = json_req(
+        &app,
+        "GET",
+        "/api/reports/monthly?from=2026-10-01&to=2026-11-30&group=week",
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+}
+
+#[tokio::test]
 async fn profitability_revenue_vs_cost() {
     let (app, _d) = app().await;
     let c = new_customer(&app, "TatuTime", "EUR", 6000).await;

@@ -367,6 +367,92 @@ async fn gather_hierarchy(app: &AppState, customers: &[Customer]) -> Result<Hier
     .await
 }
 
+/// `GET /reports/monthly`: hours per calendar month, grouped by customer,
+/// project or task. The read side of the GUI's Reports section; like the
+/// summary it is member-tier and scoped to the caller's own entries (#51).
+#[derive(Debug, serde::Deserialize)]
+pub struct MonthlyQuery {
+    #[serde(default)]
+    from: Option<String>,
+    #[serde(default)]
+    to: Option<String>,
+    #[serde(default)]
+    group: Option<String>,
+    #[serde(default)]
+    billable: Option<String>,
+}
+
+pub async fn monthly_report(
+    State(app): State<AppState>,
+    actor: AuthUser,
+    Query(q): Query<MonthlyQuery>,
+) -> ApiResult {
+    let (from, to) = parse_range(q.from.as_ref(), q.to.as_ref())?;
+    let kind = match q.group.as_deref().unwrap_or("customer") {
+        "customer" => report::MonthlyGroup::Customer,
+        "project" => report::MonthlyGroup::Project,
+        "task" => report::MonthlyGroup::Task,
+        other => {
+            return Err(ApiError::bad_request(format!(
+                "unknown group '{other}' (use customer, project or task)"
+            )));
+        }
+    };
+    let billable_filter = match q.billable.as_deref() {
+        None => None,
+        Some("true") => Some(true),
+        Some("false") => Some(false),
+        Some(other) => {
+            return Err(ApiError::bad_request(format!(
+                "'billable' must be true or false, got '{other}'"
+            )));
+        }
+    };
+    let mut entries = store_blocking("monthly entries", &app.store, move |s| {
+        s.list_range(from, to)
+    })
+    .await?;
+    // Private-per-user (#51): members report only on their own time.
+    entries.retain(|e| visible_to(&actor.0, e.user_id));
+    let customers: Vec<Customer> =
+        store_blocking("monthly customers", &app.store, |s| s.list_customers()).await?;
+    let (projects, _users) = gather_hierarchy(&app, &customers).await?;
+    // The task tier is loaded only for a task grouping: it is label data, not
+    // billing input, so a customer/project report must not pay for the fan-out.
+    let tasks = if kind == report::MonthlyGroup::Task {
+        let needed: std::collections::BTreeSet<(Uuid, String)> = entries
+            .iter()
+            .map(|e| (e.customer_id, e.project_code.0.clone()))
+            .collect();
+        let needed: Vec<(Uuid, String)> = needed.into_iter().collect();
+        store_blocking("monthly tasks", &app.store, move |s| {
+            let mut tasks = Vec::new();
+            for (customer_id, project_code) in needed {
+                for task in s.list_tasks(customer_id, &project_code)? {
+                    tasks.push((customer_id, project_code.clone(), task));
+                }
+            }
+            Ok(tasks)
+        })
+        .await?
+    } else {
+        Vec::new()
+    };
+    let report = report::summarise_months(
+        &entries,
+        report::MonthlyContext {
+            customers: &customers,
+            projects: &projects,
+            tasks: &tasks,
+        },
+        kind,
+        billable_filter,
+        from,
+        to,
+    );
+    Ok(Json(report).into_response())
+}
+
 /// `GET /reports/export.csv`: a range plus optional customer filter.
 #[derive(Debug, serde::Deserialize)]
 pub struct ExportQuery {

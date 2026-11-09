@@ -27,8 +27,9 @@ be checked on GitHub before relying on it.
 - Registers already use Vanilla mobile-card tables in several views. The Week
   grid and invoice register have local scrolling constraints; preserve their
   meaning instead of shrinking text until they fit.
-- Reports, Approvals and advanced billing are currently hidden. Responsive work
-  must not expose them or change role-based visibility.
+- Approvals and advanced billing are currently hidden. Reports is now a real
+  view (the monthly time report), so responsive work must keep it usable without
+  changing role-based visibility.
 
 Working hypothesis: a shared responsive navigation container can recover narrow
 screen space without changing the dimensions or order of desktop page controls.
