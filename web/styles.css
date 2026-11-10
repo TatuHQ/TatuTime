@@ -3317,6 +3317,80 @@ html[data-advanced-billing="off"] #advanced-billing {
       box-shadow: inset 0 3px 0 var(--accent);
    }
 
+   /* The week strip reads as one week row on a phone: weekday, date, hours —
+      no card shells. The old 4-column cards wrapped onto a second row and
+      pushed the entries down; seven flat columns fit at 360px, and the
+      selected day is marked by a filled date circle instead of a card tint. */
+   .week-strip {
+      grid-template-columns: repeat(7, minmax(0, 1fr));
+      gap: 0;
+   }
+
+   .ws-day.p-card,
+   .ws-day.p-card:hover,
+   .ws-day.p-card.selected {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      gap: .1rem;
+      min-height: 0;
+      padding: .35rem 0;
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+      box-shadow: none;
+      text-align: center;
+   }
+
+   .ws-name {
+      order: -1;
+      font-size: .65rem;
+      font-weight: 500;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+   }
+
+   .ws-date {
+      display: grid;
+      place-items: center;
+      width: 2.2rem;
+      height: 2.2rem;
+      border-radius: 50%;
+      color: var(--fg);
+      font-size: 1.15rem;
+      font-weight: 600;
+      line-height: 1;
+   }
+
+   .ws-day.selected .ws-date {
+      color: var(--bg);
+      background: var(--fg);
+   }
+
+   .ws-day.selected .ws-name {
+      color: var(--muted);
+   }
+
+   .ws-total {
+      justify-self: auto;
+      color: var(--muted);
+      font-size: .8rem;
+      font-weight: 500;
+   }
+
+   /* The status icon belongs to the desktop card; on the phone row the hours
+      already carry the day's story and the Day view links to the invoice. */
+   .ws-clock {
+      display: none;
+   }
+
+   .ws-week {
+      justify-self: start;
+      padding: .35rem 0 0;
+      text-align: left;
+   }
+
    #panel-timesheet>.ts-head {
       flex-direction: column;
       align-items: stretch;
@@ -3392,16 +3466,6 @@ html[data-advanced-billing="off"] #advanced-billing {
 }
 
 @media (max-width: 480px) {
-   .week-strip {
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: .4rem;
-   }
-
-   .ws-day.p-card {
-      min-height: 4.25rem;
-      padding: .45rem .5rem;
-   }
-
    /* #F: at this width 12 three-letter labels no longer fit; the chart's month
      axis collapses to one letter (the full label is what AT reads). */
    .inv-clabel-full {
