@@ -1234,7 +1234,7 @@ test('the card-body lead rhythm is one shared rule, not a per-view margin', () =
     // answer must exist, at the same specificity, for every card body.
     assert.match(
         css,
-        /\.p-card__content > p:not\(\[class\*="p-heading--"\]\):first-child \{ margin-top: 1rem; \}/,
+        /\.p-card__content\s*>\s*p:not\(\[class\*="p-heading--"\]\):first-child\s*\{\s*margin-top: 1rem;\s*\}/,
         'the shared card-body lead rule must keep the first paragraph below the header rule',
     );
     for (const [, , panelId] of ROUTES) {

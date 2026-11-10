@@ -82,7 +82,7 @@ test('the shell ships the advanced billing gate off and keeps its markup (#144/#
     // and `display: none` removes the whole subtree from the accessibility tree
     // and the tab order (it is not a still-tabbable node).
     assert.match(stylesRules,
-        /html\[data-advanced-billing="off"\] #advanced-billing \{ display: none; \}/,
+        /html\[data-advanced-billing="off"\] #advanced-billing\s*\{\s*display: none;\s*\}/,
         'the stylesheet hides the block from the single shell attribute');
 });
 

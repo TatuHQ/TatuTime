@@ -203,15 +203,15 @@ test('web/styles.css no longer owns the form skins, and keeps the app-owned rhyt
     // that overrides Vanilla's tinted/clipping base fieldset, and the help-text
     // margins that the bundle would otherwise pull up (.p-form-help-text sits
     // after headings in this app, not after an input).
-    assert.ok(/\.p-form__group \{ margin-bottom: \.65rem; \}/.test(stylesRules), 'the group row rhythm');
-    assert.ok(/\.p-form__group input\[type="checkbox"\], \.theme-switch input \{ min-height: 0; width: 1rem; height: 1rem; \}/.test(stylesRules),
+    assert.ok(/\.p-form__group\s*\{\s*margin-bottom: \.65rem;\s*\}/.test(stylesRules), 'the group row rhythm');
+    assert.ok(/\.p-form__group input\[type="checkbox"\],\s*\.theme-switch input\s*\{\s*min-height: 0;\s*width: 1rem;\s*height: 1rem;\s*\}/.test(stylesRules),
         'the tick-box size');
     assert.ok(/fieldset\.p-form__group \{/.test(stylesRules), 'the fieldset frame');
-    assert.ok(/fieldset\.p-form__group > legend \{/.test(stylesRules), 'the fieldset legend');
-    assert.ok(/\.customer-extra-details fieldset\.p-form__group \{ margin-top: \.5rem; \}/.test(stylesRules),
+    assert.ok(/fieldset\.p-form__group\s*>\s*legend\s*\{/.test(stylesRules), 'the fieldset legend');
+    assert.ok(/\.customer-extra-details fieldset\.p-form__group\s*\{\s*margin-top: \.5rem;\s*\}/.test(stylesRules),
         'the nested fieldset rhythm');
-    assert.ok(/\.p-form-help-text \{ margin: revert; \}/.test(stylesRules), 'the help-text margin override');
-    assert.ok(/#wizard-dialog \.p-form__group:last-child \{ margin-bottom: 0; \}/.test(stylesRules),
+    assert.ok(/\.p-form-help-text\s*\{\s*margin: revert;\s*\}/.test(stylesRules), 'the help-text margin override');
+    assert.ok(/#wizard-dialog \.p-form__group:last-child\s*\{\s*margin-bottom: 0;\s*\}/.test(stylesRules),
         'the wizard keeps no trailing gap before its action row');
 });
 

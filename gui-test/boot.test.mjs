@@ -1375,8 +1375,8 @@ api.get = async (path) => {
 
 test('the single-letter month variant is hidden by default, revealed only at narrow widths (#F)', () => {
   const css = readFileSync(new URL('../web/styles.css', import.meta.url), 'utf8');
-  assert.match(css, /\.inv-clabel-short \{ display: none; \}/,
+  assert.match(css, /\.inv-clabel-short\s*\{\s*display: none;\s*\}/,
     'the one-letter variant is off by default, so the three-letter name is what shows');
-  assert.match(css, /\.inv-clabel-full \{ display: none; \}\s*\.inv-clabel-short \{ display: inline; \}/,
+  assert.match(css, /\.inv-clabel-full\s*\{\s*display: none;\s*\}\s*\.inv-clabel-short\s*\{\s*display: inline;\s*\}/,
     'below 480px the one-letter variant replaces the three-letter one');
 });

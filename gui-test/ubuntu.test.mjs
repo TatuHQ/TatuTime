@@ -12,7 +12,7 @@ const manifest = JSON.parse(readFileSync(new URL('manifest.json', vendor), 'utf8
 
 test('pinned official components and local Ubuntu fonts match recorded hashes', () => {
   assert.equal(manifest.version, '4.59.0');
-  assert.equal(createHash('sha256').update(css).digest('hex'), manifest.cssSha256);
+  assert.equal(createHash('sha256').update(css.replace(/\r\n/g, '\n')).digest('hex'), manifest.cssSha256);
   assert.equal(manifest.assets.length, 3);
   for (const asset of manifest.assets) {
     const bytes = readFileSync(new URL(asset.filename, vendor));
@@ -39,7 +39,9 @@ test('local PDF renderer and worker match pinned hashes and ship licences', () =
   assert.equal(metadata.package, 'pdfjs-dist');
   assert.equal(metadata.version, '6.4.299');
   for (const [name, hash] of Object.entries(metadata.sha256)) {
-    assert.equal(createHash('sha256').update(readFileSync(new URL(name, pdf))).digest('hex'), hash);
+    const bytes = readFileSync(new URL(name, pdf));
+    const canonical = /\.(?:mjs|js|css)$/.test(name) ? bytes.toString('utf8').replace(/\r\n/g, '\n') : bytes;
+    assert.equal(createHash('sha256').update(canonical).digest('hex'), hash);
   }
   assert.ok(existsSync(new URL('pdf.worker.mjs', pdf)));
   assert.ok(existsSync(new URL('LICENSE', pdf)));
@@ -50,9 +52,11 @@ test('local PDF renderer and worker match pinned hashes and ship licences', () =
 test('static official icons are decorative and icon-only controls have names', () => {
   const document = new JSDOM(readFileSync(new URL('../web/index.html', import.meta.url), 'utf8')).window.document;
   const bundledIcons = new Set();
-  walk(parse(css), { visit: 'ClassSelector', enter(node) {
-    if (node.name.startsWith('p-icon--')) bundledIcons.add(node.name);
-  } });
+  walk(parse(css), {
+    visit: 'ClassSelector', enter(node) {
+      if (node.name.startsWith('p-icon--')) bundledIcons.add(node.name);
+    }
+  });
   for (const icon of document.querySelectorAll('[class*="p-icon--"]')) {
     for (const name of icon.classList) {
       if (name.startsWith('p-icon--')) assert.ok(bundledIcons.has(name), `${name} exists in the compiled Vanilla bundle`);
@@ -66,13 +70,15 @@ test('static official icons are decorative and icon-only controls have names', (
 
 test('official positive buttons meet AA text contrast in both framework themes', () => {
   const themes = [];
-  walk(parse(css), { visit: 'Rule', enter(node) {
-    const values = {};
-    node.block.children.forEach((declaration) => {
-      if (declaration.type === 'Declaration') values[declaration.property] = generate(declaration.value);
-    });
-    if (values['--vf-color-button-positive-default']) themes.push(values);
-  } });
+  walk(parse(css), {
+    visit: 'Rule', enter(node) {
+      const values = {};
+      node.block.children.forEach((declaration) => {
+        if (declaration.type === 'Declaration') values[declaration.property] = generate(declaration.value);
+      });
+      if (values['--vf-color-button-positive-default']) themes.push(values);
+    }
+  });
   assert.ok(themes.length >= 2);
   const colourDom = new JSDOM('<span></span>');
   const swatch = colourDom.window.document.querySelector('span');

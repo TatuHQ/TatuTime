@@ -199,6 +199,15 @@ export function currentRoute() {
 export function syncRoute(forceReplace = false) {
   if (!routerReady) return;
   const path = currentRoute();
+  const shortcut = {
+    '/timesheets/day': 'mobile-time',
+    '/expenses': 'mobile-expenses',
+    '/invoices': 'mobile-invoices',
+  }[path] || 'mobile-more';
+  document.querySelectorAll('#mobile-navigation button').forEach((button) => {
+    if (button.id === shortcut) button.setAttribute('aria-current', 'page');
+    else button.removeAttribute('aria-current');
+  });
   if (window.location.pathname === path) return;
   const sameSection = window.location.pathname.split('/')[1] === path.split('/')[1];
   const replace = forceReplace || sameSection;
@@ -290,6 +299,7 @@ export function initResponsiveNavigation() {
   const close = () => {
     if (drawer.open) drawer.close();
     opener.setAttribute('aria-expanded', 'false');
+    $('mobile-more').setAttribute('aria-expanded', 'false');
   };
   const sync = () => {
     const focused = document.activeElement;
@@ -309,9 +319,14 @@ export function initResponsiveNavigation() {
     opener.focus({ preventScroll: true });
     drawer.showModal();
     opener.setAttribute('aria-expanded', 'true');
+    $('mobile-more').setAttribute('aria-expanded', 'true');
   });
+  $('mobile-more').addEventListener('click', () => opener.click());
   $('navigation-close').addEventListener('click', close);
-  drawer.addEventListener('close', () => opener.setAttribute('aria-expanded', String(drawer.open)));
+  drawer.addEventListener('close', () => {
+    opener.setAttribute('aria-expanded', String(drawer.open));
+    $('mobile-more').setAttribute('aria-expanded', String(drawer.open));
+  });
   drawer.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') {
       event.preventDefault();
@@ -339,6 +354,19 @@ export function initResponsiveNavigation() {
 
 export function initTabs() {
   initResponsiveNavigation();
+  for (const [id, route] of Object.entries({
+    'mobile-time': '/timesheets/day',
+    'mobile-expenses': '/expenses',
+    'mobile-invoices': '/invoices',
+  })) {
+    $(id).addEventListener('click', () => {
+      if ($(id).hidden) return;
+      if (applyRoute(route)) {
+        refreshPanel(activeTabId('#tabs'));
+        $('main').focus({ preventScroll: true });
+      }
+    });
+  }
   for (const region of document.querySelectorAll('.table-scroll, .invoice-table-scroll')) {
     const table = region.querySelector('table');
     region.tabIndex = 0;

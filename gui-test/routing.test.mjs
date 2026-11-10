@@ -150,3 +150,27 @@ test('a Reports deep link opens the section at boot', async () => {
   assert.equal(dom.window.location.pathname, '/reports', 'the canonical URL is kept');
   dom.window.close();
 });
+
+test('mobile shortcuts open daily time and expenses and follow Back navigation', async () => {
+  const dom = await bootAt('http://localhost/timesheets/week');
+  const { window, document } = dom.window;
+  document.getElementById('mobile-time').click();
+  assert.equal(window.location.pathname, '/timesheets/day');
+  assert.ok(tabSelected(document, 'ts-day'));
+  assert.equal(document.getElementById('mobile-time').getAttribute('aria-current'), 'page');
+  document.getElementById('mobile-expenses').click();
+  assert.equal(window.location.pathname, '/expenses');
+  assert.equal(document.getElementById('mobile-expenses').getAttribute('aria-current'), 'page');
+  assert.equal(document.getElementById('mobile-time').hasAttribute('aria-current'), false);
+  window.history.pushState({}, '', '/timesheets/week');
+  window.dispatchEvent(new window.PopStateEvent('popstate'));
+  assert.equal(document.getElementById('mobile-time').hasAttribute('aria-current'), false);
+  assert.equal(document.getElementById('mobile-more').getAttribute('aria-current'), 'page');
+  dom.window.close();
+});
+
+test('mobile invoice shortcut preserves member permissions', async () => {
+  const dom = await bootAt('http://localhost/');
+  assert.equal(dom.window.document.getElementById('mobile-invoices').hidden, true);
+  dom.window.close();
+});

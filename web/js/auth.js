@@ -37,6 +37,7 @@ export function showAccount(me) {
   $('who').textContent = me.name || me.email;
   const admin = me.role === 'admin';
   state.isAdmin = admin; // #188: boot must skip admin-tier panels for members
+  $('mobile-invoices').hidden = !admin;
   document.querySelectorAll('#settings-tabs [role="tab"]').forEach((tab) => {
     // Members own only Expense categories; every other Settings section
     // (Users, Company, Invoice template, Products & services, Email,
