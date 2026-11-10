@@ -199,6 +199,15 @@ export function currentRoute() {
 export function syncRoute(forceReplace = false) {
   if (!routerReady) return;
   const path = currentRoute();
+  const shortcut = {
+    '/timesheets/day': 'mobile-time',
+    '/expenses': 'mobile-expenses',
+    '/invoices': 'mobile-invoices',
+  }[path] || 'mobile-more';
+  document.querySelectorAll('#mobile-navigation button').forEach((button) => {
+    if (button.id === shortcut) button.setAttribute('aria-current', 'page');
+    else button.removeAttribute('aria-current');
+  });
   if (window.location.pathname === path) return;
   const sameSection = window.location.pathname.split('/')[1] === path.split('/')[1];
   const replace = forceReplace || sameSection;
@@ -287,9 +296,14 @@ export function initResponsiveNavigation() {
   drawer.dataset.navigationWired = '1';
   const narrow = window.matchMedia('(width < 1036px)');
   const content = document.querySelector('.content');
+  const more = $('mobile-more');
+  const setExpanded = (expanded) => {
+    opener.setAttribute('aria-expanded', String(expanded));
+    more?.setAttribute('aria-expanded', String(expanded));
+  };
   const close = () => {
     if (drawer.open) drawer.close();
-    opener.setAttribute('aria-expanded', 'false');
+    setExpanded(false);
   };
   const sync = () => {
     const focused = document.activeElement;
@@ -304,14 +318,19 @@ export function initResponsiveNavigation() {
       }
     }
   };
-  opener.addEventListener('click', () => {
+  // Focus the control the user pressed before the native dialog takes focus:
+  // `initDialogFocusReturn` remembers that element, so dismissing the drawer
+  // restores focus to More rather than to the header button it forwards to.
+  const open = (trigger) => {
     if (!narrow.matches || drawer.open) return;
-    opener.focus({ preventScroll: true });
+    trigger.focus({ preventScroll: true });
     drawer.showModal();
-    opener.setAttribute('aria-expanded', 'true');
-  });
+    setExpanded(true);
+  };
+  opener.addEventListener('click', () => open(opener));
+  more?.addEventListener('click', () => open(more));
   $('navigation-close').addEventListener('click', close);
-  drawer.addEventListener('close', () => opener.setAttribute('aria-expanded', String(drawer.open)));
+  drawer.addEventListener('close', () => setExpanded(drawer.open));
   drawer.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') {
       event.preventDefault();
@@ -339,6 +358,19 @@ export function initResponsiveNavigation() {
 
 export function initTabs() {
   initResponsiveNavigation();
+  for (const [id, route] of Object.entries({
+    'mobile-time': '/timesheets/day',
+    'mobile-expenses': '/expenses',
+    'mobile-invoices': '/invoices',
+  })) {
+    $(id).addEventListener('click', () => {
+      if ($(id).hidden) return;
+      if (applyRoute(route)) {
+        refreshPanel(activeTabId('#tabs'));
+        $('main').focus({ preventScroll: true });
+      }
+    });
+  }
   for (const region of document.querySelectorAll('.table-scroll, .invoice-table-scroll')) {
     const table = region.querySelector('table');
     region.tabIndex = 0;

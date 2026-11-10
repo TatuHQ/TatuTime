@@ -1,0 +1,32 @@
+{
+    "name": "TatuTime",
+    "build": {
+        "dockerfile": "Dockerfile",
+        "context": ".."
+    },
+    "remoteUser": "vscode",
+    "updateRemoteUserUID": true,
+    "forwardPorts": [
+        8080
+    ],
+    "portsAttributes": {
+        "8080": {
+            "label": "TatuTime GUI and API",
+            "onAutoForward": "notify"
+        }
+    },
+    "containerEnv": {
+        "TATU_DATA_DIR": "${containerWorkspaceFolder}/Data",
+        "TATU_WEB_DIR": "${containerWorkspaceFolder}/web",
+        "TATU_SECURE_COOKIES": "0"
+    },
+    "postCreateCommand": "npm --prefix gui-test ci --no-audit --no-fund && cargo fetch --locked",
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "rust-lang.rust-analyzer",
+                "tamasfe.even-better-toml"
+            ]
+        }
+    }
+}

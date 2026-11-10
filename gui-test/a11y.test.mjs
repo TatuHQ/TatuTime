@@ -308,7 +308,7 @@ test('the bespoke tab skins are retired in favour of the p-tabs adapter (#232 in
   assert.ok(!/\.seg \[role="tab"\]/.test(stylesCss), 'the bespoke .seg [role="tab"] segment skin is gone');
   // `.seg` survives for the invoice Open|All toggle group, which is a
   // role="group" of aria-pressed buttons — not a tablist.
-  assert.match(stylesCss, /\.seg \{\n\s+display: inline-flex/, 'the .seg shell stays for the toggle group');
+  assert.match(stylesCss, /\.seg\s*\{\s*display: inline-flex/, 'the .seg shell stays for the toggle group');
 });
 test('the Open|All filter keeps its .seg semantics under the Ubuntu skin (#F)', () => {
   const { dom, document } = setup();
@@ -330,15 +330,15 @@ test('the Open|All filter keeps its .seg semantics under the Ubuntu skin (#F)', 
   // The restyle is the app-owned skin over the same group: the pressed segment
   // is filled with the accent tint in the rail's selected-tab ink (the pairing
   // contrast.mjs pins for both themes) and carries a bottom indicator.
-  assert.match(stylesCss, /\.seg \.seg-btn\[aria-pressed="true"\] \{ background: var\(--accent-soft\); color: var\(--brand-deep\)/,
+  assert.match(stylesCss, /\.seg \.seg-btn\[aria-pressed="true"\]\s*\{\s*background: var\(--accent-soft\);\s*color: var\(--brand-deep\)/,
     'the pressed segment carries the Ubuntu skin on the app ink');
   // The row itself is the shared primitive, and the status control shares the
   // fields' control height and underline boundary instead of a floating box.
-  assert.match(stylesCss, /\.filter-row,\n\.hierarchy-filters \{ display: flex; flex-wrap: wrap; align-items: flex-end; gap: var\(--space-sm\); \}/,
+  assert.match(stylesCss, /\.filter-row,\s*\.hierarchy-filters\s*\{\s*display: flex;\s*flex-wrap: wrap;\s*align-items: flex-end;\s*gap: var\(--space-sm\);\s*\}/,
     'the register filter row is the shared .filter-row primitive');
-  assert.match(stylesCss, /\.seg \{\n\s+display: inline-flex; align-items: stretch; height: var\(--control-height\);/,
+  assert.match(stylesCss, /\.seg\s*\{\s*display: inline-flex;\s*align-items: stretch;\s*height: var\(--control-height\);/,
     'the status control is sized to the design-system control height');
-  assert.match(stylesCss, /\.seg \{\n\s+display: inline-flex;[^}]*border-bottom: 1px solid var\(--field-rule\);/,
+  assert.match(stylesCss, /\.seg\s*\{\s*display: inline-flex;[^}]*border-bottom: 1px solid var\(--field-rule\);/,
     'the status control uses the same underline boundary as the fields');
   assert.ok(!/\.inv-filters/.test(stylesCss), 'the view-specific wrapper and its padding override are gone');
   dom.window.close();

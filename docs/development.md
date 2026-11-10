@@ -32,6 +32,30 @@ build step. The API contract is [`openapi.json`](../openapi.json), served at
 `/openapi.json` and rendered at `/docs`; route and contract changes belong in the
 same change.
 
+## Development container
+
+If the host has no Rust toolchain, install Docker Desktop (Linux containers)
+and the VS Code Dev Containers extension, then run **Dev Containers: Reopen in
+Container**. The checked-in `.devcontainer/` image supplies the pinned Rust
+compiler, rustfmt, clippy, Node 24, Python and Firefox ESR. It runs as a
+non-root user and installs the GUI test dependencies after creation.
+
+Inside the container, use the same Cargo commands listed above. Run the GUI
+unit checks with `npm --prefix gui-test run test:jsdom`. For the real-browser
+gate, build first with `cargo build --locked --release`, then run
+`python3 gui-test/browser-smoke.py` and
+`python3 gui-test/browser-smoke.py --dev-web-dir`.
+
+On Windows bind mounts, the live-reload probe may be unable to change a host
+file's timestamp as the container user. Test the same assets on the container's
+native filesystem instead: copy `web/` to a temporary directory, then pass that
+copy with `python3 gui-test/browser-smoke.py --web-dir /tmp/tatutime-dev-web`.
+
+`cargo run` forwards port 8080 to the host. The container enables GUI live
+reload and stores development data in the workspace's ignored `Data/` folder.
+Plain-HTTP development cookies are enabled only inside the container; this
+does not change production cookie settings.
+
 ## GUI live reload
 
 To serve GUI assets from disk on every request, so HTML/CSS/JS edits need no

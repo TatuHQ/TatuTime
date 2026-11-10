@@ -1,148 +1,219 @@
 {
-  "version": "2.0.0",
-  "tasks": [
-    {
-      "label": "cargo build",
-      "type": "shell",
-      "command": "cargo",
-      "args": [
-        "build"
-      ],
-      "problemMatcher": [
-        "$rustc"
-      ],
-      "group": {
-        "kind": "build",
-        "isDefault": true
-      }
-    },
-    {
-      "label": "cargo run",
-      "type": "shell",
-      "command": "cargo",
-      "args": [
-        "run"
-      ],
-      "problemMatcher": [
-        "$rustc"
-      ],
-      "options": {
-        "env": {
-          "RUST_BACKTRACE": "1",
-          "TATU_DATA_DIR": "${workspaceFolder}/Data"
-        }
-      }
-    },
-    {
-      "label": "cargo test",
-      "type": "shell",
-      "command": "cargo",
-      "args": [
-        "test",
-        "--all-targets"
-      ],
-      "problemMatcher": [
-        "$rustc"
-      ],
-      "group": {
-        "kind": "test",
-        "isDefault": true
-      }
-    },
-    {
-      "label": "cargo clippy",
-      "type": "shell",
-      "command": "cargo",
-      "args": [
-        "clippy",
-        "--all-targets",
-        "--",
-        "-D",
-        "warnings"
-      ],
-      "problemMatcher": [
-        "$rustc"
-      ]
-    },
-    {
-      "label": "cargo fmt",
-      "type": "shell",
-      "command": "cargo",
-      "args": [
-        "fmt",
-        "--all"
-      ],
-      "problemMatcher": []
-    },
-    {
-      "label": "cargo fmt check",
-      "type": "shell",
-      "command": "cargo",
-      "args": [
-        "fmt",
-        "--all",
-        "--",
-        "--check"
-      ],
-      "problemMatcher": []
-    },
-    {
-      "label": "gui: server (background)",
-      "type": "shell",
-      "command": "cargo",
-      "args": [
-        "run"
-      ],
-      "isBackground": true,
-      "problemMatcher": [
-        {
-          "owner": "custom",
-          "pattern": [
-            {
-              "regexp": "^$"
-            }
-          ],
-          "background": {
-            "activeOnStart": true,
-            "beginsPattern": "Compiling|Finished",
-            "endsPattern": "listening on :"
-          }
-        }
-      ],
-      "options": {
-        "env": {
-          "RUST_BACKTRACE": "1",
-          "TATU_DATA_DIR": "${workspaceFolder}/Data"
-        }
-      },
-      "presentation": {
-        "reveal": "always",
-        "panel": "dedicated"
-      }
-    },
-    {
-      "label": "gui: open browser",
-      "command": "${input:openDefaultBrowser}",
-      "problemMatcher": []
-    },
-    {
-      "label": "gui: run (server + browser)",
-      "dependsOn": [
-        "gui: server (background)",
-        "gui: open browser"
-      ],
-      "dependsOrder": "sequence",
-      "problemMatcher": []
-    }
-  ],
-  "inputs": [
-    {
-      "id": "openDefaultBrowser",
-      "type": "command",
-      "command": "vscode.open",
-      "args": [
-        "http://127.0.0.1:8080"
-      ]
-    }
-  ]
+	"version": "2.0.0",
+	"options": {
+		"cwd": "${workspaceFolder}"
+	},
+	"windows": {
+		"options": {
+			"env": {
+				"PATH": "${env:USERPROFILE}\\.cargo\\bin;${env:LOCALAPPDATA}\\Programs\\Git\\cmd;${env:ProgramFiles}\\Docker\\Docker\\resources\\bin;${env:PATH}"
+			}
+		}
+	},
+	"tasks": [
+		{
+			"label": "cargo build",
+			"type": "shell",
+			"command": "cargo",
+			"args": [
+				"build"
+			],
+			"problemMatcher": [
+				"$rustc"
+			],
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			}
+		},
+		{
+			"label": "cargo run",
+			"type": "shell",
+			"command": "cargo",
+			"args": [
+				"run"
+			],
+			"problemMatcher": [
+				"$rustc"
+			],
+			"options": {
+				"env": {
+					"RUST_BACKTRACE": "1",
+					"TATU_DATA_DIR": "${workspaceFolder}/Data"
+				}
+			}
+		},
+		{
+			"label": "cargo test",
+			"type": "shell",
+			"command": "cargo",
+			"args": [
+				"test",
+				"--all-targets"
+			],
+			"problemMatcher": [
+				"$rustc"
+			],
+			"group": {
+				"kind": "test",
+				"isDefault": true
+			}
+		},
+		{
+			"label": "cargo clippy",
+			"type": "shell",
+			"command": "cargo",
+			"args": [
+				"clippy",
+				"--all-targets",
+				"--",
+				"-D",
+				"warnings"
+			],
+			"problemMatcher": [
+				"$rustc"
+			]
+		},
+		{
+			"label": "cargo fmt",
+			"type": "shell",
+			"command": "cargo",
+			"args": [
+				"fmt",
+				"--all"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "cargo fmt check",
+			"type": "shell",
+			"command": "cargo",
+			"args": [
+				"fmt",
+				"--all",
+				"--",
+				"--check"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "gui: server (background)",
+			"type": "shell",
+			"command": "cargo",
+			"args": [
+				"run"
+			],
+			"isBackground": true,
+			"problemMatcher": [
+				{
+					"owner": "custom",
+					"pattern": [
+						{
+							"regexp": "^$"
+						}
+					],
+					"background": {
+						"activeOnStart": true,
+						"beginsPattern": "Compiling|Finished",
+						"endsPattern": "listening on :"
+					}
+				}
+			],
+			"options": {
+				"env": {
+					"RUST_BACKTRACE": "1",
+					"TATU_DATA_DIR": "${workspaceFolder}/Data"
+				}
+			},
+			"presentation": {
+				"reveal": "always",
+				"panel": "dedicated"
+			}
+		},
+		{
+			"label": "gui: open browser",
+			"command": "${input:openDefaultBrowser}",
+			"problemMatcher": []
+		},
+		{
+			"label": "gui: run (server + browser)",
+			"dependsOn": [
+				"gui: server (background)",
+				"gui: open browser"
+			],
+			"dependsOrder": "sequence",
+			"problemMatcher": []
+		},
+		{
+			"label": "mobile: focused validation",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"--test",
+				"gui-test/routing.test.mjs",
+				"gui-test/keyboard.test.mjs"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "devcontainer: build",
+			"type": "shell",
+			"command": "docker",
+			"args": [
+				"build",
+				"--file",
+				".devcontainer/Dockerfile",
+				"--tag",
+				"tatutime-dev",
+				"."
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "devcontainer: verify tools",
+			"type": "shell",
+			"command": "docker",
+			"args": [
+				"run",
+				"--rm",
+				"tatutime-dev",
+				"bash",
+				"-c",
+				"set -e; rustc --version; cargo --version; node --version; npm --version; firefox-esr --version"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "devcontainer: validate",
+			"type": "shell",
+			"command": "docker",
+			"args": [
+				"run",
+				"--rm",
+				"--mount",
+				"type=bind,source=${workspaceFolder},target=/workspace",
+				"--workdir",
+				"/workspace",
+				"tatutime-dev",
+				"bash",
+				"-c",
+				"mkdir -p target; exec > >(tee target/devcontainer-validation.log) 2>&1; set -e; npm --prefix gui-test ci --no-audit --no-fund; cargo fmt --all -- --check; node --test --test-reporter=dot gui-test/*.test.mjs; cargo clippy --locked --all-targets -- -D warnings; cargo test --locked --all-targets; cargo build --locked --release; python3 gui-test/browser-smoke.py; cp -R web /tmp/tatutime-dev-web; python3 gui-test/browser-smoke.py --web-dir /tmp/tatutime-dev-web; echo VALIDATION_PASSED"
+			],
+			"problemMatcher": [],
+			"presentation": {
+				"panel": "dedicated",
+				"reveal": "always"
+			}
+		}
+	],
+	"inputs": [
+		{
+			"id": "openDefaultBrowser",
+			"type": "command",
+			"command": "vscode.open",
+			"args": [
+				"http://127.0.0.1:8080"
+			]
+		}
+	]
 }
