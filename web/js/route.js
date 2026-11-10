@@ -203,7 +203,7 @@ export function syncRoute(forceReplace = false) {
     '/timesheets/day': 'mobile-time',
     '/expenses': 'mobile-expenses',
     '/invoices': 'mobile-invoices',
-  }[path] || 'mobile-more';
+  }[path];
   document.querySelectorAll('#mobile-navigation button').forEach((button) => {
     if (button.id === shortcut) button.setAttribute('aria-current', 'page');
     else button.removeAttribute('aria-current');
@@ -296,14 +296,9 @@ export function initResponsiveNavigation() {
   drawer.dataset.navigationWired = '1';
   const narrow = window.matchMedia('(width < 1036px)');
   const content = document.querySelector('.content');
-  const more = $('mobile-more');
-  const setExpanded = (expanded) => {
-    opener.setAttribute('aria-expanded', String(expanded));
-    more?.setAttribute('aria-expanded', String(expanded));
-  };
   const close = () => {
     if (drawer.open) drawer.close();
-    setExpanded(false);
+    opener.setAttribute('aria-expanded', 'false');
   };
   const sync = () => {
     const focused = document.activeElement;
@@ -318,19 +313,14 @@ export function initResponsiveNavigation() {
       }
     }
   };
-  // Focus the control the user pressed before the native dialog takes focus:
-  // `initDialogFocusReturn` remembers that element, so dismissing the drawer
-  // restores focus to More rather than to the header button it forwards to.
-  const open = (trigger) => {
+  opener.addEventListener('click', () => {
     if (!narrow.matches || drawer.open) return;
-    trigger.focus({ preventScroll: true });
+    opener.focus({ preventScroll: true });
     drawer.showModal();
-    setExpanded(true);
-  };
-  opener.addEventListener('click', () => open(opener));
-  more?.addEventListener('click', () => open(more));
+    opener.setAttribute('aria-expanded', 'true');
+  });
   $('navigation-close').addEventListener('click', close);
-  drawer.addEventListener('close', () => setExpanded(drawer.open));
+  drawer.addEventListener('close', () => opener.setAttribute('aria-expanded', String(drawer.open)));
   drawer.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') {
       event.preventDefault();
