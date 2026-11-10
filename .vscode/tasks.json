@@ -197,7 +197,7 @@
 				"tatutime-dev",
 				"bash",
 				"-c",
-				"mkdir -p target; exec > >(tee target/devcontainer-validation.log) 2>&1; set -e; cargo fmt --all -- --check; node --test --test-reporter=dot gui-test/*.test.mjs; cargo clippy --locked --all-targets -- -D warnings; cargo test --locked --all-targets; cargo build --locked --release; python3 gui-test/browser-smoke.py; cp -R web /tmp/tatutime-dev-web; python3 gui-test/browser-smoke.py --web-dir /tmp/tatutime-dev-web; echo VALIDATION_PASSED"
+				"mkdir -p target; exec > >(tee target/devcontainer-validation.log) 2>&1; set -e; npm --prefix gui-test ci --no-audit --no-fund; cargo fmt --all -- --check; node --test --test-reporter=dot gui-test/*.test.mjs; cargo clippy --locked --all-targets -- -D warnings; cargo test --locked --all-targets; cargo build --locked --release; python3 gui-test/browser-smoke.py; cp -R web /tmp/tatutime-dev-web; python3 gui-test/browser-smoke.py --web-dir /tmp/tatutime-dev-web; echo VALIDATION_PASSED"
 			],
 			"problemMatcher": [],
 			"presentation": {

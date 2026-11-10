@@ -296,10 +296,14 @@ export function initResponsiveNavigation() {
   drawer.dataset.navigationWired = '1';
   const narrow = window.matchMedia('(width < 1036px)');
   const content = document.querySelector('.content');
+  const more = $('mobile-more');
+  const setExpanded = (expanded) => {
+    opener.setAttribute('aria-expanded', String(expanded));
+    more?.setAttribute('aria-expanded', String(expanded));
+  };
   const close = () => {
     if (drawer.open) drawer.close();
-    opener.setAttribute('aria-expanded', 'false');
-    $('mobile-more').setAttribute('aria-expanded', 'false');
+    setExpanded(false);
   };
   const sync = () => {
     const focused = document.activeElement;
@@ -314,19 +318,19 @@ export function initResponsiveNavigation() {
       }
     }
   };
-  opener.addEventListener('click', () => {
+  // Focus the control the user pressed before the native dialog takes focus:
+  // `initDialogFocusReturn` remembers that element, so dismissing the drawer
+  // restores focus to More rather than to the header button it forwards to.
+  const open = (trigger) => {
     if (!narrow.matches || drawer.open) return;
-    opener.focus({ preventScroll: true });
+    trigger.focus({ preventScroll: true });
     drawer.showModal();
-    opener.setAttribute('aria-expanded', 'true');
-    $('mobile-more').setAttribute('aria-expanded', 'true');
-  });
-  $('mobile-more').addEventListener('click', () => opener.click());
+    setExpanded(true);
+  };
+  opener.addEventListener('click', () => open(opener));
+  more?.addEventListener('click', () => open(more));
   $('navigation-close').addEventListener('click', close);
-  drawer.addEventListener('close', () => {
-    opener.setAttribute('aria-expanded', String(drawer.open));
-    $('mobile-more').setAttribute('aria-expanded', String(drawer.open));
-  });
+  drawer.addEventListener('close', () => setExpanded(drawer.open));
   drawer.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') {
       event.preventDefault();

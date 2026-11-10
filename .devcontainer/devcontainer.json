@@ -20,7 +20,7 @@
         "TATU_WEB_DIR": "${containerWorkspaceFolder}/web",
         "TATU_SECURE_COOKIES": "0"
     },
-    "postCreateCommand": "npm --prefix gui-test install --no-package-lock && cargo fetch --locked",
+    "postCreateCommand": "npm --prefix gui-test ci --no-audit --no-fund && cargo fetch --locked",
     "customizations": {
         "vscode": {
             "extensions": [
