@@ -70,21 +70,6 @@ test('responsive navigation moves one sidebar into a closed native drawer', () =
     dom.window.close();
 });
 
-test('More opens the drawer and dismissal returns focus to More', () => {
-    const { dom, document } = setup(true);
-    const more = document.getElementById('mobile-more');
-    more.focus();
-    more.click();
-    assert.equal(document.getElementById('navigation-drawer').open, true);
-    assert.equal(more.getAttribute('aria-expanded'), 'true');
-    assert.equal(document.getElementById('navigation-open').getAttribute('aria-expanded'), 'true');
-    press(dom, 'Escape');
-    assert.equal(document.getElementById('navigation-drawer').open, false);
-    assert.equal(more.getAttribute('aria-expanded'), 'false');
-    assert.equal(activeId(document), 'mobile-more');
-    dom.window.close();
-});
-
 test('drawer selection closes navigation and focuses the destination', async () => {
     const { dom, document } = setup(true);
     document.getElementById('navigation-open').click();

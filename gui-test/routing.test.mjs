@@ -165,7 +165,11 @@ test('mobile shortcuts open daily time and expenses and follow Back navigation',
   window.history.pushState({}, '', '/timesheets/week');
   window.dispatchEvent(new window.PopStateEvent('popstate'));
   assert.equal(document.getElementById('mobile-time').hasAttribute('aria-current'), false);
-  assert.equal(document.getElementById('mobile-more').getAttribute('aria-current'), 'page');
+  assert.equal(
+    document.querySelectorAll('#mobile-navigation [aria-current]').length,
+    0,
+    'a view with no shortcut leaves none of them current',
+  );
   dom.window.close();
 });
 
