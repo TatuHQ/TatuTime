@@ -1238,6 +1238,8 @@ html[data-advanced-billing="off"] #advanced-billing { display: none; }
 .series-6 { --series: var(--series-6); }
 .series-7 { --series: var(--series-7); }
 .series-8 { --series: var(--series-8); }
+/* The combined remainder is deliberately neutral, never another customer. */
+.series-other { --series: var(--muted); }
 
 /* ---- appearance & messages settings (#146) ---- */
 .accent-row { display: flex; align-items: center; gap: .5rem; }
