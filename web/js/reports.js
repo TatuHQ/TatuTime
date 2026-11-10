@@ -33,6 +33,11 @@ const groupLabel = (group) => ({
   task: 'Task',
 })[group] || group;
 
+// Palette classes are 1-based (series-1 … series-8); the combined "Other"
+// series stays neutral so it reads as a remainder rather than another customer.
+const seriesClass = (row, index) =>
+  row.key === '__other__' ? 'series-other' : `series-${index + 1}`;
+
 // ------------------------------------------------------------ time by month --
 
 /// One row per group and one cell per month. Values are already ordered by
@@ -135,7 +140,7 @@ function drawMonthlyChart(data, shown, months) {
       const value = row.months[m]?.hours || 0;
       if (value <= 0) continue;
       bars.appendChild(el('span', {
-        cls: `report-bar series-${index}`,
+        cls: `report-bar ${seriesClass(row, index)}`,
         style: `height:${Math.max(2, Math.round((value / max) * CHART_HEIGHT))}px`,
         attrs: {
           title: `${monthLabel(month)} \u2014 ${row.label}: ${hours(value)} hours`,
@@ -161,7 +166,7 @@ function drawMonthlyChart(data, shown, months) {
   const legend = $('report-legend');
   for (const [index, row] of shown.entries()) {
     legend.appendChild(el('span', { cls: 'report-legend-item' }, [
-      el('span', { cls: `report-swatch series-${index}`, attrs: { 'aria-hidden': 'true' } }),
+      el('span', { cls: `report-swatch ${seriesClass(row, index)}`, attrs: { 'aria-hidden': 'true' } }),
       el('span', { text: row.label }),
       el('span', { cls: 'report-legend-total', text: `${hours(row.hours)} h` }),
     ]));

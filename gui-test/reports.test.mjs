@@ -85,7 +85,17 @@ test('the monthly report renders a stacked chart above the exact table', async (
   assert.equal(columns.length, 2, 'one chart column per month');
   assert.equal(columns[0].querySelectorAll('.report-bar').length, 2, 'October stacks both groups');
   assert.equal(columns[1].querySelectorAll('.report-bar').length, 1, 'November omits a zero segment');
+  assert.deepEqual(
+    [...columns[0].querySelectorAll('.report-bar')].map((bar) => bar.className),
+    ['report-bar series-1', 'report-bar series-2'],
+    'each group carries its own palette class (no shared first colour)',
+  );
   assert.equal(document.querySelectorAll('#report-legend .report-legend-item').length, 2);
+  assert.deepEqual(
+    [...document.querySelectorAll('#report-legend .report-swatch')].map((swatch) => swatch.className),
+    ['report-swatch series-1', 'report-swatch series-2'],
+    'the legend swatches match the bar colours',
+  );
   assert.match(document.getElementById('report-chart').getAttribute('aria-label'),
     /Oct 2026: 3\.00 hours/);
 
@@ -141,6 +151,8 @@ test('more than eight groups collapse into Other on the chart, never in the tabl
     'the top eight plus Other');
   assert.match(document.querySelectorAll('#report-legend .report-legend-item')[8].textContent,
     /Other \(2 groups\)/);
+  assert.equal(document.querySelectorAll('#report-legend .report-swatch')[8].className,
+    'report-swatch series-other', 'the remainder stays neutral, not another series colour');
   assert.match(document.getElementById('report-chart-note').textContent,
     /top 8 groups; 2 more/);
   dom.window.close();
