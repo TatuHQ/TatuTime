@@ -58,6 +58,9 @@ const PAIRS = [
   ['danger text on surface', '--danger', '--surface', 4.5],
   ['primary button ink', '--brand-ink', '--brand', 4.5],
   ['beta pill on tint', '--fg', '--accent-soft', 4.5],
+  // The phone week strip marks the selected day with an inverted filled circle:
+  // page ink becomes the disc and the page ground becomes its date label.
+  ['selected day on filled circle', '--bg', '--fg', 4.5],
   ['nav field text on field bg', '--fg', '--field-bg', 4.5],
   ['focus ring vs surface (UI)', '--focus', '--surface', 3.0],
   ['accent vs surface (UI)', '--accent', '--surface', 3.0],

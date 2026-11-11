@@ -441,7 +441,7 @@ const stripDays = window.document.querySelectorAll('#week-strip .ws-day');
 check('week strip renders seven days', stripDays.length === 7);
 const selDay = window.document.querySelector('#week-strip .ws-day.selected');
 check('selected day emphasised with H:MM total', selDay && selDay.dataset.date === '2026-11-11' && selDay.textContent.includes('4:15'));
-check('week strip shows week total', window.document.querySelector('.ws-week').textContent.trim() === 'Week total 4:15');
+check('week strip shows week total', window.document.querySelector('.ws-week').textContent.trim() === 'Week total: 4:15');
 
 window.document.getElementById('day-next').dispatchEvent(new window.Event('click', { bubbles: true }));
 await waitFor(() => {

@@ -65,6 +65,26 @@ test('the phone shell anchors quick navigation to the dynamic viewport', () => {
         'the panels scroll inside <main>, not the document');
 });
 
+test('the phone week strip is one flat row of seven days', () => {
+    const strip = declarations(phone, '.week-strip {');
+    assert.match(strip, /grid-template-columns:\s*repeat\(7,/,
+        'seven days share one row so the strip cannot wrap onto a second line');
+
+    const day = declarations(phone, '.ws-day.p-card,');
+    assert.match(day, /background:\s*transparent/,
+        'a phone day is a flat cell, not a card');
+    assert.match(day, /border:\s*0/, 'no card border on the phone strip');
+    assert.match(day, /flex-direction:\s*column/,
+        'weekday, date and hours stack in one column');
+
+    const date = declarations(phone, '.ws-date {');
+    assert.match(date, /border-radius:\s*50%/, 'the selected date sits in a circle');
+
+    const selected = declarations(phone, '.ws-day.selected .ws-date {');
+    assert.match(selected, /background:\s*var\(--fg\)/,
+        'the selected day is marked by a filled circle, not a card tint');
+});
+
 test('the quick navigation does not duplicate the header drawer button', () => {
     const start = html.indexOf('id="mobile-navigation"');
     assert.notEqual(start, -1, 'quick navigation missing from the markup');

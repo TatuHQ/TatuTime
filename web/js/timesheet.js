@@ -100,7 +100,7 @@ export async function refreshWeekStrip() {
     );
   }
   const sum = Object.values(totals).reduce((a, b) => a + b, 0);
-  strip.appendChild(el('span', { cls: 'ws-week num', text: `Week total ${fmtHM(sum)}` }));
+  strip.appendChild(el('span', { cls: 'ws-week num', text: `Week total: ${fmtHM(sum)}` }));
 }
 
 export async function selectDay(date) {
