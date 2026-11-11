@@ -2344,14 +2344,17 @@ class Gate:
             self.marionette.call("WebDriver:SetWindowRect", original)
 
     def responsive_dialog_audit(self):
+        # On a phone the three primary creation actions are pinned above the
+        # quick-navigation bar, and the in-panel copies are hidden; the pinned
+        # button delegates to them, so it is the visible opener to drive here.
         journeys = (
-            ("/timesheets/day", "day-add", "entry-dialog"),
+            ("/timesheets/day", "mobile-primary", "entry-dialog"),
             ("/timesheets/week", "week-add-row", "week-row-dialog"),
             ("/customers", "customer-new", "customer-dialog"),
             ("/projects", "project-new", "project-dialog"),
             ("/tasks", "task-new", "task-dialog"),
-            ("/expenses", "expense-new", "expense-dialog"),
-            ("/invoices", "invoice-new", "invoice-wizard"),
+            ("/expenses", "mobile-primary", "expense-dialog"),
+            ("/invoices", "mobile-primary", "invoice-wizard"),
             ("/settings/users", "user-new", "user-dialog"),
         )
         original = self.marionette.call("WebDriver:GetWindowRect")
@@ -2546,6 +2549,11 @@ class Gate:
                 for path, opener, control in cases:
                     self.navigate(path)
                     self.wait_script("document.documentElement.dataset.booted === 'ready'", f"shared dropdown boot {path}")
+                    # Phones pin the section action above the tabs; drive the
+                    # visible opener rather than the hidden in-panel copy.
+                    if width < 720:
+                        opener = {"day-add": "mobile-primary",
+                                  "expense-new": "mobile-primary"}.get(opener, opener)
                     if opener:
                         self.marionette.script(f"document.getElementById({json.dumps(opener)}).click(); return true;")
                     self.wait_script(f"!!document.getElementById({json.dumps(control)}).__filterButton", f"shared dropdown {control}")

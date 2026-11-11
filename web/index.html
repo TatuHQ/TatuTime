@@ -163,6 +163,11 @@
         <h1 id="page-title">Timesheet</h1>
       </header>
 
+      <div id="mobile-actions" class="mobile-actions" hidden>
+        <button type="button" id="mobile-primary" data-icon="plus" data-positive="1"><span
+            id="mobile-primary-label">Track time</span></button>
+      </div>
+
       <nav id="mobile-navigation" class="mobile-navigation" aria-label="Quick navigation">
         <button type="button" id="mobile-time" class="p-button--base" aria-controls="panel-timesheet">
           <i class="p-icon--history" aria-hidden="true"></i><span>Daily time</span></button>
@@ -256,9 +261,7 @@
               <tbody></tbody>
               <tfoot>
                 <tr>
-                  <th scope="row"><button type="button" id="day-add-bottom" class="link" data-icon="plus">Track
-                      Time</button></th>
-                  <td colspan="2" class="day-total-cell">Total: <span id="day-total" class="num"></span></td>
+                  <td colspan="3" class="day-total-cell">Total: <span id="day-total" class="num"></span></td>
                 </tr>
               </tfoot>
             </table>
@@ -653,7 +656,7 @@
            create column now stands on its own full-width row directly under the
            action row, above the Trends section. It stays written by
            refreshInvoiceSummary() and announced (role="status", aria-live). -->
-          <p id="invoice-summary" class="p-form-help-text" role="status" aria-live="polite"></p>
+          <p id="invoice-summary" class="p-form-help-text invoice-summary" role="status" aria-live="polite"></p>
           <!-- Invoice trends promoted to the page's top content section (#135): the
            Total open / Paid in tiles are retired, and the year label that lived
            inside the paid tile moves into this header, so the year stays visible
