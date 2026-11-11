@@ -288,6 +288,22 @@ export function nextTabIndex(key, index, count, orientation) {
   return null;
 }
 
+// The phone shell is sized to what the user can actually see. `100dvh` is the
+// CSS-only answer, but Chrome Android can lag behind its own URL-bar animation
+// and leave a blank strip under the quick navigation. `visualViewport.height`
+// is the visible height, so mirror it into `--app-height`; browsers without
+// `visualViewport` keep the `100dvh` fallback.
+export function initViewportHeight() {
+  const viewport = window.visualViewport;
+  if (!viewport || !document.documentElement) return;
+  const apply = () => {
+    document.documentElement.style.setProperty('--app-height', `${Math.round(viewport.height)}px`);
+  };
+  apply();
+  viewport.addEventListener('resize', apply);
+  window.addEventListener('orientationchange', apply);
+}
+
 export function initResponsiveNavigation() {
   const drawer = $('navigation-drawer');
   const sidebar = $('sidebar');
@@ -347,6 +363,7 @@ export function initResponsiveNavigation() {
 }
 
 export function initTabs() {
+  initViewportHeight();
   initResponsiveNavigation();
   for (const [id, route] of Object.entries({
     'mobile-time': '/timesheets/day',

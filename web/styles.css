@@ -43,6 +43,10 @@
    --cell-active: #d8eef8;
    --sidebar-bg: #fffdf7;
    --radius: 2px;
+   /* The phone shell height. `initViewportHeight()` mirrors
+      `visualViewport.height` here so the shell ends where the visible screen
+      does; `100dvh` is the no-JS baseline. */
+   --app-height: 100dvh;
    --shadow: 0 1px 2px rgba(23, 18, 15, .06), 0 1px 3px rgba(23, 18, 15, .10);
    /* Shared filter-row rhythm (#F follow-up): the horizontal tool rows use one
      spacing scale and one control height instead of per-view magic numbers.
@@ -3265,8 +3269,19 @@ html[data-advanced-billing="off"] #advanced-billing {
    .app {
       height: 100vh;
       height: 100dvh;
+      /* `initViewportHeight()` mirrors visualViewport.height here, so the shell
+         ends exactly where the user's screen does even while Chrome animates
+         its URL bar. */
+      height: var(--app-height);
       min-height: 0;
       overflow: hidden;
+   }
+
+   /* The version footer is desktop-only: on a phone it sat between the last
+      entry and the quick-navigation bar, and the build string belongs to the
+      About/Settings story, not the timesheet. */
+   .foot {
+      display: none;
    }
 
    .content {
@@ -3284,7 +3299,7 @@ html[data-advanced-billing="off"] #advanced-billing {
       display: flex;
       order: 1;
       flex: 0 0 auto;
-      padding: .25rem .5rem calc(.25rem + env(safe-area-inset-bottom));
+      padding: .25rem .5rem;
       background: var(--surface);
       border-top: 1px solid var(--line);
    }
