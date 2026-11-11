@@ -64,9 +64,17 @@ test('the phone shell anchors quick navigation to the dynamic viewport', () => {
         'an in-flow bar cannot drift while the browser animates its URL bar');
     assert.doesNotMatch(nav, /safe-area-inset-bottom/,
         'no reserved inset strip may paint under the bar (the page is not viewport-fit=cover)');
-    assert.match(nav, /order:\s*1/, 'the bar is the last flex row, after <main>');
+    assert.match(nav, /order:\s*2/, 'the bar is the last flex row, after the action bar');
     assert.match(phone, /main\s*{[^}]*overflow-y:\s*auto/,
         'the panels scroll inside <main>, not the document');
+
+    const actions = declarations(phone, '.mobile-actions:not([hidden]) {');
+    assert.match(actions, /order:\s*1/, 'the pinned action sits directly above the tabs');
+});
+
+test('the phone primary actions move into the pinned bar', () => {
+    assert.match(phone, /#day-add,\s*#expense-new,\s*#invoice-new\s*{\s*display:\s*none/,
+        'the in-panel primary buttons must not duplicate the pinned action');
 });
 
 test('the version footer stays off the phone', () => {

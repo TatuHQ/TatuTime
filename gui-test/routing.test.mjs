@@ -178,3 +178,27 @@ test('mobile invoice shortcut preserves member permissions', async () => {
   assert.equal(dom.window.document.getElementById('mobile-invoices').hidden, true);
   dom.window.close();
 });
+
+test('the pinned phone action follows the section and delegates to it', async () => {
+  const dom = await bootAt('http://localhost/timesheets/day');
+  const { document } = dom.window;
+  const bar = document.getElementById('mobile-actions');
+  const primary = document.getElementById('mobile-primary');
+  const label = document.getElementById('mobile-primary-label');
+  assert.equal(bar.hidden, false);
+  assert.equal(label.textContent, 'Track time');
+  assert.equal(primary.dataset.target, 'day-add');
+
+  let opened = 0;
+  document.getElementById('day-add').addEventListener('click', () => { opened += 1; });
+  primary.click();
+  assert.equal(opened, 1, 'the pinned button opens the section action');
+
+  document.getElementById('mobile-expenses').click();
+  assert.equal(label.textContent, 'Expense');
+  assert.equal(primary.dataset.target, 'expense-new');
+
+  document.getElementById('tab-customers').click();
+  assert.equal(bar.hidden, true, 'a section with no pinned action hides the bar');
+  dom.window.close();
+});

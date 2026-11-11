@@ -89,7 +89,6 @@ export function wireDayAndCalendar() {
   $('day-prev').addEventListener('click', () => navigateDay(-1));
   $('day-next').addEventListener('click', () => navigateDay(1));
   $('day-today').addEventListener('click', () => selectDay(isoDate(new Date())));
-  $('day-add-bottom').addEventListener('click', () => $('day-add').click());
   $('copy-previous').addEventListener('click', () => copyPreviousDay());
   // #140: calendar navigation.
   $('cal-prev').addEventListener('click', () => {

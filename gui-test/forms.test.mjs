@@ -300,7 +300,7 @@ test('decoration is attribute-only and every rendered button states what it need
     // purpose: `+ Manual Invoice` is the secondary action and deliberately
     // carries no data-positive, and each dialog's `Cancel`/`Close` is a plain
     // secondary button, so neither adds to it.
-    assert.equal(document.querySelectorAll('button[data-positive]').length, 41,
+    assert.equal(document.querySelectorAll('button[data-positive]').length, 42,
         'every positive shell button states data-positive');
 
     // The deleted label-mutation leaves no trace: no rendered label keeps a "+".

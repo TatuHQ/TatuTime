@@ -181,17 +181,28 @@ async function refreshInvoicesBody() {
 export async function refreshInvoiceSummary(preloaded) {
   const s = await api.get('/invoices/summary');
   const outstanding = Object.entries(s.outstanding || {})
-    .map(([cur, minor]) => `${cur} ${formatMoney(minor)}`)
-    .join(', ');
+    .map(([cur, minor]) => `${cur} ${formatMoney(minor)}`);
   // The count band speaks the same UK lifecycle vocabulary as the register
   // chips (#359): the persisted `issued` status reads "Sent", so the band and
-  // the chips can never disagree.
-  $('invoice-summary').textContent =
-    `Draft ${s.draft} · Sent ${s.issued}${s.overdue ? ` (${s.overdue} overdue)` : ''}` +
-    (s.partly_paid ? ` · Partly paid ${s.partly_paid}` : '') +
-    ` · Paid ${s.paid}` +
-    (s.written_off ? ` · Written off ${s.written_off}` : '') +
-    (outstanding ? ` · Outstanding: ${outstanding}` : '');
+  // the chips can never disagree. The parts are spans rather than one string so
+  // the phone can stack the balances under the counts while desktop keeps the
+  // single `·` line (see `.invoice-summary` in styles.css).
+  const counts = [
+    `Draft ${s.draft}`,
+    `Sent ${s.issued}${s.overdue ? ` (${s.overdue} overdue)` : ''}`,
+    ...(s.partly_paid ? [`Partly paid ${s.partly_paid}`] : []),
+    `Paid ${s.paid}`,
+    ...(s.written_off ? [`Written off ${s.written_off}`] : []),
+  ].join(' · ');
+  $('invoice-summary').replaceChildren(
+    el('span', { cls: 'invoice-stats', text: counts }),
+    ...(outstanding.length
+      ? [el('span', { cls: 'invoice-outstanding' }, [
+        el('span', { cls: 'invoice-outstanding-label', text: 'Outstanding: ' }),
+        ...outstanding.map((text) => el('span', { cls: 'invoice-amount', text })),
+      ])]
+      : []),
+  );
   // #135 overview band: tiles + monthly chart (balances & ledger are the truth)
   // #189: the invoice list is passed through from refreshInvoices (and from
   // the chained call at its foot) instead of a third GET /invoices per

@@ -1565,6 +1565,13 @@ td.cell.locked .cell-input {
    display: none;
 }
 
+/* Phone-only action bar that carries the section's primary creation action
+   above the quick navigation (Timesheets: time, Expenses: expense, Invoices:
+   invoice). Hidden until `syncRoute()` finds an action for the current view. */
+.mobile-actions {
+   display: none;
+}
+
 .navigation-drawer:not([open]) {
    display: none;
 }
@@ -3054,21 +3061,19 @@ html[data-advanced-billing="off"] #advanced-billing {
       height: 2.75rem;
    }
 
+   /* Start timer and Return to today share the second row on one centre line:
+      the timer on the left, the today link flush right. */
    .day-actions {
-      grid-column: 1 / -1;
+      grid-column: 1;
       grid-row: 2;
    }
 
    .day-end {
-      grid-column: 1 / -1;
-      grid-row: 3;
-      justify-self: stretch;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: .55rem;
-      flex-wrap: wrap;
-      min-width: 0;
+      grid-column: 2;
+      grid-row: 2;
+      justify-self: end;
+      justify-content: flex-end;
+      flex-wrap: nowrap;
    }
 
    .day-actions>.primary {
@@ -3251,6 +3256,21 @@ html[data-advanced-billing="off"] #advanced-billing {
    register uses Vanilla 4.59's real sortable pattern (aria-sort on the <th>
    plus `.p-table__sort-button`), which owns the cursor, hover ink and the
    chevron indicator. */
+/* The invoice status band: counts first, then the outstanding balances. The
+   markup is spans (built by refreshInvoiceSummary) so the phone can stack the
+   parts while desktop keeps the one-line `·` / `,` rhythm. */
+.invoice-summary {
+   display: block;
+}
+
+.invoice-summary .invoice-stats+.invoice-outstanding::before {
+   content: " · ";
+}
+
+.invoice-summary .invoice-amount+.invoice-amount::before {
+   content: ", ";
+}
+
 @media (max-width: 720px) {
    main {
       padding: 1rem;
@@ -3295,9 +3315,25 @@ html[data-advanced-billing="off"] #advanced-billing {
       overscroll-behavior: contain;
    }
 
-   .mobile-navigation {
+   /* The section's primary action rides above the three tabs, so it stays in
+      reach wherever the panel is scrolled to. */
+   .mobile-actions:not([hidden]) {
       display: flex;
       order: 1;
+      flex: 0 0 auto;
+      padding: .5rem .75rem;
+      background: var(--surface);
+      border-top: 1px solid var(--line);
+   }
+
+   .mobile-actions>button {
+      flex: 1 1 auto;
+      width: 100%;
+   }
+
+   .mobile-navigation {
+      display: flex;
+      order: 2;
       flex: 0 0 auto;
       padding: .25rem .5rem;
       background: var(--surface);
@@ -3411,10 +3447,13 @@ html[data-advanced-billing="off"] #advanced-billing {
       align-items: stretch;
    }
 
+   /* Their phone copy lives in the pinned action bar above the tabs, so the
+      in-panel buttons would duplicate the same control. Manual Invoice stays:
+      it is the secondary action and has no pinned twin. */
    #day-add,
-   #expense-new {
-      width: 100%;
-      min-width: 0;
+   #expense-new,
+   #invoice-new {
+      display: none;
    }
 
    #ts-seg {
@@ -3477,6 +3516,42 @@ html[data-advanced-billing="off"] #advanced-billing {
 
    .copy-row {
       flex-wrap: wrap;
+   }
+
+   /* "Copy from previous day" is the only control in its bar on a phone, so
+      centre it in the card instead of leaving it flush left. */
+   .copy-bar.p-card {
+      justify-content: center;
+      text-align: center;
+   }
+
+   .copy-bar .secondary {
+      margin-inline: auto;
+   }
+
+   /* The invoice status band, stacked: the counts read as one line, then the
+      outstanding balances one currency per line, left aligned with the panel
+      instead of wrapping mid-amount. */
+   .invoice-summary {
+      display: flex;
+      flex-direction: column;
+      gap: .15rem;
+      text-align: left;
+   }
+
+   .invoice-summary .invoice-stats {
+      color: var(--fg);
+      font-weight: 550;
+   }
+
+   .invoice-summary .invoice-stats+.invoice-outstanding::before,
+   .invoice-summary .invoice-amount+.invoice-amount::before {
+      content: none;
+   }
+
+   .invoice-summary .invoice-amount {
+      display: block;
+      font-variant-numeric: tabular-nums;
    }
 }
 

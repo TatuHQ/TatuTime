@@ -193,6 +193,32 @@ export function currentRoute() {
   return DEFAULT_ROUTE;
 }
 
+// The pinned phone action follows the section: Timesheets create time,
+// Expenses create an expense, Invoices raise an invoice. The bar is a phone
+// affordance; wider screens keep the section's own action row, and the phone
+// hides that copy so the same control never appears twice.
+const MOBILE_ACTIONS = {
+  timesheets: { target: 'day-add', label: 'Track time' },
+  expenses: { target: 'expense-new', label: 'Expense' },
+  invoices: { target: 'invoice-new', label: 'Invoice' },
+};
+
+function syncMobileAction(path) {
+  const bar = $('mobile-actions');
+  const button = $('mobile-primary');
+  const label = $('mobile-primary-label');
+  if (!bar || !button || !label) return;
+  const action = MOBILE_ACTIONS[path.split('/')[1]];
+  const target = action && $(action.target);
+  // A hidden or disabled target (a member without the invoice tools, a closed
+  // panel) must not leave a dead button in the bar.
+  const available = !!(action && target && !target.disabled && !target.hidden
+    && !target.closest('[hidden]'));
+  bar.hidden = !available;
+  button.dataset.target = available ? action.target : '';
+  if (available) label.textContent = action.label;
+}
+
 // Reflect the current view in the address bar. Sub-navigation inside a
 // section replaces the entry (so Back leaves the section, not each segment);
 // moving to a different section pushes a new one.
@@ -208,6 +234,7 @@ export function syncRoute(forceReplace = false) {
     if (button.id === shortcut) button.setAttribute('aria-current', 'page');
     else button.removeAttribute('aria-current');
   });
+  syncMobileAction(path);
   if (window.location.pathname === path) return;
   const sameSection = window.location.pathname.split('/')[1] === path.split('/')[1];
   const replace = forceReplace || sameSection;
@@ -365,6 +392,10 @@ export function initResponsiveNavigation() {
 export function initTabs() {
   initViewportHeight();
   initResponsiveNavigation();
+  $('mobile-primary')?.addEventListener('click', () => {
+    const target = $('mobile-primary').dataset.target;
+    if (target) $(target)?.click();
+  });
   for (const [id, route] of Object.entries({
     'mobile-time': '/timesheets/day',
     'mobile-expenses': '/expenses',
