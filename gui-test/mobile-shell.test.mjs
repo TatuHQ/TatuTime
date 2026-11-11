@@ -56,13 +56,23 @@ function declarations(source, selector) {
 test('the phone shell anchors quick navigation to the dynamic viewport', () => {
     const app = declarations(phone, '.app {');
     assert.match(app, /height:\s*100dvh/, 'the shell must take the dynamic viewport height');
+    assert.match(app, /height:\s*var\(--app-height\)/,
+        'the visible height reported by visualViewport must win over dvh');
 
     const nav = declarations(phone, '.mobile-navigation {');
     assert.doesNotMatch(nav, /position:\s*fixed/,
         'an in-flow bar cannot drift while the browser animates its URL bar');
+    assert.doesNotMatch(nav, /safe-area-inset-bottom/,
+        'no reserved inset strip may paint under the bar (the page is not viewport-fit=cover)');
     assert.match(nav, /order:\s*1/, 'the bar is the last flex row, after <main>');
     assert.match(phone, /main\s*{[^}]*overflow-y:\s*auto/,
         'the panels scroll inside <main>, not the document');
+});
+
+test('the version footer stays off the phone', () => {
+    const foot = declarations(phone, '.foot {');
+    assert.match(foot, /display:\s*none/,
+        'the build string belongs to desktop/About, not between the entries and the bar');
 });
 
 test('the phone week strip is one flat row of seven days', () => {
