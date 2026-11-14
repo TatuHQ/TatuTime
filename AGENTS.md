@@ -61,6 +61,16 @@ release is a no-op. That is what makes the "a release on every commit that lands
 in `main`" rule hold by construction (#352); the carve-out recorded by hand on
 the `v0.1.8` release notes is no longer needed.
 
+### Dependency updates
+
+Dependabot opens one PR per update, described by
+[`.github/dependabot.yml`](.github/dependabot.yml). CI gates every one of them. A
+patch or minor bump is labelled `automerge` and merged by
+[`.github/workflows/dependabot-automerge.yml`](.github/workflows/dependabot-automerge.yml)
+once CI is green, so its release is the `v<version>+<short-sha>` one described
+above; a major bump is never labelled and waits for the owner's approval like
+any other change. Do not add `automerge` to a major bump by hand.
+
 ### Architecture invariants
 
 - Money is **minor units** (`u64` cents) and hours are **hundredths** (`u32`);
