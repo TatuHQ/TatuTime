@@ -60,7 +60,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
 # Harden at runtime (compose does this by default):
 #   --read-only --cap-drop ALL --security-opt no-new-privileges --tmpfs /tmp
 # ---------------------------------------------------------------------------
-FROM gcr.io/distroless/cc-debian13:nonroot@sha256:3ee00291cf386ec52a552e6a858d555debd74776eb4bfa53fa3df2cd6677515e
+FROM gcr.io/distroless/cc-debian13:nonroot@sha256:cb87acc574abe719b6e5c547384defa2f7b1f24af9605d3f618cf852495d8be2
 
 LABEL org.opencontainers.image.title="TatuTime" \
   org.opencontainers.image.description="TatuTime timesheet server (API, GUI and contract in one binary)" \
