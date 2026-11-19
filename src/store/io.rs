@@ -105,7 +105,11 @@ impl Store {
             self.ensure_capacity::<T>()?;
         }
         std::fs::create_dir_all(self.doc_dir::<T>())?;
-        write_json(&path, value)
+        write_json(&path, value)?;
+        if matches!(T::DIR, "invoices" | "submissions" | "claims") {
+            self.invalidate_lock_snapshot();
+        }
+        Ok(())
     }
 
     /// Refuse a *new* document when its collection already holds `MAX_DOCS`
@@ -134,6 +138,9 @@ impl Store {
             return Err(StoreError::NotFound);
         }
         std::fs::remove_file(&path)?;
+        if matches!(T::DIR, "invoices" | "submissions" | "claims") {
+            self.invalidate_lock_snapshot();
+        }
         Ok(())
     }
 }

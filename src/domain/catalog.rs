@@ -1,7 +1,7 @@
 use super::customer::{LabelOverrides, PaymentTerms, TermsKind};
 use super::invoice::LineItemKind;
 use super::primitives::{Currency, default_active};
-use chrono::{DateTime, Utc};
+use crate::time::*;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -19,7 +19,7 @@ pub struct ItemType {
     pub currency: Currency,
     #[serde(default = "default_active")]
     pub active: bool,
-    pub created_at: DateTime<Utc>,
+    pub created_at: Timestamp,
 }
 
 fn default_currency_eur() -> Currency {

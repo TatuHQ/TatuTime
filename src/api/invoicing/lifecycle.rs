@@ -142,7 +142,7 @@ pub(super) async fn record_timeline(
     description: String,
     actor_name: String,
     meta: Option<serde_json::Map<String, serde_json::Value>>,
-) -> chrono::DateTime<chrono::Utc> {
+) -> Timestamp {
     let at = app.clock.now();
     let event = InvoiceTimelineEvent {
         kind,

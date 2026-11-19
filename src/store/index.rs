@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use chrono::NaiveDate;
 use uuid::Uuid;
 
 use super::cold::ColdIdIndex;
@@ -9,6 +8,7 @@ use super::io::{dir_entries, dir_exists, json_stems, read_json, write_json};
 use super::{ARCHIVE_DIR, ENTRIES_DIR, MAX_RANGE_DAYS, Store, StoreError};
 use crate::auth::User;
 use crate::domain::{Entry, Expense, Invoice};
+use crate::time::*;
 
 impl Store {
     // ---------------------------------------------------------- side indexes --
@@ -56,7 +56,7 @@ impl Store {
     pub(super) fn rebuild_invoice_index(&self) -> Result<(), StoreError> {
         let _guard = self.write_lock()?;
         let invoices = self.list_invoices()?;
-        let mut best: HashMap<String, (String, chrono::DateTime<chrono::Utc>)> = HashMap::new();
+        let mut best: HashMap<String, (String, Timestamp)> = HashMap::new();
         // Active documents win over superseded originals; among equals the
         // earliest created wins, matching `find_invoice_by_number`.
         for inv in invoices.iter().filter(|invoice| !invoice.is_superseded()) {
@@ -195,7 +195,7 @@ impl Store {
     /// The document ids a day folder holds, from its listing alone (no decode).
     fn entry_day_disk_ids(
         &self,
-        date: NaiveDate,
+        date: CivilDate,
     ) -> Result<std::collections::BTreeSet<String>, StoreError> {
         let dir = self.day_dir(date);
         if !dir_exists(&dir)? {
@@ -246,9 +246,9 @@ impl Store {
     fn entry_index_day_ids(
         &self,
         idx: &EntryUserIndex,
-        date: NaiveDate,
+        date: CivilDate,
     ) -> Result<Option<HashMap<String, Vec<String>>>, StoreError> {
-        let key = date.format("%Y-%m-%d").to_string();
+        let key = date.strftime("%Y-%m-%d").to_string();
         let day = idx.days.get(&key).cloned().unwrap_or_default();
         let indexed: std::collections::BTreeSet<String> = day.values().flatten().cloned().collect();
         let mut merged = self.entry_day_disk_ids(date)?;
@@ -280,7 +280,7 @@ impl Store {
     /// the caller must not trust it for this read.
     fn read_entries_by_ids(
         &self,
-        date: NaiveDate,
+        date: CivilDate,
         ids: &[String],
         user_id: Uuid,
     ) -> Result<Option<Vec<Entry>>, StoreError> {
@@ -325,7 +325,7 @@ impl Store {
         let mut idx = self.read_entry_index().unwrap_or_default();
         let day = idx
             .days
-            .entry(entry.date.format("%Y-%m-%d").to_string())
+            .entry(entry.date.strftime("%Y-%m-%d").to_string())
             .or_default();
         let id = entry.id.to_string();
         // Re-file: drop any prior owner for this id, then add the owner.
@@ -343,12 +343,12 @@ impl Store {
 
     /// Drop `id` from `date`'s slice (a delete, or the old side of a move). The
     /// caller holds the write lock.
-    pub(super) fn unindex_entry_locked(&self, date: NaiveDate, id: Uuid) -> Result<(), StoreError> {
+    pub(super) fn unindex_entry_locked(&self, date: CivilDate, id: Uuid) -> Result<(), StoreError> {
         let path = self.entry_index_path();
         let Some(mut idx) = self.read_entry_index() else {
             return Ok(());
         };
-        let key = date.format("%Y-%m-%d").to_string();
+        let key = date.strftime("%Y-%m-%d").to_string();
         let id = id.to_string();
         if let Some(day) = idx.days.get_mut(&key) {
             for ids in day.values_mut() {
@@ -366,12 +366,12 @@ impl Store {
     /// caller holds the write lock.
     fn write_entry_day_index_locked(
         &self,
-        date: NaiveDate,
+        date: CivilDate,
         docs: &[Entry],
     ) -> Result<(), StoreError> {
         let path = self.entry_index_path();
         let mut idx = self.read_entry_index().unwrap_or_default();
-        let key = date.format("%Y-%m-%d").to_string();
+        let key = date.strftime("%Y-%m-%d").to_string();
         if docs.is_empty() {
             idx.days.remove(&key);
         } else {
@@ -435,7 +435,7 @@ impl Store {
     /// documents only. The #335 index may only name days that are on disk, so
     /// handing it the cold rows would re-add a key naming the relocated day and
     /// regress #349's invariant on the first member read of an archived week.
-    fn scan_and_index_entry_day(&self, date: NaiveDate) -> Result<Vec<Entry>, StoreError> {
+    fn scan_and_index_entry_day(&self, date: CivilDate) -> Result<Vec<Entry>, StoreError> {
         let _guard = self.write_lock()?;
         let hot = self.walk_docs(&self.day_dir(date), |p| self.read_entry(p))?;
         let mut merged = hot.clone();
@@ -488,7 +488,7 @@ impl Store {
     /// heals the index). Order matches [`Store::list_by_date`] exactly.
     pub fn list_by_date_for_user(
         &self,
-        date: NaiveDate,
+        date: CivilDate,
         user_id: Uuid,
     ) -> Result<Vec<Entry>, StoreError> {
         let idx = self.read_entry_index();
@@ -499,8 +499,8 @@ impl Store {
     /// matches [`Store::list_range`].
     pub fn list_range_for_user(
         &self,
-        from: NaiveDate,
-        to: NaiveDate,
+        from: CivilDate,
+        to: CivilDate,
         user_id: Uuid,
     ) -> Result<Vec<Entry>, StoreError> {
         // QA-08: at most MAX_RANGE_DAYS *inclusive* days.
@@ -522,7 +522,7 @@ impl Store {
 
     fn list_entry_day_for_user(
         &self,
-        date: NaiveDate,
+        date: CivilDate,
         user_id: Uuid,
         idx: Option<&EntryUserIndex>,
     ) -> Result<Vec<Entry>, StoreError> {
@@ -626,8 +626,6 @@ pub(super) fn sort_entries_by_created(out: &mut [Entry]) {
 mod index_tests {
     use super::*;
     use crate::domain::{Invoice, InvoiceStatus};
-    use chrono::{TimeZone, Utc};
-
     fn user(email: &str) -> User {
         User {
             id: Uuid::new_v4(),
@@ -638,7 +636,7 @@ mod index_tests {
             default_rate_minor: 0,
             cost_rate_minor: 0,
             password_hash: String::new(),
-            created_at: Utc.with_ymd_and_hms(2026, 10, 1, 0, 0, 0).unwrap(),
+            created_at: crate::time::utc_timestamp(2026, 10, 1, 0, 0, 0),
             session_version: 1,
         }
     }
@@ -652,12 +650,12 @@ mod index_tests {
             number: String::new(),
             customer_id: Uuid::new_v4(),
             currency: crate::domain::Currency("EUR".into()),
-            period_from: NaiveDate::from_ymd_opt(2026, 10, 1).unwrap(),
-            period_to: NaiveDate::from_ymd_opt(2026, 10, 7).unwrap(),
+            period_from: CivilDate::new(2026, 10, 1).unwrap(),
+            period_to: CivilDate::new(2026, 10, 7).unwrap(),
             lines: vec![],
             total_minor: 0,
             status: InvoiceStatus::Draft,
-            created_at: Utc.with_ymd_and_hms(2026, 10, 1, 0, 0, 0).unwrap(),
+            created_at: crate::time::utc_timestamp(2026, 10, 1, 0, 0, 0),
             issued_at: None,
             due_date: None,
             paid_at: None,
@@ -763,18 +761,16 @@ mod per_user_index_tests {
     // does, and heal. These drive each drift shape directly.
     use super::*;
     use crate::domain::{Entry, Hours, ProjectCode, Source};
-    use chrono::{TimeZone, Utc};
-
-    fn day() -> NaiveDate {
-        NaiveDate::from_ymd_opt(2026, 10, 2).unwrap()
+    fn day() -> CivilDate {
+        CivilDate::new(2026, 10, 2).unwrap()
     }
 
-    fn other_day() -> NaiveDate {
-        NaiveDate::from_ymd_opt(2026, 10, 3).unwrap()
+    fn other_day() -> CivilDate {
+        CivilDate::new(2026, 10, 3).unwrap()
     }
 
-    fn entry_at(user: Option<Uuid>, seq: u32, date: NaiveDate) -> Entry {
-        let at = Utc.with_ymd_and_hms(2026, 10, 2, 9, 0, seq).unwrap();
+    fn entry_at(user: Option<Uuid>, seq: u32, date: CivilDate) -> Entry {
+        let at = crate::time::utc_timestamp(2026, 10, 2, 9, 0, seq);
         Entry {
             imported: None,
             id: Uuid::new_v4(),
@@ -793,7 +789,7 @@ mod per_user_index_tests {
     }
 
     fn expense(user: Option<Uuid>) -> Expense {
-        let at = Utc.with_ymd_and_hms(2026, 10, 2, 9, 0, 0).unwrap();
+        let at = crate::time::utc_timestamp(2026, 10, 2, 9, 0, 0);
         Expense {
             imported: None,
             id: Uuid::new_v4(),

@@ -78,41 +78,40 @@ pub async fn sync_invoice(
     // A legacy `Paid` invoice predating the ledger (#114) is represented as
     // one payment of the total under the empty detail.
     let detail_of = |p: &crate::domain::InvoicePayment| p.id.to_string();
-    let pending: Vec<(String, u64, String, chrono::DateTime<chrono::Utc>)> =
-        if invoice.payments.is_empty() {
-            if invoice.paid_minor() > 0 {
-                vec![(
-                    String::new(),
-                    invoice.paid_minor(),
-                    invoice.payment_reference.clone(),
-                    invoice.paid_at.unwrap_or_else(|| app.clock.now()),
-                )]
-            } else {
-                Vec::new()
-            }
+    let pending: Vec<(String, u64, String, Timestamp)> = if invoice.payments.is_empty() {
+        if invoice.paid_minor() > 0 {
+            vec![(
+                String::new(),
+                invoice.paid_minor(),
+                invoice.payment_reference.clone(),
+                invoice.paid_at.unwrap_or_else(|| app.clock.now()),
+            )]
         } else {
-            invoice
-                .payments
-                .iter()
-                .filter(|p| {
-                    !records.iter().any(|r| {
-                        r.provider == provider.name()
-                            && r.kind == "payment"
-                            && r.invoice_id == invoice.id
-                            && r.detail == detail_of(p)
-                            && r.status == crate::accounting::SyncStatus::Synced
-                    })
+            Vec::new()
+        }
+    } else {
+        invoice
+            .payments
+            .iter()
+            .filter(|p| {
+                !records.iter().any(|r| {
+                    r.provider == provider.name()
+                        && r.kind == "payment"
+                        && r.invoice_id == invoice.id
+                        && r.detail == detail_of(p)
+                        && r.status == crate::accounting::SyncStatus::Synced
                 })
-                .map(|p| {
-                    (
-                        detail_of(p),
-                        p.amount_minor,
-                        p.reference.clone(),
-                        p.received_at,
-                    )
-                })
-                .collect()
-        };
+            })
+            .map(|p| {
+                (
+                    detail_of(p),
+                    p.amount_minor,
+                    p.reference.clone(),
+                    p.received_at,
+                )
+            })
+            .collect()
+    };
     if let Some(prev) = records
         .iter()
         .find(|r| {

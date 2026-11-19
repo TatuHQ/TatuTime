@@ -12,7 +12,7 @@
 
 use std::sync::Arc;
 
-use chrono::{DateTime, Utc};
+use crate::time::*;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
@@ -52,7 +52,7 @@ pub trait AccountingSync: Send + Sync {
         amount_minor: u64,
         currency: &str,
         reference: &str,
-        paid_at: DateTime<Utc>,
+        paid_at: Timestamp,
     ) -> Result<String, SyncError>;
 }
 
@@ -134,7 +134,7 @@ pub struct SyncRecord {
     #[serde(default)]
     pub error: String,
     pub attempts: u32,
-    pub updated_at: DateTime<Utc>,
+    pub updated_at: Timestamp,
     /// Sub-key for `kind == "payment"` records: the ledger payment id
     /// (#114), so each recorded payment syncs with its real amount. Empty
     /// for invoice records and for the single legacy payment.
@@ -183,8 +183,8 @@ impl AccountingSync for QboProvider {
     fn push_invoice(&self, doc: &InvoiceDoc, suggested_id: &str) -> Result<String, SyncError> {
         let body = serde_json::json!({
             "IdDoc": {
-                "TxnDate": doc.invoice.period_to.format("%Y-%m-%d").to_string(),
-                "DueDate": doc.invoice.due_date.map(|d| d.format("%Y-%m-%d").to_string()).unwrap_or_default(),
+                "TxnDate": doc.invoice.period_to.strftime("%Y-%m-%d").to_string(),
+                "DueDate": doc.invoice.due_date.map(|d| d.strftime("%Y-%m-%d").to_string()).unwrap_or_default(),
                 "DocNumber": doc.invoice.number,
                 "CustomerRef": { "name": doc.customer.name },
                 "CurrencyRef": { "value": doc.invoice.currency.0 },
@@ -204,11 +204,11 @@ impl AccountingSync for QboProvider {
         amount_minor: u64,
         currency: &str,
         reference: &str,
-        paid_at: DateTime<Utc>,
+        paid_at: Timestamp,
     ) -> Result<String, SyncError> {
         let body = serde_json::json!({
             "Payment": {
-                "TxnDate": paid_at.format("%Y-%m-%d").to_string(),
+                "TxnDate": paid_at.strftime("%Y-%m-%d").to_string(),
                 "TotalAmt": qbo_amount(amount_minor),
                 "CurrencyRef": { "value": currency },
                 "PaymentRefNum": reference,
@@ -229,8 +229,8 @@ impl AccountingSync for XeroProvider {
                 "Type": "ACCREC", // sales invoice (review B9: ACCPAY is a bill)
                 "InvoiceNumber": doc.invoice.number,
                 "ContactName": doc.customer.name,
-                "Date": doc.invoice.period_to.format("%Y-%m-%d").to_string(),
-                "DueDate": doc.invoice.due_date.map(|d| d.format("%Y-%m-%d").to_string()).unwrap_or_default(),
+                "Date": doc.invoice.period_to.strftime("%Y-%m-%d").to_string(),
+                "DueDate": doc.invoice.due_date.map(|d| d.strftime("%Y-%m-%d").to_string()).unwrap_or_default(),
                 "CurrencyCode": doc.invoice.currency.0,
                 "Total": doc.invoice.total_minor as f64 / 100.0,
                 "LineItems": doc.invoice.lines.iter().map(|l| serde_json::json!({
@@ -248,11 +248,11 @@ impl AccountingSync for XeroProvider {
         amount_minor: u64,
         currency: &str,
         reference: &str,
-        paid_at: DateTime<Utc>,
+        paid_at: Timestamp,
     ) -> Result<String, SyncError> {
         let body = serde_json::json!({
             "Payments": [{
-                "Date": paid_at.format("%Y-%m-%d").to_string(),
+                "Date": paid_at.strftime("%Y-%m-%d").to_string(),
                 "Amount": amount_minor as f64 / 100.0,
                 "CurrencyCode": currency,
                 "Reference": reference,
@@ -306,7 +306,7 @@ pub struct SyncAttempt<'a> {
     pub remote_id: String,
     pub status: SyncStatus,
     pub error: String,
-    pub now: DateTime<Utc>,
+    pub now: Timestamp,
     /// See `SyncRecord::detail` (#114).
     pub detail: String,
 }
@@ -409,7 +409,7 @@ impl crate::scheduler::Job for AccountingRetryJob {
     fn interval_secs(&self) -> i64 {
         24 * 3600
     }
-    fn run(&self, now: DateTime<Utc>) {
+    fn run(&self, now: Timestamp) {
         let Ok(records) = list_records(&self.store) else {
             return;
         };
@@ -551,8 +551,6 @@ impl crate::scheduler::Job for AccountingRetryJob {
 mod tests {
     use super::*;
     use crate::domain::{Currency, InvoiceStatus, LineKind};
-    use chrono::TimeZone;
-
     /// Transport that records bodies and returns deterministic ids, or fails
     /// on command.
     struct StubTransport {
@@ -616,11 +614,11 @@ mod tests {
             number: "INV-0042".into(),
             customer_id: customer.id,
             currency: Currency("EUR".into()),
-            period_from: chrono::NaiveDate::from_ymd_opt(2026, 10, 1).unwrap(),
-            period_to: chrono::NaiveDate::from_ymd_opt(2026, 10, 7).unwrap(),
+            period_from: CivilDate::new(2026, 10, 1).unwrap(),
+            period_to: CivilDate::new(2026, 10, 7).unwrap(),
             lines: vec![crate::domain::InvoiceLine {
                 kind: LineKind::Time,
-                date: chrono::NaiveDate::from_ymd_opt(2026, 10, 2).unwrap(),
+                date: CivilDate::new(2026, 10, 2).unwrap(),
                 entry_id: Some(Uuid::new_v4()),
                 expense_id: None,
                 project_code: None,
@@ -635,9 +633,9 @@ mod tests {
             }],
             total_minor: 18000,
             status: InvoiceStatus::Issued,
-            created_at: Utc.timestamp_opt(1, 0).unwrap(),
+            created_at: jiff::Timestamp::new(1, 0).unwrap(),
             issued_at: None,
-            due_date: Some(chrono::NaiveDate::from_ymd_opt(2026, 10, 21).unwrap()),
+            due_date: Some(CivilDate::new(2026, 10, 21).unwrap()),
             paid_at: None,
             payment_reference: String::new(),
             pdf: None,
@@ -677,7 +675,7 @@ mod tests {
         assert_eq!(body["Line"][0]["Amount"], "180.00");
         assert_eq!(body["synchronized_id"], "qbo:INV-0042");
         drop(posts);
-        let paid_at = Utc.timestamp_opt(1, 0).unwrap();
+        let paid_at = jiff::Timestamp::new(1, 0).unwrap();
         let pid = p
             .push_payment(&remote, 18000, "EUR", "wire:abc", paid_at)
             .unwrap();

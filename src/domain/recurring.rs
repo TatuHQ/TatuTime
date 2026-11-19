@@ -1,5 +1,5 @@
 use super::primitives::Currency;
-use chrono::{DateTime, NaiveDate, Utc};
+use crate::time::*;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -43,25 +43,25 @@ pub struct RecurringSchedule {
     pub currency: Currency,
     pub active: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub last_period_end: Option<NaiveDate>,
-    pub created_at: DateTime<Utc>,
+    pub last_period_end: Option<CivilDate>,
+    pub created_at: Timestamp,
 }
 
 /// If a schedule is due as of `today`, return the period `(from, to)` to bill.
 pub fn due_period(
     cadence: Cadence,
-    last_period_end: Option<NaiveDate>,
-    today: NaiveDate,
-) -> Option<(NaiveDate, NaiveDate)> {
+    last_period_end: Option<CivilDate>,
+    today: CivilDate,
+) -> Option<(CivilDate, CivilDate)> {
     let interval = cadence.interval_days();
     match last_period_end {
         None => {
-            let from = today - chrono::Duration::days(interval - 1);
+            let from = today - (interval - 1).days();
             Some((from, today))
         }
         Some(last) => {
             if (today - last).num_days() >= interval {
-                Some((last + chrono::Duration::days(1), today))
+                Some((last + (1).days(), today))
             } else {
                 None
             }
@@ -75,19 +75,19 @@ mod tests {
 
     #[test]
     fn due_period_quarterly_boundary() {
-        let today = NaiveDate::from_ymd_opt(2026, 10, 7).unwrap();
+        let today = CivilDate::new(2026, 10, 7).unwrap();
         // Never run -> a full 91-day quarter ending today.
         assert_eq!(
             due_period(Cadence::Quarterly, None, today),
-            Some((today - chrono::Duration::days(90), today))
+            Some((today - (90).days(), today))
         );
         // Ran 90 days ago -> not yet due; 91 days ago -> due, from the next day.
-        let last = today - chrono::Duration::days(90);
+        let last = today - (90).days();
         assert!(due_period(Cadence::Quarterly, Some(last), today).is_none());
-        let last91 = today - chrono::Duration::days(91);
+        let last91 = today - (91).days();
         assert_eq!(
             due_period(Cadence::Quarterly, Some(last91), today),
-            Some((last91 + chrono::Duration::days(1), today))
+            Some((last91 + (1).days(), today))
         );
     }
 }

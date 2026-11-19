@@ -5,12 +5,12 @@
 //! but it means logout cannot revoke before expiry — tracked as a hardening
 //! ticket (session revocation). Secrets never appear in responses or logs.
 
+use crate::time::*;
 use argon2::Argon2;
 use argon2::password_hash::phc::PasswordHash;
 use argon2::password_hash::{PasswordHasher, PasswordVerifier};
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use chrono::{DateTime, Utc};
 use hmac::{Hmac, KeyInit, Mac};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
@@ -40,7 +40,7 @@ pub struct User {
     #[serde(default)]
     pub cost_rate_minor: u64,
     pub password_hash: String,
-    pub created_at: DateTime<Utc>,
+    pub created_at: Timestamp,
     /// Incremented whenever security-sensitive identity data changes.
     #[serde(default)]
     pub session_version: u64,
@@ -134,11 +134,11 @@ impl Session {
         m.finalize().into_bytes().to_vec()
     }
 
-    pub fn issue(&self, user: &User, now: DateTime<Utc>) -> String {
+    pub fn issue(&self, user: &User, now: Timestamp) -> String {
         let claims = Claims {
             uid: user.id.to_string(),
             jti: Uuid::new_v4().to_string(),
-            exp: now.timestamp() + self.ttl_secs,
+            exp: now.as_second() + self.ttl_secs,
             session_version: user.session_version,
         };
         let payload =
@@ -148,7 +148,7 @@ impl Session {
     }
 
     /// Returns the verified claims if the token is authentic and unexpired.
-    pub fn verify(&self, token: &str, now: DateTime<Utc>) -> Option<SessionClaims> {
+    pub fn verify(&self, token: &str, now: Timestamp) -> Option<SessionClaims> {
         let (payload, sig) = token.split_once('.')?;
         let provided = URL_SAFE_NO_PAD.decode(sig).ok()?;
         // verify_slice is constant-time.
@@ -157,7 +157,7 @@ impl Session {
         m.verify_slice(&provided).ok()?;
         let json = URL_SAFE_NO_PAD.decode(payload).ok()?;
         let claims: Claims = serde_json::from_slice(&json).ok()?;
-        if claims.exp < now.timestamp() {
+        if claims.exp < now.as_second() {
             return None;
         }
         Some(SessionClaims {
@@ -366,16 +366,16 @@ mod tests {
             default_rate_minor: 0,
             cost_rate_minor: 0,
             password_hash: String::new(),
-            created_at: Utc::now(),
+            created_at: Timestamp::now(),
             session_version: 1,
         };
-        let now = Utc::now();
+        let now = Timestamp::now();
         let token = s.issue(&user, now);
         assert_eq!(s.verify(&token, now).map(|c| c.uid), Some(user.id));
         // Tampered signature fails.
         assert_eq!(s.verify(&format!("{token}x"), now).map(|c| c.uid), None);
         // Expired fails.
-        let later = now + chrono::Duration::hours(2);
+        let later = now + jiff::SignedDuration::from_hours(2);
         assert_eq!(s.verify(&token, later).map(|c| c.uid), None);
     }
 
@@ -418,8 +418,6 @@ mod tests {
 #[cfg(test)]
 mod persistence_tests {
     use super::*;
-    use chrono::TimeZone;
-
     fn user(email: &str) -> User {
         User {
             id: uuid::Uuid::new_v4(),
@@ -430,7 +428,7 @@ mod persistence_tests {
             default_rate_minor: 0,
             cost_rate_minor: 0,
             password_hash: String::new(),
-            created_at: Utc::now(),
+            created_at: Timestamp::now(),
             session_version: 1,
         }
     }
@@ -454,10 +452,10 @@ mod persistence_tests {
         // a token issued before the restart verifies after it
         let u1 = user("a@b.co");
         let session1 = make_session(Some(s1.clone()), false, false).unwrap();
-        let token = session1.issue(&u1, Utc.timestamp_opt(1_730_000_000, 0).unwrap());
+        let token = session1.issue(&u1, jiff::Timestamp::new(1_730_000_000, 0).unwrap());
         let session2 = make_session(Some(s2), false, false).unwrap();
         let claims = session2
-            .verify(&token, Utc.timestamp_opt(1_730_000_100, 0).unwrap())
+            .verify(&token, jiff::Timestamp::new(1_730_000_100, 0).unwrap())
             .expect("cross-boot token still valid");
         assert_eq!(claims.uid, u1.id);
         // *_FILE variant is honoured

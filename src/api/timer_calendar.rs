@@ -11,7 +11,7 @@ pub async fn get_timer(State(app): State<AppState>, actor: AuthUser) -> ApiResul
             let hundredths = elapsed_hundredths(t.started_at, now);
             Ok(Json(serde_json::json!({
                 "timer": t,
-                "elapsed_seconds": (now - t.started_at).num_seconds().max(0),
+                "elapsed_seconds": (now - t.started_at).as_secs().max(0),
                 "elapsed_hours": Hours(hundredths),
             }))
             .into_response())
@@ -82,7 +82,7 @@ pub async fn stop_timer(State(app): State<AppState>, actor: AuthUser) -> ApiResu
     let entry = Entry {
         imported: None,
         id: Uuid::new_v4(),
-        date: now.date_naive(),
+        date: now.to_zoned_datetime(jiff::tz::TimeZone::UTC).date(),
         customer_id: timer.customer_id,
         user_id: Some(timer.user_id),
         project_code: timer.project_code,
@@ -214,7 +214,7 @@ pub async fn calendar_oauth_start(
         .get_str("calendar_oauth_redirect", &crate::appconfig::process_env);
     let state = app
         .oauth_flows
-        .start(&provider, app.clock.now().timestamp());
+        .start(&provider, app.clock.now().as_second());
     let url = crate::calendar_oauth::authorize_url(&provider, &client_id, &redirect, &state);
     Ok(Json(serde_json::json!({ "url": url })).into_response())
 }
@@ -238,7 +238,7 @@ pub async fn calendar_oauth_callback(
 ) -> ApiResult {
     let code = q.code.unwrap_or_default();
     let state = q.state.unwrap_or_default();
-    let Some(provider) = app.oauth_flows.take(&state, app.clock.now().timestamp()) else {
+    let Some(provider) = app.oauth_flows.take(&state, app.clock.now().as_second()) else {
         return Err(ApiError::new(
             StatusCode::UNAUTHORIZED,
             "bad_state",
@@ -309,7 +309,11 @@ pub async fn list_notifications(State(app): State<AppState>, actor: AuthUser) ->
         .iter()
         .any(|notification| notification.kind == "no_time_today")
     {
-        let today = app.clock.now().date_naive();
+        let today = app
+            .clock
+            .now()
+            .to_zoned_datetime(jiff::tz::TimeZone::UTC)
+            .date();
         let has_time_today = app
             .store
             .list_range(today, today)?
@@ -317,7 +321,12 @@ pub async fn list_notifications(State(app): State<AppState>, actor: AuthUser) ->
             .any(|entry| entry.user_id == Some(actor.0.id));
         list.retain(|notification| {
             notification.kind != "no_time_today"
-                || (notification.created_at.date_naive() == today && !has_time_today)
+                || (notification
+                    .created_at
+                    .to_zoned_datetime(jiff::tz::TimeZone::UTC)
+                    .date()
+                    == today
+                    && !has_time_today)
         });
     }
     // #16's Approvals view is hidden in the GUI, so a stored submission nudge

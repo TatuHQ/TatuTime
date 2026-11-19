@@ -166,7 +166,7 @@ pub fn create(root: &Path, out: &Path) -> Result<usize, BackupError> {
     let manifest = Manifest {
         app: "tatu-time".into(),
         version: env!("CARGO_PKG_VERSION").into(),
-        created_at: chrono::Utc::now().to_rfc3339(),
+        created_at: jiff::Timestamp::now().to_string(),
         files: entries,
     };
     let manifest_json =
@@ -377,7 +377,10 @@ fn tar_header<W: Write>(w: &mut W, name: &str, size: u64) -> Result<(), BackupEr
     write_octal(&mut header[108..116], 0);
     write_octal(&mut header[116..124], 0);
     write_octal(&mut header[124..136], size);
-    write_octal(&mut header[136..148], chrono::Utc::now().timestamp() as u64);
+    write_octal(
+        &mut header[136..148],
+        jiff::Timestamp::now().as_second() as u64,
+    );
     header[156] = b'0'; // regular file
     header[257..263].copy_from_slice(b"ustar\0");
     header[263..265].copy_from_slice(b"00");
@@ -492,12 +495,9 @@ fn octal(field: &[u8]) -> Result<u64, BackupError> {
 
 use std::sync::{Arc, Mutex};
 
-use chrono::{
-    DateTime, Datelike, Days, Local, LocalResult, Months, NaiveDate, NaiveDateTime, TimeZone, Utc,
-};
-
 use crate::appconfig::AppConfig;
 use crate::scheduler::Job;
+use crate::time::*;
 
 /// The fixed middle of a backup file name. `list_backups` uses it to recognise
 /// the files this feature owns, so unrelated ZIPs in the folder are ignored.
@@ -552,10 +552,10 @@ pub fn company_slug(name: &str) -> String {
 /// local time zone (the same zone the schedule uses). Colons are replaced by
 /// hyphens so the name is portable.
 #[must_use]
-pub fn file_name(now: DateTime<Local>, company: &str) -> String {
+pub fn file_name(now: ZonedDateTime, company: &str) -> String {
     format!(
         "{}_tatutime-backup_{}.zip",
-        now.format("%Y-%m-%d_%H-%M-%S"),
+        now.strftime("%Y-%m-%d_%H-%M-%S"),
         company_slug(company)
     )
 }
@@ -666,7 +666,7 @@ pub fn create_zip(root: &Path, out: &Path) -> Result<usize, BackupError> {
 pub struct CreatedBackup {
     pub file_name: String,
     pub size_bytes: u64,
-    pub created_at: DateTime<Utc>,
+    pub created_at: Timestamp,
 }
 
 /// A ZIP found in the backup directory.
@@ -674,7 +674,7 @@ pub struct CreatedBackup {
 pub struct BackupFile {
     pub file_name: String,
     pub size_bytes: u64,
-    pub created_at: DateTime<Utc>,
+    pub created_at: Timestamp,
 }
 
 /// Write a new backup into `destination`, choosing a unique name when two runs
@@ -683,10 +683,10 @@ pub fn run_in(
     destination: &Path,
     root: &Path,
     company: &str,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<CreatedBackup, BackupError> {
     std::fs::create_dir_all(destination)?;
-    let local = now.with_timezone(&Local);
+    let local = now.to_zoned_datetime(TimeZone::system());
     let base = file_name(local, company);
     let mut name = base.clone();
     let mut out = destination.join(&name);
@@ -730,8 +730,9 @@ pub fn list_backups_in(destination: &Path) -> Result<Vec<BackupFile>, BackupErro
         }
         let created_at = metadata
             .modified()
-            .map(DateTime::<Utc>::from)
-            .unwrap_or_else(|_| Utc::now());
+            .ok()
+            .and_then(|modified| Timestamp::try_from(modified).ok())
+            .unwrap_or_else(Timestamp::now);
         out.push(BackupFile {
             file_name: name,
             size_bytes: metadata.len(),
@@ -772,22 +773,26 @@ impl Cadence {
     }
 }
 
-fn at(date: NaiveDate, hour: u32, minute: u32) -> NaiveDateTime {
-    date.and_hms_opt(hour, minute, 0)
-        .expect("validated 0..=23 and 0..=59")
+fn at(date: CivilDate, hour: u32, minute: u32) -> CivilDateTime {
+    date.at(
+        i8::try_from(hour).expect("validated 0..=23"),
+        i8::try_from(minute).expect("validated 0..=59"),
+        0,
+        0,
+    )
 }
 
-fn first_of_month(date: NaiveDate) -> NaiveDate {
-    date.with_day(1).expect("every month has a first day")
+fn first_of_month(date: CivilDate) -> CivilDate {
+    date.first_of_month()
 }
 
 /// The most recent scheduled occurrence at or before `now`.
 #[must_use]
 pub fn last_occurrence(
-    now: NaiveDateTime,
+    now: CivilDateTime,
     cadence: Cadence,
     (hour, minute): (u32, u32),
-) -> NaiveDateTime {
+) -> CivilDateTime {
     let today = now.date();
     match cadence {
         Cadence::Daily => {
@@ -795,19 +800,19 @@ pub fn last_occurrence(
             if today_at <= now {
                 today_at
             } else {
-                at(today - Days::new(1), hour, minute)
+                at(today - 1.days(), hour, minute)
             }
         }
         Cadence::Weekly => {
             // Monday of the current ISO week, then step back a week when this
             // week's Monday time has not arrived yet.
-            let back = u64::from(today.weekday().num_days_from_monday());
-            let monday = today - Days::new(back);
+            let back = i64::from(today.weekday().to_monday_zero_offset());
+            let monday = today - back.days();
             let monday_at = at(monday, hour, minute);
             if monday_at <= now {
                 monday_at
             } else {
-                at(monday - Days::new(7), hour, minute)
+                at(monday - 7.days(), hour, minute)
             }
         }
         Cadence::Monthly => {
@@ -816,7 +821,7 @@ pub fn last_occurrence(
             if first_at <= now {
                 first_at
             } else {
-                let previous = first - Days::new(1);
+                let previous = first - 1.days();
                 at(first_of_month(previous), hour, minute)
             }
         }
@@ -826,10 +831,10 @@ pub fn last_occurrence(
 /// The next scheduled occurrence strictly after `now`.
 #[must_use]
 pub fn next_occurrence(
-    now: NaiveDateTime,
+    now: CivilDateTime,
     cadence: Cadence,
     (hour, minute): (u32, u32),
-) -> NaiveDateTime {
+) -> CivilDateTime {
     let today = now.date();
     match cadence {
         Cadence::Daily => {
@@ -837,17 +842,17 @@ pub fn next_occurrence(
             if today_at > now {
                 today_at
             } else {
-                at(today + Days::new(1), hour, minute)
+                at(today + 1.days(), hour, minute)
             }
         }
         Cadence::Weekly => {
-            let back = u64::from(today.weekday().num_days_from_monday());
-            let monday = today - Days::new(back);
+            let back = i64::from(today.weekday().to_monday_zero_offset());
+            let monday = today - back.days();
             let monday_at = at(monday, hour, minute);
             if monday_at > now {
                 monday_at
             } else {
-                at(monday + Days::new(7), hour, minute)
+                at(monday + 7.days(), hour, minute)
             }
         }
         Cadence::Monthly => {
@@ -857,7 +862,7 @@ pub fn next_occurrence(
                 first_at
             } else {
                 let next = first
-                    .checked_add_months(Months::new(1))
+                    .checked_add(1.month())
                     .expect("calendar month within range");
                 at(next, hour, minute)
             }
@@ -869,45 +874,38 @@ pub fn next_occurrence(
 /// A skipped wall time (spring-forward) resolves to the first existing instant
 /// after it, so the schedule fires once rather than once per minute while the
 /// clock is inside the gap.
-fn local_to_utc(naive: NaiveDateTime) -> Option<DateTime<Utc>> {
-    let resolve = |value: NaiveDateTime| match Local.from_local_datetime(&value) {
-        LocalResult::Single(dt) | LocalResult::Ambiguous(dt, _) => Some(dt.with_timezone(&Utc)),
-        LocalResult::None => None,
-    };
-    resolve(naive).or_else(|| {
-        [30i64, 60, 90, 120]
-            .into_iter()
-            .find_map(|minutes| resolve(naive + chrono::Duration::minutes(minutes)))
-    })
+fn local_to_utc(naive: CivilDateTime) -> Option<Timestamp> {
+    TimeZone::system()
+        .to_ambiguous_zoned_datetime(naive)
+        .compatible()
+        .ok()
+        .map(|zoned| zoned.timestamp())
 }
 
 /// Whether a backup is due at `now`: the last one is older than the most
 /// recent scheduled occurrence. With no backup yet, the first tick runs one
 /// immediately (so enabling the feature does not wait for tomorrow).
 #[must_use]
-pub fn is_due(
-    now: DateTime<Utc>,
-    cadence: Cadence,
-    time: (u32, u32),
-    last: Option<DateTime<Utc>>,
-) -> bool {
-    let occurrence = last_occurrence(now.with_timezone(&Local).naive_local(), cadence, time);
+pub fn is_due(now: Timestamp, cadence: Cadence, time: (u32, u32), last: Option<Timestamp>) -> bool {
+    let local_now = now.to_zoned_datetime(TimeZone::system()).datetime();
+    let occurrence = last_occurrence(local_now, cadence, time);
     match (local_to_utc(occurrence), last) {
         (Some(occurrence), Some(last)) => occurrence > last,
         (Some(_), None) => true,
         // A wall-clock time the local zone skipped must not block backups, but
         // it must not storm either: without a resolvable occurrence, at most
         // one run per day.
-        (None, Some(last)) => now - last >= chrono::Duration::hours(23),
+        (None, Some(last)) => now - last >= SignedDuration::from_hours(23),
         (None, None) => true,
     }
 }
 
 /// `next_occurrence` expressed in UTC, for the admin status payload.
 #[must_use]
-pub fn next_run(now: DateTime<Utc>, cadence: Cadence, time: (u32, u32)) -> Option<DateTime<Utc>> {
-    let next = next_occurrence(now.with_timezone(&Local).naive_local(), cadence, time);
-    local_to_utc(next).or_else(|| Some(now + chrono::Duration::days(1)))
+pub fn next_run(now: Timestamp, cadence: Cadence, time: (u32, u32)) -> Option<Timestamp> {
+    let local_now = now.to_zoned_datetime(TimeZone::system()).datetime();
+    let next = next_occurrence(local_now, cadence, time);
+    local_to_utc(next).or_else(|| Some(now + 24.hours()))
 }
 
 fn company_name(root: &Path, cfg: &AppConfig, env: &dyn Fn(&str) -> Option<String>) -> String {
@@ -959,7 +957,7 @@ impl Job for BackupJob {
         60
     }
 
-    fn run(&self, now: DateTime<Utc>) {
+    fn run(&self, now: Timestamp) {
         let cfg = match self.cfg.lock() {
             Ok(guard) => guard.clone(),
             Err(poisoned) => poisoned.into_inner().clone(),
@@ -1130,7 +1128,7 @@ mod tests {
             &destination,
             src.path(),
             "Capyabara Solutions Ltda",
-            Utc::now(),
+            Timestamp::now(),
         )
         .unwrap();
         assert!(
@@ -1179,7 +1177,7 @@ mod tests {
         let hold = tempfile::tempdir().unwrap();
         seed_data(src.path());
         let destination = hold.path().join("Backup");
-        let now = Utc::now();
+        let now = Timestamp::now();
         let first = run_in(&destination, src.path(), "Tatu", now).unwrap();
         let second = run_in(&destination, src.path(), "Tatu", now).unwrap();
         assert_ne!(first.file_name, second.file_name);
@@ -1203,88 +1201,54 @@ mod tests {
 
     #[test]
     fn schedule_occurrences_follow_the_cadence() {
-        use chrono::NaiveDate;
-        let friday = NaiveDate::from_ymd_opt(2026, 10, 23)
-            .unwrap()
-            .and_hms_opt(10, 30, 0)
-            .unwrap();
+        let friday = CivilDate::new(2026, 10, 23).unwrap().at(10, 30, 0, 0);
         // Daily: today when the time has passed, yesterday before it.
         assert_eq!(
             last_occurrence(friday, Cadence::Daily, (2, 0)),
-            NaiveDate::from_ymd_opt(2026, 10, 23)
-                .unwrap()
-                .and_hms_opt(2, 0, 0)
-                .unwrap()
+            CivilDate::new(2026, 10, 23).unwrap().at(2, 0, 0, 0)
         );
-        let early = NaiveDate::from_ymd_opt(2026, 10, 23)
-            .unwrap()
-            .and_hms_opt(1, 0, 0)
-            .unwrap();
+        let early = CivilDate::new(2026, 10, 23).unwrap().at(1, 0, 0, 0);
         assert_eq!(
             last_occurrence(early, Cadence::Daily, (2, 0)),
-            NaiveDate::from_ymd_opt(2026, 10, 22)
-                .unwrap()
-                .and_hms_opt(2, 0, 0)
-                .unwrap()
+            CivilDate::new(2026, 10, 22).unwrap().at(2, 0, 0, 0)
         );
         // Weekly: Monday of this week, or the previous Monday before its time.
         assert_eq!(
             last_occurrence(friday, Cadence::Weekly, (2, 0)),
-            NaiveDate::from_ymd_opt(2026, 10, 19)
-                .unwrap()
-                .and_hms_opt(2, 0, 0)
-                .unwrap()
+            CivilDate::new(2026, 10, 19).unwrap().at(2, 0, 0, 0)
         );
-        let monday_early = NaiveDate::from_ymd_opt(2026, 10, 19)
-            .unwrap()
-            .and_hms_opt(1, 0, 0)
-            .unwrap();
+        let monday_early = CivilDate::new(2026, 10, 19).unwrap().at(1, 0, 0, 0);
         assert_eq!(
             last_occurrence(monday_early, Cadence::Weekly, (2, 0)),
-            NaiveDate::from_ymd_opt(2026, 10, 12)
-                .unwrap()
-                .and_hms_opt(2, 0, 0)
-                .unwrap()
+            CivilDate::new(2026, 10, 12).unwrap().at(2, 0, 0, 0)
         );
         // Monthly: the 1st of this month, or the previous month's 1st.
         assert_eq!(
             last_occurrence(friday, Cadence::Monthly, (2, 0)),
-            NaiveDate::from_ymd_opt(2026, 10, 1)
-                .unwrap()
-                .and_hms_opt(2, 0, 0)
-                .unwrap()
+            CivilDate::new(2026, 10, 1).unwrap().at(2, 0, 0, 0)
         );
-        let first_early = NaiveDate::from_ymd_opt(2026, 10, 1)
-            .unwrap()
-            .and_hms_opt(1, 0, 0)
-            .unwrap();
+        let first_early = CivilDate::new(2026, 10, 1).unwrap().at(1, 0, 0, 0);
         assert_eq!(
             last_occurrence(first_early, Cadence::Monthly, (2, 0)),
-            NaiveDate::from_ymd_opt(2026, 9, 1)
-                .unwrap()
-                .and_hms_opt(2, 0, 0)
-                .unwrap()
+            CivilDate::new(2026, 9, 1).unwrap().at(2, 0, 0, 0)
         );
         // Next run is strictly after now.
         assert_eq!(
             next_occurrence(friday, Cadence::Daily, (2, 0)),
-            NaiveDate::from_ymd_opt(2026, 10, 24)
-                .unwrap()
-                .and_hms_opt(2, 0, 0)
-                .unwrap()
+            CivilDate::new(2026, 10, 24).unwrap().at(2, 0, 0, 0)
         );
     }
 
     #[test]
     fn is_due_compares_the_last_backup_with_the_last_occurrence() {
-        let now = Utc::now();
+        let now = Timestamp::now();
         assert!(is_due(now, Cadence::Daily, (2, 0), None));
         assert!(!is_due(now, Cadence::Daily, (2, 0), Some(now)));
         assert!(is_due(
             now,
             Cadence::Daily,
             (2, 0),
-            Some(now - chrono::Duration::days(3))
+            Some(now - SignedDuration::from_hours(72))
         ));
     }
 
@@ -1313,7 +1277,7 @@ mod tests {
             audit,
         );
 
-        job.run(Utc::now());
+        job.run(Timestamp::now());
         let files = list_backups_in(&dir.path().join("Backup")).unwrap();
         assert_eq!(files.len(), 1, "the enabled job writes one archive");
         assert!(
@@ -1337,7 +1301,7 @@ mod tests {
             Arc::new(|_| None),
             Arc::new(crate::audit::AuditLog::new(dir.path())),
         );
-        job.run(Utc::now() + chrono::Duration::minutes(1));
+        job.run(Timestamp::now() + (1).minutes());
         assert_eq!(
             list_backups_in(&dir.path().join("Backup")).unwrap().len(),
             1

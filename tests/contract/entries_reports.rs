@@ -1004,7 +1004,7 @@ async fn archived_days_read_through_the_entries_api() {
     use tatu_time::store::Store;
 
     let day = "2026-08-03";
-    let cutoff = chrono::NaiveDate::from_ymd_opt(2026, 9, 1).unwrap();
+    let cutoff = jiff::civil::Date::new(2026, 9, 1).unwrap();
 
     let (app, d) = app().await;
     let c = new_customer(&app, "TatuTime", "EUR", 6000).await;

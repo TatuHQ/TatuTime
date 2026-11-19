@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, HashSet};
 
-use chrono::NaiveDate;
+use crate::time::*;
 use serde::Serialize;
 
 use crate::domain::{Currency, Hours};
@@ -29,7 +29,7 @@ pub struct Row {
     pub line: u64,
     pub end_line: u64,
     pub fields: BTreeMap<String, String>,
-    pub date: Option<NaiveDate>,
+    pub date: Option<CivilDate>,
     pub client: String,
     pub project: String,
     pub project_code: String,
@@ -331,7 +331,7 @@ fn number(
 }
 
 fn normalize_row(kind: ReportKind, row: &mut Row, errors: &mut Vec<Issue>) {
-    row.date = NaiveDate::parse_from_str(value(row, "date").trim(), "%Y-%m-%d").ok();
+    row.date = CivilDate::strptime("%Y-%m-%d", value(row, "date").trim()).ok();
     if row.date.is_none() {
         errors.push(issue(
             row.record,
@@ -468,7 +468,7 @@ fn normalize_row(kind: ReportKind, row: &mut Row, errors: &mut Vec<Issue>) {
 
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
 struct CorrectionKey<'a> {
-    date: NaiveDate,
+    date: CivilDate,
     client: &'a str,
     project: &'a str,
     project_code: &'a str,

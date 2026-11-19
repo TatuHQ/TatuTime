@@ -10,8 +10,8 @@
 //! [`MAX_LIMIT`] — is a 422 naming the field, never a silent restart from page
 //! one or a silent clamp.
 
+use crate::time::*;
 use base64::Engine as _;
-use chrono::NaiveDate;
 use uuid::Uuid;
 
 use crate::domain::FieldError;
@@ -38,7 +38,7 @@ pub enum Order {
 pub struct PageRequest {
     pub limit: usize,
     /// The last key the previous page emitted; the next page starts after it.
-    pub cursor: Option<(NaiveDate, Uuid)>,
+    pub cursor: Option<(CivilDate, Uuid)>,
 }
 
 /// Resolve `limit`/`cursor` from the raw query strings.
@@ -84,7 +84,7 @@ pub fn paginate<T, K>(
     order: Order,
 ) -> (Vec<T>, Option<String>)
 where
-    K: Fn(&T) -> (NaiveDate, Uuid),
+    K: Fn(&T) -> (CivilDate, Uuid),
 {
     let mut rest: Vec<T> = match req.cursor {
         None => items,
@@ -106,11 +106,11 @@ where
 }
 
 /// The last emitted key, encoded. See the module docs: opaque to clients.
-fn encode_cursor((date, id): (NaiveDate, Uuid)) -> String {
+fn encode_cursor((date, id): (CivilDate, Uuid)) -> String {
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(format!("{date}|{id}"))
 }
 
-fn decode_cursor(raw: &str) -> Result<(NaiveDate, Uuid), ApiError> {
+fn decode_cursor(raw: &str) -> Result<(CivilDate, Uuid), ApiError> {
     let invalid = || {
         ApiError::validation(vec![FieldError::new(
             "cursor",
@@ -122,7 +122,7 @@ fn decode_cursor(raw: &str) -> Result<(NaiveDate, Uuid), ApiError> {
         .map_err(|_| invalid())?;
     let text = String::from_utf8(bytes).map_err(|_| invalid())?;
     let (date, id) = text.split_once('|').ok_or_else(invalid)?;
-    let date = NaiveDate::parse_from_str(date, "%Y-%m-%d").map_err(|_| invalid())?;
+    let date = CivilDate::strptime("%Y-%m-%d", date).map_err(|_| invalid())?;
     let id = Uuid::parse_str(id).map_err(|_| invalid())?;
     Ok((date, id))
 }

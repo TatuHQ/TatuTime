@@ -12,10 +12,9 @@
 
 use std::collections::BTreeMap;
 
-use chrono::Datelike;
-
 use crate::domain::{Currency, FieldError, Invoice};
 use crate::pdf::{Block, Doc, Span};
+use crate::time::*;
 
 /// The closed set of `%variable%` names. Case-sensitive by contract.
 pub const VARS: &[&str] = &[
@@ -171,7 +170,7 @@ pub type Vars = BTreeMap<String, String>;
 pub fn vars_for(
     invoice: &Invoice,
     customer: &crate::domain::Customer,
-    issue_day: Option<chrono::NaiveDate>,
+    issue_day: Option<CivilDate>,
 ) -> Vars {
     let mut v = Vars::new();
     v.insert("invoice_number".into(), invoice.number.clone());
@@ -601,8 +600,6 @@ pub fn currency_minor(minor: u64, currency: &Currency) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::NaiveDate;
-
     fn sample_invoice() -> Invoice {
         use crate::domain::{Currency, InvoiceStatus};
         Invoice {
@@ -613,18 +610,14 @@ mod tests {
             number: "INV-0007".into(),
             customer_id: uuid::Uuid::new_v4(),
             currency: Currency("EUR".into()),
-            period_from: NaiveDate::from_ymd_opt(2026, 10, 1).unwrap(),
-            period_to: NaiveDate::from_ymd_opt(2026, 10, 31).unwrap(),
+            period_from: CivilDate::new(2026, 10, 1).unwrap(),
+            period_to: CivilDate::new(2026, 10, 31).unwrap(),
             lines: vec![],
             total_minor: 120000,
             status: InvoiceStatus::Draft,
-            created_at: NaiveDate::from_ymd_opt(2026, 10, 5)
-                .unwrap()
-                .and_hms_opt(9, 0, 0)
-                .unwrap()
-                .and_utc(),
+            created_at: crate::time::utc_timestamp(2026, 10, 5, 9, 0, 0),
             issued_at: None,
-            due_date: Some(NaiveDate::from_ymd_opt(2026, 11, 4).unwrap()),
+            due_date: Some(CivilDate::new(2026, 11, 4).unwrap()),
             paid_at: None,
             payment_reference: String::new(),
             pdf: None,
@@ -643,7 +636,7 @@ mod tests {
         vars_for(
             &sample_invoice(),
             &customer_named("TatuTime"),
-            Some(NaiveDate::from_ymd_opt(2026, 10, 5).unwrap()),
+            Some(CivilDate::new(2026, 10, 5).unwrap()),
         )
     }
 
@@ -672,7 +665,7 @@ mod tests {
 
     #[test]
     fn variable_table_resolves_documented_examples() {
-        let issue = Some(NaiveDate::from_ymd_opt(2026, 10, 5).unwrap());
+        let issue = Some(CivilDate::new(2026, 10, 5).unwrap());
         let inv = sample_invoice();
         let built = vars_for(&inv, &customer_named("TatuTime"), issue);
         assert_eq!(built["invoice_number"], "INV-0007");
@@ -834,8 +827,8 @@ mod tests {
     #[test]
     fn period_variables_use_integer_month_arithmetic() {
         let inv = Invoice {
-            period_from: NaiveDate::from_ymd_opt(2026, 1, 15).unwrap(),
-            period_to: NaiveDate::from_ymd_opt(2026, 1, 31).unwrap(),
+            period_from: CivilDate::new(2026, 1, 15).unwrap(),
+            period_to: CivilDate::new(2026, 1, 31).unwrap(),
             ..sample_invoice()
         };
         let v = vars_for(&inv, &customer_named("C"), None);
@@ -915,11 +908,7 @@ mod tests {
             &inv,
             &template,
             &customer,
-            &vars_for(
-                &inv,
-                &customer,
-                Some(NaiveDate::from_ymd_opt(2026, 10, 5).unwrap()),
-            ),
+            &vars_for(&inv, &customer, Some(CivilDate::new(2026, 10, 5).unwrap())),
         );
         apply_doc_content(&mut doc, &content);
         assert!(

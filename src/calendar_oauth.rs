@@ -16,6 +16,7 @@ use base64::Engine as _;
 use serde_json::Value;
 
 use crate::calendar::{CalendarError, CalendarEvent};
+use crate::time::*;
 
 /// Minimal fetch abstraction over the provider HTTP APIs.
 pub trait HttpFetch: Send + Sync {
@@ -25,11 +26,7 @@ pub trait HttpFetch: Send + Sync {
 /// A source of calendar events for a date range (inclusive `from`..=`to`).
 pub trait CalendarSource: Send + Sync {
     fn name(&self) -> &'static str;
-    fn fetch(
-        &self,
-        from: chrono::NaiveDate,
-        to: chrono::NaiveDate,
-    ) -> Result<Vec<CalendarEvent>, CalendarError>;
+    fn fetch(&self, from: CivilDate, to: CivilDate) -> Result<Vec<CalendarEvent>, CalendarError>;
 }
 
 // ------------------------------------------------------------------ google --
@@ -65,35 +62,37 @@ impl GraphCalendar {
 
 /// Google timestamps: `{"dateTime": "RFC3339", "timeZone": ...}` or
 /// `{"date": "YYYY-MM-DD"}` for all-day events.
-fn google_dt(v: &Value) -> Option<chrono::DateTime<chrono::Utc>> {
+fn google_dt(v: &Value) -> Option<Timestamp> {
     if let Some(s) = v.get("dateTime").and_then(|d| d.as_str()) {
-        return chrono::DateTime::parse_from_rfc3339(s)
-            .map(|d| d.with_timezone(&chrono::Utc))
-            .ok();
+        return s.parse::<Timestamp>().ok();
     }
     v.get("date").and_then(|d| d.as_str()).and_then(|d| {
-        chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d")
-            .ok()
-            .map(|n| n.and_time(chrono::NaiveTime::MIN).and_utc())
+        CivilDate::strptime("%Y-%m-%d", d).ok().and_then(|n| {
+            n.at(0, 0, 0, 0)
+                .in_tz("UTC")
+                .ok()
+                .map(|zoned| zoned.timestamp())
+        })
     })
 }
 
-fn iso(s: Option<&str>) -> Option<chrono::DateTime<chrono::Utc>> {
-    s.and_then(|v| chrono::DateTime::parse_from_rfc3339(v).ok())
-        .map(|d| d.with_timezone(&chrono::Utc))
+fn iso(s: Option<&str>) -> Option<Timestamp> {
+    s.and_then(|v| v.parse::<Timestamp>().ok())
 }
 
 /// All-day Google events report `end.date` as EXCLUSIVE; extend to end-of-day
 /// so a same-day range filter keeps them.
-fn all_day_end(d: &Value) -> Option<chrono::DateTime<chrono::Utc>> {
+fn all_day_end(d: &Value) -> Option<Timestamp> {
     d.get("date")
         .and_then(|x| x.as_str())
-        .and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok())
+        .and_then(|s| CivilDate::strptime("%Y-%m-%d", s).ok())
         .map(|n| {
             n.pred_opt()
                 .unwrap_or(n)
-                .and_time(chrono::NaiveTime::from_hms_opt(23, 59, 59).unwrap())
-                .and_utc()
+                .at(23, 59, 59, 0)
+                .in_tz("UTC")
+                .expect("UTC is always a valid time zone")
+                .timestamp()
         })
 }
 
@@ -101,11 +100,7 @@ impl CalendarSource for GoogleCalendar {
     fn name(&self) -> &'static str {
         "google"
     }
-    fn fetch(
-        &self,
-        from: chrono::NaiveDate,
-        to: chrono::NaiveDate,
-    ) -> Result<Vec<CalendarEvent>, CalendarError> {
+    fn fetch(&self, from: CivilDate, to: CivilDate) -> Result<Vec<CalendarEvent>, CalendarError> {
         let base = "https://www.googleapis.com/calendar/v3/calendars/";
         let url = format!(
             "{base}{}?timeMin={}T00:00:00Z&timeMax={}T23:59:59Z&singleEvents=false",
@@ -161,11 +156,7 @@ impl CalendarSource for GraphCalendar {
     fn name(&self) -> &'static str {
         "microsoft"
     }
-    fn fetch(
-        &self,
-        from: chrono::NaiveDate,
-        to: chrono::NaiveDate,
-    ) -> Result<Vec<CalendarEvent>, CalendarError> {
+    fn fetch(&self, from: CivilDate, to: CivilDate) -> Result<Vec<CalendarEvent>, CalendarError> {
         let url = format!(
             "https://graph.microsoft.com/v1.0/me/calendarView?startDateTime={from}T00:00:00Z&endDateTime={to}T23:59:59Z"
         );
@@ -533,8 +524,6 @@ impl HttpFetch for BearerFetch {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::{NaiveDate, Timelike};
-
     /// Fake transport returning a fixture by URL pattern; counts calls and
     /// can emulate a 401-then-refresh flow.
     struct FixtureFetch {
@@ -549,8 +538,8 @@ mod tests {
         }
     }
 
-    fn d(s: &str) -> NaiveDate {
-        NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap()
+    fn d(s: &str) -> CivilDate {
+        CivilDate::strptime("%Y-%m-%d", s).unwrap()
     }
 
     #[test]
@@ -575,7 +564,10 @@ mod tests {
         assert_eq!(evs.len(), 2, "recurring event skipped");
         assert_eq!(evs[0].title, "Stand-up");
         assert_eq!(evs[1].uid, "g3");
-        assert!(evs[1].start.hour() == 0 && evs[1].end.hour() == 23);
+        assert!(
+            evs[1].start.to_zoned_datetime(TimeZone::UTC).hour() == 0
+                && evs[1].end.to_zoned_datetime(TimeZone::UTC).hour() == 23
+        );
     }
 
     #[test]

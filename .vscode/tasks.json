@@ -104,21 +104,17 @@
 				"run"
 			],
 			"isBackground": true,
-			"problemMatcher": [
-				{
-					"owner": "custom",
-					"pattern": [
-						{
-							"regexp": "^$"
-						}
-					],
-					"background": {
-						"activeOnStart": true,
-						"beginsPattern": "Compiling|Finished",
-						"endsPattern": "listening on :"
-					}
+			"problemMatcher": {
+				"owner": "custom",
+				"pattern": {
+					"regexp": ""
+				},
+				"background": {
+					"activeOnStart": true,
+					"beginsPattern": "Compiling|Finished",
+					"endsPattern": "listening on :"
 				}
-			],
+			},
 			"options": {
 				"env": {
 					"RUST_BACKTRACE": "1",

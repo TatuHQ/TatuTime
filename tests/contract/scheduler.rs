@@ -27,9 +27,9 @@ async fn notifications_hide_stale_and_resolved_no_time_reminders() {
         .into_iter()
         .find(|user| user.email == ADMIN_EMAIL)
         .unwrap();
-    let now = chrono::Utc::now();
+    let now = jiff::Timestamp::now();
     for (kind, created_at) in [
-        ("no_time_today", now - chrono::Duration::days(1)),
+        ("no_time_today", now - jiff::SignedDuration::from_hours(24)),
         ("no_time_today", now),
         ("submit_timesheet", now),
     ] {
@@ -62,7 +62,7 @@ async fn notifications_hide_stale_and_resolved_no_time_reminders() {
         "POST",
         "/api/entries",
         Some(json!({
-            "date": now.date_naive().to_string(),
+            "date": now.to_zoned_datetime(jiff::tz::TimeZone::UTC).date().to_string(),
             "customer_id": cid,
             "project_code": "REMINDER",
             "hours": 1,

@@ -1,4 +1,4 @@
-use chrono::{DateTime, NaiveDate, Utc};
+use crate::time::*;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -11,7 +11,7 @@ pub struct Notification {
     pub kind: String,
     pub title: String,
     pub body: String,
-    pub created_at: DateTime<Utc>,
+    pub created_at: Timestamp,
     pub read: bool,
 }
 
@@ -33,14 +33,14 @@ pub enum SubmissionState {
 pub struct Submission {
     pub id: Uuid,
     pub user_id: Uuid,
-    pub week_start: NaiveDate,
-    pub week_end: NaiveDate,
+    pub week_start: CivilDate,
+    pub week_end: CivilDate,
     pub state: SubmissionState,
     pub entry_ids: Vec<Uuid>,
     pub comment: String,
-    pub created_at: DateTime<Utc>,
+    pub created_at: Timestamp,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub submitted_at: Option<DateTime<Utc>>,
+    pub submitted_at: Option<Timestamp>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub decided_at: Option<DateTime<Utc>>,
+    pub decided_at: Option<Timestamp>,
 }

@@ -2,9 +2,8 @@
 //! notifications: "no time logged today" and (on Fridays) "submit your
 //! timesheet". The decision is a pure function so it is unit-testable.
 
+use crate::time::*;
 use std::sync::Arc;
-
-use chrono::{Datelike, NaiveDate, Weekday};
 
 use crate::domain::Notification;
 use crate::scheduler::Job;
@@ -18,7 +17,7 @@ pub const APPROVALS_AVAILABLE: bool = false;
 
 /// The reminder decisions given what happened for a user on `now`'s day/week.
 pub fn decide(
-    now: NaiveDate,
+    now: CivilDate,
     has_entries_today: bool,
     week_has_entries: bool,
     week_submitted: bool,
@@ -32,7 +31,11 @@ pub fn decide(
             "You haven't recorded any time yet today.",
         ));
     }
-    if approvals_available && now.weekday() == Weekday::Fri && week_has_entries && !week_submitted {
+    if approvals_available
+        && now.weekday() == Weekday::Friday
+        && week_has_entries
+        && !week_submitted
+    {
         out.push((
             "submit_timesheet",
             "Submit your timesheet",
@@ -42,9 +45,9 @@ pub fn decide(
     out
 }
 
-pub fn monday_of(d: NaiveDate) -> NaiveDate {
-    let offset = (d.weekday().num_days_from_monday()) as i64;
-    d - chrono::Duration::days(offset)
+pub fn monday_of(d: CivilDate) -> CivilDate {
+    let offset = (d.weekday().to_monday_zero_offset()) as i64;
+    d - (offset).days()
 }
 
 pub struct ReminderJob {
@@ -64,13 +67,13 @@ impl Job for ReminderJob {
     fn interval_secs(&self) -> i64 {
         24 * 3600 // daily
     }
-    fn run(&self, now: chrono::DateTime<chrono::Utc>) {
+    fn run(&self, now: Timestamp) {
         let Ok(users) = self.store.list_users() else {
             return;
         };
-        let today = now.date_naive();
+        let today = now.to_zoned_datetime(jiff::tz::TimeZone::UTC).date();
         let week_start = monday_of(today);
-        let week_end = week_start + chrono::Duration::days(6);
+        let week_end = week_start + (6).days();
         let week_entries = self
             .store
             .list_range(week_start, week_end)
@@ -111,8 +114,13 @@ impl Job for ReminderJob {
 mod tests {
     use super::*;
 
-    fn date(y: i32, m: u32, d: u32) -> NaiveDate {
-        NaiveDate::from_ymd_opt(y, m, d).unwrap()
+    fn date(y: i32, m: u32, d: u32) -> CivilDate {
+        CivilDate::new(
+            i16::try_from(y).unwrap(),
+            i8::try_from(m).unwrap(),
+            i8::try_from(d).unwrap(),
+        )
+        .unwrap()
     }
 
     #[test]
@@ -157,8 +165,6 @@ mod tests {
 mod job_tests {
     use super::*;
     use crate::auth::{Role, User};
-    use chrono::{TimeZone, Utc};
-
     #[test]
     fn job_pushes_no_time_reminder() {
         let dir = tempfile::tempdir().unwrap();
@@ -172,11 +178,11 @@ mod job_tests {
             default_rate_minor: 0,
             cost_rate_minor: 0,
             password_hash: String::new(),
-            created_at: Utc::now(),
+            created_at: Timestamp::now(),
             session_version: 1,
         };
         store.put_user(&user).unwrap();
-        let now = Utc.timestamp_opt(1_730_000_000, 0).unwrap(); // a weekday
+        let now = jiff::Timestamp::new(1_730_000_000, 0).unwrap(); // a weekday
         ReminderJob::new(store.clone()).run(now);
         let notes = store.list_notifications(user.id).unwrap();
         assert!(notes.iter().any(|n| n.kind == "no_time_today"), "{notes:?}");

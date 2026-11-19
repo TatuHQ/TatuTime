@@ -86,6 +86,7 @@ impl Expense {
 mod tests {
     use super::*;
     use crate::domain::{Invoice, InvoicePayment, InvoiceSources, InvoiceStatus, generate_invoice};
+    use crate::time::Timestamp;
     use serde_json::json;
 
     fn origin(invoiced: bool) -> ImportOrigin {
@@ -176,7 +177,7 @@ mod tests {
             &sources,
             entries[0].date,
             entries[0].date,
-            chrono::Utc::now(),
+            Timestamp::now(),
         )
         .unwrap();
         assert_eq!(invoice.lines.len(), 1);
@@ -200,7 +201,7 @@ mod tests {
         invoice.payments.push(InvoicePayment {
             id: Uuid::new_v4(),
             amount_minor: 1000,
-            received_at: chrono::Utc::now(),
+            received_at: Timestamp::now(),
             reference: String::new(),
             method: "manual".into(),
         });

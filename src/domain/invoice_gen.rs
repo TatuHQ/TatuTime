@@ -5,7 +5,7 @@ use super::invoice::{Invoice, InvoiceError, InvoiceLine, InvoiceStatus, LineKind
 use super::primitives::Currency;
 use super::project::Project;
 use crate::auth::User;
-use chrono::{DateTime, NaiveDate, Utc};
+use crate::time::*;
 use uuid::Uuid;
 
 /// Entry and expense ids already committed to a **non-draft** invoice, in the
@@ -69,9 +69,9 @@ pub fn generate_invoice(
     number: String,
     customer: &Customer,
     src: &InvoiceSources<'_>,
-    from: NaiveDate,
-    to: NaiveDate,
-    now: DateTime<Utc>,
+    from: CivilDate,
+    to: CivilDate,
+    now: Timestamp,
 ) -> Result<Invoice, InvoiceError> {
     let InvoiceSources {
         projects,
@@ -335,7 +335,7 @@ mod tests {
     use super::*;
     use crate::domain::{Hours, ProjectCode};
 
-    fn inv(status: InvoiceStatus, total: u64, due: Option<NaiveDate>) -> Invoice {
+    fn inv(status: InvoiceStatus, total: u64, due: Option<CivilDate>) -> Invoice {
         Invoice {
             supersedes: None,
             superseded_by: None,
@@ -344,12 +344,12 @@ mod tests {
             number: "INV-1".into(),
             customer_id: Uuid::new_v4(),
             currency: Currency("EUR".into()),
-            period_from: NaiveDate::from_ymd_opt(2026, 1, 1).unwrap(),
-            period_to: NaiveDate::from_ymd_opt(2026, 1, 7).unwrap(),
+            period_from: CivilDate::new(2026, 1, 1).unwrap(),
+            period_to: CivilDate::new(2026, 1, 7).unwrap(),
             lines: vec![],
             total_minor: total,
             status,
-            created_at: Utc::now(),
+            created_at: Timestamp::now(),
             issued_at: None,
             due_date: due,
             paid_at: None,
@@ -372,7 +372,7 @@ mod tests {
         let expense = Uuid::new_v4();
         let line = InvoiceLine {
             kind: LineKind::Time,
-            date: NaiveDate::from_ymd_opt(2026, 1, 2).unwrap(),
+            date: CivilDate::new(2026, 1, 2).unwrap(),
             entry_id: Some(entry),
             expense_id: Some(expense),
             project_code: Some(ProjectCode("P1".into())),

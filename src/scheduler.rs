@@ -11,12 +11,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 
-use chrono::{DateTime, Utc};
-
+use crate::time::*;
 pub trait Job: Send + Sync {
     fn name(&self) -> &str;
     fn interval_secs(&self) -> i64;
-    fn run(&self, now: DateTime<Utc>);
+    fn run(&self, now: Timestamp);
 }
 
 pub struct Scheduler {
@@ -47,8 +46,8 @@ impl Scheduler {
     /// invoices from `last_period_end`, reminders from stored notifications),
     /// so a crash between run and persist costs one duplicate at most —
     /// while the old mark-first order silently skipped a whole day.
-    pub fn tick(&self, now: DateTime<Utc>) {
-        let now_ts = now.timestamp();
+    pub fn tick(&self, now: Timestamp) {
+        let now_ts = now.as_second();
         let mut fired: Vec<String> = Vec::new();
         {
             let last = lock(&self.last);
@@ -84,7 +83,8 @@ impl Scheduler {
             loop {
                 tokio::time::sleep(std::time::Duration::from_secs(poll_secs)).await;
                 let me = self.clone();
-                if let Err(e) = tokio::task::spawn_blocking(move || me.tick(Utc::now())).await {
+                if let Err(e) = tokio::task::spawn_blocking(move || me.tick(Timestamp::now())).await
+                {
                     tracing::warn!(error = %e, "scheduler tick failed");
                 }
             }
@@ -111,7 +111,6 @@ fn lock(m: &Mutex<HashMap<String, i64>>) -> MutexGuard<'_, HashMap<String, i64>>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::TimeZone;
     use std::sync::atomic::{AtomicU32, Ordering};
 
     struct CountingJob {
@@ -126,13 +125,13 @@ mod tests {
         fn interval_secs(&self) -> i64 {
             self.interval
         }
-        fn run(&self, _now: DateTime<Utc>) {
+        fn run(&self, _now: Timestamp) {
             self.count.fetch_add(1, Ordering::SeqCst);
         }
     }
 
-    fn t(secs: i64) -> DateTime<Utc> {
-        Utc.timestamp_opt(1_700_000_000 + secs, 0).unwrap()
+    fn t(secs: i64) -> Timestamp {
+        jiff::Timestamp::new(1_700_000_000 + secs, 0).unwrap()
     }
 
     #[test]

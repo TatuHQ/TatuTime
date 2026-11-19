@@ -1,7 +1,7 @@
 use super::primitives::{
     Currency, FieldError, ProjectCode, default_active, default_true, validate_name, validate_note,
 };
-use chrono::{DateTime, NaiveDate, Utc};
+use crate::time::*;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -21,7 +21,7 @@ pub struct Expense {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub imported: Option<super::ImportOrigin>,
     pub id: Uuid,
-    pub date: NaiveDate,
+    pub date: CivilDate,
     pub customer_id: Uuid,
     /// The user who recorded the expense (#51 ownership; None for legacy docs).
     #[serde(default)]
@@ -49,14 +49,14 @@ pub struct Expense {
     /// The reference date the rate was published for (for example the day the
     /// ECB published its table), never the expense date.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub exchange_rate_date: Option<NaiveDate>,
+    pub exchange_rate_date: Option<CivilDate>,
     /// Optional receipt stored inline (base64) with its filename (#23).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub receipt_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub receipt_b64: Option<String>,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
+    pub created_at: Timestamp,
+    pub updated_at: Timestamp,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -159,7 +159,7 @@ fn validate_rate(raw: &str) -> Option<String> {
 
 pub fn validate_expense_input(input: &ExpenseInput) -> Result<ExpenseDraft, Vec<FieldError>> {
     let mut errors = Vec::new();
-    let date = NaiveDate::parse_from_str(input.date.trim(), "%Y-%m-%d")
+    let date = CivilDate::strptime("%Y-%m-%d", input.date.trim())
         .map_err(|_| {
             errors.push(FieldError::new(
                 "date",
@@ -242,7 +242,7 @@ pub fn validate_expense_input(input: &ExpenseInput) -> Result<ExpenseDraft, Vec<
         ));
     }
     let rate_date = match input.exchange_rate_date.as_deref().map(str::trim) {
-        Some(raw) if !raw.is_empty() => NaiveDate::parse_from_str(raw, "%Y-%m-%d")
+        Some(raw) if !raw.is_empty() => CivilDate::strptime("%Y-%m-%d", raw)
             .map_err(|_| {
                 errors.push(FieldError::new(
                     "exchange_rate_date",
@@ -282,7 +282,7 @@ pub struct CategoryDraft {
 
 #[derive(Debug)]
 pub struct ExpenseDraft {
-    pub date: NaiveDate,
+    pub date: CivilDate,
     pub customer_id: Uuid,
     pub project_code: Option<String>,
     pub category_id: Option<Uuid>,
@@ -294,7 +294,7 @@ pub struct ExpenseDraft {
     pub original_amount_minor: Option<u64>,
     pub original_currency: Option<String>,
     pub exchange_rate: Option<String>,
-    pub exchange_rate_date: Option<NaiveDate>,
+    pub exchange_rate_date: Option<CivilDate>,
     pub billable: bool,
     pub note: String,
     pub receipt_name: Option<String>,
@@ -399,7 +399,7 @@ mod tests {
         assert_eq!(ok.exchange_rate.as_deref(), Some("0.9206"));
         assert_eq!(
             ok.exchange_rate_date,
-            Some(NaiveDate::from_ymd_opt(2026, 10, 1).unwrap())
+            Some(CivilDate::new(2026, 10, 1).unwrap())
         );
 
         // An ordinary expense carries no conversion at all.

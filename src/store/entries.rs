@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use chrono::NaiveDate;
+use crate::time::*;
 use uuid::Uuid;
 
 use super::cold::ColdIdIndex;
@@ -12,13 +12,13 @@ use crate::domain::Entry;
 impl Store {
     // -------------------------------------------------------------- entries --
 
-    pub(super) fn day_dir(&self, date: NaiveDate) -> PathBuf {
+    pub(super) fn day_dir(&self, date: CivilDate) -> PathBuf {
         self.root
             .join(ENTRIES_DIR)
-            .join(date.format("%Y-%m-%d").to_string())
+            .join(date.strftime("%Y-%m-%d").to_string())
     }
 
-    pub(super) fn entry_path(&self, date: NaiveDate, id: Uuid) -> PathBuf {
+    pub(super) fn entry_path(&self, date: CivilDate, id: Uuid) -> PathBuf {
         self.day_dir(date).join(format!("{id}.json"))
     }
 
@@ -40,17 +40,17 @@ impl Store {
     /// The cold day folder for `date`: `archive/entries/<YYYY-MM>/<YYYY-MM-DD>/`
     /// — [`Store::day_dir`]'s mirror on the cold side, and the one place the
     /// cold layout is spelled (the #349 pass builds its paths through it too).
-    pub(crate) fn cold_day_dir(&self, date: NaiveDate) -> PathBuf {
+    pub(crate) fn cold_day_dir(&self, date: CivilDate) -> PathBuf {
         self.root
             .join(ARCHIVE_DIR)
             .join(ENTRIES_DIR)
-            .join(date.format("%Y-%m").to_string())
-            .join(date.format("%Y-%m-%d").to_string())
+            .join(date.strftime("%Y-%m").to_string())
+            .join(date.strftime("%Y-%m-%d").to_string())
     }
 
     /// The cold document path for one entry: the mirror of
     /// [`Store::entry_path`].
-    pub(super) fn cold_entry_path(&self, date: NaiveDate, id: Uuid) -> PathBuf {
+    pub(super) fn cold_entry_path(&self, date: CivilDate, id: Uuid) -> PathBuf {
         self.cold_day_dir(date).join(format!("{id}.json"))
     }
 
@@ -69,7 +69,7 @@ impl Store {
     /// Every published cold day folder as a date, ascending: the cold mirror of
     /// the hot `<YYYY-MM-DD>` folders, reached month-first. A child whose name
     /// is not a well-formed day is not a day folder.
-    pub(super) fn cold_day_folders(&self) -> Result<Vec<NaiveDate>, StoreError> {
+    pub(super) fn cold_day_folders(&self) -> Result<Vec<CivilDate>, StoreError> {
         let mut out = Vec::new();
         for month in self.cold_month_dirs()? {
             for day in dir_entries(&month)? {
@@ -79,7 +79,7 @@ impl Store {
                 let Some(name) = day.file_name().and_then(|n| n.to_str()) else {
                     continue;
                 };
-                if let Ok(date) = NaiveDate::parse_from_str(name, "%Y-%m-%d") {
+                if let Ok(date) = CivilDate::strptime("%Y-%m-%d", name) {
                     out.push(date);
                 }
             }
@@ -94,7 +94,7 @@ impl Store {
     /// trust rule compares against (#335/#350). An absent cold day is empty.
     pub(super) fn cold_day_ids(
         &self,
-        date: NaiveDate,
+        date: CivilDate,
     ) -> Result<std::collections::BTreeSet<String>, StoreError> {
         let dir = self.cold_day_dir(date);
         if !dir_exists(&dir)? {
@@ -104,7 +104,7 @@ impl Store {
     }
 
     /// The cold copies of one day's documents, in `dir_entries` order.
-    pub(super) fn cold_day_docs(&self, date: NaiveDate) -> Result<Vec<Entry>, StoreError> {
+    pub(super) fn cold_day_docs(&self, date: CivilDate) -> Result<Vec<Entry>, StoreError> {
         let dir = self.cold_day_dir(date);
         if !dir_exists(&dir)? {
             return Ok(Vec::new());
@@ -127,7 +127,7 @@ impl Store {
     /// relocation. A read lists every document the union holds: QA-05 moved
     /// the `MAX_DOCS` cap to the write path, so a pre-existing over-cap day
     /// stays readable instead of failing every listing.
-    fn merged_day_docs(&self, date: NaiveDate) -> Result<Vec<Entry>, StoreError> {
+    fn merged_day_docs(&self, date: CivilDate) -> Result<Vec<Entry>, StoreError> {
         let mut out = self.walk_docs(&self.day_dir(date), |p| self.read_entry(p))?;
         merge_cold_docs(&mut out, self.cold_day_docs(date)?);
         Ok(out)
@@ -140,9 +140,9 @@ impl Store {
     fn cold_index_day_is_current(
         &self,
         idx: &ColdIdIndex,
-        date: NaiveDate,
+        date: CivilDate,
     ) -> Result<bool, StoreError> {
-        let key = date.format("%Y-%m-%d").to_string();
+        let key = date.strftime("%Y-%m-%d").to_string();
         let listed: std::collections::BTreeSet<String> = idx
             .get(&key)
             .cloned()
@@ -153,7 +153,7 @@ impl Store {
     }
 
     /// Whether the entry document exists in **either** tree (#350).
-    pub(super) fn entry_exists(&self, date: NaiveDate, id: Uuid) -> bool {
+    pub(super) fn entry_exists(&self, date: CivilDate, id: Uuid) -> bool {
         self.entry_path(date, id).is_file() || self.cold_entry_path(date, id).is_file()
     }
 
@@ -179,10 +179,10 @@ impl Store {
         }
         let wanted = id.to_string();
         if let Some(idx) = self.read_cold_index() {
-            let mut hints: Vec<NaiveDate> = idx
+            let mut hints: Vec<CivilDate> = idx
                 .iter()
                 .filter(|(_, ids)| ids.iter().any(|listed| listed == &wanted))
-                .filter_map(|(date, _)| NaiveDate::parse_from_str(date, "%Y-%m-%d").ok())
+                .filter_map(|(date, _)| CivilDate::strptime("%Y-%m-%d", date).ok())
                 .collect();
             hints.sort();
             for date in hints {
@@ -203,7 +203,7 @@ impl Store {
         Ok(None)
     }
 
-    pub fn list_by_date(&self, date: NaiveDate) -> Result<Vec<Entry>, StoreError> {
+    pub fn list_by_date(&self, date: CivilDate) -> Result<Vec<Entry>, StoreError> {
         let mut out = self.merged_day_docs(date)?;
         sort_entries_by_created(&mut out);
         Ok(out)
@@ -215,7 +215,7 @@ impl Store {
     /// ```rust
     /// let week = store.list_range(monday, sunday)?; // inclusive on both ends
     /// ```
-    pub fn list_range(&self, from: NaiveDate, to: NaiveDate) -> Result<Vec<Entry>, StoreError> {
+    pub fn list_range(&self, from: CivilDate, to: CivilDate) -> Result<Vec<Entry>, StoreError> {
         // QA-08: the cap means "at most MAX_RANGE_DAYS *inclusive* days", so
         // the difference may be at most one less (400 days span 399).
         if (to - from).num_days() >= MAX_RANGE_DAYS {
@@ -273,7 +273,7 @@ impl Store {
     /// lock.
     pub(super) fn remove_entry_copies_locked(
         &self,
-        date: NaiveDate,
+        date: CivilDate,
         id: Uuid,
     ) -> Result<(), StoreError> {
         for path in [self.entry_path(date, id), self.cold_entry_path(date, id)] {
@@ -292,7 +292,7 @@ impl Store {
     /// exactly one document for `id` exists on disk.
     pub(super) fn rehydrate_entry_locked(
         &self,
-        date: NaiveDate,
+        date: CivilDate,
         id: Uuid,
     ) -> Result<(), StoreError> {
         match std::fs::remove_file(self.cold_entry_path(date, id)) {
@@ -309,7 +309,7 @@ impl Store {
     /// later pass refuse the day (`ArchiveRefusal::ColdDayExists`) for a folder
     /// with nothing in it. A failure here must never fail the write that emptied
     /// it, so the result is dropped.
-    fn prune_empty_cold_day(&self, date: NaiveDate) {
+    fn prune_empty_cold_day(&self, date: CivilDate) {
         let day = self.cold_day_dir(date);
         if !day.is_dir() {
             return;
