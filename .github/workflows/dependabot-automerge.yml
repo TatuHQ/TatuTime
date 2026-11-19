@@ -1,142 +1,95 @@
 name: Dependabot auto-merge
 
-# Patch and minor Dependabot bumps merge themselves once CI is green; a major
-# bump keeps the owner-approval gate.
-#
-# Classification runs on `pull_request_target` because a workflow triggered by
-# a Dependabot pull request gets a read-only `GITHUB_TOKEN` on `pull_request`.
-# The merge runs on `workflow_run` after CI reports success, so no runner is
-# held while checks run, and every required context (lint-test, build-image,
-# actionlint, secret-scan, supply-chain) has already passed.
-#
-# GitHub's native auto-merge cannot be used here: its deferred completion path
-# re-checks the `pull_request` rules rather than the actor, so a ruleset bypass
-# grant never lets it complete and the PR stays BLOCKED on review forever. The
-# merge is therefore issued directly through the API with
-# `DEPENDABOT_AUTOMERGE_TOKEN` — a token for the repository owner, who is the
-# only bypass actor on `.github/CODEOWNERS`' ruleset. Ruleset
-# `main: changes only via pull request` is untouched, so a pull request and all
-# required checks still gate the merge.
-#
-# Strict required status checks mean the branch must sit on current `main`: when
-# the merge is refused as out of date, the branch is updated instead, which
-# re-runs CI and re-enters this job.
-
 on:
   pull_request_target:
     types: [opened, synchronize, reopened]
     branches: [main]
-  workflow_run:
-    workflows: [CI]
-    types: [completed]
 
-# Least privilege (#263 item 1): the workflow-scoped token is read-only; the
-# classification job grants itself `pull-requests: write` to label the PR, and
-# the merge job runs on the owner's token held in `DEPENDABOT_AUTOMERGE_TOKEN`.
-permissions:
-  contents: read
+permissions: {}
 
 jobs:
   classify:
     name: Classify the bump
-    if: >-
-      github.event_name == 'pull_request_target' &&
-      github.event.pull_request.user.login == 'dependabot[bot]'
+    if: github.event.pull_request.user.login == 'dependabot[bot]'
+    concurrency:
+      group: dependabot-automerge-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
     runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 5
     permissions:
       contents: read
       pull-requests: write
     steps:
+      # Use only PR metadata; never check out or execute PR code in this job.
       - name: Read the update type
         id: dependabot
         uses: dependabot/fetch-metadata@21025c705c08248db411dc16f3619e6b5f9ea21a # v2
 
-      # Only a known minor or patch update is marked. Anything else — a major
-      # bump, a grouped update whose highest change cannot be determined, an
-      # unreadable payload — stays unlabelled and therefore needs review.
-      - name: Mark patch and minor bumps for auto-merge
+      - name: Label eligible updates
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           UPDATE_TYPE: ${{ steps.dependabot.outputs.update-type }}
         run: |
           set -euo pipefail
+          current_head=$(gh pr view "$PR" --repo "$REPO" --json headRefOid --jq .headRefOid)
+          if [[ "$current_head" != "$HEAD_SHA" ]]; then
+            echo "PR head has changed; leaving it to the newer run"
+            exit 0
+          fi
           case "$UPDATE_TYPE" in
-            *semver-minor|*semver-patch)
-              echo "$UPDATE_TYPE — marked for auto-merge"
-              gh pr edit "$PR" --add-label automerge
+            version-update:semver-patch|version-update:semver-minor|security-update:semver-patch|security-update:semver-minor)
+              gh pr edit "$PR" --repo "$REPO" --add-label automerge
               ;;
             *)
-              echo "${UPDATE_TYPE:-unknown} — left for review"
-              gh pr edit "$PR" --remove-label automerge >/dev/null 2>&1 || true
+              gh pr edit "$PR" --repo "$REPO" --remove-label automerge
               ;;
           esac
 
-  merge:
-    name: Merge once CI is green
-    if: >-
-      github.event_name == 'workflow_run' &&
-      github.event.workflow_run.event == 'pull_request' &&
-      github.event.workflow_run.conclusion == 'success'
-    runs-on: [self-hosted, Linux, X64]
-    timeout-minutes: 10
-    permissions:
-      contents: read
-    steps:
-      - name: Merge the bump
+      - name: Configure GitHub native auto-merge
         env:
+          # A built-in Actions token would suppress the release workflow on merge.
           GH_TOKEN: ${{ secrets.DEPENDABOT_AUTOMERGE_TOKEN }}
           REPO: ${{ github.repository }}
-          RUN_ID: ${{ github.event.workflow_run.id }}
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          UPDATE_TYPE: ${{ steps.dependabot.outputs.update-type }}
         run: |
           set -euo pipefail
-
-          # Without the owner token the gate stays manual; say so once per run
-          # instead of failing CI-shaped noise on every Dependabot PR.
-          if [ -z "${GH_TOKEN:-}" ]; then
-            echo "::warning title=Dependabot auto-merge is off::DEPENDABOT_AUTOMERGE_TOKEN is unset. Add a fine-grained PAT for the repository owner with Contents: write and Pull requests: write."
+          if [[ -z "$GH_TOKEN" ]]; then
+            echo "::error::DEPENDABOT_AUTOMERGE_TOKEN is not configured"
+            exit 1
+          fi
+          details=$(gh pr view "$PR" --repo "$REPO" --json id,headRefOid,state,autoMergeRequest)
+          if [[ $(jq -r '.headRefOid' <<< "$details") != "$HEAD_SHA" || $(jq -r '.state' <<< "$details") != OPEN ]]; then
+            echo "PR has changed or closed; skipping stale event"
             exit 0
           fi
-
-          sha=$(gh api "repos/$REPO/actions/runs/$RUN_ID" --jq .head_sha)
-          pr=$(gh api "repos/$REPO/commits/$sha/pulls" \
-            --jq '[.[] | select(.state == "open")][0].number // empty')
-          if [ -z "$pr" ]; then
-            echo "no open pull request for $sha — nothing to merge"
-            exit 0
-          fi
-
-          author=$(gh api "repos/$REPO/pulls/$pr" --jq .user.login)
-          if [ "$author" != "dependabot[bot]" ]; then
-            echo "PR #$pr is authored by $author — not a Dependabot bump"
-            exit 0
-          fi
-
-          if ! gh api "repos/$REPO/issues/$pr/labels" --jq '.[].name' | grep -qx automerge; then
-            echo "PR #$pr is not marked automerge (major or unclassified) — leaving it for review"
-            exit 0
-          fi
-
-          response=$(mktemp)
-          if gh api -X PUT "repos/$REPO/pulls/$pr/merge" \
-            -f merge_method=merge >"$response" 2>&1; then
-            echo "merged PR #$pr"
-            exit 0
-          fi
-
-          message=$(cat "$response")
-          echo "$message"
-          case "$message" in
-            *"Base branch was modified"*|*"not up to date"*)
-              # `strict_required_status_checks_policy`: the branch must sit on
-              # current main. Updating it re-runs CI, which re-enters this job;
-              # the expected head records which commit was rebuilt.
-              gh api -X PUT "repos/$REPO/pulls/$pr/update-branch" \
-                -f expected_head_sha="$sha"
-              echo "updated PR #$pr onto main; the next green CI run merges it"
+          id=$(jq -er '.id' <<< "$details")
+          queued=$(jq -r '.autoMergeRequest != null' <<< "$details")
+          case "$UPDATE_TYPE" in
+            version-update:semver-patch|version-update:semver-minor|security-update:semver-patch|security-update:semver-minor)
+              if [[ "$queued" == false ]]; then
+                # Only enroll; unlike gh pr merge --auto, this cannot fall back to a direct merge call.
+                gh api graphql -f id="$id" -f head="$HEAD_SHA" -f query="
+                  mutation(\$id: ID!, \$head: GitObjectID!) {
+                    enablePullRequestAutoMerge(input: {pullRequestId: \$id, expectedHeadOid: \$head, mergeMethod: MERGE}) {
+                      pullRequest { number }
+                    }
+                  }"
+              fi
               ;;
             *)
-              echo "::warning title=Dependabot auto-merge skipped::PR #$pr did not merge: $message"
+              if [[ "$queued" == true ]]; then
+                gh api graphql -f id="$id" -f query="
+                  mutation(\$id: ID!) {
+                    disablePullRequestAutoMerge(input: {pullRequestId: \$id}) {
+                      pullRequest { number }
+                    }
+                  }"
+              fi
+              echo "${UPDATE_TYPE:-unknown}: left for manual merge"
               ;;
           esac

@@ -65,11 +65,14 @@ the `v0.1.8` release notes is no longer needed.
 
 Dependabot opens one PR per update, described by
 [`.github/dependabot.yml`](.github/dependabot.yml). CI gates every one of them. A
-patch or minor bump is labelled `automerge` and merged by
-[`.github/workflows/dependabot-automerge.yml`](.github/workflows/dependabot-automerge.yml)
-once CI is green, so its release is the `v<version>+<short-sha>` one described
-above; a major bump is never labelled and waits for the owner's approval like
-any other change. Do not add `automerge` to a major bump by hand.
+patch or minor bump is labelled `automerge` and enrolled in GitHub's native
+auto-merge by
+[`.github/workflows/dependabot-automerge.yml`](.github/workflows/dependabot-automerge.yml).
+GitHub still requires the owner's approval and all required CI checks. Major
+and unclassified bumps must be merged manually after the same requirements
+are met. The workflow labels with the built-in Actions token and uses
+`DEPENDABOT_AUTOMERGE_TOKEN` only to enroll or remove a PR from native
+auto-merge, so the resulting push can trigger the release workflow.
 
 ### Architecture invariants
 

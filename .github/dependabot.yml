@@ -1,9 +1,9 @@
 # Dependabot version updates for TatuTime.
 #
-# CI on each PR validates the new pin. A patch or minor bump then merges itself
-# once CI is green (.github/workflows/dependabot-automerge.yml); a major bump is
-# never marked for auto-merge and keeps the owner-approval gate. Either way a
-# pin never moves without a green CI run. The Rust toolchain is pinned by
+# CI on each PR validates the new pin. GitHub auto-merges patch and minor
+# bumps only after the required owner review and CI checks pass
+# (.github/workflows/dependabot-automerge.yml). Major and unclassified bumps
+# must be merged manually after the same checks. The Rust toolchain is pinned by
 # rust-toolchain.toml and the Dockerfile base images; bump all three together in
 # one intentional PR.
 version: 2
