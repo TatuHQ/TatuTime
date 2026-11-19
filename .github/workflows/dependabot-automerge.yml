@@ -50,7 +50,7 @@ jobs:
     steps:
       - name: Read the update type
         id: dependabot
-        uses: dependabot/fetch-metadata@21025c705c08248db411dc16f3619e6b5f9ea21a # v2
+        uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3.1.0
 
       # Only a known minor or patch update is marked. Anything else — a major
       # bump, a grouped update whose highest change cannot be determined, an
