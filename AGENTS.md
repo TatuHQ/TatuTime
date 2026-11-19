@@ -63,9 +63,11 @@ the `v0.1.8` release notes is no longer needed.
 
 ### Dependency updates
 
-Dependabot opens one PR per update, described by
-[`.github/dependabot.yml`](.github/dependabot.yml). CI gates every one of them. A
-patch or minor bump is labelled `automerge` and enrolled in GitHub's native
+Dependabot groups scheduled Cargo, npm, Docker, and GitHub Actions version
+updates into one weekly PR when updates are available. See
+[`.github/dependabot.yml`](.github/dependabot.yml). Security updates may arrive
+separately. A PR classified as a patch or minor update is labelled `automerge`
+and enrolled in GitHub's native
 auto-merge by
 [`.github/workflows/dependabot-automerge.yml`](.github/workflows/dependabot-automerge.yml).
 GitHub still requires the owner's approval and all required CI checks. Major
