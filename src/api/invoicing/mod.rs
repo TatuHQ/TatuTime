@@ -15,6 +15,7 @@ mod sync;
 use crate::api::{
     ApiError, AppState, FieldError, Invoice, InvoiceError, default_active_true, generate_invoice,
 };
+use crate::time::*;
 use uuid::Uuid;
 
 pub use catalog::{create_item_type, delete_item_type, list_item_types, update_item_type};
@@ -72,8 +73,8 @@ pub struct InvoiceInput {
 fn build_draft(
     app: &AppState,
     customer: &crate::domain::Customer,
-    from: chrono::NaiveDate,
-    to: chrono::NaiveDate,
+    from: CivilDate,
+    to: CivilDate,
     include_expenses: bool,
     project_codes: &[crate::domain::ProjectCode],
     line_grouping: crate::domain::LineGrouping,

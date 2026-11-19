@@ -16,6 +16,8 @@ use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use thiserror::Error;
 
+use crate::time::*;
+
 #[derive(Debug, Error)]
 pub enum SsoError {
     #[error("assertion signature is invalid")]
@@ -75,7 +77,7 @@ pub struct SignedTokenIdp {
     issuer: String,
     secret: String,
     allowed_domains: Vec<String>,
-    now_fn: Box<dyn Fn() -> chrono::DateTime<chrono::Utc> + Send + Sync>,
+    now_fn: Box<dyn Fn() -> Timestamp + Send + Sync>,
 }
 
 impl SignedTokenIdp {
@@ -89,16 +91,13 @@ impl SignedTokenIdp {
             issuer: issuer.into(),
             secret: secret.into(),
             allowed_domains,
-            now_fn: Box::new(chrono::Utc::now),
+            now_fn: Box::new(Timestamp::now),
         }
     }
 
     /// Test hook: deterministic clock for expiry behaviour.
     #[must_use]
-    pub fn with_clock(
-        mut self,
-        now_fn: impl Fn() -> chrono::DateTime<chrono::Utc> + Send + Sync + 'static,
-    ) -> Self {
+    pub fn with_clock(mut self, now_fn: impl Fn() -> Timestamp + Send + Sync + 'static) -> Self {
         self.now_fn = Box::new(now_fn);
         self
     }
@@ -173,7 +172,7 @@ impl IdentityProvider for SignedTokenIdp {
         }
         let claims: TokenClaims =
             serde_json::from_slice(&unb64(parts[1])?).map_err(|_| SsoError::BadAssertion)?;
-        if claims.exp < (self.now_fn)().timestamp() {
+        if claims.exp < (self.now_fn)().as_second() {
             return Err(SsoError::Expired);
         }
         let email = crate::auth::normalise_email(&claims.email).ok_or(SsoError::NoEmail)?;
@@ -258,7 +257,7 @@ impl IdentityProvider for SamlIdp {
         }
         let s: SamlStatement =
             serde_json::from_str(&statement).map_err(|_| SsoError::BadAssertion)?;
-        if s.not_on_or_after < chrono::Utc::now().timestamp() {
+        if s.not_on_or_after < Timestamp::now().as_second() {
             return Err(SsoError::Expired);
         }
         let email = crate::auth::normalise_email(&s.name_id).ok_or(SsoError::NoEmail)?;
@@ -382,12 +381,10 @@ pub fn map_role(groups: &[String], admin_group: &str) -> crate::auth::Role {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::{TimeZone, Utc};
-
     #[test]
     fn signed_token_roundtrip_and_rejections() {
         let idp = SignedTokenIdp::new("okta", "test-secret", vec!["tatutime.test".into()])
-            .with_clock(move || Utc.timestamp_opt(1_000_000, 0).unwrap());
+            .with_clock(move || jiff::Timestamp::new(1_000_000, 0).unwrap());
         let claims = TokenClaims {
             sub: "u1".into(),
             email: "Alice@tatutime.test".into(),
@@ -446,7 +443,7 @@ mod tests {
             "NameID": "dana@contoso.test",
             "display_name": "Dana",
             "groups": ["engineering"],
-            "NotOnOrAfter": chrono::Utc::now().timestamp() + 300,
+            "NotOnOrAfter": Timestamp::now().as_second() + 300,
         })
         .to_string();
         let payload = b64(statement.as_bytes());
@@ -463,7 +460,7 @@ mod tests {
         // Foreign domain rejected.
         let bad = serde_json::json!({
             "NameID": "eve@phish.example",
-            "NotOnOrAfter": chrono::Utc::now().timestamp() + 300,
+            "NotOnOrAfter": Timestamp::now().as_second() + 300,
         })
         .to_string();
         let payload2 = b64(bad.as_bytes());
@@ -501,7 +498,7 @@ mod tests {
             email: "alice@tatutime.test".into(),
             name: "Alice".into(),
             groups: vec![],
-            exp: chrono::Utc::now().timestamp() + 300,
+            exp: Timestamp::now().as_second() + 300,
         };
         assert!(matches!(
             deny_all.verify(&deny_all.issue(&claims), ""),

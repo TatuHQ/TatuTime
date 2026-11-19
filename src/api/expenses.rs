@@ -3,8 +3,6 @@
 
 use super::pagination::{self, Order};
 use super::*;
-use chrono::{DateTime, Utc};
-
 use crate::domain::ExpenseDraft;
 
 pub async fn list_categories(State(app): State<AppState>) -> ApiResult {
@@ -185,7 +183,7 @@ fn expense_from_draft(
     existing: Option<&Expense>,
     draft: ExpenseDraft,
     id: Uuid,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Expense {
     Expense {
         imported: existing.and_then(|expense| expense.imported.clone()),
@@ -344,7 +342,7 @@ pub async fn create_submission(
 ) -> ApiResult {
     let week_start = parse_date(&input.week_start)?;
     let week_end = week_start
-        .checked_add_days(chrono::Days::new(6))
+        .checked_add_days(6)
         .ok_or_else(|| ApiError::bad_request("invalid week"))?;
     let all = app.store.list_range(week_start, week_end)?;
     // #218: one bulk answer instead of a full invoice+submission re-scan per

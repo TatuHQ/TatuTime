@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use chrono::{DateTime, Utc};
+use crate::time::*;
 use uuid::Uuid;
 
 use super::io::{read_json, write_json};
@@ -75,6 +75,7 @@ impl Store {
         }
         std::fs::create_dir_all(self.doc_dir::<Invoice>())?;
         write_json(&self.doc_path::<Invoice>(&invoice.id.to_string()), invoice)?;
+        self.invalidate_lock_snapshot();
         self.index_invoice_locked(invoice)
     }
 
@@ -318,7 +319,7 @@ impl Store {
 /// minted by `create_invoice` (default or customer-prefixed), but the hint never carries
 /// anything that could steer a path (#50).
 /// The `pdf` hint persisted with the invoice (#113).
-pub(super) fn pdf_hint(number: &str, archived: &[u8], now: DateTime<Utc>) -> PdfHint {
+pub(super) fn pdf_hint(number: &str, archived: &[u8], now: Timestamp) -> PdfHint {
     use sha2::{Digest, Sha256};
     let mut h = Sha256::new();
     h.update(archived);
@@ -344,12 +345,12 @@ mod invoice_seq_tests {
             number: number.into(),
             customer_id: Uuid::new_v4(),
             currency: Currency("EUR".into()),
-            period_from: chrono::NaiveDate::from_ymd_opt(2026, 10, 1).unwrap(),
-            period_to: chrono::NaiveDate::from_ymd_opt(2026, 10, 7).unwrap(),
+            period_from: CivilDate::new(2026, 10, 1).unwrap(),
+            period_to: CivilDate::new(2026, 10, 7).unwrap(),
             lines: vec![],
             total_minor: 0,
             status: InvoiceStatus::Draft,
-            created_at: chrono::Utc::now(),
+            created_at: Timestamp::now(),
             issued_at: None,
             due_date: None,
             paid_at: None,

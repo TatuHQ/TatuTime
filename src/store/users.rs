@@ -265,6 +265,7 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::time::Timestamp;
 
     #[test]
     fn has_users_ignores_side_indexes_and_tmp_files() {
@@ -299,7 +300,7 @@ mod tests {
             default_rate_minor: 0,
             cost_rate_minor: 0,
             password_hash: "x".into(),
-            created_at: chrono::Utc::now(),
+            created_at: Timestamp::now(),
             session_version: 0,
         };
         std::fs::write(

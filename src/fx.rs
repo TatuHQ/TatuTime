@@ -14,8 +14,7 @@ use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use chrono::{NaiveDate, Utc};
-
+use crate::time::*;
 /// The ECB's daily reference document (EUR-based, no key, no quota).
 pub const ECB_URL: &str = "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml";
 
@@ -35,13 +34,13 @@ pub struct Rate {
     /// The reference date the rate was published for. `None` for the identity
     /// conversion of a currency with itself, which needs no table at all (and
     /// therefore works offline).
-    pub date: Option<NaiveDate>,
+    pub date: Option<CivilDate>,
 }
 
 /// The ECB's published table: units of each currency per 1 EUR.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Rates {
-    pub date: NaiveDate,
+    pub date: CivilDate,
     per_eur: HashMap<String, f64>,
 }
 
@@ -81,7 +80,7 @@ impl Rates {
 /// rate='N'/>` per currency — and the project keeps its dependency surface
 /// small.
 pub fn parse_ecb(xml: &str) -> Option<Rates> {
-    let date = NaiveDate::parse_from_str(attr(xml, "time='")?, "%Y-%m-%d").ok()?;
+    let date = CivilDate::strptime("%Y-%m-%d", attr(xml, "time='")?).ok()?;
     let mut per_eur = HashMap::new();
     for chunk in xml.split("currency='").skip(1) {
         let Some((code, rest)) = chunk.split_once('\'') else {
@@ -195,8 +194,10 @@ pub fn convert(from: &str, to: &str) -> Result<Rate, FxError> {
 }
 
 /// Today, for the identity conversion's audit trail.
-pub fn today() -> NaiveDate {
-    Utc::now().date_naive()
+pub fn today() -> CivilDate {
+    Timestamp::now()
+        .to_zoned_datetime(jiff::tz::TimeZone::UTC)
+        .date()
 }
 
 #[cfg(test)]
@@ -217,7 +218,7 @@ mod tests {
     #[test]
     fn parses_the_reference_date_and_the_table() {
         let rates = parse_ecb(DOC).expect("the ECB document parses");
-        assert_eq!(rates.date, NaiveDate::from_ymd_opt(2026, 10, 14).unwrap());
+        assert_eq!(rates.date, CivilDate::new(2026, 10, 14).unwrap());
         assert_eq!(rates.per_eur.get("USD"), Some(&1.0831));
         assert_eq!(rates.per_eur.get("JPY"), Some(&163.42));
     }

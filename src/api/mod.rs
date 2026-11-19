@@ -31,6 +31,7 @@ use crate::domain::{Submission, SubmissionState};
 use crate::error::ApiError;
 use crate::report;
 use crate::store::{Store, StoreError};
+use crate::time::*;
 
 pub mod admin_email;
 pub mod auth;
@@ -680,8 +681,8 @@ pub(crate) fn provider_or_400<T>(found: Option<T>, kind: &str) -> Result<T, ApiE
     found.ok_or_else(|| ApiError::bad_request(format!("unknown or disabled {kind} provider")))
 }
 
-pub(crate) fn parse_date(s: &str) -> Result<chrono::NaiveDate, ApiError> {
-    chrono::NaiveDate::parse_from_str(s.trim(), "%Y-%m-%d")
+pub(crate) fn parse_date(s: &str) -> Result<CivilDate, ApiError> {
+    CivilDate::strptime("%Y-%m-%d", s.trim())
         .map_err(|_| ApiError::bad_request(format!("'{s}' is not a date in YYYY-MM-DD form")))
 }
 
@@ -690,7 +691,7 @@ pub(crate) fn parse_date(s: &str) -> Result<chrono::NaiveDate, ApiError> {
 pub(crate) fn parse_range(
     from: Option<&String>,
     to: Option<&String>,
-) -> Result<(chrono::NaiveDate, chrono::NaiveDate), ApiError> {
+) -> Result<(CivilDate, CivilDate), ApiError> {
     let missing = || ApiError::bad_request("query needs 'from' and 'to'");
     let (from, to) = (from.ok_or_else(missing)?, to.ok_or_else(missing)?);
     let (from, to) = (parse_date(from)?, parse_date(to)?);
@@ -712,7 +713,7 @@ pub struct RangeQuery {
 
 impl RangeQuery {
     /// Resolve both bounds, with the documented errors.
-    pub(crate) fn dates(&self) -> Result<(chrono::NaiveDate, chrono::NaiveDate), ApiError> {
+    pub(crate) fn dates(&self) -> Result<(CivilDate, CivilDate), ApiError> {
         parse_range(self.from.as_ref(), self.to.as_ref())
     }
 }

@@ -4,9 +4,8 @@
 //! the schedule's `last_period_end`. Drafts are not auto-issued (a human
 //! reviews and issues them).
 
+use crate::time::*;
 use std::sync::Arc;
-
-use chrono::{DateTime, Utc};
 
 use crate::domain::{
     Cadence, Invoice, InvoiceLine, InvoiceStatus, LineKind, RecurMode, RecurringSchedule,
@@ -29,9 +28,9 @@ impl RecurringJob {
     fn build_invoice(
         &self,
         schedule: &RecurringSchedule,
-        from: chrono::NaiveDate,
-        to: chrono::NaiveDate,
-        now: DateTime<Utc>,
+        from: CivilDate,
+        to: CivilDate,
+        now: Timestamp,
     ) -> Result<Option<Invoice>, String> {
         let customer = self
             .store
@@ -137,8 +136,8 @@ impl Job for RecurringJob {
     fn interval_secs(&self) -> i64 {
         24 * 3600
     }
-    fn run(&self, now: DateTime<Utc>) {
-        let today = now.date_naive();
+    fn run(&self, now: Timestamp) {
+        let today = now.to_zoned_datetime(jiff::tz::TimeZone::UTC).date();
         let Ok(schedules) = self.store.list_schedules() else {
             return;
         };
@@ -183,10 +182,13 @@ impl Job for RecurringJob {
 mod tests {
     use super::*;
     use crate::domain::RecurringSchedule;
-    use chrono::NaiveDate;
-
-    fn date(y: i32, m: u32, d: u32) -> NaiveDate {
-        NaiveDate::from_ymd_opt(y, m, d).unwrap()
+    fn date(y: i32, m: u32, d: u32) -> CivilDate {
+        CivilDate::new(
+            i16::try_from(y).unwrap(),
+            i8::try_from(m).unwrap(),
+            i8::try_from(d).unwrap(),
+        )
+        .unwrap()
     }
 
     #[test]
@@ -235,10 +237,10 @@ mod tests {
             currency: Currency("EUR".into()),
             active: true,
             last_period_end: None,
-            created_at: Utc::now(),
+            created_at: Timestamp::now(),
         };
         store.put_schedule(&sched).unwrap();
-        let now = Utc::now();
+        let now = Timestamp::now();
         RecurringJob::new(store.clone()).run(now);
         let invoices = store.list_invoices().unwrap();
         assert_eq!(invoices.len(), 1);

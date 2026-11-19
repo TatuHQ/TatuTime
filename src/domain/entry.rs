@@ -1,7 +1,7 @@
 use super::customer::Customer;
 use super::primitives::{Currency, FieldError, Hours, ProjectCode, default_true, validate_note};
 use super::project::{Project, Source};
-use chrono::{DateTime, NaiveDate, Utc};
+use crate::time::*;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -18,7 +18,7 @@ pub struct Timer {
     pub task_code: Option<ProjectCode>,
     #[serde(default)]
     pub note: String,
-    pub started_at: DateTime<Utc>,
+    pub started_at: Timestamp,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -34,8 +34,8 @@ pub struct StartTimerInput {
 
 /// Elapsed hundredths-of-an-hour for a running timer, rounded half-up and
 /// clamped to the valid entry range (0.01–24.00 h).
-pub fn elapsed_hundredths(started_at: DateTime<Utc>, now: DateTime<Utc>) -> u32 {
-    let secs = (now - started_at).num_seconds().max(0) as u64;
+pub fn elapsed_hundredths(started_at: Timestamp, now: Timestamp) -> u32 {
+    let secs = (now - started_at).as_secs().max(0) as u64;
     let hundredths = (secs * 100 + 1800) / 3600; // round half up
     hundredths.clamp(1, 2400) as u32
 }
@@ -45,7 +45,7 @@ pub struct Entry {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub imported: Option<super::ImportedTime>,
     pub id: Uuid,
-    pub date: NaiveDate,
+    pub date: CivilDate,
     pub customer_id: Uuid,
     /// The user who logged the entry (#21 attribution; None for legacy docs).
     #[serde(default)]
@@ -63,8 +63,8 @@ pub struct Entry {
     /// Provenance. Defaults to `manual` so pre-#18 documents load unchanged.
     #[serde(default)]
     pub source: Source,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
+    pub created_at: Timestamp,
+    pub updated_at: Timestamp,
 }
 
 /// Effective (currency, rate) of an entry. Rate precedence (#21): **person →
@@ -111,7 +111,7 @@ pub struct EntryInput {
 
 pub fn validate_entry_input(input: &EntryInput) -> Result<EntryDraft, Vec<FieldError>> {
     let mut errors = Vec::new();
-    let date = NaiveDate::parse_from_str(input.date.trim(), "%Y-%m-%d")
+    let date = CivilDate::strptime("%Y-%m-%d", input.date.trim())
         .map_err(|_| {
             errors.push(FieldError::new(
                 "date",
@@ -139,7 +139,7 @@ pub fn validate_entry_input(input: &EntryInput) -> Result<EntryDraft, Vec<FieldE
 
 #[derive(Debug)]
 pub struct EntryDraft {
-    pub date: NaiveDate,
+    pub date: CivilDate,
     pub customer_id: Uuid,
     pub project_code: String,
     pub task_code: Option<String>,
@@ -174,7 +174,7 @@ mod tests {
         let entry = Entry {
             imported: None,
             id: Uuid::new_v4(),
-            date: chrono::NaiveDate::from_ymd_opt(2026, 10, 2).unwrap(),
+            date: CivilDate::new(2026, 10, 2).unwrap(),
             customer_id: Uuid::new_v4(),
             user_id: None,
             project_code: ProjectCode::parse("P1").unwrap(),
@@ -183,8 +183,8 @@ mod tests {
             note: String::new(),
             billable: true,
             source: Source::Manual,
-            created_at: chrono::Utc::now(),
-            updated_at: chrono::Utc::now(),
+            created_at: Timestamp::now(),
+            updated_at: Timestamp::now(),
         };
         let customer = Customer {
             id: entry.customer_id,
@@ -257,10 +257,8 @@ mod tests {
 #[cfg(test)]
 mod timer_tests {
     use super::*;
-    use chrono::TimeZone;
-
-    fn at(secs: i64) -> DateTime<Utc> {
-        Utc.timestamp_opt(1_700_000_000 + secs, 0).unwrap()
+    fn at(secs: i64) -> Timestamp {
+        jiff::Timestamp::new(1_700_000_000 + secs, 0).unwrap()
     }
 
     #[test]

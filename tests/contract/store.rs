@@ -323,7 +323,7 @@ mod storage_layout {
             default_rate_minor: 0,
             cost_rate_minor: 0,
             password_hash: String::new(),
-            created_at: chrono::Utc::now(),
+            created_at: jiff::Timestamp::now(),
             session_version: 1,
         };
         store.put_user(&user).unwrap();
@@ -374,7 +374,7 @@ mod storage_layout {
             })
             .unwrap();
 
-        let date = chrono::NaiveDate::from_ymd_opt(2026, 10, 9).unwrap();
+        let date = jiff::civil::Date::new(2026, 10, 9).unwrap();
         let entry = Entry {
             imported: None,
             id: Uuid::new_v4(),
@@ -387,8 +387,8 @@ mod storage_layout {
             note: String::new(),
             billable: true,
             source: Default::default(),
-            created_at: chrono::Utc::now(),
-            updated_at: chrono::Utc::now(),
+            created_at: jiff::Timestamp::now(),
+            updated_at: jiff::Timestamp::now(),
         };
         store.put_entry(&entry).unwrap();
 
@@ -400,7 +400,7 @@ mod storage_layout {
                     kind: "layout".into(),
                     title: "Layout".into(),
                     body: "Layout".into(),
-                    created_at: chrono::Utc::now(),
+                    created_at: jiff::Timestamp::now(),
                     read: false,
                 },
             )
@@ -420,7 +420,7 @@ mod storage_layout {
                 lines: vec![],
                 total_minor: 0,
                 status: InvoiceStatus::Draft,
-                created_at: chrono::Utc::now(),
+                created_at: jiff::Timestamp::now(),
                 issued_at: None,
                 due_date: None,
                 paid_at: None,
@@ -461,7 +461,7 @@ mod storage_layout {
         let user_id = user.id.to_string();
         let invoice_id = invoice.id.to_string();
         let entry_id = entry.id.to_string();
-        let day = date.format("%Y-%m-%d").to_string();
+        let day = date.to_string();
 
         // Documents, at the paths the documented shapes expand to.
         let expected_documents = [
@@ -566,8 +566,8 @@ mod entries_archive {
     const LATER: &str = "2026-10-09";
     const CUTOFF: &str = "2026-09-01";
 
-    fn cutoff() -> chrono::NaiveDate {
-        chrono::NaiveDate::parse_from_str(CUTOFF, "%Y-%m-%d").expect("cutoff")
+    fn cutoff() -> jiff::civil::Date {
+        jiff::civil::Date::strptime("%Y-%m-%d", CUTOFF).expect("cutoff")
     }
 
     /// The data root below the temp dir the harness hands out.
@@ -1099,16 +1099,16 @@ mod cold_tree_reads {
     const MEMBER_EMAIL: &str = "dana@test.local";
     const MEMBER_PW: &str = "danapass123";
 
-    fn cutoff() -> chrono::NaiveDate {
-        chrono::NaiveDate::parse_from_str(CUTOFF, "%Y-%m-%d").expect("cutoff")
+    fn cutoff() -> jiff::civil::Date {
+        jiff::civil::Date::strptime("%Y-%m-%d", CUTOFF).expect("cutoff")
     }
 
-    fn day() -> chrono::NaiveDate {
-        chrono::NaiveDate::parse_from_str(DAY, "%Y-%m-%d").expect("day")
+    fn day() -> jiff::civil::Date {
+        jiff::civil::Date::strptime("%Y-%m-%d", DAY).expect("day")
     }
 
-    fn later() -> chrono::NaiveDate {
-        chrono::NaiveDate::parse_from_str(LATER, "%Y-%m-%d").expect("later")
+    fn later() -> jiff::civil::Date {
+        jiff::civil::Date::strptime("%Y-%m-%d", LATER).expect("later")
     }
 
     /// The data root below the temp dir the harness hands out.

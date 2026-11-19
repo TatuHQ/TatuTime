@@ -7,7 +7,7 @@
 
 use std::collections::BTreeMap;
 
-use chrono::{Datelike, NaiveDate};
+use crate::time::*;
 use uuid::Uuid;
 
 use crate::auth::User;
@@ -87,7 +87,7 @@ fn group_key(
             user_name.to_owned(),
         ),
         Group::Week => {
-            let iso = entry.date.iso_week();
+            let iso = entry.date.iso_week_date();
             (
                 format!("{}-W{:02}", iso.year(), iso.week()),
                 format!("{}-W{:02}", iso.year(), iso.week()),
@@ -273,14 +273,14 @@ struct MonthAcc {
     entries: usize,
 }
 
-fn month_key(date: NaiveDate) -> String {
+fn month_key(date: CivilDate) -> String {
     format!("{:04}-{:02}", date.year(), date.month())
 }
 
 /// Every month touched by an inclusive `from`/`to` range, oldest first. The
 /// store caps a range at 400 days, so this is at most fourteen months and a
 /// simple walk needs no calendar arithmetic beyond the December rollover.
-fn months_in_range(from: NaiveDate, to: NaiveDate) -> Vec<String> {
+fn months_in_range(from: CivilDate, to: CivilDate) -> Vec<String> {
     let mut out = Vec::new();
     let (mut year, mut month) = (from.year(), from.month());
     while (year, month) <= (to.year(), to.month()) {
@@ -317,8 +317,8 @@ pub fn summarise_months(
     ctx: MonthlyContext<'_>,
     kind: MonthlyGroup,
     billable_filter: Option<bool>,
-    from: NaiveDate,
-    to: NaiveDate,
+    from: CivilDate,
+    to: CivilDate,
 ) -> MonthlyReport {
     let months = months_in_range(from, to);
     let month_index: std::collections::HashMap<&str, usize> = months
@@ -447,19 +447,20 @@ pub fn summarise_months(
 #[cfg(test)]
 mod monthly_tests {
     use super::months_in_range;
+    use crate::time::CivilDate;
 
     #[test]
     fn the_month_axis_crosses_a_year_boundary_in_order() {
-        let from = chrono::NaiveDate::from_ymd_opt(2025, 11, 15).unwrap();
-        let to = chrono::NaiveDate::from_ymd_opt(2026, 2, 2).unwrap();
+        let from = CivilDate::new(2025, 11, 15).unwrap();
+        let to = CivilDate::new(2026, 2, 2).unwrap();
         assert_eq!(
             months_in_range(from, to),
             vec!["2025-11", "2025-12", "2026-01", "2026-02"]
         );
         // A range inside one month yields exactly that month, and the first and
         // last month are included even when the bounds are mid-month.
-        let from = chrono::NaiveDate::from_ymd_opt(2026, 10, 20).unwrap();
-        let to = chrono::NaiveDate::from_ymd_opt(2026, 10, 21).unwrap();
+        let from = CivilDate::new(2026, 10, 20).unwrap();
+        let to = CivilDate::new(2026, 10, 21).unwrap();
         assert_eq!(months_in_range(from, to), vec!["2026-10"]);
     }
 }
@@ -501,8 +502,8 @@ pub fn summarise_profit(
     expenses: &[crate::domain::Expense],
     entries: &[Entry],
     ctx: ProfitContext<'_>,
-    from: NaiveDate,
-    to: NaiveDate,
+    from: CivilDate,
+    to: CivilDate,
 ) -> Profitability {
     let customers = ctx.customers;
     let projects = ctx.projects;
@@ -623,8 +624,8 @@ pub struct InvoiceReport {
 pub fn invoice_report(
     invoices: &[crate::domain::Invoice],
     customers: &[Customer],
-    from: NaiveDate,
-    to: NaiveDate,
+    from: CivilDate,
+    to: CivilDate,
 ) -> InvoiceReport {
     use crate::domain::InvoiceStatus;
     let mut rows: Vec<InvoiceReportRow> = Vec::new();
@@ -717,16 +718,16 @@ pub fn invoice_csv(invoices: &[crate::domain::Invoice], customers: &[Customer]) 
         let fields = [
             i.number.clone(),
             name(i.customer_id),
-            i.period_from.format("%Y-%m-%d").to_string(),
-            i.period_to.format("%Y-%m-%d").to_string(),
+            i.period_from.strftime("%Y-%m-%d").to_string(),
+            i.period_to.strftime("%Y-%m-%d").to_string(),
             i.currency.0.clone(),
             i.total_minor.to_string(),
             format!("{:?}", i.status).to_lowercase(),
-            i.issued_at.map(|t| t.to_rfc3339()).unwrap_or_default(),
+            i.issued_at.map(|t| t.to_string()).unwrap_or_default(),
             i.due_date
-                .map(|d| d.format("%Y-%m-%d").to_string())
+                .map(|d| d.strftime("%Y-%m-%d").to_string())
                 .unwrap_or_default(),
-            i.paid_at.map(|t| t.to_rfc3339()).unwrap_or_default(),
+            i.paid_at.map(|t| t.to_string()).unwrap_or_default(),
             i.payment_reference.clone(),
             i.paid_minor().to_string(),
             i.balance_minor().to_string(),
@@ -801,7 +802,7 @@ pub fn export_csv(
         let hours = e.hours.0 as f64 / 100.0;
         let amount = e.billing_amount_minor(rate);
         let fields = [
-            e.date.format("%Y-%m-%d").to_string(),
+            e.date.strftime("%Y-%m-%d").to_string(),
             customer.name.clone(),
             e.project_code.0.clone(),
             e.task_code

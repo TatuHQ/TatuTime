@@ -16,7 +16,6 @@
 //! and `%variable%` has a value to show. Every value is synthetic. Nothing here
 //! writes to the store.
 
-use chrono::{NaiveDate, TimeZone, Utc};
 use uuid::Uuid;
 
 use crate::api::*;
@@ -27,8 +26,13 @@ use crate::domain::{
 
 /// A date that exists in every calendar (no leap-day edge) and keeps the
 /// sample byte-stable across runs — the preview's ETag depends on it.
-fn day(year: i32, month: u32, day: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(year, month, day).expect("sample date is valid")
+fn day(year: i32, month: u32, day: u32) -> CivilDate {
+    CivilDate::new(
+        i16::try_from(year).expect("sample year is valid"),
+        i8::try_from(month).expect("sample month is valid"),
+        i8::try_from(day).expect("sample day is valid"),
+    )
+    .expect("sample date is valid")
 }
 
 /// The synthetic invoice every preview and save-gauntlet renders against.
@@ -100,10 +104,7 @@ pub(crate) fn sample_invoice() -> Invoice {
         // Subtotal 1,610.00 + 23% VAT 370.30 = 1,980.30 (integer minor units).
         total_minor: 198_030,
         status: InvoiceStatus::Draft,
-        created_at: Utc
-            .with_ymd_and_hms(2026, 10, 5, 9, 0, 0)
-            .single()
-            .expect("sample timestamp is valid"),
+        created_at: crate::time::utc_timestamp(2026, 10, 5, 9, 0, 0),
         issued_at: None,
         due_date: Some(day(2026, 11, 4)),
         paid_at: None,

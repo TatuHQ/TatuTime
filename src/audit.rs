@@ -9,7 +9,7 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use chrono::{DateTime, Utc};
+use crate::time::*;
 use serde_json::json;
 
 /// Rotate once the log passes this size (D3, #102). One generation is kept
@@ -33,8 +33,8 @@ impl AuditLog {
     }
 
     /// Append one event. `subject` is an email or id, never a secret.
-    pub fn record(&self, event: &str, subject: &str, now: DateTime<Utc>) {
-        let line = json!({ "ts": now.to_rfc3339(), "event": event, "subject": subject });
+    pub fn record(&self, event: &str, subject: &str, now: Timestamp) {
+        let line = json!({ "ts": now.to_string(), "event": event, "subject": subject });
         // Hold the append lock for this line; a poisoned lock still yields a
         // usable guard (we only ever append whole lines). The O_APPEND single
         // write stays as-is: it is safe across processes (one line, one
@@ -119,7 +119,7 @@ mod tests {
     fn records_and_reads_back_newest_first() {
         let dir = tempfile::tempdir().unwrap();
         let log = AuditLog::new(dir.path());
-        let now = Utc::now();
+        let now = Timestamp::now();
         log.record("login_failed", "a@b.co", now);
         log.record("login_ok", "a@b.co", now);
         let recent = log.recent(10);
@@ -134,7 +134,7 @@ mod tests {
         // file read would, even well past one chunk.
         let dir = tempfile::tempdir().unwrap();
         let log = AuditLog::new(dir.path());
-        let now = Utc::now();
+        let now = Timestamp::now();
         for i in 0..4000 {
             log.record("ev", &format!("subject-{i}"), now);
         }
@@ -150,9 +150,10 @@ mod tests {
     fn size_rotation_keeps_one_generation() {
         let dir = tempfile::tempdir().unwrap();
         let log = AuditLog::new(dir.path());
-        let now = Utc::now();
-        // Each line is ~95 bytes; 1 MiB crosses MAX_LOG_BYTES mid-run.
-        for i in 0..13000 {
+        let now = Timestamp::now();
+        // Jiff's canonical timestamp representation is shorter than Chrono's;
+        // use enough records to cross the byte threshold regardless.
+        for i in 0..16000 {
             log.record("rotation", &format!("s-{i}"), now);
         }
         assert!(
@@ -169,6 +170,6 @@ mod tests {
             .iter()
             .map(|v| v["subject"].as_str().unwrap())
             .collect();
-        assert_eq!(subjects, ["s-12999", "s-12998", "s-12997"]);
+        assert_eq!(subjects, ["s-15999", "s-15998", "s-15997"]);
     }
 }

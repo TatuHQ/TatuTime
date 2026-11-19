@@ -32,7 +32,7 @@ pub struct ManualInvoiceInput {
 #[serde(deny_unknown_fields)]
 pub struct InvoiceLineInput {
     pub kind: crate::domain::LineKind,
-    pub date: chrono::NaiveDate,
+    pub date: CivilDate,
     #[serde(default)]
     pub entry_id: Option<Uuid>,
     #[serde(default)]
@@ -109,7 +109,7 @@ fn percent_field(value: u16, field: &str, errors: &mut Vec<FieldError>) {
 
 fn validate_document(
     document: &crate::domain::InvoiceDocument,
-    today: chrono::NaiveDate,
+    today: CivilDate,
     errors: &mut Vec<FieldError>,
 ) {
     for (field, value, max) in [

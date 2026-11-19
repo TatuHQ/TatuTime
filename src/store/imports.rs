@@ -15,7 +15,7 @@
 use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use chrono::{DateTime, Utc};
+use crate::time::*;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
@@ -64,7 +64,7 @@ pub struct StagedImportFile {
     pub name: String,
     pub sha256: String,
     pub bytes: u64,
-    pub uploaded_at: DateTime<Utc>,
+    pub uploaded_at: Timestamp,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -115,7 +115,7 @@ pub enum ImportBatchState {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ImportCommitOutcome {
-    pub committed_at: DateTime<Utc>,
+    pub committed_at: Timestamp,
     pub revision: String,
     pub entries: Vec<Uuid>,
     pub expenses: Vec<Uuid>,
@@ -131,8 +131,8 @@ pub struct ImportBatch {
     pub id: Uuid,
     pub namespace: String,
     pub state: ImportBatchState,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
+    pub created_at: Timestamp,
+    pub updated_at: Timestamp,
     pub files: ImportFiles,
     pub choices: ImportChoices,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -277,7 +277,7 @@ impl Store {
         &self,
         id: Uuid,
         choices: ImportChoices,
-        now: DateTime<Utc>,
+        now: Timestamp,
     ) -> Result<ImportBatch, StoreError> {
         let _guard = self.write_lock()?;
         let mut batch = self.get_import_batch(id)?.ok_or(StoreError::NotFound)?;
@@ -305,7 +305,7 @@ impl Store {
         kind: ImportKind,
         name: &str,
         bytes: &[u8],
-        now: DateTime<Utc>,
+        now: Timestamp,
     ) -> Result<ImportBatch, StoreError> {
         if bytes.len() > kind.limit() {
             return Err(StoreError::Conflict(format!(
@@ -387,7 +387,7 @@ impl Store {
         &self,
         id: Uuid,
         revision: &str,
-        now: DateTime<Utc>,
+        now: Timestamp,
     ) -> Result<ImportBatch, StoreError> {
         let _guard = self.write_lock()?;
         let mut batch = self.get_import_batch(id)?.ok_or(StoreError::NotFound)?;
@@ -410,7 +410,7 @@ impl Store {
         &self,
         id: Uuid,
         expected_revision: &str,
-        now: DateTime<Utc>,
+        now: Timestamp,
     ) -> Result<ImportCommitOutcome, StoreError> {
         let _guard = self.write_lock()?;
         let mut batch = self.get_import_batch(id)?.ok_or(StoreError::NotFound)?;
@@ -1002,6 +1002,7 @@ impl Store {
                     archived_at: now,
                 });
                 write_json(&self.doc_path::<Invoice>(&invoice.id.to_string()), invoice)?;
+                self.invalidate_lock_snapshot();
                 self.index_invoice_locked(invoice)?;
                 self.advance_invoice_high_water(&invoice.number)?;
             }
@@ -1394,7 +1395,7 @@ mod tests {
                 default_rate_minor: 0,
                 cost_rate_minor: 0,
                 password_hash: String::new(),
-                created_at: Utc::now(),
+                created_at: Timestamp::now(),
                 session_version: 1,
             })
             .unwrap();
@@ -1439,8 +1440,8 @@ mod tests {
             id,
             namespace: "harvest-account".into(),
             state: ImportBatchState::Draft,
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
+            created_at: Timestamp::now(),
+            updated_at: Timestamp::now(),
             files: ImportFiles::default(),
             choices,
             preview_revision: None,
@@ -1469,13 +1470,13 @@ mod tests {
                 ImportKind::Time,
                 "time.csv",
                 csv().as_bytes(),
-                Utc::now(),
+                Timestamp::now(),
             )
             .unwrap();
         let preview = store.import_preview(id).unwrap();
         assert!(preview.ready, "{:?}", preview.issues);
         let outcome = store
-            .commit_import(id, &preview.revision, Utc::now())
+            .commit_import(id, &preview.revision, Timestamp::now())
             .unwrap();
         assert_eq!(outcome.entries.len(), 1);
         let entry = store.get_entry(outcome.entries[0]).unwrap().unwrap();
@@ -1489,7 +1490,7 @@ mod tests {
 
         // The identical retry returns the same outcome, not a second record.
         let retry = store
-            .commit_import(id, &preview.revision, Utc::now())
+            .commit_import(id, &preview.revision, Timestamp::now())
             .unwrap();
         assert_eq!(retry.entries, outcome.entries);
         assert_eq!(store.list_all_entries().unwrap().len(), 1);
@@ -1505,7 +1506,7 @@ mod tests {
                 ImportKind::Time,
                 "time.csv",
                 csv().as_bytes(),
-                Utc::now(),
+                Timestamp::now(),
             )
             .unwrap();
         let duplicate = store.import_preview(second_id).unwrap();
@@ -1513,7 +1514,7 @@ mod tests {
         assert!(!duplicate.ready);
         assert!(
             store
-                .commit_import(second_id, &duplicate.revision, Utc::now())
+                .commit_import(second_id, &duplicate.revision, Timestamp::now())
                 .is_err()
         );
     }
@@ -1561,7 +1562,7 @@ mod tests {
                 ImportKind::Time,
                 "time.csv",
                 csv().as_bytes(),
-                Utc::now(),
+                Timestamp::now(),
             )
             .unwrap();
         std::fs::write(
@@ -1572,7 +1573,7 @@ mod tests {
         assert!(store.import_preview(id).is_err());
         assert!(
             store
-                .commit_import(id, &"0".repeat(64), Utc::now())
+                .commit_import(id, &"0".repeat(64), Timestamp::now())
                 .is_err()
         );
     }
@@ -1590,12 +1591,12 @@ mod tests {
                 ImportKind::Time,
                 "time.csv",
                 csv().as_bytes(),
-                Utc::now(),
+                Timestamp::now(),
             )
             .unwrap();
         let preview = store.import_preview(id).unwrap();
         let outcome = store
-            .commit_import(id, &preview.revision, Utc::now())
+            .commit_import(id, &preview.revision, Timestamp::now())
             .unwrap();
         // Simulate the crash window: the committed journal is durable but the
         // batch still looks like a draft.
@@ -1628,7 +1629,7 @@ mod tests {
                 ImportKind::Time,
                 "time.csv",
                 csv().as_bytes(),
-                Utc::now(),
+                Timestamp::now(),
             )
             .unwrap();
         let orphan = dir.path().join("data/customers/orphan.json");
@@ -1702,9 +1703,9 @@ mod tests {
             customer_id: Some(cid),
             original_number: "INV-0050".into(),
             currency: Some(Currency("EUR".into())),
-            invoice_date: chrono::NaiveDate::from_ymd_opt(2026, 1, 31),
-            period_from: chrono::NaiveDate::from_ymd_opt(2026, 1, 1),
-            period_to: chrono::NaiveDate::from_ymd_opt(2026, 1, 31),
+            invoice_date: CivilDate::new(2026, 1, 31).ok(),
+            period_from: CivilDate::new(2026, 1, 1).ok(),
+            period_to: CivilDate::new(2026, 1, 31).ok(),
             total_minor: Some(20_000),
             opening_paid_minor: 0,
             status: Some(InvoiceStatus::Issued),
@@ -1717,7 +1718,7 @@ mod tests {
                 ImportKind::Time,
                 "time.csv",
                 csv().as_bytes(),
-                Utc::now(),
+                Timestamp::now(),
             )
             .unwrap();
         store
@@ -1726,7 +1727,7 @@ mod tests {
                 ImportKind::Invoices,
                 "invoices.zip",
                 &invoice_zip("invoices/INV-0050.pdf", pdf),
-                Utc::now(),
+                Timestamp::now(),
             )
             .unwrap();
         let preview = store.import_preview(id).unwrap();
@@ -1737,7 +1738,7 @@ mod tests {
             allow_writes(&store.root.join("invoices"));
             return;
         }
-        let failed = store.commit_import(id, &preview.revision, Utc::now());
+        let failed = store.commit_import(id, &preview.revision, Timestamp::now());
         allow_writes(&store.root.join("invoices"));
         assert!(failed.is_err(), "the PDF write boundary fails the commit");
         assert_eq!(
@@ -1759,7 +1760,7 @@ mod tests {
 
         // The same reviewed revision commits cleanly once the boundary is gone.
         let outcome = store
-            .commit_import(id, &preview.revision, Utc::now())
+            .commit_import(id, &preview.revision, Timestamp::now())
             .unwrap();
         assert_eq!(outcome.invoices, vec!["INV-0050".to_string()]);
         assert!(store.get_entry(entry_id).unwrap().is_some());
@@ -1780,19 +1781,19 @@ mod tests {
                 ImportKind::Time,
                 "time.csv",
                 csv().as_bytes(),
-                Utc::now(),
+                Timestamp::now(),
             )
             .unwrap();
         let preview = store.import_preview(id).unwrap();
         assert!(preview.ready, "{:?}", preview.issues);
 
-        let day = store.day_dir(chrono::NaiveDate::from_ymd_opt(2026, 1, 5).unwrap());
+        let day = store.day_dir(CivilDate::new(2026, 1, 5).unwrap());
         if !deny_writes(&day) {
             eprintln!("skip: this filesystem/user does not enforce directory write modes");
             allow_writes(&day);
             return;
         }
-        let failed = store.commit_import(id, &preview.revision, Utc::now());
+        let failed = store.commit_import(id, &preview.revision, Timestamp::now());
         allow_writes(&day);
         assert!(failed.is_err());
         assert_eq!(
@@ -1805,7 +1806,7 @@ mod tests {
         assert!(store.list_all_entries().unwrap().is_empty());
 
         let outcome = store
-            .commit_import(id, &preview.revision, Utc::now())
+            .commit_import(id, &preview.revision, Timestamp::now())
             .unwrap();
         assert_eq!(outcome.entries.len(), 1);
         assert_eq!(store.list_all_entries().unwrap().len(), 1);

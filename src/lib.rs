@@ -37,6 +37,7 @@ pub mod scheduler;
 pub mod sso;
 pub mod store;
 pub mod template;
+mod time;
 pub mod vault;
 
 pub use assets::spawn_web_watcher;

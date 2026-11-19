@@ -1,9 +1,8 @@
-use chrono::{DateTime, Datelike, NaiveDate, Utc};
-
 use crate::domain::{
     Customer, Invoice, InvoiceLine, InvoiceWatermarkStage, LabelOverrides, LineGrouping,
     LineItemKind, LineKind, PaymentLine, PaymentTerms, TermsKind,
 };
+use crate::time::*;
 
 // =============================================================== doc model ==
 
@@ -192,14 +191,16 @@ pub struct Doc {
 
 /// The day a document was issued, for display: the issue timestamp when set,
 /// otherwise the creation timestamp.
-fn issue_day(created_at: DateTime<Utc>, issued_at: Option<DateTime<Utc>>) -> NaiveDate {
-    (issued_at.unwrap_or(created_at)).date_naive()
+fn issue_day(created_at: Timestamp, issued_at: Option<Timestamp>) -> CivilDate {
+    (issued_at.unwrap_or(created_at))
+        .to_zoned_datetime(jiff::tz::TimeZone::UTC)
+        .date()
 }
 
 /// The one date format every document surface uses: `dd/mm/yyyy`. Integer
 /// fields only, no locale, no clock.
 #[must_use]
-pub fn format_date(date: NaiveDate) -> String {
+pub fn format_date(date: CivilDate) -> String {
     format!("{:02}/{:02}/{}", date.day(), date.month(), date.year())
 }
 
@@ -749,7 +750,6 @@ mod tests {
         PaymentDetails, PaymentRail, PaymentTerms, TermsKind,
     };
     use crate::pdf::render_invoice_pdf;
-    use chrono::TimeZone;
     use uuid::Uuid;
 
     fn sample_invoice() -> Invoice {
@@ -761,12 +761,12 @@ mod tests {
             number: "INV-0001".into(),
             customer_id: "22222222-2222-2222-2222-222222222222".parse().unwrap(),
             currency: Currency("EUR".into()),
-            period_from: chrono::NaiveDate::from_ymd_opt(2026, 10, 1).unwrap(),
-            period_to: chrono::NaiveDate::from_ymd_opt(2026, 10, 31).unwrap(),
+            period_from: CivilDate::new(2026, 10, 1).unwrap(),
+            period_to: CivilDate::new(2026, 10, 31).unwrap(),
             lines: vec![
                 InvoiceLine {
                     kind: LineKind::Time,
-                    date: chrono::NaiveDate::from_ymd_opt(2026, 10, 5).unwrap(),
+                    date: CivilDate::new(2026, 10, 5).unwrap(),
                     entry_id: None,
                     expense_id: None,
                     project_code: Some(crate::domain::ProjectCode("WEB-1".into())),
@@ -781,7 +781,7 @@ mod tests {
                 },
                 InvoiceLine {
                     kind: LineKind::Expense,
-                    date: chrono::NaiveDate::from_ymd_opt(2026, 10, 9).unwrap(),
+                    date: CivilDate::new(2026, 10, 9).unwrap(),
                     entry_id: None,
                     expense_id: None,
                     project_code: None,
@@ -797,9 +797,9 @@ mod tests {
             ],
             total_minor: 84500,
             status: InvoiceStatus::Issued,
-            created_at: Utc.timestamp_opt(1_700_000_000, 0).unwrap(),
-            issued_at: Some(Utc.timestamp_opt(1_760_000_000, 0).unwrap()),
-            due_date: Some(chrono::NaiveDate::from_ymd_opt(2026, 11, 14).unwrap()),
+            created_at: jiff::Timestamp::new(1_700_000_000, 0).unwrap(),
+            issued_at: Some(jiff::Timestamp::new(1_760_000_000, 0).unwrap()),
+            due_date: Some(CivilDate::new(2026, 11, 14).unwrap()),
             paid_at: None,
             payment_reference: String::new(),
             pdf: None,
@@ -882,11 +882,11 @@ mod tests {
     #[test]
     fn dates_and_hours_format_without_floats() {
         assert_eq!(
-            format_date(chrono::NaiveDate::from_ymd_opt(2026, 8, 3).unwrap()),
+            format_date(CivilDate::new(2026, 8, 3).unwrap()),
             "03/08/2026"
         );
         assert_eq!(
-            format_date(chrono::NaiveDate::from_ymd_opt(2026, 12, 31).unwrap()),
+            format_date(CivilDate::new(2026, 12, 31).unwrap()),
             "31/12/2026"
         );
         assert_eq!(hours_minutes_text(10_000), "100h 00min");
@@ -979,7 +979,7 @@ mod tests {
             kind: TermsKind::Net30,
             days: None,
         });
-        inv.due_date = chrono::NaiveDate::from_ymd_opt(2026, 10, 15);
+        inv.due_date = CivilDate::new(2026, 10, 15).ok();
         let doc = doc_for(&inv, &customer(), &org());
         assert_eq!(doc.title, "INVOICE");
         assert_eq!(doc.subject.as_deref(), Some("TatuTime invoice for 08 2026"));
@@ -1112,7 +1112,7 @@ mod tests {
                     rate: Option<u64>,
                     amount: u64| InvoiceLine {
             kind,
-            date: chrono::NaiveDate::from_ymd_opt(2026, 10, 5).unwrap(),
+            date: CivilDate::new(2026, 10, 5).unwrap(),
             entry_id: None,
             expense_id: None,
             project_code: Some(ProjectCode(project.into())),
@@ -1212,7 +1212,7 @@ mod tests {
         let mut inv = sample_invoice();
         let line = |hours: u32, amount: u64| InvoiceLine {
             kind: LineKind::Time,
-            date: chrono::NaiveDate::from_ymd_opt(2026, 10, 5).unwrap(),
+            date: CivilDate::new(2026, 10, 5).unwrap(),
             entry_id: None,
             expense_id: None,
             project_code: Some(ProjectCode("P1".into())),
@@ -1249,7 +1249,7 @@ mod tests {
         let mut inv = sample_invoice();
         inv.lines = vec![InvoiceLine {
             kind: LineKind::Fixed,
-            date: chrono::NaiveDate::from_ymd_opt(2026, 10, 2).unwrap(),
+            date: CivilDate::new(2026, 10, 2).unwrap(),
             entry_id: None,
             expense_id: None,
             project_code: None,

@@ -1,10 +1,10 @@
-use chrono::{DateTime, NaiveDate, Utc};
 use uuid::Uuid;
 
 use super::invoices::pdf_hint;
 use super::io::{read_json, write_bytes_atomic, write_json};
 use super::*;
 use crate::domain::{Entry, InvoiceStatus, PaymentTerms};
+use crate::time::*;
 
 // -------------------------------------------- multi-document transactions --
 //
@@ -30,8 +30,8 @@ impl Store {
     pub fn issue_invoice(
         &self,
         id: Uuid,
-        now: DateTime<Utc>,
-        due: NaiveDate,
+        now: Timestamp,
+        due: CivilDate,
         subject: String,
         terms: Option<PaymentTerms>,
         pdf: &[u8],
@@ -71,6 +71,7 @@ impl Store {
         invoice.terms = terms;
         invoice.pdf = Some(hint);
         write_json(&self.doc_path::<Invoice>(&id.to_string()), &invoice)?;
+        self.invalidate_lock_snapshot();
         Ok(invoice)
     }
 
@@ -120,7 +121,7 @@ impl Store {
         &self,
         id: Uuid,
         pdf: &[u8],
-        now: DateTime<Utc>,
+        now: Timestamp,
     ) -> Result<Invoice, StoreError> {
         let _guard = self.write_lock()?;
         let Some(mut invoice) = read_json::<Invoice>(&self.doc_path::<Invoice>(&id.to_string()))?
@@ -156,7 +157,7 @@ impl Store {
         original_id: Uuid,
         mut revision: Invoice,
         pdf: Option<&[u8]>,
-        now: DateTime<Utc>,
+        now: Timestamp,
     ) -> Result<Invoice, StoreError> {
         let _guard = self.write_lock()?;
         let original_path = self.doc_path::<Invoice>(&original_id.to_string());
@@ -209,7 +210,7 @@ impl Store {
     pub fn pay_invoice(
         &self,
         id: Uuid,
-        now: DateTime<Utc>,
+        now: Timestamp,
         reference: String,
     ) -> Result<Invoice, StoreError> {
         self.record_payment(id, None, reference, "manual".into(), now)
@@ -226,7 +227,7 @@ impl Store {
         amount: Option<u64>,
         reference: String,
         method: String,
-        now: DateTime<Utc>,
+        now: Timestamp,
     ) -> Result<Invoice, StoreError> {
         let _guard = self.write_lock()?;
         self.record_payment_locked(id, amount, reference, method, now)
@@ -238,7 +239,7 @@ impl Store {
         amount: Option<u64>,
         reference: String,
         method: String,
-        now: DateTime<Utc>,
+        now: Timestamp,
     ) -> Result<Invoice, StoreError> {
         let path = self.doc_path::<Invoice>(&id.to_string());
         let Some(mut invoice) = read_json::<Invoice>(&path)? else {
@@ -300,7 +301,7 @@ impl Store {
         &self,
         id: Uuid,
         reason: String,
-        now: DateTime<Utc>,
+        now: Timestamp,
     ) -> Result<Invoice, StoreError> {
         let _guard = self.write_lock()?;
         let path = self.doc_path::<Invoice>(&id.to_string());
@@ -355,7 +356,7 @@ impl Store {
     /// never an entry living in two folders).
     pub fn save_entry(
         &self,
-        existing_date: Option<NaiveDate>,
+        existing_date: Option<CivilDate>,
         updated: &Entry,
     ) -> Result<(), StoreError> {
         let _guard = self.write_lock()?;
@@ -384,7 +385,7 @@ impl Store {
     /// `save_entry` with the lock check executed in the same transaction.
     pub fn save_entry_guarded<F, E>(
         &self,
-        existing_date: Option<NaiveDate>,
+        existing_date: Option<CivilDate>,
         updated: &Entry,
         verify_unlocked: F,
     ) -> Result<(), E>
@@ -455,7 +456,7 @@ impl Store {
 
     fn save_entry_inner(
         &self,
-        existing_date: Option<NaiveDate>,
+        existing_date: Option<CivilDate>,
         updated: &Entry,
     ) -> Result<(), StoreError> {
         std::fs::create_dir_all(self.day_dir(updated.date))?;
@@ -522,8 +523,6 @@ impl Store {
 mod txn_tests {
     use super::*;
     use crate::domain::{Currency, InvoiceLine, InvoiceStatus, LineKind};
-    use chrono::TimeZone;
-
     fn invoice() -> Invoice {
         Invoice {
             supersedes: None,
@@ -533,11 +532,11 @@ mod txn_tests {
             number: "_".into(),
             customer_id: Uuid::new_v4(),
             currency: Currency("EUR".into()),
-            period_from: NaiveDate::from_ymd_opt(2026, 10, 1).unwrap(),
-            period_to: NaiveDate::from_ymd_opt(2026, 10, 7).unwrap(),
+            period_from: CivilDate::new(2026, 10, 1).unwrap(),
+            period_to: CivilDate::new(2026, 10, 7).unwrap(),
             lines: vec![InvoiceLine {
                 kind: LineKind::Fixed,
-                date: NaiveDate::from_ymd_opt(2026, 10, 2).unwrap(),
+                date: CivilDate::new(2026, 10, 2).unwrap(),
                 entry_id: None,
                 expense_id: None,
                 project_code: None,
@@ -552,7 +551,7 @@ mod txn_tests {
             }],
             total_minor: 100,
             status: InvoiceStatus::Draft,
-            created_at: Utc.with_ymd_and_hms(2026, 10, 1, 0, 0, 0).unwrap(),
+            created_at: crate::time::utc_timestamp(2026, 10, 1, 0, 0, 0),
             issued_at: None,
             due_date: None,
             paid_at: None,
@@ -579,7 +578,7 @@ mod txn_tests {
             default_rate_minor: 0,
             cost_rate_minor: 0,
             password_hash: String::new(),
-            created_at: Utc.with_ymd_and_hms(2026, 10, 1, 0, 0, 0).unwrap(),
+            created_at: crate::time::utc_timestamp(2026, 10, 1, 0, 0, 0),
             session_version: 1,
         }
     }
@@ -601,21 +600,21 @@ mod txn_tests {
         let inv = store.create_invoice(invoice()).unwrap();
         // Cannot pay a draft.
         let e = store
-            .pay_invoice(inv.id, Utc::now(), "ref".into())
+            .pay_invoice(inv.id, Timestamp::now(), "ref".into())
             .unwrap_err();
         assert!(matches!(e, StoreError::Conflict(_)));
         store
             .issue_invoice(
                 inv.id,
-                Utc::now(),
-                NaiveDate::from_ymd_opt(2026, 10, 21).unwrap(),
+                Timestamp::now(),
+                CivilDate::new(2026, 10, 21).unwrap(),
                 "INV subject".into(),
                 None,
                 b"%PDF-1.4 test",
             )
             .unwrap();
         let paid = store
-            .pay_invoice(inv.id, Utc::now(), "wire:1".into())
+            .pay_invoice(inv.id, Timestamp::now(), "wire:1".into())
             .unwrap();
         assert_eq!(paid.status, InvoiceStatus::Paid);
         assert_eq!(paid.payment_reference, "wire:1");
@@ -623,8 +622,8 @@ mod txn_tests {
         assert!(matches!(
             store.issue_invoice(
                 inv.id,
-                Utc::now(),
-                NaiveDate::from_ymd_opt(2026, 10, 21).unwrap(),
+                Timestamp::now(),
+                CivilDate::new(2026, 10, 21).unwrap(),
                 String::new(),
                 None,
                 b"%PDF-1.4 test"
@@ -643,8 +642,8 @@ mod txn_tests {
         store
             .issue_invoice(
                 inv.id,
-                Utc::now(),
-                NaiveDate::from_ymd_opt(2026, 10, 21).unwrap(),
+                Timestamp::now(),
+                CivilDate::new(2026, 10, 21).unwrap(),
                 String::new(),
                 None,
                 b"%PDF-1.4 first",
@@ -656,7 +655,7 @@ mod txn_tests {
         );
         // A later attach with different bytes must NOT rewrite history.
         let again = store
-            .attach_invoice_pdf(inv.id, b"%PDF-1.4 second", Utc::now())
+            .attach_invoice_pdf(inv.id, b"%PDF-1.4 second", Timestamp::now())
             .unwrap();
         assert_eq!(
             store.invoice_pdf_bytes(inv.id).unwrap().unwrap(),
@@ -674,14 +673,14 @@ mod txn_tests {
         let store = Store::open(dir.path().join("data")).unwrap();
         let inv = store.create_invoice(invoice()).unwrap();
         assert!(matches!(
-            store.attach_invoice_pdf(inv.id, b"x", Utc::now()),
+            store.attach_invoice_pdf(inv.id, b"x", Timestamp::now()),
             Err(StoreError::Conflict(_))
         ));
         store
             .issue_invoice(
                 inv.id,
-                Utc::now(),
-                NaiveDate::from_ymd_opt(2026, 10, 21).unwrap(),
+                Timestamp::now(),
+                CivilDate::new(2026, 10, 21).unwrap(),
                 String::new(),
                 None,
                 b"%PDF-1.4 doc",
@@ -703,8 +702,8 @@ mod txn_tests {
         store
             .issue_invoice(
                 inv.id,
-                Utc::now(),
-                NaiveDate::from_ymd_opt(2026, 10, 21).unwrap(),
+                Timestamp::now(),
+                CivilDate::new(2026, 10, 21).unwrap(),
                 String::new(),
                 None,
                 b"%PDF x",
@@ -716,7 +715,7 @@ mod txn_tests {
                 Some(10_000),
                 "a:1".into(),
                 "manual".into(),
-                Utc::now(),
+                Timestamp::now(),
             )
             .unwrap();
         assert_eq!(p1.status, InvoiceStatus::PartlyPaid);
@@ -724,7 +723,13 @@ mod txn_tests {
         // Zero is refused without persisting; over-balance too.
         assert!(
             store
-                .record_payment(inv.id, Some(0), "x".into(), "manual".into(), Utc::now())
+                .record_payment(
+                    inv.id,
+                    Some(0),
+                    "x".into(),
+                    "manual".into(),
+                    Timestamp::now()
+                )
                 .is_err()
         );
         assert!(
@@ -734,7 +739,7 @@ mod txn_tests {
                     Some(20_001),
                     "x".into(),
                     "manual".into(),
-                    Utc::now()
+                    Timestamp::now()
                 )
                 .is_err()
         );
@@ -743,7 +748,7 @@ mod txn_tests {
             1
         );
         let p2 = store
-            .record_payment(inv.id, None, "a:2".into(), "bank".into(), Utc::now())
+            .record_payment(inv.id, None, "a:2".into(), "bank".into(), Timestamp::now())
             .unwrap();
         assert_eq!(p2.status, InvoiceStatus::Paid);
         assert_eq!(p2.balance_minor(), 0);
@@ -761,8 +766,8 @@ mod txn_tests {
         store
             .issue_invoice(
                 inv.id,
-                Utc::now(),
-                NaiveDate::from_ymd_opt(2026, 10, 21).unwrap(),
+                Timestamp::now(),
+                CivilDate::new(2026, 10, 21).unwrap(),
                 String::new(),
                 None,
                 b"%PDF x",
@@ -774,11 +779,11 @@ mod txn_tests {
                 Some(2_000),
                 "a:1".into(),
                 "manual".into(),
-                Utc::now(),
+                Timestamp::now(),
             )
             .unwrap();
         let wo = store
-            .write_off_invoice(inv.id, "forgiven".into(), Utc::now())
+            .write_off_invoice(inv.id, "forgiven".into(), Timestamp::now())
             .unwrap();
         assert_eq!(wo.status, InvoiceStatus::WrittenOff);
         assert_eq!(wo.write_off_reason, "forgiven");
@@ -788,12 +793,18 @@ mod txn_tests {
         // Final: pay + re-write-off conflict.
         assert!(
             store
-                .record_payment(inv.id, Some(100), "x".into(), "manual".into(), Utc::now())
+                .record_payment(
+                    inv.id,
+                    Some(100),
+                    "x".into(),
+                    "manual".into(),
+                    Timestamp::now()
+                )
                 .is_err()
         );
         assert!(
             store
-                .write_off_invoice(inv.id, "again".into(), Utc::now())
+                .write_off_invoice(inv.id, "again".into(), Timestamp::now())
                 .is_err()
         );
     }
@@ -804,13 +815,11 @@ mod timer_finish_tests {
     // #214: two concurrent POST /api/timer/stop calls must not both log time.
     use super::*;
     use crate::domain::{Entry, Hours, ProjectCode, Source};
-    use chrono::{TimeZone, Utc};
-
     fn entry(id: Uuid, user: Uuid) -> Entry {
         Entry {
             imported: None,
             id,
-            date: NaiveDate::from_ymd_opt(2026, 10, 2).unwrap(),
+            date: CivilDate::new(2026, 10, 2).unwrap(),
             customer_id: Uuid::new_v4(),
             user_id: Some(user),
             project_code: ProjectCode("P1".into()),
@@ -819,8 +828,8 @@ mod timer_finish_tests {
             note: String::new(),
             billable: true,
             source: Source::Timer,
-            created_at: Utc.with_ymd_and_hms(2026, 10, 2, 9, 0, 0).unwrap(),
-            updated_at: Utc.with_ymd_and_hms(2026, 10, 2, 11, 0, 0).unwrap(),
+            created_at: crate::time::utc_timestamp(2026, 10, 2, 9, 0, 0),
+            updated_at: crate::time::utc_timestamp(2026, 10, 2, 11, 0, 0),
         }
     }
 
@@ -835,7 +844,7 @@ mod timer_finish_tests {
             project_code: ProjectCode("P1".into()),
             task_code: None,
             note: String::new(),
-            started_at: Utc.with_ymd_and_hms(2026, 10, 2, 9, 0, 0).unwrap(),
+            started_at: crate::time::utc_timestamp(2026, 10, 2, 9, 0, 0),
         };
         store.put_timer(&timer).unwrap();
 

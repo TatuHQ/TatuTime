@@ -10,7 +10,7 @@
 //! draft invoice each period: THIS is the money held; that is a billing
 //! cadence. The two never share state.
 
-use chrono::{DateTime, Utc};
+use crate::time::*;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -50,7 +50,7 @@ pub struct RetainerTx {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub idempotency_key: Option<String>,
     pub recorded_by: Uuid,
-    pub created_at: DateTime<Utc>,
+    pub created_at: Timestamp,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -61,9 +61,9 @@ pub struct Retainer {
     pub currency: Currency,
     pub status: RetainerStatus,
     pub transactions: Vec<RetainerTx>,
-    pub created_at: DateTime<Utc>,
+    pub created_at: Timestamp,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub closed_at: Option<DateTime<Utc>>,
+    pub closed_at: Option<Timestamp>,
 }
 
 impl TxKind {
@@ -87,7 +87,7 @@ pub struct TxRequest<'a> {
     pub reason: String,
     pub idempotency_key: Option<String>,
     pub actor: Uuid,
-    pub now: DateTime<Utc>,
+    pub now: Timestamp,
     pub currency_claim: Option<&'a str>,
 }
 
@@ -172,8 +172,6 @@ impl Retainer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::TimeZone;
-
     fn retainer() -> Retainer {
         Retainer {
             id: Uuid::new_v4(),
@@ -182,13 +180,13 @@ mod tests {
             currency: Currency("EUR".into()),
             status: RetainerStatus::Open,
             transactions: vec![],
-            created_at: Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
+            created_at: crate::time::utc_timestamp(2026, 1, 1, 0, 0, 0),
             closed_at: None,
         }
     }
 
-    fn now() -> DateTime<Utc> {
-        Utc.with_ymd_and_hms(2026, 2, 1, 0, 0, 0).unwrap()
+    fn now() -> Timestamp {
+        crate::time::utc_timestamp(2026, 2, 1, 0, 0, 0)
     }
 
     #[test]

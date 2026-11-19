@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::path::{Path, PathBuf};
 
-use chrono::{NaiveDate, Utc};
+use crate::time::*;
 use uuid::Uuid;
 
 use super::io::{dir_entries, dir_exists, write_json};
@@ -65,14 +65,14 @@ impl Store {
     /// in that case.
     pub fn archive_entries_before(
         &self,
-        cutoff: NaiveDate,
+        cutoff: CivilDate,
         dry_run: bool,
         locks: &dyn crate::lock::EntryLock,
     ) -> Result<ArchiveReport, StoreError> {
         let _guard = self.write_lock()?;
         let mut report = ArchiveReport {
             dry_run,
-            cutoff: cutoff.format("%Y-%m-%d").to_string(),
+            cutoff: cutoff.strftime("%Y-%m-%d").to_string(),
             ..ArchiveReport::default()
         };
 
@@ -98,7 +98,7 @@ impl Store {
         // unrecognised — a relocation has to prove it understood the day before
         // it touches it.
         let entries_dir = self.root.join(ENTRIES_DIR);
-        let mut candidates: Vec<NaiveDate> = Vec::new();
+        let mut candidates: Vec<CivilDate> = Vec::new();
         if dir_exists(&entries_dir)? {
             for child in dir_entries(&entries_dir)? {
                 let name = child
@@ -106,7 +106,7 @@ impl Store {
                     .and_then(|n| n.to_str())
                     .unwrap_or_default()
                     .to_string();
-                match NaiveDate::parse_from_str(&name, "%Y-%m-%d") {
+                match CivilDate::strptime("%Y-%m-%d", &name) {
                     // Out of scope (on or after the cutoff): neither a candidate
                     // nor a refusal — the pass leaves it exactly as it found it.
                     Ok(date) if child.is_dir() && date >= cutoff => {}
@@ -124,7 +124,7 @@ impl Store {
         candidates.sort();
 
         let mut manifest: Vec<crate::backup::FileEntry> = Vec::new();
-        let mut relocated: Vec<NaiveDate> = Vec::new();
+        let mut relocated: Vec<CivilDate> = Vec::new();
         for date in candidates {
             let day = self.day_dir(date);
             // The day's documents by file name alone: an entry's id *is* its
@@ -165,7 +165,7 @@ impl Store {
             if let Some(reason) = refusal {
                 report.skipped_entries += docs.len() as u64;
                 report.skipped.push(SkippedDay {
-                    day: date.format("%Y-%m-%d").to_string(),
+                    day: date.strftime("%Y-%m-%d").to_string(),
                     entries: docs.len() as u64,
                     reason,
                 });
@@ -176,7 +176,7 @@ impl Store {
                 bytes += std::fs::metadata(doc)?.len();
             }
             let row = ArchivedDay {
-                day: date.format("%Y-%m-%d").to_string(),
+                day: date.strftime("%Y-%m-%d").to_string(),
                 documents: docs.len() as u64,
                 bytes,
             };
@@ -222,7 +222,7 @@ impl Store {
             let ids = self.cold_day_ids(date)?;
             if !ids.is_empty() {
                 idx.insert(
-                    date.format("%Y-%m-%d").to_string(),
+                    date.strftime("%Y-%m-%d").to_string(),
                     ids.into_iter().collect(),
                 );
             }
@@ -247,7 +247,7 @@ impl Store {
     /// (minor units, hundredths) cannot be touched by a relocation.
     fn relocate_day_locked(
         &self,
-        date: NaiveDate,
+        date: CivilDate,
         day: &Path,
         docs: &[PathBuf],
     ) -> Result<Vec<crate::backup::FileEntry>, StoreError> {
@@ -256,7 +256,7 @@ impl Store {
             .parent()
             .ok_or_else(|| StoreError::Io("archive day path has no parent".into()))?;
         std::fs::create_dir_all(month)?;
-        let name = date.format("%Y-%m-%d").to_string();
+        let name = date.strftime("%Y-%m-%d").to_string();
         let staging = month.join(format!(".{name}.staging"));
         // A staging folder can only be a crash leftover of a pass whose hot day is
         // still here (the hot day goes last), so its content is a duplicate of
@@ -275,7 +275,7 @@ impl Store {
             rows.push(crate::backup::FileEntry {
                 path: format!(
                     "{ARCHIVE_DIR}/{ENTRIES_DIR}/{}/{name}/{file}",
-                    date.format("%Y-%m")
+                    date.strftime("%Y-%m")
                 ),
                 size,
                 sha256,
@@ -290,13 +290,13 @@ impl Store {
     /// day absent from disk (the index's own trust rule compares exactly that,
     /// #335). The caller holds the write lock; a missing or unreadable index is
     /// "no index", so nothing is rewritten.
-    fn drop_archived_day_keys_locked(&self, days: &[NaiveDate]) -> Result<(), StoreError> {
+    fn drop_archived_day_keys_locked(&self, days: &[CivilDate]) -> Result<(), StoreError> {
         let Some(mut idx) = self.read_entry_index() else {
             return Ok(());
         };
         let keys: Vec<String> = days
             .iter()
-            .map(|d| d.format("%Y-%m-%d").to_string())
+            .map(|d| d.strftime("%Y-%m-%d").to_string())
             .collect();
         let before = idx.days.len();
         for key in &keys {
@@ -313,7 +313,7 @@ impl Store {
     /// run — the ADR keeps the manifest with the operator's backup — and unique,
     /// so two runs can never overwrite each other's record.
     fn archive_manifest_rel(&self) -> String {
-        let stamp = Utc::now().format("%Y%m%dT%H%M%SZ");
+        let stamp = Timestamp::now().strftime("%Y%m%dT%H%M%SZ");
         let unique: String = Uuid::new_v4()
             .simple()
             .to_string()
@@ -331,16 +331,16 @@ impl Store {
     fn write_archive_manifest_locked(
         &self,
         rel: &str,
-        cutoff: NaiveDate,
+        cutoff: CivilDate,
         files: &[crate::backup::FileEntry],
     ) -> Result<(), StoreError> {
-        let cutoff = cutoff.format("%Y-%m-%d").to_string();
+        let cutoff = cutoff.strftime("%Y-%m-%d").to_string();
         write_json(
             &self.root.join(rel),
             &ArchiveManifest {
                 app: "tatu-time",
                 version: env!("CARGO_PKG_VERSION"),
-                created_at: Utc::now().to_rfc3339(),
+                created_at: Timestamp::now().to_string(),
                 cutoff,
                 files,
             },

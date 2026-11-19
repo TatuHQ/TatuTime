@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::io::{Cursor, Read};
 
-use chrono::{Datelike, NaiveDate, Weekday};
+use crate::time::*;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
@@ -345,10 +345,10 @@ fn parse_amount(raw: &str) -> Option<(i64, Option<crate::domain::Currency>)> {
 /// prints the issue date as `DD/MM/YYYY`; ISO stays accepted for other
 /// exporters. The suggestion is normalised to ISO so the review field can be a
 /// plain `date` input.
-fn parse_invoice_date(value: &str) -> Option<NaiveDate> {
+fn parse_invoice_date(value: &str) -> Option<CivilDate> {
     ["%Y-%m-%d", "%d/%m/%Y", "%d.%m.%Y"]
         .iter()
-        .find_map(|format| NaiveDate::parse_from_str(value.trim(), format).ok())
+        .find_map(|format| CivilDate::strptime(format, value.trim()).ok())
 }
 
 fn offer(
@@ -407,7 +407,7 @@ fn suggest(
                 offer(
                     suggestions,
                     field,
-                    &date.format("%Y-%m-%d").to_string(),
+                    &date.strftime("%Y-%m-%d").to_string(),
                     None,
                     page,
                     evidence,
@@ -479,22 +479,22 @@ fn suggest(
     }
 }
 
-fn month_bounds(year: i32, month: u32) -> Option<(NaiveDate, NaiveDate)> {
-    let start = NaiveDate::from_ymd_opt(year, month, 1)?;
+fn month_bounds(year: i16, month: i8) -> Option<(CivilDate, CivilDate)> {
+    let start = CivilDate::new(year, month, 1).ok()?;
     let (next_year, next_month) = if month == 12 {
         (year.checked_add(1)?, 1)
     } else {
         (year, month + 1)
     };
-    let next = NaiveDate::from_ymd_opt(next_year, next_month, 1)?;
+    let next = CivilDate::new(next_year, next_month, 1).ok()?;
     Some((start, next.pred_opt()?))
 }
 
 /// The last weekday of a month. Source invoices are normally issued on it, so
 /// a weekend date at the very end of the month still belongs to that month.
-fn last_weekday(year: i32, month: u32) -> Option<NaiveDate> {
+fn last_weekday(year: i16, month: i8) -> Option<CivilDate> {
     let (_, mut date) = month_bounds(year, month)?;
-    while matches!(date.weekday(), Weekday::Sat | Weekday::Sun) {
+    while matches!(date.weekday(), Weekday::Saturday | Weekday::Sunday) {
         date = date.pred_opt()?;
     }
     Some(date)
@@ -513,7 +513,7 @@ fn period_suggestions(suggestions: &[PdfSuggestion]) -> Vec<PdfSuggestion> {
     else {
         return Vec::new();
     };
-    let Ok(issue_date) = NaiveDate::parse_from_str(&issue.value, "%Y-%m-%d") else {
+    let Ok(issue_date) = CivilDate::strptime("%Y-%m-%d", &issue.value) else {
         return Vec::new();
     };
     let Some((issue_start, issue_end)) = month_bounds(issue_date.year(), issue_date.month()) else {
@@ -536,9 +536,9 @@ fn period_suggestions(suggestions: &[PdfSuggestion]) -> Vec<PdfSuggestion> {
         };
         (bounds, "Billing month preceding the issue date")
     };
-    let suggestion = |field, date: NaiveDate| PdfSuggestion {
+    let suggestion = |field, date: CivilDate| PdfSuggestion {
         field,
-        value: date.format("%Y-%m-%d").to_string(),
+        value: date.strftime("%Y-%m-%d").to_string(),
         amount_minor: None,
         page: issue.page,
         evidence: reason.to_string(),

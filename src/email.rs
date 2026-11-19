@@ -10,6 +10,8 @@
 //! configured the app runs with `DisabledEmailSender` — emails are logged, not
 //! sent — degrading safely exactly like the vault itself.
 
+use crate::time::*;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct EmailMessage {
     /// Recipients, in delivery order. Every transport issues one `RCPT TO` per
@@ -626,7 +628,7 @@ fn build_mime_with_sender(msg: &EmailMessage, sender: Option<&str>) -> Result<St
         from_header,
         encode_header(&msg.to.join(", ")),
         encode_header(&msg.subject),
-        chrono::Utc::now().to_rfc2822(),
+        Timestamp::now().strftime("%a, %d %b %Y %H:%M:%S GMT"),
     );
     if let Some(reply) = msg.reply_to.as_deref().filter(|r| !r.trim().is_empty()) {
         h.push_str(&format!("Reply-To: {}\r\n", encode_header(reply.trim())));
@@ -786,8 +788,8 @@ pub fn render_reminder_email(
 /// Should an overdue invoice get a reminder now, given a cadence in days since
 /// the last reminder? Pure so the schedule is testable with a `FixedClock`.
 pub fn due_for_reminder(
-    last_reminder: Option<chrono::NaiveDate>,
-    today: chrono::NaiveDate,
+    last_reminder: Option<CivilDate>,
+    today: CivilDate,
     cadence_days: i64,
 ) -> bool {
     match last_reminder {
@@ -799,8 +801,6 @@ pub fn due_for_reminder(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::NaiveDate;
-
     #[test]
     fn address_validation() {
         assert!(valid_address("a@b.co"));
@@ -906,11 +906,11 @@ mod tests {
 
     #[test]
     fn reminder_cadence_gate() {
-        let today = NaiveDate::from_ymd_opt(2026, 10, 5).unwrap();
+        let today = CivilDate::new(2026, 10, 5).unwrap();
         assert!(due_for_reminder(None, today, 7));
-        let last = NaiveDate::from_ymd_opt(2026, 10, 2).unwrap();
+        let last = CivilDate::new(2026, 10, 2).unwrap();
         assert!(!due_for_reminder(Some(last), today, 7));
-        let last = NaiveDate::from_ymd_opt(2026, 9, 28).unwrap();
+        let last = CivilDate::new(2026, 9, 28).unwrap();
         assert!(due_for_reminder(Some(last), today, 7));
     }
 
