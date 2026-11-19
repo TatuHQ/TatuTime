@@ -1,25 +1,21 @@
 # Dependabot version updates for TatuTime.
 #
-# CI on each PR validates the new pin. A patch or minor bump then merges itself
-# once CI is green (.github/workflows/dependabot-automerge.yml); a major bump is
-# never marked for auto-merge and keeps the owner-approval gate. Either way a
-# pin never moves without a green CI run. The Rust toolchain is pinned by
-# rust-toolchain.toml and the Dockerfile base images; bump all three together in
-# one intentional PR.
 version: 2
-updates:
-  - package-ecosystem: github-actions
-    directory: /
+
+multi-ecosystem-groups:
+  weekly-dependencies:
     schedule:
       interval: weekly
     commit-message:
       prefix: "chore(deps)"
     labels:
       - dependencies
-    groups:
-      actions:
-        patterns:
-          - "*"
+
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    patterns: ["*"]
+    multi-ecosystem-group: weekly-dependencies
 
   # Known blind spot (#263 item 5): this ecosystem only reads image references
   # in `image:` fields and Dockerfile `FROM` lines. Images pulled inside `run:`
@@ -32,24 +28,16 @@ updates:
   - package-ecosystem: docker
     directories:
       - "/"
-    schedule:
-      interval: weekly
-    commit-message:
-      prefix: "chore(deps)"
-    labels:
-      - dependencies
+    patterns: ["*"]
+    multi-ecosystem-group: weekly-dependencies
     ignore:
       # rust:1.99.1 mirrors rust-toolchain.toml and must move with it.
       - dependency-name: "rust"
 
   - package-ecosystem: cargo
     directory: /
-    schedule:
-      interval: weekly
-    commit-message:
-      prefix: "chore(deps)"
-    labels:
-      - dependencies
+    patterns: ["*"]
+    multi-ecosystem-group: weekly-dependencies
 
   # GUI harness (#192): jsdom/sass/vanilla-framework gate CI's gui-test job;
   # without this entry they never received update PRs. The vanilla-framework
@@ -57,11 +45,7 @@ updates:
   # (gui-test/build-ubuntu-assets.mjs + manifest hashes), not an automated bump.
   - package-ecosystem: npm
     directory: /gui-test
-    schedule:
-      interval: weekly
-    commit-message:
-      prefix: "chore(deps)"
-    labels:
-      - dependencies
+    patterns: ["*"]
+    multi-ecosystem-group: weekly-dependencies
     ignore:
       - dependency-name: "vanilla-framework"
