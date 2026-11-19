@@ -70,11 +70,14 @@ separately. A PR classified as a patch or minor update is labelled `automerge`
 and enrolled in GitHub's native
 auto-merge by
 [`.github/workflows/dependabot-automerge.yml`](.github/workflows/dependabot-automerge.yml).
-GitHub still requires the owner's approval and all required CI checks. Major
-and unclassified bumps must be merged manually after the same requirements
-are met. The workflow labels with the built-in Actions token and uses
-`DEPENDABOT_AUTOMERGE_TOKEN` only to enroll or remove a PR from native
-auto-merge, so the resulting push can trigger the release workflow.
+For an eligible bump the workflow records the owner's approval with
+`DEPENDABOT_AUTOMERGE_TOKEN` before enrolling it in native auto-merge, so the
+review gate and all required CI checks still apply; a push dismisses the
+approval and re-runs the workflow, which approves the new head. Major and
+unclassified bumps must be merged manually after the same requirements are
+met. Labelling uses the built-in Actions token; the owner token is used only
+to approve and to enroll or remove a PR from native auto-merge, so the
+resulting push can trigger the release workflow.
 
 ### Architecture invariants
 

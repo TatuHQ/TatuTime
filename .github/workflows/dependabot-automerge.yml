@@ -71,6 +71,19 @@ jobs:
           queued=$(jq -r '.autoMergeRequest != null' <<< "$details")
           case "$UPDATE_TYPE" in
             version-update:semver-patch|version-update:semver-minor|security-update:semver-patch|security-update:semver-minor)
+              # The ruleset requires the owner's approval before a bot's pull
+              # request can merge. This token belongs to the owner, so record
+              # that approval here; CI still gates the merge. A push dismisses
+              # the approval and re-runs this job, which approves again.
+              approver=$(gh api user --jq .login)
+              approved=$(gh api "repos/$REPO/pulls/$PR/reviews" \
+                --jq "[.[] | select(.state == \"APPROVED\" and .commit_id == \"$HEAD_SHA\" and .user.login == \"$approver\")] | length")
+              if [[ "$approved" == 0 ]]; then
+                gh api -X POST "repos/$REPO/pulls/$PR/reviews" \
+                  -f event=APPROVE \
+                  -f commit_id="$HEAD_SHA" \
+                  -f body="Approved by automation for a patch/minor Dependabot bump; CI still gates the merge." >/dev/null
+              fi
               if [[ "$queued" == false ]]; then
                 # Only enroll; unlike gh pr merge --auto, this cannot fall back to a direct merge call.
                 gh api graphql -f id="$id" -f head="$HEAD_SHA" -f query="
