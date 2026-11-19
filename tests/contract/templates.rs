@@ -1,8 +1,8 @@
 use crate::support::*;
 
 use axum::http::{StatusCode, header};
-use chrono::Datelike;
 use http_body_util::BodyExt;
+use jiff::ToSpan;
 use serde_json::Value;
 use serde_json::json;
 use tower::ServiceExt;
@@ -46,16 +46,15 @@ async fn seed_customer_invoice(app: &Client, name: &str, extra: Value) -> (Value
 
 #[tokio::test]
 async fn payment_terms_decide_due_date_at_issue() {
-    let today = chrono::Utc::now().date_naive();
+    let today = jiff::Timestamp::now()
+        .to_zoned_datetime(jiff::tz::TimeZone::UTC)
+        .date();
     let cases = [
         (json!({"kind":"upon_receipt"}), today),
-        (json!({"kind":"net_15"}), today + chrono::Duration::days(15)),
-        (json!({"kind":"net_30"}), today + chrono::Duration::days(30)),
-        (json!({"kind":"net_45"}), today + chrono::Duration::days(45)),
-        (
-            json!({"kind":"custom","days":21}),
-            today + chrono::Duration::days(21),
-        ),
+        (json!({"kind":"net_15"}), today + (15).days()),
+        (json!({"kind":"net_30"}), today + (30).days()),
+        (json!({"kind":"net_45"}), today + (45).days()),
+        (json!({"kind":"custom","days":21}), today + (21).days()),
     ];
     for (i, (terms, expected)) in cases.iter().enumerate() {
         let (app, _d) = app().await;
@@ -108,10 +107,12 @@ async fn legacy_net14_fallback_is_untouched_and_org_default_applies() {
     let (_c2, inv2) = seed_customer_invoice(&app, "NEXT", json!({})).await;
     let iid2 = inv2["id"].as_str().unwrap();
     let (_, issued2) = json_req(&app, "POST", &format!("/api/invoices/{iid2}/issue"), None).await;
-    let today = chrono::Utc::now().date_naive();
+    let today = jiff::Timestamp::now()
+        .to_zoned_datetime(jiff::tz::TimeZone::UTC)
+        .date();
     assert_eq!(
         issued2["due_date"].as_str().unwrap(),
-        (today + chrono::Duration::days(20)).to_string()
+        (today + (20).days()).to_string()
     );
 
     // Customer terms beat the org default.
@@ -367,7 +368,11 @@ async fn email_uses_resolved_subject_and_html_body() {
         "November",
         "December",
     ];
-    let issue_month = month_names[chrono::Utc::now().date_naive().month0() as usize];
+    let issue_month = month_names[jiff::Timestamp::now()
+        .to_zoned_datetime(jiff::tz::TimeZone::UTC)
+        .date()
+        .month()
+        .saturating_sub(1) as usize];
     assert_eq!(
         msgs[0].subject,
         format!(

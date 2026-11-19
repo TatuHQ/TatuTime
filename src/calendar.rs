@@ -8,7 +8,7 @@
 //! events with an `RRULE` are skipped. Parsing is a pure function so it is
 //! deterministic under test with a fixture.
 
-use chrono::{DateTime, NaiveDate, TimeZone, Utc};
+use crate::time::*;
 use serde::Serialize;
 use std::io::Read;
 
@@ -19,8 +19,8 @@ pub(crate) const MAX_CALENDAR_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct CalendarEvent {
     pub uid: String,
-    pub start: DateTime<Utc>,
-    pub end: DateTime<Utc>,
+    pub start: Timestamp,
+    pub end: Timestamp,
     pub title: String,
     pub location: String,
 }
@@ -53,27 +53,26 @@ fn unfold(raw: &str) -> Vec<String> {
 
 /// Parse an ICS value (RFC3339, basic date-time `YYYYMMDDTHHMMSS[Z]`, or
 /// all-day date `YYYYMMDD`) into a UTC datetime.
-fn parse_ics_dt(value: &str) -> Option<DateTime<Utc>> {
+fn parse_ics_dt(value: &str) -> Option<Timestamp> {
     let v = value.trim();
-    if let Ok(dt) = DateTime::parse_from_rfc3339(v) {
-        return Some(dt.with_timezone(&Utc));
+    if let Ok(dt) = v.parse::<Timestamp>() {
+        return Some(dt);
     }
     if v.len() >= 15 && v.as_bytes()[8] == b'T' {
         // YYYYMMDDTHHMMSS[Z]
         let (date, time) = (&v[..8], &v[9..15]);
-        let n = chrono::NaiveDateTime::parse_from_str(&format!("{date}T{time}"), "%Y%m%dT%H%M%S")
-            .ok()?;
-        return Some(if v.ends_with('Z') {
-            Utc.from_utc_datetime(&n)
-        } else {
-            // Treat naive local as UTC for MVP.
-            Utc.from_utc_datetime(&n)
-        });
+        let n = CivilDateTime::strptime("%Y%m%dT%H%M%S", format!("{date}T{time}")).ok()?;
+        // Treat naive local as UTC for MVP.
+        return n.in_tz("UTC").ok().map(|zoned| zoned.timestamp());
     }
     if v.len() == 8 {
         // All-day date -> midnight UTC.
-        let d = NaiveDate::parse_from_str(v, "%Y%m%d").ok()?;
-        return Some(Utc.from_utc_datetime(&d.and_hms_opt(0, 0, 0)?));
+        let d = CivilDate::strptime("%Y%m%d", v).ok()?;
+        return d
+            .at(0, 0, 0, 0)
+            .in_tz("UTC")
+            .ok()
+            .map(|zoned| zoned.timestamp());
     }
     None
 }
@@ -87,13 +86,13 @@ fn value_of(line: &str, prop: &str) -> Option<String> {
 
 /// Parse ICS text into events overlapping `[from, to]` (inclusive by day).
 /// Recurring events (with RRULE) are skipped.
-pub fn parse_ics(text: &str, from: NaiveDate, to: NaiveDate) -> Vec<CalendarEvent> {
+pub fn parse_ics(text: &str, from: CivilDate, to: CivilDate) -> Vec<CalendarEvent> {
     let lines = unfold(text);
     let mut events = Vec::new();
     let mut in_event = false;
     let mut uid = String::new();
-    let mut start: Option<DateTime<Utc>> = None;
-    let mut end: Option<DateTime<Utc>> = None;
+    let mut start: Option<Timestamp> = None;
+    let mut end: Option<Timestamp> = None;
     let mut title = String::new();
     let mut location = String::new();
     let mut recurring = false;
@@ -111,8 +110,8 @@ pub fn parse_ics(text: &str, from: NaiveDate, to: NaiveDate) -> Vec<CalendarEven
             in_event = false;
             if let (Some(s), Some(e)) = (start, end)
                 && !recurring
-                && e.date_naive() >= from
-                && s.date_naive() <= to
+                && e.to_zoned_datetime(jiff::tz::TimeZone::UTC).date() >= from
+                && s.to_zoned_datetime(jiff::tz::TimeZone::UTC).date() <= to
             {
                 events.push(CalendarEvent {
                     uid: uid.clone(),
@@ -191,8 +190,8 @@ mod tests {
 
     const ICS: &str = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:1@x\r\nDTSTART:20261002T090000Z\r\nDTEND:20261002T100000Z\r\nSUMMARY:Stand-up\r\nLOCATION:Room\r\nEND:VEVENT\r\nBEGIN:VEVENT\r\nUID:2@x\r\nDTSTART:20261005T140000Z\r\nDTEND:20261005T150000Z\r\nSUMMARY:Client, sync\r\nEND:VEVENT\r\nBEGIN:VEVENT\r\nUID:3@x\r\nDTSTART:20261003T090000Z\r\nDTEND:20261003T100000Z\r\nRRULE:FREQ=WEEKLY\r\nSUMMARY:Weekly (skipped)\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
 
-    fn d(s: &str) -> NaiveDate {
-        NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap()
+    fn d(s: &str) -> CivilDate {
+        CivilDate::strptime("%Y-%m-%d", s).unwrap()
     }
 
     #[test]

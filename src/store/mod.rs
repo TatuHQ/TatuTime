@@ -198,7 +198,8 @@ pub struct Store {
     /// Memoized #255 lock snapshot paired with the collection stamps it was
     /// built from. Always the innermost lock (acquired briefly, never while
     /// another store mutex is held), so it cannot deadlock the write guard.
-    lock_cache: Mutex<Option<(LockStamp, Arc<LockSnapshot>)>>,
+    lock_cache: Mutex<Option<(LockStamp, u64, Arc<LockSnapshot>)>>,
+    lock_generation: std::sync::atomic::AtomicU64,
     /// #335 measurement seam: counts the entity documents decoded through
     /// [`Store::read_entry`]/[`Store::read_expense`], so a test can *prove* the
     /// per-user index reads only the member's rows instead of asserting it in
@@ -407,6 +408,7 @@ impl Store {
             lock_timeout,
             max_docs,
             lock_cache: Mutex::new(None),
+            lock_generation: std::sync::atomic::AtomicU64::new(0),
             #[cfg(test)]
             doc_reads: std::sync::atomic::AtomicU64::new(0),
         };

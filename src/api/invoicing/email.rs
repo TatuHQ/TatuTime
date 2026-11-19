@@ -108,7 +108,7 @@ pub async fn invoice_receipts_handler(
 /// Sanitise a stored receipt name for `Content-Disposition`: keep the extension
 /// and readable stem, drop a path (a receipt never has one) and any character
 /// that could break the header. A nameless receipt gets a date-based name.
-fn receipt_filename(name: Option<&str>, date: chrono::NaiveDate) -> String {
+fn receipt_filename(name: Option<&str>, date: CivilDate) -> String {
     let raw = name.unwrap_or("").trim();
     let base = raw.rsplit(['/', '\\']).next().unwrap_or("");
     let mut cleaned: String = base

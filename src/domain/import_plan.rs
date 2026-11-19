@@ -19,7 +19,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-use chrono::NaiveDate;
+use crate::time::*;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
@@ -178,13 +178,13 @@ pub struct InvoiceChoice {
     pub currency: Option<Currency>,
     /// Date-only provenance from the original document.
     #[serde(default)]
-    pub invoice_date: Option<NaiveDate>,
+    pub invoice_date: Option<CivilDate>,
     /// Native invoice period, explicitly reviewed. Never invented from the
     /// invoice date.
     #[serde(default)]
-    pub period_from: Option<NaiveDate>,
+    pub period_from: Option<CivilDate>,
     #[serde(default)]
-    pub period_to: Option<NaiveDate>,
+    pub period_to: Option<CivilDate>,
     #[serde(default)]
     pub total_minor: Option<u64>,
     /// Reviewed historical settlement. Never derived from a filename or a PDF
@@ -246,7 +246,7 @@ pub struct PlannedTime {
     pub source_person: String,
     pub source_employee_id: String,
     pub source_task: String,
-    pub date: Option<NaiveDate>,
+    pub date: Option<CivilDate>,
     pub customer_id: Option<Uuid>,
     pub project_code: Option<String>,
     pub task_code: Option<String>,
@@ -277,7 +277,7 @@ pub struct PlannedExpense {
     pub source_person: String,
     pub source_employee_id: String,
     pub source_category: String,
-    pub date: Option<NaiveDate>,
+    pub date: Option<CivilDate>,
     pub customer_id: Option<Uuid>,
     pub project_code: Option<String>,
     pub category_id: Option<Uuid>,
@@ -299,9 +299,9 @@ pub struct PlannedInvoice {
     pub customer_id: Option<Uuid>,
     pub original_number: String,
     pub currency: Option<String>,
-    pub invoice_date: Option<NaiveDate>,
-    pub period_from: Option<NaiveDate>,
-    pub period_to: Option<NaiveDate>,
+    pub invoice_date: Option<CivilDate>,
+    pub period_from: Option<CivilDate>,
+    pub period_to: Option<CivilDate>,
     pub total_minor: Option<u64>,
     pub opening_paid_minor: u64,
     pub status: Option<InvoiceStatus>,
@@ -976,7 +976,7 @@ pub fn plan(
                 .map(|imported| (imported.namespace.clone(), imported.source_key.clone()))
         })
         .collect();
-    let ordinary_entries: BTreeSet<(NaiveDate, Uuid, String, u32, String)> = view
+    let ordinary_entries: BTreeSet<(CivilDate, Uuid, String, u32, String)> = view
         .entries
         .iter()
         .filter(|entry| entry.imported.is_none())
@@ -990,7 +990,7 @@ pub fn plan(
             )
         })
         .collect();
-    let ordinary_expenses: BTreeSet<(NaiveDate, Uuid, u64, String, String)> = view
+    let ordinary_expenses: BTreeSet<(CivilDate, Uuid, u64, String, String)> = view
         .expenses
         .iter()
         .filter(|expense| expense.imported.is_none())
@@ -2187,9 +2187,9 @@ mod tests {
             customer_id: Some(f.cid),
             original_number: "H-1".into(),
             currency: Some(Currency("EUR".into())),
-            invoice_date: NaiveDate::from_ymd_opt(2026, 1, 5),
-            period_from: NaiveDate::from_ymd_opt(2026, 1, 1),
-            period_to: NaiveDate::from_ymd_opt(2026, 1, 31),
+            invoice_date: CivilDate::new(2026, 1, 5).ok(),
+            period_from: CivilDate::new(2026, 1, 1).ok(),
+            period_to: CivilDate::new(2026, 1, 31).ok(),
             total_minor: Some(10_000),
             opening_paid_minor: 0,
             status: Some(InvoiceStatus::Issued),

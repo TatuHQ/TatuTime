@@ -854,8 +854,7 @@ mod tests {
         LineKind,
     };
     use crate::pdf::{Org, doc_for, render_invoice_pdf};
-    use chrono::{TimeZone, Utc};
-
+    use crate::time::*;
     fn sample_invoice() -> Invoice {
         Invoice {
             supersedes: None,
@@ -865,12 +864,12 @@ mod tests {
             number: "INV-0001".into(),
             customer_id: "22222222-2222-2222-2222-222222222222".parse().unwrap(),
             currency: Currency("EUR".into()),
-            period_from: chrono::NaiveDate::from_ymd_opt(2026, 10, 1).unwrap(),
-            period_to: chrono::NaiveDate::from_ymd_opt(2026, 10, 31).unwrap(),
+            period_from: CivilDate::new(2026, 10, 1).unwrap(),
+            period_to: CivilDate::new(2026, 10, 31).unwrap(),
             lines: vec![
                 InvoiceLine {
                     kind: LineKind::Time,
-                    date: chrono::NaiveDate::from_ymd_opt(2026, 10, 5).unwrap(),
+                    date: CivilDate::new(2026, 10, 5).unwrap(),
                     entry_id: None,
                     expense_id: None,
                     project_code: Some(crate::domain::ProjectCode("WEB-1".into())),
@@ -885,7 +884,7 @@ mod tests {
                 },
                 InvoiceLine {
                     kind: LineKind::Expense,
-                    date: chrono::NaiveDate::from_ymd_opt(2026, 10, 9).unwrap(),
+                    date: CivilDate::new(2026, 10, 9).unwrap(),
                     entry_id: None,
                     expense_id: None,
                     project_code: None,
@@ -901,9 +900,9 @@ mod tests {
             ],
             total_minor: 84500,
             status: InvoiceStatus::Issued,
-            created_at: Utc.timestamp_opt(1_700_000_000, 0).unwrap(),
-            issued_at: Some(Utc.timestamp_opt(1_760_000_000, 0).unwrap()),
-            due_date: Some(chrono::NaiveDate::from_ymd_opt(2026, 11, 14).unwrap()),
+            created_at: jiff::Timestamp::new(1_700_000_000, 0).unwrap(),
+            issued_at: Some(jiff::Timestamp::new(1_760_000_000, 0).unwrap()),
+            due_date: Some(CivilDate::new(2026, 11, 14).unwrap()),
             paid_at: None,
             payment_reference: String::new(),
             pdf: None,

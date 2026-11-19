@@ -1,5 +1,5 @@
 use super::primitives::Currency;
-use chrono::{DateTime, Utc};
+use crate::time::*;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -26,11 +26,11 @@ pub struct ExpenseClaim {
     pub currency: Currency,
     pub state: ClaimState,
     pub comment: String,
-    pub created_at: DateTime<Utc>,
+    pub created_at: Timestamp,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub submitted_at: Option<DateTime<Utc>>,
+    pub submitted_at: Option<Timestamp>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub decided_at: Option<DateTime<Utc>>,
+    pub decided_at: Option<Timestamp>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

@@ -203,7 +203,7 @@ pub(crate) fn content_for(
         invoice
             .issued_at
             .or(Some(invoice.created_at))
-            .map(|dt| dt.date_naive())
+            .map(|dt| dt.to_zoned_datetime(jiff::tz::TimeZone::UTC).date())
     });
     let vars = crate::template::vars_for(invoice, customer, issue_day);
     crate::template::doc_content(invoice, template, customer, &vars)
@@ -291,8 +291,8 @@ pub(crate) fn resolve_due_date(
     invoice: &Invoice,
     customer: &crate::domain::Customer,
     template: &crate::domain::InvoiceTemplate,
-    now: chrono::DateTime<chrono::Utc>,
-) -> chrono::NaiveDate {
+    now: Timestamp,
+) -> CivilDate {
     if let Some(due) = invoice.document.due_date {
         return due;
     }
@@ -304,14 +304,12 @@ pub(crate) fn resolve_due_date(
         let from = invoice
             .document
             .invoice_date
-            .unwrap_or_else(|| now.date_naive());
-        return from
-            .checked_add_days(chrono::Days::new(u64::from(days)))
-            .unwrap_or(from);
+            .unwrap_or_else(|| now.to_zoned_datetime(jiff::tz::TimeZone::UTC).date());
+        return from.checked_add_days(u64::from(days)).unwrap_or(from);
     }
     invoice
         .period_to
-        .checked_add_days(chrono::Days::new(14))
+        .checked_add_days(14)
         .unwrap_or(invoice.period_to)
 }
 

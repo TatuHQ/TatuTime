@@ -410,13 +410,12 @@ mod bulk_tests {
         ClaimState, Currency, Entry, ExpenseClaim, Hours, Invoice, InvoiceLine, InvoiceStatus,
         LineKind, ProjectCode, Source, Submission, SubmissionState,
     };
-    use chrono::{NaiveDate, TimeZone, Utc};
-
+    use crate::time::*;
     fn entry_ref(id: Uuid) -> Entry {
         Entry {
             imported: None,
             id,
-            date: NaiveDate::from_ymd_opt(2026, 10, 2).unwrap(),
+            date: CivilDate::new(2026, 10, 2).unwrap(),
             customer_id: Uuid::new_v4(),
             user_id: None,
             project_code: ProjectCode("P1".into()),
@@ -425,8 +424,8 @@ mod bulk_tests {
             note: String::new(),
             billable: true,
             source: Source::Manual,
-            created_at: Utc.with_ymd_and_hms(2026, 10, 2, 0, 0, 0).unwrap(),
-            updated_at: Utc.with_ymd_and_hms(2026, 10, 2, 0, 0, 0).unwrap(),
+            created_at: crate::time::utc_timestamp(2026, 10, 2, 0, 0, 0),
+            updated_at: crate::time::utc_timestamp(2026, 10, 2, 0, 0, 0),
         }
     }
 
@@ -438,7 +437,7 @@ mod bulk_tests {
             } else {
                 LineKind::Expense
             },
-            date: NaiveDate::from_ymd_opt(2026, 10, 2).unwrap(),
+            date: CivilDate::new(2026, 10, 2).unwrap(),
             entry_id,
             expense_id,
             project_code: Some(ProjectCode("P1".into())),
@@ -462,12 +461,12 @@ mod bulk_tests {
             number: number.into(),
             customer_id: Uuid::new_v4(),
             currency: Currency("EUR".into()),
-            period_from: NaiveDate::from_ymd_opt(2026, 10, 1).unwrap(),
-            period_to: NaiveDate::from_ymd_opt(2026, 10, 7).unwrap(),
+            period_from: CivilDate::new(2026, 10, 1).unwrap(),
+            period_to: CivilDate::new(2026, 10, 7).unwrap(),
             lines,
             total_minor: 600,
             status,
-            created_at: Utc.with_ymd_and_hms(2026, 10, 7, 0, 0, 0).unwrap(),
+            created_at: crate::time::utc_timestamp(2026, 10, 7, 0, 0, 0),
             issued_at: None,
             due_date: None,
             paid_at: None,
@@ -494,7 +493,7 @@ mod bulk_tests {
             currency: Currency("EUR".into()),
             state,
             comment: String::new(),
-            created_at: Utc.with_ymd_and_hms(2026, 10, 7, 0, 0, 0).unwrap(),
+            created_at: crate::time::utc_timestamp(2026, 10, 7, 0, 0, 0),
             submitted_at: None,
             decided_at: None,
         }
@@ -542,12 +541,12 @@ mod bulk_tests {
             .put_submission(&Submission {
                 id: Uuid::new_v4(),
                 user_id: Uuid::new_v4(),
-                week_start: NaiveDate::from_ymd_opt(2026, 9, 28).unwrap(),
-                week_end: NaiveDate::from_ymd_opt(2026, 10, 4).unwrap(),
+                week_start: CivilDate::new(2026, 9, 28).unwrap(),
+                week_end: CivilDate::new(2026, 10, 4).unwrap(),
                 state: SubmissionState::Submitted,
                 entry_ids: vec![e_sub],
                 comment: String::new(),
-                created_at: Utc::now(),
+                created_at: Timestamp::now(),
                 submitted_at: None,
                 decided_at: None,
             })

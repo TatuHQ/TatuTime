@@ -671,7 +671,7 @@ async fn import_history_sources_dedup_and_locks_survive_backup_restore_and_archi
     assert!(!replanned.ready);
 
     // The cold archive relocates the unbilled day but refuses the locked one.
-    let cutoff = chrono::NaiveDate::from_ymd_opt(2026, 1, 7).unwrap();
+    let cutoff = jiff::civil::Date::new(2026, 1, 7).unwrap();
     let report = store.archive_entries_before(cutoff, false, &locks).unwrap();
     assert_eq!(report.days.len(), 1, "{report:?}");
     assert_eq!(report.days[0].day, "2026-01-06");
@@ -1076,7 +1076,7 @@ fn supplied_private_exports_parse_only_when_explicitly_enabled() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().join("data")).unwrap();
     let batch_id = Uuid::new_v4();
-    let now = chrono::Utc::now();
+    let now = jiff::Timestamp::now();
     store
         .create_import_batch(ImportBatch {
             id: batch_id,

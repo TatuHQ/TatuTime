@@ -1,6 +1,6 @@
 use super::customer::PaymentTerms;
 use super::primitives::{Currency, FieldError, Hours, ProjectCode, is_zero_u16};
-use chrono::{DateTime, NaiveDate, Utc};
+use crate::time::*;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use uuid::Uuid;
@@ -72,7 +72,7 @@ impl LineGrouping {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct InvoiceLine {
     pub kind: LineKind,
-    pub date: NaiveDate,
+    pub date: CivilDate,
     /// Time lines reference an entry; expense lines reference an expense.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub entry_id: Option<Uuid>,
@@ -208,11 +208,11 @@ pub fn check_manual_line(
 /// Validate + convert manual line input; errors carry `lines[i].field` names.
 ///
 /// `today` is threaded in rather than read off the wall clock: the domain never
-/// calls `Utc::now()` itself (see `clock.rs`), so a manual-line draft stays
+/// calls `Timestamp::now()` itself (see `clock.rs`), so a manual-line draft stays
 /// deterministic under `FixedClock`.
 pub fn validate_manual_lines(
     lines: &[ManualLineInput],
-    today: NaiveDate,
+    today: CivilDate,
     errors: &mut Vec<FieldError>,
 ) -> Vec<InvoiceLine> {
     if lines.len() > MANUAL_LINE_MAX {
@@ -274,21 +274,21 @@ pub struct Invoice {
     pub number: String,
     pub customer_id: Uuid,
     pub currency: Currency,
-    pub period_from: NaiveDate,
-    pub period_to: NaiveDate,
+    pub period_from: CivilDate,
+    pub period_to: CivilDate,
     pub lines: Vec<InvoiceLine>,
     pub total_minor: u64,
     pub status: InvoiceStatus,
-    pub created_at: DateTime<Utc>,
+    pub created_at: Timestamp,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub issued_at: Option<DateTime<Utc>>,
+    pub issued_at: Option<Timestamp>,
     /// Resolved due date at issue (#27, #116): payment terms come from the
     /// customer, else the org invoice template, else a net-14 fallback.
     /// None until issued.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub due_date: Option<NaiveDate>,
+    pub due_date: Option<CivilDate>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub paid_at: Option<DateTime<Utc>>,
+    pub paid_at: Option<Timestamp>,
     #[serde(default)]
     pub payment_reference: String,
     /// VAT percent in hundredths (2100 = 21.00%) — manual/draft feature
@@ -312,7 +312,7 @@ pub struct Invoice {
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub write_off_reason: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub written_off_at: Option<DateTime<Utc>>,
+    pub written_off_at: Option<Timestamp>,
     /// The resolved invoice subject, frozen at issue. Empty on drafts and on
     /// legacy issued documents (which keep resolving live or fall back to the
     /// legacy `Invoice {n} from {org}` wording).
@@ -333,9 +333,9 @@ pub struct InvoiceDocument {
     #[serde(default)]
     pub po_number: String,
     #[serde(default)]
-    pub invoice_date: Option<NaiveDate>,
+    pub invoice_date: Option<CivilDate>,
     #[serde(default)]
-    pub due_date: Option<NaiveDate>,
+    pub due_date: Option<CivilDate>,
     #[serde(default)]
     pub payment_terms: Option<crate::domain::PaymentTerms>,
     #[serde(default)]
@@ -375,7 +375,7 @@ pub struct InvoiceTimelineEvent {
     pub actor_name: String,
     /// When it happened, from the injected `Clock` (RFC 3339 on the wire), the
     /// same serialisation as every other persisted timestamp.
-    pub at: DateTime<Utc>,
+    pub at: Timestamp,
     /// Optional per-kind structured extras (e.g. the recipient + From identity
     /// for `email_sent`). Omitted when absent so older events stay clean.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -474,7 +474,7 @@ pub fn invoice_watermark_stage(
 /// idempotent: re-marking an already-sent invoice reports the original
 /// timestamp rather than minting a second one.
 #[must_use]
-pub fn invoice_sent_at(events: &[InvoiceTimelineEvent]) -> Option<DateTime<Utc>> {
+pub fn invoice_sent_at(events: &[InvoiceTimelineEvent]) -> Option<Timestamp> {
     events
         .iter()
         .filter(|e| {
@@ -511,7 +511,7 @@ pub fn safe_filename(s: &str) -> String {
 pub struct InvoicePayment {
     pub id: Uuid,
     pub amount_minor: u64,
-    pub received_at: DateTime<Utc>,
+    pub received_at: Timestamp,
     pub reference: String,
     pub method: String,
 }
@@ -530,7 +530,7 @@ pub struct PdfHint {
     pub sha256: String,
     /// When the archive was written (issue time, or lazy first-download for
     /// legacy invoices).
-    pub archived_at: DateTime<Utc>,
+    pub archived_at: Timestamp,
 }
 
 impl Invoice {
@@ -594,7 +594,7 @@ pub struct InvoiceSummary {
 
 /// Roll up invoice states as of `today`; an issued invoice past its due date
 /// counts as overdue and its total is outstanding.
-pub fn summarise_invoices(invoices: &[Invoice], today: NaiveDate) -> InvoiceSummary {
+pub fn summarise_invoices(invoices: &[Invoice], today: CivilDate) -> InvoiceSummary {
     let mut s = InvoiceSummary {
         draft: 0,
         issued: 0,
@@ -645,7 +645,7 @@ pub enum InvoiceError {
 mod tests {
     use super::*;
 
-    fn inv(status: InvoiceStatus, total: u64, due: Option<NaiveDate>) -> Invoice {
+    fn inv(status: InvoiceStatus, total: u64, due: Option<CivilDate>) -> Invoice {
         Invoice {
             supersedes: None,
             superseded_by: None,
@@ -654,12 +654,12 @@ mod tests {
             number: "INV-1".into(),
             customer_id: Uuid::new_v4(),
             currency: Currency("EUR".into()),
-            period_from: NaiveDate::from_ymd_opt(2026, 1, 1).unwrap(),
-            period_to: NaiveDate::from_ymd_opt(2026, 1, 7).unwrap(),
+            period_from: CivilDate::new(2026, 1, 1).unwrap(),
+            period_to: CivilDate::new(2026, 1, 7).unwrap(),
             lines: vec![],
             total_minor: total,
             status,
-            created_at: Utc::now(),
+            created_at: Timestamp::now(),
             issued_at: None,
             due_date: due,
             paid_at: None,
@@ -698,7 +698,7 @@ mod tests {
             kind,
             description: String::new(),
             actor_name: "Tester".into(),
-            at: DateTime::from_timestamp(epoch_secs, 0).unwrap(),
+            at: Timestamp::new(epoch_secs, 0).unwrap(),
             meta: None,
         }
     }
@@ -804,7 +804,7 @@ mod tests {
         ];
         assert_eq!(
             invoice_sent_at(&out_of_order),
-            Some(DateTime::from_timestamp(20, 0).unwrap())
+            Some(Timestamp::new(20, 0).unwrap())
         );
     }
 
@@ -834,7 +834,7 @@ mod tests {
 
     #[test]
     fn manual_line_validation_guards() {
-        let today = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
+        let today = CivilDate::new(2026, 1, 1).unwrap();
         let mut errs = Vec::new();
         let ok = ManualLineInput {
             description: "Seat".into(),
@@ -864,13 +864,9 @@ mod tests {
 
     #[test]
     fn summary_uses_balance_and_new_lifecycle_states() {
-        let today = NaiveDate::from_ymd_opt(2026, 10, 10).unwrap();
+        let today = CivilDate::new(2026, 10, 10).unwrap();
         let mk = |status: InvoiceStatus, total: u64, paid: u64| {
-            let mut i = inv(
-                status,
-                total,
-                Some(NaiveDate::from_ymd_opt(2026, 10, 1).unwrap()),
-            );
+            let mut i = inv(status, total, Some(CivilDate::new(2026, 10, 1).unwrap()));
             if paid > 0 {
                 i.payments.push(InvoicePayment {
                     id: Uuid::new_v4(),
@@ -901,18 +897,18 @@ mod tests {
 
     #[test]
     fn invoice_summary_counts_and_outstanding() {
-        let today = NaiveDate::from_ymd_opt(2026, 2, 1).unwrap();
+        let today = CivilDate::new(2026, 2, 1).unwrap();
         let invoices = vec![
             inv(InvoiceStatus::Draft, 100, None),
             inv(
                 InvoiceStatus::Issued,
                 500,
-                Some(NaiveDate::from_ymd_opt(2026, 1, 20).unwrap()),
+                Some(CivilDate::new(2026, 1, 20).unwrap()),
             ), // overdue
             inv(
                 InvoiceStatus::Issued,
                 300,
-                Some(NaiveDate::from_ymd_opt(2026, 6, 1).unwrap()),
+                Some(CivilDate::new(2026, 6, 1).unwrap()),
             ), // not yet due
             inv(InvoiceStatus::Paid, 999, None),
         ];
@@ -923,7 +919,7 @@ mod tests {
 
     #[test]
     fn invoice_summaries_saturate_corrupt_money_totals() {
-        let today = NaiveDate::from_ymd_opt(2026, 2, 1).unwrap();
+        let today = CivilDate::new(2026, 2, 1).unwrap();
         let mut first = inv(InvoiceStatus::Issued, u64::MAX, None);
         let mut second = inv(InvoiceStatus::Issued, 10, None);
         first.currency = Currency("EUR".into());

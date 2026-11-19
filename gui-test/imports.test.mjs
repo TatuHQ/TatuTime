@@ -119,6 +119,7 @@ async function harness({
         return response(200, getBatch);
     };
     dom.window.eval(app);
+    dom.window.initDialog();
     // The workspace's own controls are wired by boot() in the real app; the
     // harness wires them directly so filter/click behaviour is the shipped one.
     dom.window.wireImports();

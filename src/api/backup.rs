@@ -9,8 +9,6 @@
 
 use super::*;
 
-use chrono::{Local, Offset};
-
 use crate::backup::{self, Cadence};
 
 fn cadence_from(
@@ -32,8 +30,8 @@ fn time_from(
 /// means. `label` is fixed-width (`UTC+02:00`) and an abbreviation such as
 /// `CEST` rides along when the platform provides one.
 fn timezone_json() -> serde_json::Value {
-    let now = Local::now();
-    let offset = now.offset().fix().local_minus_utc();
+    let now = Timestamp::now().to_zoned_datetime(TimeZone::system());
+    let offset = now.offset().seconds();
     let label = if offset == 0 {
         "UTC".to_string()
     } else {
@@ -45,7 +43,7 @@ fn timezone_json() -> serde_json::Value {
             (seconds % 3600) / 60
         )
     };
-    let abbreviation = now.format("%Z").to_string();
+    let abbreviation = now.strftime("%Z").to_string();
     let abbreviation = if abbreviation.is_empty() || abbreviation == label {
         None
     } else {
@@ -62,7 +60,7 @@ fn file_json(file: &backup::BackupFile) -> serde_json::Value {
     serde_json::json!({
         "file_name": file.file_name,
         "size_bytes": file.size_bytes,
-        "created_at": file.created_at.to_rfc3339(),
+        "created_at": file.created_at,
     })
 }
 
@@ -83,10 +81,10 @@ fn status_json(app: &AppState) -> serde_json::Value {
     let next_run_at = enabled
         .then(|| backup::next_run(now, cadence, time))
         .flatten();
-    let next_run = next_run_at.map(|at| at.to_rfc3339());
+    let next_run = next_run_at.map(|at| at.to_string());
     let next_run_local = next_run_at.map(|at| {
-        at.with_timezone(&Local)
-            .format("%Y-%m-%d %H:%M")
+        at.to_zoned_datetime(TimeZone::system())
+            .strftime("%Y-%m-%d %H:%M")
             .to_string()
     });
     let last_backup = backups.first().map(file_json);
@@ -169,7 +167,7 @@ pub async fn run_backup(State(app): State<AppState>) -> ApiResult {
     Ok(Json(serde_json::json!({
         "file_name": created.file_name,
         "size_bytes": created.size_bytes,
-        "created_at": created.created_at.to_rfc3339(),
+        "created_at": created.created_at,
     }))
     .into_response())
 }

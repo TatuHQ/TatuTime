@@ -62,7 +62,7 @@ async fn sso_jit_provisions_and_logs_in() {
         email: "Newbie@tatutime.test".into(),
         name: "New Bie".into(),
         groups: vec![],
-        exp: chrono::Utc::now().timestamp() + 300,
+        exp: jiff::Timestamp::now().as_second() + 300,
     };
     let token = idp.issue(&claims);
     let (s1, user, _) = raw(
@@ -153,7 +153,7 @@ async fn sso_admin_group_setting_is_resolved_for_new_and_existing_users() {
         email: "member@tatutime.test".into(),
         name: "Member".into(),
         groups,
-        exp: chrono::Utc::now().timestamp() + 300,
+        exp: jiff::Timestamp::now().as_second() + 300,
     };
 
     // First login provisions a member; the stored group mapping promotes the
@@ -221,7 +221,7 @@ async fn sso_empty_allowed_domains_denies_and_provisions_nothing() {
         email: "Intruder@tatutime.test".into(),
         name: "Intruder".into(),
         groups: vec![],
-        exp: chrono::Utc::now().timestamp() + 300,
+        exp: jiff::Timestamp::now().as_second() + 300,
     };
     let token = idp.issue(&claims);
     let (s1, body, _) = raw(

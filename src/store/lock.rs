@@ -4,12 +4,22 @@ use super::*;
 impl Store {
     // ------------------------------------------------------- lock snapshot (#255)
 
+    pub(super) fn invalidate_lock_snapshot(&self) {
+        self.lock_generation
+            .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        match self.lock_cache.lock() {
+            Ok(mut cache) => *cache = None,
+            Err(poisoned) => *poisoned.into_inner() = None,
+        }
+    }
+
     /// The #18 lock snapshot: every frozen entry and expense id, memoized on
-    /// the source collections' directory stamps. In steady state (no writes
-    /// since the last call) this parses **zero** documents; any write that
-    /// changes a source collection bumps its directory mtime and forces exactly
-    /// one re-scan. A scan failure (unreadable or corrupt document) propagates
-    /// and is **never cached**, so callers stay fail-closed (#185).
+    /// the source collections' directory stamps and this Store's write
+    /// generation. In steady state (no writes since the last call) this parses
+    /// **zero** documents; local writes invalidate it even when the filesystem
+    /// does not advance the directory mtime. A scan failure (unreadable or
+    /// corrupt document) propagates and is **never cached**, so callers stay
+    /// fail-closed (#185).
     ///
     /// Correctness rests on the atomic tmp+rename write discipline: because a
     /// rename into a directory bumps that directory's mtime, the memoized set
@@ -17,29 +27,46 @@ impl Store {
     /// rebuilds. This is the "recompute cheaply rather than risk staleness"
     /// choice the fail-closed contract demands.
     pub fn lock_snapshot(&self) -> Result<Arc<LockSnapshot>, StoreError> {
-        let stamp = LockStamp {
+        loop {
+            let generation = self
+                .lock_generation
+                .load(std::sync::atomic::Ordering::Acquire);
+            let stamp = self.lock_stamp();
+            {
+                let cache = self
+                    .lock_cache
+                    .lock()
+                    .map_err(|_| StoreError::Io("lock cache poisoned".into()))?;
+                if let Some((cached, cached_generation, snapshot)) = cache.as_ref()
+                    && *cached == stamp
+                    && *cached_generation == generation
+                {
+                    return Ok(Arc::clone(snapshot));
+                }
+            }
+
+            let snapshot = Arc::new(self.scan_lock_state()?);
+            if self
+                .lock_generation
+                .load(std::sync::atomic::Ordering::Acquire)
+                != generation
+                || self.lock_stamp() != stamp
+            {
+                continue;
+            }
+            if let Ok(mut cache) = self.lock_cache.lock() {
+                *cache = Some((stamp, generation, Arc::clone(&snapshot)));
+            }
+            return Ok(snapshot);
+        }
+    }
+
+    fn lock_stamp(&self) -> LockStamp {
+        LockStamp {
             invoices: dir_mtime(&self.doc_dir::<Invoice>()),
             submissions: dir_mtime(&self.doc_dir::<Submission>()),
             claims: dir_mtime(&self.doc_dir::<ExpenseClaim>()),
-        };
-        {
-            let cache = self
-                .lock_cache
-                .lock()
-                .map_err(|_| StoreError::Io("lock cache poisoned".into()))?;
-            if let Some((cached, snapshot)) = cache.as_ref()
-                && *cached == stamp
-            {
-                return Ok(Arc::clone(snapshot));
-            }
         }
-        // Rebuild outside the cache lock; a poisoned cache still fails closed
-        // on the *next* call rather than wedging here.
-        let snapshot = Arc::new(self.scan_lock_state()?);
-        if let Ok(mut cache) = self.lock_cache.lock() {
-            *cache = Some((stamp, Arc::clone(&snapshot)));
-        }
-        Ok(snapshot)
     }
 
     /// One full pass over invoices, submissions and claims (the parse cost the
@@ -80,7 +107,7 @@ impl Store {
             // rejected to unlock, an approved one cannot, and the 409 message
             // must not offer an action the decision endpoint refuses.
             let frozen = FrozenWeek {
-                week_start: sub.week_start.format("%Y-%m-%d").to_string(),
+                week_start: sub.week_start.strftime("%Y-%m-%d").to_string(),
                 approved: sub.state == crate::domain::SubmissionState::Approved,
             };
             for entry in &sub.entry_ids {

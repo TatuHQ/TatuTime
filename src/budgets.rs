@@ -4,13 +4,13 @@
 
 use std::sync::Arc;
 
-use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use crate::auth::User;
 use crate::domain::{Customer, Entry, Project};
 use crate::scheduler::Job;
 use crate::store::Store;
+use crate::time::*;
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct BudgetRow {
@@ -113,7 +113,7 @@ impl Job for BudgetAlertJob {
     fn interval_secs(&self) -> i64 {
         24 * 3600
     }
-    fn run(&self, now: DateTime<Utc>) {
+    fn run(&self, now: Timestamp) {
         let customers = match self.store.list_customers() {
             Ok(c) => c,
             Err(_) => return,
@@ -172,8 +172,6 @@ impl Job for BudgetAlertJob {
 mod tests {
     use super::*;
     use crate::domain::{Currency, Hours, ProjectCode};
-    use chrono::{NaiveDate, TimeZone};
-
     fn proj(budget_h: Option<u32>) -> (uuid::Uuid, Project) {
         let cid = uuid::Uuid::new_v4();
         (
@@ -205,7 +203,7 @@ mod tests {
             default_rate_minor: 0,
             cost_rate_minor: 0,
             password_hash: String::new(),
-            created_at: Utc::now(),
+            created_at: Timestamp::now(),
             session_version: 1,
         };
         store.put_user(&admin).unwrap();
@@ -232,7 +230,10 @@ mod tests {
             })
             .unwrap();
         store.put_project(&project).unwrap();
-        let long_ago = Utc::now().date_naive() - chrono::Duration::days(800);
+        let long_ago = Timestamp::now()
+            .to_zoned_datetime(jiff::tz::TimeZone::UTC)
+            .date()
+            - 800_i64.days();
         store
             .put_entry(&Entry {
                 imported: None,
@@ -246,11 +247,11 @@ mod tests {
                 note: String::new(),
                 billable: true,
                 source: crate::domain::Source::Manual,
-                created_at: Utc::now(),
-                updated_at: Utc::now(),
+                created_at: Timestamp::now(),
+                updated_at: Timestamp::now(),
             })
             .unwrap();
-        BudgetAlertJob::new(store.clone()).run(Utc::now());
+        BudgetAlertJob::new(store.clone()).run(Timestamp::now());
         let notes = store.list_notifications(admin.id).unwrap();
         assert!(
             notes
@@ -285,7 +286,7 @@ mod tests {
         let entries = vec![Entry {
             imported: None,
             id: uuid::Uuid::new_v4(),
-            date: NaiveDate::from_ymd_opt(2026, 10, 2).unwrap(),
+            date: CivilDate::new(2026, 10, 2).unwrap(),
             customer_id: cid,
             user_id: None,
             project_code: ProjectCode::parse("P1").unwrap(),
@@ -294,8 +295,8 @@ mod tests {
             note: String::new(),
             billable: true,
             source: crate::domain::Source::Manual,
-            created_at: Utc.timestamp_opt(1, 0).unwrap(),
-            updated_at: Utc.timestamp_opt(1, 0).unwrap(),
+            created_at: jiff::Timestamp::new(1, 0).unwrap(),
+            updated_at: jiff::Timestamp::new(1, 0).unwrap(),
         }];
         let rows = burn_report(&[(cid, p)], &entries, &[customer], &[]);
         assert_eq!(rows.len(), 1);
@@ -332,7 +333,7 @@ mod tests {
         let entries = vec![Entry {
             imported: None,
             id: uuid::Uuid::new_v4(),
-            date: NaiveDate::from_ymd_opt(2026, 10, 2).unwrap(),
+            date: CivilDate::new(2026, 10, 2).unwrap(),
             customer_id: cid,
             user_id: None,
             project_code: ProjectCode::parse("P1").unwrap(),
@@ -341,8 +342,8 @@ mod tests {
             note: String::new(),
             billable: true,
             source: crate::domain::Source::Manual,
-            created_at: Utc.timestamp_opt(1, 0).unwrap(),
-            updated_at: Utc.timestamp_opt(1, 0).unwrap(),
+            created_at: jiff::Timestamp::new(1, 0).unwrap(),
+            updated_at: jiff::Timestamp::new(1, 0).unwrap(),
         }];
         let rows = burn_report(&[(cid, p)], &entries, &[customer], &[]);
         assert_eq!(rows.len(), 1);

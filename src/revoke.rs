@@ -7,7 +7,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use chrono::{DateTime, Utc};
+use crate::time::*;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
@@ -39,8 +39,8 @@ impl Revocations {
     /// Revocation is keyed on the token id (`jti`) alone: #19/#45 make a
     /// per-token logout plus `session_version` the single mechanism, so there
     /// is no per-user marker to maintain here.
-    pub fn revoke(&self, jti: &str, exp: i64, now: DateTime<Utc>) {
-        let now_ts = now.timestamp();
+    pub fn revoke(&self, jti: &str, exp: i64, now: Timestamp) {
+        let now_ts = now.as_second();
         let mut list = lock(&self.inner);
         list.retain(|r| r.exp > now_ts);
         if !list.iter().any(|r| r.jti == jti) {
@@ -58,8 +58,8 @@ impl Revocations {
     /// process (or a previous boot sharing the volume) must take effect here
     /// too, otherwise revoked sessions keep working. The file is tiny and
     /// auth already touches disk for the user record.
-    pub fn is_revoked(&self, jti: &str, now: DateTime<Utc>) -> bool {
-        let now_ts = now.timestamp();
+    pub fn is_revoked(&self, jti: &str, now: Timestamp) -> bool {
+        let now_ts = now.as_second();
         let fresh: Vec<Revoked> = fs::read_to_string(&self.path)
             .ok()
             .and_then(|s| serde_json::from_str::<Vec<Revoked>>(&s).ok())
@@ -95,9 +95,9 @@ mod tests {
     #[test]
     fn revoke_then_check_and_prune_expired() {
         let dir = tempfile::tempdir().unwrap();
-        let now = Utc::now();
+        let now = Timestamp::now();
         let r = Revocations::new(dir.path());
-        let future = now.timestamp() + 3600;
+        let future = now.as_second() + 3600;
         assert!(!r.is_revoked("abc", now));
         r.revoke("abc", future, now);
         assert!(r.is_revoked("abc", now));
@@ -105,7 +105,7 @@ mod tests {
         let r2 = Revocations::new(dir.path());
         assert!(r2.is_revoked("abc", now));
         // Expired entries are not revoked.
-        let past = now.timestamp() - 10;
+        let past = now.as_second() - 10;
         r2.revoke("old", past, now);
         assert!(!r2.is_revoked("old", now));
     }
@@ -114,17 +114,15 @@ mod tests {
 #[cfg(test)]
 mod cross_process_tests {
     use super::*;
-    use chrono::TimeZone;
-
     #[test]
     fn revocations_are_visible_across_instances_sharing_a_dir() {
         // Review B6: a second process (or later boot) must honour revocations
         // written by the first, because is_revoked re-reads the file.
         let dir = tempfile::tempdir().unwrap();
-        let now = Utc.with_ymd_and_hms(2026, 10, 5, 0, 0, 0).unwrap();
+        let now = crate::time::utc_timestamp(2026, 10, 5, 0, 0, 0);
         let a = Revocations::new(dir.path());
         let b = Revocations::new(dir.path());
-        a.revoke("token-1", now.timestamp() + 3600, now);
+        a.revoke("token-1", now.as_second() + 3600, now);
         assert!(b.is_revoked("token-1", now), "b must see a's revoke");
         assert!(!b.is_revoked("token-2", now));
     }
